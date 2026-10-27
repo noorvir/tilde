@@ -1,0 +1,4 @@
+.build/
+build/
+.agent/current.md
+.DS_Store
