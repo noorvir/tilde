@@ -25,7 +25,7 @@ Then, in System Settings > Privacy & Security, turn on Tilde for:
 | Permission | What it enables | Without it |
 |---|---|---|
 | Screen Recording | Screenshots of any app | Screenshots only for pages in Tilde's browser |
-| Accessibility | Element data in native apps and the iOS Simulator | The window under the cursor only |
+| Accessibility | Element data in native apps | The window under the cursor only |
 
 The build is signed ad hoc with a designated requirement on the bundle identifier
 (`dev.tilde.app`), so the permissions stay after a rebuild. If a switch is on but
@@ -110,6 +110,11 @@ Only one session is on screen at a time. Further sessions queue.
 | Pause (HUD) | Lets you use your apps; markers stay |
 
 Tilde does not take focus from your app while you annotate.
+
+**iOS Simulator (Xcode 27 Device Hub):** drag a region on the device screen. A click
+gives only the whole device view. Device Hub exposes the iOS elements to Accessibility,
+but it reports their frames without its zoom and pan, so Tilde cannot find the element
+under the cursor.
 
 ## Output
 
