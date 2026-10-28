@@ -21,6 +21,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var server: HTTPServer?
     private var serverState = ServerState(port: 7311)
     private var menu: StatusMenu?
+    private var hotKeys: HotKeys?
 
     override public init() {
         super.init()
@@ -30,6 +31,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let port = UInt16(ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "") ?? 7311
         serverState = ServerState(port: port)
         menu = StatusMenu(server: serverState, browser: browser, controller: controller)
+        hotKeys = HotKeys(controller: controller)
         startServer()
 
         if ScreenCapture.isAllowed {

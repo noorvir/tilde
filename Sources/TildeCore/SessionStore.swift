@@ -1,6 +1,6 @@
 import Foundation
 
-/// Annotation sessions requested by agents. One session is on screen at a time;
+/// Annotation sessions requested by agents or started by the user. One session is on screen at a time;
 /// later sessions queue until the active one is sent or cancelled.
 @MainActor
 public final class SessionStore: ObservableObject {
@@ -10,6 +10,8 @@ public final class SessionStore: ObservableObject {
         public let client: String
         public let message: String?
         public let url: URL?
+        /// Started by the user from Tilde itself; no agent waits for the result.
+        public let isLocal: Bool
         public fileprivate(set) var state: State
     }
 
@@ -49,9 +51,9 @@ public final class SessionStore: ObservableObject {
         sessions.first { $0.id == id }
     }
 
-    public func start(client: String, message: String?, url: URL?) -> Session {
+    public func start(client: String, message: String?, url: URL?, isLocal: Bool = false) -> Session {
         let state: State = active == nil ? .annotating : .queued
-        let session = Session(id: Self.newID(), client: client, message: message, url: url, state: state)
+        let session = Session(id: Self.newID(), client: client, message: message, url: url, isLocal: isLocal, state: state)
         sessions.append(session)
         return session
     }

@@ -33,6 +33,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(disabled(statusTitle))
         menu.addItem(.separator())
 
+        if controller.session == nil {
+            menu.addItem(action("Start Annotation", #selector(startAnnotation), key: "a"))
+        } else {
+            let title = controller.isPaused ? "Resume Annotation" : "Pause Annotation"
+            menu.addItem(action(title, #selector(togglePause), key: "p"))
+            menu.addItem(action("Cancel Annotation", #selector(cancelAnnotation)))
+        }
+        menu.addItem(.separator())
+
         menu.addItem(action("Open Browser", #selector(openBrowser)))
         menu.addItem(action("Open Inbox Folder", #selector(openInbox)))
 
@@ -95,6 +104,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     // MARK: - Actions
 
+    @objc private func startAnnotation() {
+        controller.startLocal()
+    }
+
+    @objc private func togglePause() {
+        controller.togglePause()
+    }
+
+    @objc private func cancelAnnotation() {
+        controller.cancel()
+    }
+
     @objc private func openBrowser() {
         browser.show()
     }
@@ -117,8 +138,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     // MARK: - Items
 
-    private func action(_ title: String, _ selector: Selector) -> NSMenuItem {
-        let entry = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+    /// A `key` shows the matching ⌃⌥ global shortcut from `HotKeys`.
+    private func action(_ title: String, _ selector: Selector, key: String = "") -> NSMenuItem {
+        let entry = NSMenuItem(title: title, action: selector, keyEquivalent: key)
+        entry.keyEquivalentModifierMask = [.control, .option]
         entry.target = self
         return entry
     }

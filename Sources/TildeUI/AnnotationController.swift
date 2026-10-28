@@ -36,7 +36,8 @@ final class AnnotationController: ObservableObject {
     enum Phase: Equatable {
         case idle
         case annotating
-        case sent(client: String)
+        /// Shown in the HUD for a moment after Send, such as "Sent to Codex".
+        case sent(confirmation: String)
     }
 
     @Published private(set) var phase: Phase = .idle
@@ -106,7 +107,7 @@ final class AnnotationController: ObservableObject {
         for overlay in overlays {
             overlay.orderFrontRegardless()
         }
-        overlays.first?.makeKey()
+        makeOverlayKey()
         hud.show()
     }
 
@@ -164,10 +165,26 @@ final class AnnotationController: ObservableObject {
             }
 
             log.notice("session \(session.id, privacy: .public) sent with \(annotations.count) annotations")
-            phase = .sent(client: session.client)
+            if session.isLocal {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(reportText(for: feedback, folder: folder), forType: .string)
+                phase = .sent(confirmation: "Copied to clipboard")
+            } else {
+                phase = .sent(confirmation: "Sent to \(session.client)")
+            }
             store.finish(session.id, with: .sent(feedback, folder: folder))
             end()
         }
+    }
+
+    /// Starts a session from Tilde itself. Its feedback goes to the clipboard and the inbox.
+    /// While a session is on screen, brings the HUD forward instead.
+    func startLocal() {
+        if session != nil {
+            hud.show()
+            return
+        }
+        _ = store.start(client: "You", message: nil, url: nil, isLocal: true)
     }
 
     func cancel() {
@@ -180,14 +197,19 @@ final class AnnotationController: ObservableObject {
     }
 
     func togglePause() {
+        guard phase == .annotating else {
+            return
+        }
         isPaused.toggle()
         hover = nil
         for overlay in overlays {
             overlay.ignoresMouseEvents = isPaused
         }
-        if !isPaused {
-            overlays.first?.makeKey()
+        if isPaused {
+            // A key overlay would keep the keyboard; give it back to the user's app.
+            NSWorkspace.shared.frontmostApplication?.activate()
         }
+        makeOverlayKey()
     }
 
     func clearDrafts() {
@@ -200,6 +222,11 @@ final class AnnotationController: ObservableObject {
 
     func mouseMoved(to point: CGPoint) {
         guard composer == nil, !isPaused else {
+            return
+        }
+        if isOverPanel(point) {
+            latestHoverPoint = nil
+            hover = nil
             return
         }
 
@@ -346,12 +373,24 @@ final class AnnotationController: ObservableObject {
     private func hideComposer() {
         composer = nil
         commentPanel.close()
-        overlays.first?.makeKey()
+        makeOverlayKey()
+    }
+
+    /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
+    /// has it or annotating is paused.
+    func makeOverlayKey() {
+        guard composer == nil, !isPaused else {
+            return
+        }
+        let pointer = NSEvent.mouseLocation
+        let overlay = overlays.first { $0.frame.contains(pointer) } ?? overlays.first
+        overlay?.makeKey()
     }
 
     /// Whether a Quartz point is over Tilde's own HUD or comment box.
     func isOverPanel(_ point: CGPoint) -> Bool {
-        [hud.window, commentPanel.window].contains { $0.isVisible && $0.frame.contains(point.flipped) }
+        let point = point.flipped
+        return hud.contains(point) || (commentPanel.window.isVisible && commentPanel.window.frame.contains(point))
     }
 
     /// Frame and marker of the comment target that is not yet a draft.

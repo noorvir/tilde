@@ -2,14 +2,19 @@ import AppKit
 import SwiftUI
 
 /// Floating indicator under the menu bar while annotating: status, agent message, tools
-/// and the list of annotations. Sized to its content and anchored at the top center.
+/// and the list of annotations, anchored at the top center.
+///
+/// The panel keeps one size and the content sits at its top. Resizing an NSHostingView
+/// while SwiftUI changes its content re-centers the content for a frame, which makes the
+/// pill jump. Transparent parts of the panel let mouse events through to the overlay.
 @MainActor
 final class HUDPanel {
     let window: NSPanel
-    private let hosting: FittingHostingView<HUDView>
+    private let hosting: NSHostingView<HUDView>
 
     init(controller: AnnotationController) {
-        hosting = FittingHostingView(rootView: HUDView(controller: controller))
+        hosting = NSHostingView(rootView: HUDView(controller: controller))
+        hosting.sizingOptions = []
         window = FloatingPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         window.level = .screenSaver
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
@@ -18,11 +23,19 @@ final class HUDPanel {
         window.hasShadow = false
         window.isReleasedWhenClosed = false
         window.contentView = hosting
-        hosting.onSizeChange = { [weak self] _ in self?.layout() }
     }
 
+    /// Shows the HUD on the screen that has the pointer.
     func show() {
-        layout()
+        let pointer = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.screens.first else {
+            return
+        }
+
+        let visible = screen.visibleFrame
+        let width: CGFloat = 560
+        let frame = NSRect(x: screen.frame.midX - width / 2, y: visible.minY, width: width, height: visible.height + 4)
+        window.setFrame(frame, display: true)
         window.orderFrontRegardless()
     }
 
@@ -30,13 +43,14 @@ final class HUDPanel {
         window.orderOut(nil)
     }
 
-    private func layout() {
-        guard let screen = NSScreen.screens.first else {
-            return
+    /// Whether an AppKit screen point is over the visible HUD content.
+    func contains(_ point: NSPoint) -> Bool {
+        guard window.isVisible else {
+            return false
         }
         let size = hosting.fittingSize
-        let origin = NSPoint(x: screen.frame.midX - size.width / 2, y: screen.visibleFrame.maxY - size.height + 4)
-        window.setFrame(NSRect(origin: origin, size: size), display: true)
+        let content = NSRect(x: window.frame.midX - size.width / 2, y: window.frame.maxY - size.height, width: size.width, height: size.height)
+        return content.contains(point)
     }
 }
 
@@ -60,6 +74,7 @@ struct HUDView: View {
         }
         .padding(16)
         .fixedSize()
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: controller.showsList)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
     }
@@ -68,11 +83,11 @@ struct HUDView: View {
     private var pill: some View {
         HStack(spacing: 4) {
             switch controller.phase {
-            case .sent(let client):
+            case .sent(let confirmation):
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Color.tildeBlue)
-                Text("Sent to \(client)")
+                Text(confirmation)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                     .padding(.trailing, 6)
@@ -92,7 +107,7 @@ struct HUDView: View {
         let count = controller.drafts.count
 
         HStack(spacing: 9) {
-            PulseDot(isPaused: controller.isPaused)
+            PulseDot(isActive: controller.phase == .annotating && !controller.isPaused)
             VStack(alignment: .leading, spacing: 1) {
                 Text(controller.isPaused ? "Paused" : "Annotating")
                     .font(.system(size: 13, weight: .semibold))
@@ -112,7 +127,7 @@ struct HUDView: View {
         }
         .disabled(count == 0)
 
-        HUDButton(symbol: controller.isPaused ? "play.fill" : "pause.fill", isOn: controller.isPaused, help: "Pause to use your apps") {
+        HUDButton(symbol: controller.isPaused ? "play.fill" : "pause.fill", isOn: controller.isPaused, help: "Pause to use your apps  \(HotKeys.pauseTitle)") {
             controller.togglePause()
         }
 
@@ -136,7 +151,7 @@ struct HUDView: View {
         }
         .buttonStyle(.plain)
         .disabled(count == 0 && controller.composer == nil)
-        .help("Send to \(controller.session?.client ?? "agent")  ⌘↩")
+        .help(sendHelp)
         .padding(.leading, 4)
 
         HUDButton(symbol: "xmark", help: "Cancel") {
@@ -144,7 +159,20 @@ struct HUDView: View {
         }
     }
 
+    private var sendHelp: String {
+        guard let session = controller.session else {
+            return "Send  ⌘↩"
+        }
+        if session.isLocal {
+            return "Copy to clipboard  ⌘↩"
+        }
+        return "Send to \(session.client)  ⌘↩"
+    }
+
     private var subtitle: String {
+        if controller.isPaused {
+            return "\(HotKeys.pauseTitle) to resume"
+        }
         let client = controller.session?.client ?? "Agent"
         let count = controller.drafts.count
         if count == 0 {
@@ -190,26 +218,31 @@ private struct HUDButton: View {
 }
 
 private struct PulseDot: View {
-    let isPaused: Bool
-    @State private var pulse = false
+    let isActive: Bool
 
     var body: some View {
         ZStack {
+            if isActive {
+                // The animation is scoped to the ring so it never animates the HUD layout.
+                PhaseAnimator([false, true]) { expanded in
+                    ring
+                        .scaleEffect(expanded ? 1 : 0.5)
+                        .opacity(expanded ? 0 : 1)
+                } animation: { expanded in
+                    expanded ? .easeOut(duration: 1.4) : nil
+                }
+            }
             Circle()
-                .fill(Color.tildeBlue.opacity(0.35))
-                .frame(width: 18, height: 18)
-                .scaleEffect(pulse && !isPaused ? 1 : 0.5)
-                .opacity(pulse && !isPaused ? 0 : 1)
-            Circle()
-                .fill(isPaused ? Color.white.opacity(0.4) : Color.tildeBlue)
+                .fill(isActive ? Color.tildeBlue : Color.white.opacity(0.4))
                 .frame(width: 8, height: 8)
         }
         .frame(width: 18, height: 18)
-        .onAppear {
-            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
-                pulse = true
-            }
-        }
+    }
+
+    private var ring: some View {
+        Circle()
+            .fill(Color.tildeBlue.opacity(0.35))
+            .frame(width: 18, height: 18)
     }
 }
 

@@ -93,6 +93,10 @@ final class OverlayView: NSView {
         controller.mouseMoved(to: point)
     }
 
+    override func mouseEntered(with event: NSEvent) {
+        controller.makeOverlayKey()
+    }
+
     override func mouseExited(with event: NSEvent) {
         controller.mouseExited()
     }
@@ -129,6 +133,10 @@ final class OverlayView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if controller.isPaused {
+            super.keyDown(with: event)
+            return
+        }
         if event.keyCode == 53 {
             if controller.composer != nil {
                 controller.closeComposer()

@@ -98,6 +98,10 @@ Only one session is on screen at a time. Further sessions queue.
 
 ## Annotate
 
+Agents start a session with `start_annotation`. To start one yourself, press ⌃⌥A
+or choose Start Annotation in the menu-bar menu. Use this to send feedback to any
+agent by paste, or to try Tilde without an agent.
+
 | Action | Result |
 |---|---|
 | Hover | Highlights the element under the cursor |
@@ -107,7 +111,8 @@ Only one session is on screen at a time. Further sessions queue.
 | ⌘↩ | Adds the comment and sends everything |
 | Esc | Closes the comment box |
 | Click a marker | Edits or deletes that annotation |
-| Pause (HUD) | Lets you use your apps; markers stay |
+| ⌃⌥P or Pause (HUD) | Lets you use your apps; markers stay. Press again to resume |
+| Cancel (HUD or menu) | Closes the session without sending |
 
 Tilde does not take focus from your app while you annotate.
 
@@ -119,6 +124,8 @@ under the cursor.
 ## Output
 
 The agent gets one text block and one PNG per annotation, in the same order.
+For a session that you started, Tilde copies the markdown report to the clipboard.
+The report gives the folder of the screenshots.
 Every sent batch is also saved to `~/.tilde/inbox/<time>_<session>/` as
 `feedback.md` plus `annotation-N.png`.
 

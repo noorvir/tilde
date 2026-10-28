@@ -75,10 +75,6 @@ final class ElementPicker {
             else {
                 continue
             }
-            // The cursor is over Tilde's own HUD or comment box: nothing to pick.
-            if pid == ownPID && layer > OverlayWindow.overlayLevel.rawValue {
-                return nil
-            }
             // Windows above the overlay never receive its clicks; Window Server owns the menu bar.
             guard alpha > 0.01, layer < OverlayWindow.overlayLevel.rawValue, app != "Window Server",
                   pid != ownPID || number == browser.windowNumber
