@@ -162,6 +162,23 @@ final class Harness {
         controller.showsList = false
         try check(annotatingWidth == pausedWidth && annotatingWidth > 0, "HUD keeps its width when paused, got \(annotatingWidth) and \(pausedWidth)")
 
+        // Clear all and cancel ask first, in the pill, at the same width; Cancel keeps everything.
+        controller.requestClearAll()
+        let confirmWidth = hudPillWidth
+        if let hudWindow {
+            await renderAlone(hudWindow, "04e-confirm-clear")
+        }
+        controller.dismissConfirmation()
+        controller.requestCancel()
+        if let hudWindow {
+            await renderAlone(hudWindow, "04f-confirm-cancel")
+        }
+        controller.dismissConfirmation()
+        try check(
+            confirmWidth == annotatingWidth && controller.drafts.count == 1 && controller.phase == .annotating,
+            "confirming keeps the pill width and Cancel keeps the annotation"
+        )
+
         // The pointer over the pill is over Tilde's UI; the empty panel below the HUD is not.
         if let hudWindow {
             let pill = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 16 - HUDMetrics.height / 2).flipped

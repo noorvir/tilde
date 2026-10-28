@@ -10,7 +10,7 @@ import SwiftUI
 /// pill jump. Transparent parts of the panel let mouse events through to the overlay.
 @MainActor
 final class HUDPanel {
-    static let motion = Animation.spring(duration: 0.35, bounce: 0.12)
+    static let motion = Animation.spring(duration: 0.3, bounce: 0)
 
     let window: NSPanel
     private let hosting: FirstMouseHostingView<HUDView>
@@ -220,18 +220,32 @@ struct HUDView: View {
             pill
             if controller.isHUDShown, controller.phase == .annotating, let message = controller.session?.message, !message.isEmpty {
                 MessageBubble(client: controller.session?.client ?? "Agent", message: message)
+                    .transition(Self.zoom)
             }
             if controller.isHUDShown, controller.phase == .annotating, controller.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
+                    .transition(Self.zoom)
             }
         }
         .padding(16)
         .fixedSize()
         .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: onContentFrame)
+        .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: controller.showsList)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
         .animation(HUDPanel.motion, value: controller.phase)
+        .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
+    }
+
+    /// How the message and list appear and go with the HUD: the same zoom as the pill.
+    private static let zoom = AnyTransition.scale(scale: 0.5, anchor: .top).combined(with: .opacity)
+
+    private var pillScale: CGFloat {
+        if !controller.isHUDShown {
+            return 0.5
+        }
+        return isPillHovered ? 1.03 : 1
     }
 
     /// The pill keeps one width while annotating, so it never jumps between states. After
@@ -257,22 +271,34 @@ struct HUDView: View {
                         .foregroundStyle(.white)
                 }
             case .annotating, .idle:
-                annotatingContent
+                // Stacked, so the crossfade between the two never lays them out side by side.
+                ZStack {
+                    if let confirmation = controller.confirmation {
+                        HStack(spacing: 4) {
+                            confirmContent(confirmation)
+                        }
+                        .transition(.opacity)
+                    } else {
+                        HStack(spacing: 4) {
+                            annotatingContent
+                        }
+                        .transition(.opacity)
+                    }
+                }
             }
         }
         .padding(.leading, HUDMetrics.leadingInset)
         .padding(.trailing, HUDMetrics.trailingInset)
         .frame(width: pillContentWidth, height: HUDMetrics.height)
-        .opacity(controller.isHUDShown ? 1 : 0)
-        // Collapsed, the pill has no width; it grows out of its centre to its content.
-        .frame(width: controller.isHUDShown ? nil : 0, height: HUDMetrics.height)
         .clipShape(Capsule())
         .background(Capsule().fill(Color.tildeInk))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
         .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
-        // The pill can be dragged to move the HUD; it grows a little under the pointer to
-        // show that. A drag that starts on a button moves the HUD and does not press it.
-        .scaleEffect(isPillHovered && controller.isHUDShown ? 1.03 : 1)
+        // Opening and closing zoom the laid-out pill in and out of its centre. Under the
+        // pointer it grows a little to show that it can be dragged; a drag that starts on a
+        // button moves the HUD and does not press it.
+        .scaleEffect(pillScale)
+        .opacity(controller.isHUDShown ? 1 : 0)
         .animation(.spring(duration: 0.25), value: isPillHovered)
         .onHover { isPillHovered = $0 }
         .gesture(
@@ -303,17 +329,17 @@ struct HUDView: View {
 
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
-        HUDButton(symbol: "list.bullet", badge: count, isOn: controller.showsList, help: "Show annotations") {
+        HUDButton(symbol: "list.bullet", badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide annotations" : "Show annotations") {
             controller.showsList.toggle()
         }
         .disabled(count == 0)
 
-        HUDButton(symbol: controller.isPaused ? "play.fill" : "pause.fill", isOn: controller.isPaused, help: "Pause to use your apps  \(HotKeys.pauseTitle)") {
+        HUDButton(symbol: controller.isPaused ? "play.fill" : "pause.fill", isOn: controller.isPaused, help: "\(controller.isPaused ? "Resume" : "Pause") annotating (\(HotKeys.pauseTitle))") {
             controller.togglePause()
         }
 
-        HUDButton(symbol: "trash", isDestructive: true, help: "Clear annotations") {
-            controller.clearDrafts()
+        HUDButton(symbol: "trash", isDestructive: true, help: "Clear all annotations and keep annotating") {
+            controller.requestClearAll()
         }
         .disabled(count == 0)
 
@@ -332,11 +358,52 @@ struct HUDView: View {
         }
         .buttonStyle(.plain)
         .disabled(count == 0 && controller.composer == nil)
-        .help(sendHelp)
+        .tildeTooltip(sendHelp)
         .padding(.leading, 4)
 
-        HUDButton(symbol: "xmark", help: "Cancel") {
-            controller.cancel()
+        HUDButton(symbol: "xmark", help: "Cancel: discard everything and close") {
+            controller.requestCancel()
+        }
+    }
+
+    /// Replaces the pill's content, at the same size, with a question and two buttons.
+    @ViewBuilder
+    private func confirmContent(_ confirmation: Confirmation) -> some View {
+        let count = controller.drafts.count
+        let all = count == 1 ? "the annotation" : "all \(count) annotations"
+
+        HStack(spacing: HUDMetrics.iconGap) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.red)
+            switch confirmation {
+            case .clearAll:
+                Text("Clear \(all)?")
+            case .cancelSession:
+                Text("Discard \(all) and close?")
+            }
+        }
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(.white)
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        PillTextButton(title: "Cancel", isDestructive: false) {
+            controller.dismissConfirmation()
+        }
+        .tildeTooltip("Keep the annotations (Esc)")
+
+        switch confirmation {
+        case .clearAll:
+            PillTextButton(title: "Clear", isDestructive: true) {
+                controller.confirm()
+            }
+            .tildeTooltip("Delete all annotations (↩)")
+        case .cancelSession:
+            PillTextButton(title: "Discard", isDestructive: true) {
+                controller.confirm()
+            }
+            .tildeTooltip("Discard everything and close (↩)")
         }
     }
 
@@ -406,7 +473,36 @@ private struct HUDButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help(help)
+        .tildeTooltip(help)
+    }
+}
+
+/// A text button for the pill's confirm state; destructive ones are red like Delete.
+private struct PillTextButton: View {
+    let title: String
+    let isDestructive: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(isDestructive ? Color.red : .white.opacity(0.9))
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(Capsule().fill(background))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+
+    private var background: Color {
+        if isDestructive {
+            return Color.red.opacity(isHovered ? 0.28 : 0.16)
+        }
+        return .white.opacity(isHovered ? 0.16 : 0.09)
     }
 }
 
@@ -531,7 +627,7 @@ private struct AnnotationRow: View {
 
             // A button's click does not reach the row's tap gesture, so Delete never opens the preview.
             RowDeleteButton { controller.deleteDraft(draft.id) }
-                .help("Delete")
+                .tildeTooltip("Delete this annotation")
         }
         .padding(.leading, HUDMetrics.leadingInset)
         .padding(.trailing, HUDMetrics.trailingInset)
@@ -540,7 +636,7 @@ private struct AnnotationRow: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture { controller.preview(draft.id) }
-        .help("Open preview")
+        .tildeTooltip("Open preview")
     }
 }
 

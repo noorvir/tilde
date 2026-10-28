@@ -113,7 +113,8 @@ agent by paste, or to try Tilde without an agent.
 | Click a marker | Edits or deletes that annotation |
 | Space on a marker, or a thumbnail in the list | Opens the preview. ← and → show the other annotations; Esc or a click outside closes it |
 | ⌃⌥P or Pause (HUD) | Lets you use your apps; markers stay. Press again to resume |
-| Cancel (HUD or menu) | Closes the session without sending |
+| Clear all (HUD trash) | Deletes all annotations and keeps the session; asks first |
+| Cancel (HUD X or menu) | Closes the session without sending; the HUD asks first when there are annotations |
 | Drag the HUD pill | Moves the HUD on that screen. An outline shows the home position; the pill snaps there when close. Reset HUD Position in the menu also puts it back |
 
 Tilde does not take focus from your app while you annotate.

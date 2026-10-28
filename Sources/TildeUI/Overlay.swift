@@ -156,6 +156,14 @@ final class OverlayView: NSView {
             super.keyDown(with: event)
             return
         }
+        if controller.confirmation != nil {
+            if event.keyCode == 53 {
+                controller.dismissConfirmation()
+            } else if event.keyCode == 36 {
+                controller.confirm()
+            }
+            return
+        }
         if event.keyCode == 49, let id = hoveredMarker {
             controller.preview(id)
             return

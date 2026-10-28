@@ -15,6 +15,12 @@ struct Draft: Identifiable {
     var id: UUID { annotation.id }
 }
 
+/// HUD actions that discard every annotation, so the pill asks before doing them.
+enum Confirmation {
+    case clearAll
+    case cancelSession
+}
+
 enum PreviewImage {
     case closeUp
     case context
@@ -59,6 +65,8 @@ final class AnnotationController: ObservableObject {
     @Published private(set) var isPaused = false
     /// The draft shown in the preview card; annotate clicks wait while it is open.
     @Published private(set) var previewID: Draft.ID?
+    /// A destructive HUD action waiting for the user to confirm it in the pill.
+    @Published private(set) var confirmation: Confirmation?
     /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
     /// when it appears and collapses into it before the panel hides.
     @Published var isHUDShown = false
@@ -117,6 +125,7 @@ final class AnnotationController: ObservableObject {
         isPaused = false
         isSending = false
         showsList = false
+        confirmation = nil
         phase = .annotating
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
 
@@ -134,6 +143,7 @@ final class AnnotationController: ObservableObject {
     }
 
     private func end() {
+        confirmation = nil
         commentPanel.close()
         previewPanel.close()
         previewID = nil
@@ -243,6 +253,40 @@ final class AnnotationController: ObservableObject {
         drafts = []
         commentPanel.close()
         composer = nil
+    }
+
+    /// Asks in the pill before clearing all annotations.
+    func requestClearAll() {
+        guard !drafts.isEmpty else {
+            return
+        }
+        confirmation = .clearAll
+    }
+
+    /// Asks in the pill before cancelling, unless there is nothing to lose.
+    func requestCancel() {
+        guard !drafts.isEmpty else {
+            cancel()
+            return
+        }
+        confirmation = .cancelSession
+    }
+
+    func confirm() {
+        guard let confirmation else {
+            return
+        }
+        self.confirmation = nil
+        switch confirmation {
+        case .clearAll:
+            clearDrafts()
+        case .cancelSession:
+            cancel()
+        }
+    }
+
+    func dismissConfirmation() {
+        confirmation = nil
     }
 
     // MARK: - Picking

@@ -93,6 +93,7 @@ struct PreviewView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(20)
+        .tildeTooltipHost()
         .environment(\.colorScheme, .dark)
     }
 
@@ -222,7 +223,7 @@ private struct Screenshot: View {
                 }
                 .onHover { isHovered = $0 }
                 .onTapGesture(perform: enlarge)
-                .help("Enlarge")
+                .tildeTooltip("Enlarge")
         }
     }
 }
@@ -308,7 +309,7 @@ private struct PreviewButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help(help)
+        .tildeTooltip(help)
     }
     private var foreground: Color {
         if isDestructive {
