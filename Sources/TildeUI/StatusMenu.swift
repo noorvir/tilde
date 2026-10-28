@@ -17,7 +17,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         self.controller = controller
         super.init()
 
-        item.button?.image = NSImage(systemSymbolName: "pencil.and.scribble", accessibilityDescription: "Tilde")
+        item.button?.image = TildeMark.menuBarImage()
+        item.button?.imageScaling = .scaleNone
         let menu = NSMenu()
         menu.delegate = self
         item.menu = menu

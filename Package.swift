@@ -13,6 +13,8 @@ let package = Package(
         ),
         .executableTarget(name: "Tilde", dependencies: ["TildeUI"]),
         .executableTarget(name: "tilde-mcp"),
+        // Writes the app icon from TildeMark; see scripts/build-app.sh.
+        .executableTarget(name: "tilde-icon", dependencies: ["TildeUI"]),
         // Drives the real UI in-process with synthesized events; see scripts/e2e.sh.
         .executableTarget(name: "tilde-e2e", dependencies: ["TildeCore", "TildeUI"], exclude: ["fixture.html"]),
         // Posts real input and captures the screen for tests on a real display; see scripts/build-driver.sh.
