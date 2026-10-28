@@ -67,7 +67,7 @@ private struct TooltipSource: ViewModifier {
     }
 }
 
-private struct TooltipBubble: View {
+struct TooltipBubble: View {
     let text: String
 
     var body: some View {

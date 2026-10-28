@@ -46,7 +46,7 @@ final class HomeOutline {
     }
 }
 
-private struct OutlineView: View {
+struct OutlineView: View {
     @ObservedObject var model: HomeOutline.Model
 
     var body: some View {

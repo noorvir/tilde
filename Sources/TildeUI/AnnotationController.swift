@@ -368,8 +368,7 @@ final class AnnotationController: ObservableObject {
     /// window the target belongs to. For an element (`outline` set), both screenshots come
     /// from that window alone, so no other window, Tilde's included, can cover them.
     private func openComposer(target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?) {
-        // A few points around an element keep its outline inside the image.
-        let closeUpRect = outline.map { $0.insetBy(dx: -4, dy: -4) } ?? frame
+        let closeUpRect = Self.closeUpRect(frame: frame, outline: outline)
         let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
         let browser = self.browser
         let capturesContext = session?.capturesContext ?? false
@@ -389,6 +388,18 @@ final class AnnotationController: ObservableObject {
         log.notice("comment opened for \(chip, privacy: .public)")
         commentText = ""
         commentPanel.show(chip: chip, isEditing: false, near: marker, below: frame)
+    }
+
+    /// What the close-up shows: an element (`outline` set) with 4 pt around it so its outline
+    /// fits, or a region exactly.
+    nonisolated static func closeUpRect(frame: CGRect, outline: CGRect?) -> CGRect {
+        outline.map { $0.insetBy(dx: -4, dy: -4) } ?? frame
+    }
+
+    /// Whether at least 80% of a region lies inside a window, so the window is its context.
+    nonisolated static func isMostlyInside(_ region: CGRect, _ window: CGRect) -> Bool {
+        let inside = window.intersection(region)
+        return !inside.isNull && inside.width * inside.height >= 0.8 * region.width * region.height
     }
 
     /// The target alone: an element from its own window, or a region from the screen.
@@ -414,9 +425,7 @@ final class AnnotationController: ObservableObject {
         }
 
         if let window {
-            let inside = window.frame.intersection(frame)
-            let isMostlyInside = !inside.isNull && inside.width * inside.height >= 0.8 * frame.width * frame.height
-            if !isRegion || isMostlyInside {
+            if !isRegion || isMostlyInside(frame, window.frame) {
                 return await ScreenCapture.png(ofWindow: CGWindowID(window.number), area: window.frame, outline: frame, maxSide: 1024)
             }
         }
@@ -578,3 +587,30 @@ final class AnnotationController: ObservableObject {
         return nil
     }
 }
+
+#if DEBUG
+extension AnnotationController {
+    /// Puts the controller in a given state without opening any window, for snapshot and
+    /// behaviour tests. Debug builds only.
+    func setStateForTesting(
+        session: SessionStore.Session?,
+        drafts: [Draft] = [],
+        phase: Phase = .annotating,
+        hover: Picked? = nil,
+        composer: Composer? = nil,
+        isPaused: Bool = false,
+        previewID: Draft.ID? = nil,
+        confirmation: Confirmation? = nil
+    ) {
+        self.session = session
+        self.drafts = drafts
+        self.phase = phase
+        self.hover = hover
+        self.composer = composer
+        self.isPaused = isPaused
+        self.previewID = previewID
+        self.confirmation = confirmation
+        isHUDShown = true
+    }
+}
+#endif

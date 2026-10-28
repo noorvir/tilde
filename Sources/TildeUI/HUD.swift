@@ -92,7 +92,8 @@ final class HUDPanel {
             return
         }
 
-        let top = Self.clamped(savedTop(on: screen) ?? Self.homeTop(on: screen), on: screen)
+        let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
+        let top = Self.clamped(savedTop(on: screen) ?? home, in: screen.visibleFrame)
         let height = screen.visibleFrame.height + 4
         window.setFrame(NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height), display: true)
     }
@@ -111,8 +112,8 @@ final class HUDPanel {
             return
         }
 
-        let home = Self.homeTop(on: screen)
-        let isNearHome = hypot(top.x - home.x, top.y - home.y) < Self.snapDistance
+        let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
+        let isNearHome = Self.snapsHome(top, home: home)
         if isNearHome {
             top = home
         }
@@ -141,19 +142,23 @@ final class HUDPanel {
             forgetTop(on: screen)
             return
         }
-        let kept = Self.clamped(top, on: screen)
+        let kept = Self.clamped(top, in: screen.visibleFrame)
         window.setFrameOrigin(NSPoint(x: kept.x - Self.width / 2, y: kept.y - height))
         saveTop(kept, on: screen)
     }
 
     /// Top centre of the panel at home: the top centre of the screen's visible area.
-    private static func homeTop(on screen: NSScreen) -> NSPoint {
-        NSPoint(x: screen.frame.midX, y: screen.visibleFrame.maxY + 4)
+    static func homeTop(screenFrame: NSRect, visibleFrame: NSRect) -> NSPoint {
+        NSPoint(x: screenFrame.midX, y: visibleFrame.maxY + 4)
+    }
+
+    /// Whether a dragged panel top centre is close enough to home to snap there.
+    static func snapsHome(_ top: NSPoint, home: NSPoint) -> Bool {
+        hypot(top.x - home.x, top.y - home.y) < snapDistance
     }
 
     /// Keeps the pill's top centre inside the screen's visible area.
-    private static func clamped(_ top: NSPoint, on screen: NSScreen) -> NSPoint {
-        let visible = screen.visibleFrame
+    static func clamped(_ top: NSPoint, in visible: NSRect) -> NSPoint {
         let halfWidth = HUDView.width / 2 + 16
         let x = min(max(top.x, visible.minX + halfWidth), visible.maxX - halfWidth)
         let y = min(max(top.y, visible.minY + HUDMetrics.height + 32), visible.maxY + 4)
@@ -191,12 +196,13 @@ final class HUDPanel {
         guard window.isVisible, controller.isHUDShown else {
             return false
         }
-        let frame = window.frame
-        let content = NSRect(
-            x: frame.minX + contentFrame.minX, y: frame.maxY - contentFrame.maxY,
-            width: contentFrame.width, height: contentFrame.height
-        )
-        return content.contains(point)
+        return Self.screenRect(ofContent: contentFrame, inWindow: window.frame).contains(point)
+    }
+
+    /// Converts a frame in the panel's SwiftUI space (top-left origin) to AppKit screen
+    /// coordinates.
+    static func screenRect(ofContent content: CGRect, inWindow frame: NSRect) -> NSRect {
+        NSRect(x: frame.minX + content.minX, y: frame.maxY - content.maxY, width: content.width, height: content.height)
     }
 }
 

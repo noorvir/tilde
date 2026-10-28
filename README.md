@@ -138,9 +138,35 @@ Every sent batch is also saved to `~/.tilde/inbox/<time>_<session>/` as
 ## Development
 
 ```sh
-swift test           # MCP session contract and HTTP server
+swift test           # unit, behaviour and snapshot tests (about 10 s)
 scripts/e2e.sh       # full flow in one process, no permissions needed
 ```
+
+### Testing
+
+| Layer | Covers | Run |
+|---|---|---|
+| `TildeCoreTests` | MCP session contract, HTTP server, report path compaction | `swift test --filter TildeCoreTests` |
+| `TildeUITests/BehaviourTests` | Confirm flows, Esc/Return in the confirm state, single delete, close-up and context rules, HUD home, snap distance, on-screen limits | `swift test --filter BehaviourTests` |
+| `TildeUITests/SnapshotTests` | Pixel snapshots of every HUD state, the list, the comment box, the preview, a tooltip, the home outline and the overlay | `swift test --filter SnapshotTests` |
+| `scripts/e2e.sh` | The whole flow with synthesized events: hover, click, comment, preview, region, send, inbox, agent result, capture shapes | `scripts/e2e.sh` |
+
+Snapshots render offscreen at 2× into sRGB on a grey background, with fixed fake data and
+generated images, and compare with the PNGs in `Tests/Snapshots/`. A pixel counts as
+different when a channel differs by more than 2 of 255; a snapshot fails when more than
+0.1% of its pixels differ. On failure, `<name>.actual.png` and `<name>.diff.png` (changes in
+red) are written to `.build/snapshot-failures/`.
+
+Text rendering changes between macOS versions, so the references belong to the macOS
+version in `Tests/Snapshots/manifest.json`. On another version the tests stop with a
+message to record again. After an intended design change, or on a new macOS version:
+
+```sh
+TILDE_RECORD_SNAPSHOTS=1 swift test --filter SnapshotTests
+```
+
+Then look at the changed PNGs in `git diff` before you commit them. The UI tests need a
+logged-in Mac with a window server; they do not run headless.
 
 `scripts/e2e.sh` runs the real MCP server, browser, overlay, HUD and comment box.
 It drives them with synthesized AppKit events, acts as the agent, and writes

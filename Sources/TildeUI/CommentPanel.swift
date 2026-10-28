@@ -58,7 +58,7 @@ final class CommentPanel {
     }
 }
 
-private struct CommentView: View {
+struct CommentView: View {
     @ObservedObject var controller: AnnotationController
     let chip: String
     let isEditing: Bool

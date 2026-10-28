@@ -18,6 +18,8 @@ let package = Package(
         // Posts real input and captures the screen for tests on a real display; see scripts/build-driver.sh.
         .executableTarget(name: "tilde-driver", dependencies: ["TildeCore"]),
         .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore"]),
+        // Snapshot and behaviour tests of the UI; they render offscreen and need a logged-in Mac.
+        .testTarget(name: "TildeUITests", dependencies: ["TildeCore", "TildeUI"]),
     ],
     swiftLanguageModes: [.v5]
 )
