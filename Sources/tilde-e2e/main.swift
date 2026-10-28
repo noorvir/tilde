@@ -162,6 +162,13 @@ final class Harness {
         controller.showsList = false
         try check(annotatingWidth == pausedWidth && annotatingWidth > 0, "HUD keeps its width when paused, got \(annotatingWidth) and \(pausedWidth)")
 
+        // The pointer over the pill is over Tilde's UI; the empty panel below the HUD is not.
+        if let hudWindow {
+            let pill = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 16 - HUDMetrics.height / 2).flipped
+            let below = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 600).flipped
+            try check(controller.isOverPanel(pill) && !controller.isOverPanel(below), "the pill counts as UI and the empty panel below it does not")
+        }
+
         // Region: drag, comment, then ⌘↩ sends everything.
         let table = try await screenRect(ofFirst: "table")
         let start = CGPoint(x: table.minX + 160, y: table.maxY - 64)

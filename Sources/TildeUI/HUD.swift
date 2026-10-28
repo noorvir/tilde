@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Floating indicator under the menu bar while annotating: status, agent message, tools
-/// and the list of annotations, anchored at the top center.
+/// Floating indicator while annotating: status, agent message, tools and the list of
+/// annotations. It sits at the top centre of the screen with the pointer, unless the user
+/// dragged the pill somewhere else on that screen; the position is kept per screen.
 ///
 /// The panel keeps one size and the content sits at its top. Resizing an NSHostingView
 /// while SwiftUI changes its content re-centers the content for a frame, which makes the
@@ -15,6 +16,20 @@ final class HUDPanel {
     private let hosting: FirstMouseHostingView<HUDView>
     private unowned let controller: AnnotationController
     private var pendingHide: DispatchWorkItem?
+    /// Pointer and panel origin when a drag of the pill started.
+    private var dragStart: (pointer: NSPoint, origin: NSPoint)?
+    /// Whether the dragged pill is snapped to its home position.
+    private var isSnappedHome = false
+    private let homeOutline = HomeOutline()
+    /// How close to home, in points, the dragged pill snaps there.
+    private static let snapDistance: CGFloat = 40
+    /// The visible content (pill, message, list) in the panel's SwiftUI coordinates, which
+    /// have a top-left origin. The hosting view has no sizing options, so its fitting size
+    /// is zero and cannot give this.
+    private var contentFrame: CGRect = .zero
+
+    private static let width: CGFloat = 560
+    private static let positionsKey = "HUDPositions"
 
     init(controller: AnnotationController) {
         self.controller = controller
@@ -29,20 +44,17 @@ final class HUDPanel {
         window.hasShadow = false
         window.isReleasedWhenClosed = false
         window.contentView = hosting
+        hosting.rootView = HUDView(controller: controller) { [weak self] ended in
+            self?.dragPill(ended: ended)
+        } onContentFrame: { [weak self] frame in
+            self?.contentFrame = frame
+        }
     }
 
     /// Shows the HUD on the screen that has the pointer.
     func show() {
-        let pointer = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.screens.first else {
-            return
-        }
-
-        let visible = screen.visibleFrame
-        let width: CGFloat = 560
-        let frame = NSRect(x: screen.frame.midX - width / 2, y: visible.minY, width: width, height: visible.height + 4)
         pendingHide?.cancel()
-        window.setFrame(frame, display: true)
+        place()
         window.orderFrontRegardless()
 
         // Grow on the next pass, after SwiftUI has laid out the collapsed pill.
@@ -65,13 +77,125 @@ final class HUDPanel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: hide)
     }
 
+    /// Forgets the dragged positions and moves the HUD back to the top centre.
+    func resetPosition() {
+        UserDefaults.standard.removeObject(forKey: Self.positionsKey)
+        if window.isVisible {
+            place()
+        }
+    }
+
+    /// Puts the panel on the screen with the pointer, at the saved position for that screen.
+    private func place() {
+        let pointer = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.screens.first else {
+            return
+        }
+
+        let top = Self.clamped(savedTop(on: screen) ?? Self.homeTop(on: screen), on: screen)
+        let height = screen.visibleFrame.height + 4
+        window.setFrame(NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height), display: true)
+    }
+
+    /// Moves the panel with the pointer while the pill is dragged, showing the home position
+    /// and snapping to it when close. At the end, a snapped pill goes back to home; any other
+    /// is kept on its screen and its position saved.
+    private func dragPill(ended: Bool) {
+        let pointer = NSEvent.mouseLocation
+        let start = dragStart ?? (pointer, window.frame.origin)
+        dragStart = start
+
+        let height = window.frame.height
+        var top = NSPoint(x: start.origin.x + pointer.x - start.pointer.x + Self.width / 2, y: start.origin.y + pointer.y - start.pointer.y + height)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(top) }) ?? NSScreen.screens.first(where: { $0.frame.contains(pointer) }) else {
+            return
+        }
+
+        let home = Self.homeTop(on: screen)
+        let isNearHome = hypot(top.x - home.x, top.y - home.y) < Self.snapDistance
+        if isNearHome {
+            top = home
+        }
+        let frame = NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height)
+        if isNearHome && !isSnappedHome {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                window.animator().setFrame(frame, display: true)
+            }
+        } else if !isNearHome || !isSnappedHome {
+            window.setFrameOrigin(frame.origin)
+        }
+        isSnappedHome = isNearHome
+
+        // The outline matches the pill: below the 16 pt content padding, at the pill's width.
+        let outline = NSRect(x: home.x - HUDView.width / 2, y: home.y - 16 - HUDMetrics.height, width: HUDView.width, height: HUDMetrics.height)
+        homeOutline.show(outline, isSnapped: isNearHome, below: window.windowNumber)
+        guard ended else {
+            return
+        }
+
+        dragStart = nil
+        isSnappedHome = false
+        homeOutline.hide()
+        if isNearHome {
+            forgetTop(on: screen)
+            return
+        }
+        let kept = Self.clamped(top, on: screen)
+        window.setFrameOrigin(NSPoint(x: kept.x - Self.width / 2, y: kept.y - height))
+        saveTop(kept, on: screen)
+    }
+
+    /// Top centre of the panel at home: the top centre of the screen's visible area.
+    private static func homeTop(on screen: NSScreen) -> NSPoint {
+        NSPoint(x: screen.frame.midX, y: screen.visibleFrame.maxY + 4)
+    }
+
+    /// Keeps the pill's top centre inside the screen's visible area.
+    private static func clamped(_ top: NSPoint, on screen: NSScreen) -> NSPoint {
+        let visible = screen.visibleFrame
+        let halfWidth = HUDView.width / 2 + 16
+        let x = min(max(top.x, visible.minX + halfWidth), visible.maxX - halfWidth)
+        let y = min(max(top.y, visible.minY + HUDMetrics.height + 32), visible.maxY + 4)
+        return NSPoint(x: x, y: y)
+    }
+
+    /// Saved positions are offsets from each screen's top-left corner, keyed by display ID.
+    private func savedTop(on screen: NSScreen) -> NSPoint? {
+        let positions = UserDefaults.standard.dictionary(forKey: Self.positionsKey) as? [String: [Double]]
+        guard let offset = positions?[Self.key(for: screen)], offset.count == 2 else {
+            return nil
+        }
+        return NSPoint(x: screen.frame.minX + offset[0], y: screen.frame.maxY + offset[1])
+    }
+
+    private func saveTop(_ top: NSPoint, on screen: NSScreen) {
+        var positions = UserDefaults.standard.dictionary(forKey: Self.positionsKey) as? [String: [Double]] ?? [:]
+        positions[Self.key(for: screen)] = [top.x - screen.frame.minX, top.y - screen.frame.maxY]
+        UserDefaults.standard.set(positions, forKey: Self.positionsKey)
+    }
+
+    private func forgetTop(on screen: NSScreen) {
+        var positions = UserDefaults.standard.dictionary(forKey: Self.positionsKey) as? [String: [Double]] ?? [:]
+        positions[Self.key(for: screen)] = nil
+        UserDefaults.standard.set(positions, forKey: Self.positionsKey)
+    }
+
+    private static func key(for screen: NSScreen) -> String {
+        let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        return number?.stringValue ?? screen.localizedName
+    }
+
     /// Whether an AppKit screen point is over the visible HUD content.
     func contains(_ point: NSPoint) -> Bool {
         guard window.isVisible, controller.isHUDShown else {
             return false
         }
-        let size = hosting.fittingSize
-        let content = NSRect(x: window.frame.midX - size.width / 2, y: window.frame.maxY - size.height, width: size.width, height: size.height)
+        let frame = window.frame
+        let content = NSRect(
+            x: frame.minX + contentFrame.minX, y: frame.maxY - contentFrame.maxY,
+            width: contentFrame.width, height: contentFrame.height
+        )
         return content.contains(point)
     }
 }
@@ -85,6 +209,11 @@ struct HUDView: View {
     static let width: CGFloat = 462
 
     @ObservedObject var controller: AnnotationController
+    /// Called while the pill is dragged; `true` when the drag ends.
+    var onDrag: (_ ended: Bool) -> Void = { _ in }
+    /// Reports the frame of the visible content in the window, top-left origin.
+    var onContentFrame: (CGRect) -> Void = { _ in }
+    @State private var isPillHovered = false
 
     var body: some View {
         VStack(spacing: 8) {
@@ -98,6 +227,7 @@ struct HUDView: View {
         }
         .padding(16)
         .fixedSize()
+        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: onContentFrame)
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: controller.showsList)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
@@ -140,6 +270,16 @@ struct HUDView: View {
         .background(Capsule().fill(Color.tildeInk))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
         .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+        // The pill can be dragged to move the HUD; it grows a little under the pointer to
+        // show that. A drag that starts on a button moves the HUD and does not press it.
+        .scaleEffect(isPillHovered && controller.isHUDShown ? 1.03 : 1)
+        .animation(.spring(duration: 0.25), value: isPillHovered)
+        .onHover { isPillHovered = $0 }
+        .gesture(
+            DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                .onChanged { _ in onDrag(false) }
+                .onEnded { _ in onDrag(true) }
+        )
     }
 
     @ViewBuilder

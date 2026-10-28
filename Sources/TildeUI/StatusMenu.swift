@@ -42,6 +42,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
+        menu.addItem(action("Reset HUD Position", #selector(resetHUDPosition)))
         menu.addItem(action("Open Browser", #selector(openBrowser)))
         menu.addItem(action("Open Inbox Folder", #selector(openInbox)))
 
@@ -114,6 +115,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     @objc private func cancelAnnotation() {
         controller.cancel()
+    }
+
+    @objc private func resetHUDPosition() {
+        controller.resetHUDPosition()
     }
 
     @objc private func openBrowser() {

@@ -77,6 +77,9 @@ final class AnnotationController: ObservableObject {
     private var subscription: AnyCancellable?
 
     private var latestHoverPoint: CGPoint?
+    /// Whether the last pointer move was over Tilde's own UI; a pick that finishes after the
+    /// pointer moved onto the UI must not highlight what is under it.
+    private var isPointerOverPanel = false
     private var isHoverRunning = false
     private var isSending = false
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
@@ -248,7 +251,8 @@ final class AnnotationController: ObservableObject {
         guard composer == nil, previewID == nil, !isPaused else {
             return
         }
-        if isOverPanel(point) {
+        isPointerOverPanel = isOverPanel(point)
+        if isPointerOverPanel {
             latestHoverPoint = nil
             hover = nil
             return
@@ -264,7 +268,7 @@ final class AnnotationController: ObservableObject {
             while let next = latestHoverPoint {
                 latestHoverPoint = nil
                 let picked = await picker.pick(at: next)
-                if composer == nil && !isPaused {
+                if composer == nil && !isPaused && !isPointerOverPanel {
                     hover = picked
                 }
             }
@@ -502,6 +506,10 @@ final class AnnotationController: ObservableObject {
         }
         let next = (index + step + drafts.count) % drafts.count
         previewID = drafts[next].id
+    }
+
+    func resetHUDPosition() {
+        hud.resetPosition()
     }
 
     func closePreview() {
