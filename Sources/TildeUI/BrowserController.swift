@@ -151,7 +151,7 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
 
         let area = window.convertToScreen(webView.convert(viewRect, to: nil)).flipped
         let scale = CGFloat(cgImage.width) / area.width
-        return ScreenCapture.png(from: cgImage, outline: outline.map { $0.offsetBy(dx: -area.minX, dy: -area.minY) }, scale: scale)
+        return ScreenCapture.png(from: cgImage, outline: outline.map { $0.offsetBy(dx: -area.minX, dy: -area.minY) }, scale: scale, maxSide: 1600)
     }
 
     func windowWillClose(_ notification: Notification) {

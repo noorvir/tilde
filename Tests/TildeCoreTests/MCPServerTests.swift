@@ -24,11 +24,25 @@ struct MCPServerTests {
 
         let result = try await call("wait_for_annotation", ["session_id": id, "wait_seconds": 30], session: sessionID)
         let content = try #require(result["content"] as? [[String: Any]])
-        #expect(content.count == 2)
+        #expect(content.count == 5)
         #expect(text(of: result).contains("> the badge is misaligned"))
         #expect(text(of: result).contains("Selector: `td > a`"))
-        #expect(content[1]["type"] as? String == "image")
-        #expect(content[1]["mimeType"] as? String == "image/png")
+        #expect(text(of: result).contains("![annotation 1 in context](annotation-1-context.png)"))
+        #expect(content[2]["type"] as? String == "image")
+        #expect(content[2]["mimeType"] as? String == "image/png")
+        // Each image follows its caption, and the close-up comes before the context image.
+        #expect(content[1]["text"] as? String == "Annotation 1 close-up (primary)")
+        #expect(content[2]["data"] as? String == Data([0x89, 0x50, 0x4E, 0x47]).base64EncodedString())
+        #expect((content[3]["text"] as? String)?.hasPrefix("Annotation 1 context (secondary") == true)
+        #expect(content[4]["data"] as? String == Data([0x89, 0x50, 0x4E, 0x47, 0x0D]).base64EncodedString())
+    }
+
+    @Test func contextNoneTurnsOffContextScreenshots() async throws {
+        _ = try await call("start_annotation", ["wait_seconds": 0, "context": "none"])
+        #expect(store.active?.capturesContext == false)
+
+        let invalid = try await call("start_annotation", ["wait_seconds": 0, "context": "screen"])
+        #expect(invalid["isError"] as? Bool == true)
     }
 
     @Test func openWaitReturnsAsSoonAsTheUserSends() async throws {
@@ -113,7 +127,8 @@ struct MCPServerTests {
             comment: "the badge is misaligned",
             target: .element(.web(element)),
             frame: CGRect(x: 10, y: 20, width: 40, height: 20),
-            image: Data([0x89, 0x50, 0x4E, 0x47])
+            image: Data([0x89, 0x50, 0x4E, 0x47]),
+            contextImage: Data([0x89, 0x50, 0x4E, 0x47, 0x0D])
         )
         return Feedback(annotations: [annotation])
     }

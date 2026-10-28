@@ -60,14 +60,37 @@ final class OverlayView: NSView {
     }
 
     override func cursorUpdate(with event: NSEvent) {
-        NSCursor.crosshair.set()
+        updateCursor(at: NSEvent.mouseLocation.flipped, source: "cursorUpdate")
+    }
+
+    /// The only place that sets the cursor while annotating: an arrow over the HUD, a
+    /// crosshair outside Tilde's panels. Over the comment box and the preview it sets nothing,
+    /// so their text fields keep the text cursor.
+    private func updateCursor(at point: CGPoint, source: String) {
+        let cursor: NSCursor?
+        if controller.isOverTextPanel(point) {
+            cursor = nil
+        } else if controller.isOverPanel(point) || controller.previewID != nil {
+            cursor = .arrow
+        } else {
+            cursor = .crosshair
+        }
+
+        if CursorDebug.isEnabled {
+            let target = cursor.map(CursorDebug.name(of:)) ?? "none"
+            CursorDebug.log.notice("overlay \(self.window?.windowNumber ?? 0, privacy: .public) \(source, privacy: .public) at \(Int(point.x), privacy: .public),\(Int(point.y), privacy: .public) wants \(target, privacy: .public)")
+        }
+        if let cursor, NSCursor.current != cursor {
+            cursor.set()
+        }
     }
 
     // MARK: - Events
 
-    /// Quartz screen point of an event.
+    /// Quartz screen point of an event. Converts through the event's own window: a moved
+    /// event can belong to another overlay's window, and this window would give a wrong point.
     private func screenPoint(_ event: NSEvent) -> CGPoint {
-        guard let window else {
+        guard let window = event.window ?? window else {
             return .zero
         }
         return window.convertPoint(toScreen: event.locationInWindow).flipped
@@ -80,11 +103,7 @@ final class OverlayView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         let point = screenPoint(event)
-        if controller.isOverPanel(point) {
-            NSCursor.arrow.set()
-        } else {
-            NSCursor.crosshair.set()
-        }
+        updateCursor(at: point, source: "mouseMoved")
         let marker = controller.drafts.last { hypot($0.marker.x - point.x, $0.marker.y - point.y) <= 13 }?.id
         if marker != hoveredMarker {
             hoveredMarker = marker
@@ -135,6 +154,10 @@ final class OverlayView: NSView {
     override func keyDown(with event: NSEvent) {
         if controller.isPaused {
             super.keyDown(with: event)
+            return
+        }
+        if event.keyCode == 49, let id = hoveredMarker {
+            controller.preview(id)
             return
         }
         if event.keyCode == 53 {

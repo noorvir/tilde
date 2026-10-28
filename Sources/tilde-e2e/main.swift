@@ -106,13 +106,25 @@ final class Harness {
             browser.show(URL(string: "http://127.0.0.1:\(pagePort)/"))
         }
         try await until("the page is loaded", timeout: 30) { await self.pageIsReady() }
+        // On a Mac with more displays, other apps' windows can cover the page. Keep it on the
+        // main display and above normal windows so hover and clicks reach it.
+        if let page = NSApp.windows.first(where: { $0.windowNumber == browser.windowNumber }), let screen = NSScreen.screens.first {
+            let visible = screen.visibleFrame
+            let size = page.frame.size
+            page.level = .floating
+            page.setFrame(NSRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width, height: size.height), display: true)
+        }
         await render("01-start")
 
         // Element: hover, click, comment with Return.
         let chip = try await screenRect(ofFirst: "tbody tr:nth-child(2) td:nth-child(3) .chip")
         let chipCenter = CGPoint(x: chip.midX, y: chip.midY)
-        mouse(.mouseMoved, at: chipCenter)
-        try await until("hover finds the element") { self.controller.hover != nil }
+        // Real pointer moves also reach the overlay, so repeat the move until the hover is the chip.
+        try await until("hover finds the element") {
+            self.mouse(.mouseMoved, at: chipCenter)
+            try? await Task.sleep(for: .milliseconds(100))
+            return self.controller.hover?.chip == "span"
+        }
         try check(controller.hover?.chip == "span", "hover chip is span, got \(controller.hover?.details ?? [])")
         await render("02-hover")
 
@@ -124,6 +136,31 @@ final class Harness {
         await render("04-comment-typed")
         key("\r", code: 36)
         try await until("the first annotation is added") { self.controller.drafts.count == 1 }
+
+        // Preview: opens on the draft, shows its comment, closes and gives annotate mode back.
+        let first = controller.drafts[0]
+        try await until("the first screenshots are captured") { self.controller.drafts.first?.annotation.image != nil }
+        controller.preview(first.id)
+        try await until("the preview opens") { self.previewWindow?.isVisible == true }
+        if let previewWindow {
+            await renderAlone(previewWindow, "04b-preview")
+            controller.expandedPreviewImage = .context
+            await renderAlone(previewWindow, "04c-preview-context")
+        }
+        controller.closePreview()
+        try check(previewWindow?.isVisible != true && controller.drafts.count == 1, "preview closes and keeps the annotation")
+
+        // The pill keeps one width in every state.
+        let annotatingWidth = hudPillWidth
+        controller.togglePause()
+        let pausedWidth = hudPillWidth
+        controller.togglePause()
+        controller.showsList = true
+        if let hudWindow {
+            await renderAlone(hudWindow, "04d-hud-list")
+        }
+        controller.showsList = false
+        try check(annotatingWidth == pausedWidth && annotatingWidth > 0, "HUD keeps its width when paused, got \(annotatingWidth) and \(pausedWidth)")
 
         // Region: drag, comment, then ⌘↩ sends everything.
         let table = try await screenRect(ofFirst: "table")
@@ -149,6 +186,9 @@ final class Harness {
             return false
         }
         await render("07-sent")
+        if let hudWindow {
+            await renderAlone(hudWindow, "07b-hud-sent")
+        }
 
         guard case .sent(let feedback, let folder)? = store.session(session.id)?.state else {
             throw CheckFailure(description: "session is not sent")
@@ -172,7 +212,23 @@ final class Harness {
         try check(report.contains("> Too much empty space under the table"), "report has the region comment")
         try check(report.contains("React components: App › DocumentsTable › DocumentRow › OwnerChip"), "report has the React component path")
         try check(report.contains("Selector: `"), "report has a selector")
-        try check(result.images.count == 2, "agent receives two images, got \(result.images.count)")
+        // Without Screen Recording there are no context screenshots.
+        let imageCount = feedback.annotations.flatMap { [$0.image, $0.contextImage] }.compactMap { $0 }.count
+        try check(result.images.count == imageCount && imageCount >= 2, "agent receives \(imageCount) images, got \(result.images.count)")
+
+        // With Screen Recording: the close-up is the element alone (4 pt around it) and the
+        // context is its whole window.
+        if let closeUp = feedback.annotations[0].image.flatMap(NSBitmapImageRep.init(data:)),
+           let context = feedback.annotations[0].contextImage.flatMap(NSBitmapImageRep.init(data:)),
+           let page = NSApp.windows.first(where: { $0.windowNumber == browser.windowNumber })
+        {
+            let closeUpRatio = Double(closeUp.pixelsWide) / Double(closeUp.pixelsHigh)
+            let chipRatio = (chip.width + 8) / (chip.height + 8)
+            try check(abs(closeUpRatio - chipRatio) < 0.1, "close-up is the element alone, got \(closeUp.pixelsWide)×\(closeUp.pixelsHigh) for \(chip.size)")
+            let contextRatio = Double(context.pixelsWide) / Double(context.pixelsHigh)
+            let windowRatio = page.frame.width / page.frame.height
+            try check(abs(contextRatio - windowRatio) < 0.05, "context is the whole window, got \(context.pixelsWide)×\(context.pixelsHigh) for \(page.frame.size)")
+        }
     }
 
     // MARK: - Page
@@ -210,6 +266,16 @@ final class Harness {
 
     private var hudWindow: NSWindow? {
         NSApp.windows.first { $0.contentView is NSHostingView<HUDView> }
+    }
+
+    /// Fitting width of the HUD's pill, measured on a fresh view so no animation is involved.
+    private var hudPillWidth: CGFloat {
+        let view = NSHostingView(rootView: HUDView(controller: controller))
+        return view.fittingSize.width
+    }
+
+    private var previewWindow: NSWindow? {
+        NSApp.windows.first { $0.contentView is NSHostingView<PreviewView> }
     }
 
     private var commentWindow: NSWindow? {
@@ -306,6 +372,30 @@ final class Harness {
         if let hudWindow, hudWindow.isVisible {
             draw(hudWindow, rounded: false)
         }
+        NSGraphicsContext.restoreGraphicsState()
+
+        let url = outputFolder.appendingPathComponent("\(name).png")
+        try? canvas.representation(using: .png, properties: [:])?.write(to: url)
+        print("rendered \(url.path)")
+    }
+
+    /// Renders one window by itself into a PNG of its size.
+    private func renderAlone(_ window: NSWindow, _ name: String) async {
+        try? await Task.sleep(for: .milliseconds(250))
+        let size = window.frame.size
+        let canvas = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(size.width) * 2, pixelsHigh: Int(size.height) * 2,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        )!
+        canvas.size = size
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: canvas)
+        NSColor(white: 0.55, alpha: 1).setFill()
+        NSRect(origin: .zero, size: size).fill()
+        NSGraphicsContext.current?.cgContext.translateBy(x: -window.frame.minX, y: -window.frame.minY)
+        draw(window, rounded: false)
         NSGraphicsContext.restoreGraphicsState()
 
         let url = outputFolder.appendingPathComponent("\(name).png")

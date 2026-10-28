@@ -11,6 +11,8 @@ struct Picked {
     let chip: String
     /// Lines for the hover label next to the highlight.
     let details: [String]
+    /// The window the element belongs to; set by `ElementPicker.pick`.
+    var window: ElementPicker.WindowInfo?
 }
 
 /// Finds the element under a screen point: DOM data in Tilde's browser, the Accessibility
@@ -25,27 +27,25 @@ final class ElementPicker {
     }
 
     func pick(at point: CGPoint) async -> Picked? {
-        guard let window = topWindow(at: point) else {
+        guard let window = window(at: point) else {
             return nil
         }
 
+        var picked: Picked?
         if window.number == browser.windowNumber {
-            let picked = await browser.inspect(at: point)
-            if let picked {
-                return picked
+            picked = await browser.inspect(at: point)
+        }
+        if picked == nil, AXIsProcessTrusted() {
+            picked = await withCheckedContinuation { continuation in
+                accessibilityQueue.async {
+                    continuation.resume(returning: Self.accessibilityPick(at: point, in: window))
+                }
             }
         }
 
-        guard AXIsProcessTrusted() else {
-            return windowPick(window)
-        }
-
-        let picked = await withCheckedContinuation { continuation in
-            accessibilityQueue.async {
-                continuation.resume(returning: Self.accessibilityPick(at: point, in: window))
-            }
-        }
-        return picked ?? windowPick(window)
+        var result = picked ?? windowPick(window)
+        result.window = window
+        return result
     }
 
     // MARK: - Windows
@@ -58,7 +58,8 @@ final class ElementPicker {
         let frame: CGRect
     }
 
-    private func topWindow(at point: CGPoint) -> WindowInfo? {
+    /// The topmost window under a Quartz point that annotate mode can pick from.
+    func window(at point: CGPoint) -> WindowInfo? {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let screenFrames = NSScreen.screens.map(\.frame.flipped)
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []

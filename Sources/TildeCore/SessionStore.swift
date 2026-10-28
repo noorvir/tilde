@@ -12,6 +12,8 @@ public final class SessionStore: ObservableObject {
         public let url: URL?
         /// Started by the user from Tilde itself; no agent waits for the result.
         public let isLocal: Bool
+        /// Whether each annotation also gets a screenshot of the window around it.
+        public let capturesContext: Bool
         public fileprivate(set) var state: State
     }
 
@@ -51,9 +53,12 @@ public final class SessionStore: ObservableObject {
         sessions.first { $0.id == id }
     }
 
-    public func start(client: String, message: String?, url: URL?, isLocal: Bool = false) -> Session {
+    public func start(client: String, message: String?, url: URL?, isLocal: Bool = false, capturesContext: Bool = true) -> Session {
         let state: State = active == nil ? .annotating : .queued
-        let session = Session(id: Self.newID(), client: client, message: message, url: url, isLocal: isLocal, state: state)
+        let session = Session(
+            id: Self.newID(), client: client, message: message, url: url,
+            isLocal: isLocal, capturesContext: capturesContext, state: state
+        )
         sessions.append(session)
         return session
     }

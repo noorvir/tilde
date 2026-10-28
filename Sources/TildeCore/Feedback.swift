@@ -18,13 +18,17 @@ public struct Annotation: Sendable, Identifiable {
     public let frame: CGRect
     /// PNG crop of the annotated area. Nil when the screen could not be captured.
     public let image: Data?
+    /// PNG of the window (or screen area) around the target, with the target outlined.
+    /// Nil when the session asked for no context or it could not be captured.
+    public let contextImage: Data?
 
-    public init(id: UUID = UUID(), comment: String, target: Target, frame: CGRect, image: Data?) {
+    public init(id: UUID = UUID(), comment: String, target: Target, frame: CGRect, image: Data?, contextImage: Data?) {
         self.id = id
         self.comment = comment
         self.target = target
         self.frame = frame
         self.image = image
+        self.contextImage = contextImage
     }
 }
 

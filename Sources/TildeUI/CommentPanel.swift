@@ -72,7 +72,7 @@ private struct CommentView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.black.opacity(0.05)))
+                    .background(Capsule().fill(Color.white.opacity(0.08)))
                 Spacer()
                 if isEditing, case .edit(let id) = controller.composer {
                     Button {
@@ -123,11 +123,11 @@ private struct CommentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .frame(width: 320)
-        .background(RoundedRectangle(cornerRadius: 16).fill(.white))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.08)))
-        .shadow(color: .black.opacity(0.2), radius: 16, y: 6)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.tildeInk))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
+        .shadow(color: .black.opacity(0.24), radius: 16, y: 6)
         .padding(18)
-        .environment(\.colorScheme, .light)
+        .environment(\.colorScheme, .dark)
         .onExitCommand { controller.closeComposer() }
         .onAppear { focused = true }
     }
@@ -138,7 +138,7 @@ private struct CommentView: View {
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.black.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.1)))
             Text(label)
                 .font(.system(size: 10.5))
         }

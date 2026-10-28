@@ -17,7 +17,9 @@ public final class MCPServer {
         the iOS Simulator. Call start_annotation to open annotate mode (pass url to open a page in \
         Tilde's browser, and message to tell the user what to look at). If a result reports that the \
         user is still annotating, call wait_for_annotation with the same session_id until it returns \
-        the feedback or reports that the user cancelled.
+        the feedback or reports that the user cancelled. Each annotation comes with a close-up of the \
+        target (primary) and a context image of its surroundings (secondary); look at the context \
+        image only when the close-up does not show enough.
         """
 
     public init(store: SessionStore) {
@@ -99,12 +101,17 @@ public final class MCPServer {
             [
                 "name": "start_annotation",
                 "annotations": ["title": "Ask the user for visual feedback", "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false],
-                "description": "Opens annotate mode on the user's Mac. The user clicks elements or drags regions on any app or web page, comments on each and presses Send. Returns the feedback (markdown report plus one screenshot per annotation) if the user sends within wait_seconds; otherwise returns a session_id that is still in progress.",
+                "description": "Opens annotate mode on the user's Mac. The user clicks elements or drags regions on any app or web page, comments on each and presses Send. Returns the feedback (markdown report plus, per annotation, a close-up and a smaller context screenshot that shows where the target sits) if the user sends within wait_seconds; otherwise returns a session_id that is still in progress.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
                         "message": ["type": "string", "description": "Short note shown to the user, such as what to review."],
                         "url": ["type": "string", "description": "Web page to open in Tilde's browser, such as http://localhost:3000."],
+                        "context": [
+                            "type": "string",
+                            "enum": ["window", "none"],
+                            "description": "\"window\" (default) adds a screenshot of the window around each annotation with the target outlined. \"none\" sends only the close-ups.",
+                        ],
                         "wait_seconds": waitSeconds,
                     ],
                 ],
@@ -141,7 +148,12 @@ public final class MCPServer {
                 url = parsed
             }
 
-            let session = store.start(client: client, message: message, url: url)
+            let context = arguments["context"] as? String ?? "window"
+            guard context == "window" || context == "none" else {
+                return toolError("Invalid context: \(context). Use \"window\" or \"none\".")
+            }
+
+            let session = store.start(client: client, message: message, url: url, capturesContext: context == "window")
             let state = await store.wait(for: session.id, seconds: waitSeconds)
             return toolResult(sessionID: session.id, state: state)
 
@@ -171,11 +183,12 @@ public final class MCPServer {
             return text("The user cancelled the annotation session \(sessionID) without sending feedback.")
         case .sent(let feedback, let folder):
             var content: [[String: Any]] = [["type": "text", "text": reportText(for: feedback, folder: folder)]]
-            for annotation in feedback.annotations {
-                guard let image = annotation.image else {
-                    continue
+            for (index, annotation) in feedback.annotations.enumerated() {
+                let labelled = [(closeUpLabel(index + 1), annotation.image), (contextLabel(index + 1), annotation.contextImage)]
+                for case let (label, image?) in labelled {
+                    content.append(["type": "text", "text": label])
+                    content.append(["type": "image", "data": image.base64EncodedString(), "mimeType": "image/png"])
                 }
-                content.append(["type": "image", "data": image.base64EncodedString(), "mimeType": "image/png"])
             }
             return ["content": content]
         }

@@ -83,7 +83,7 @@ Then configure the agent on the server with `http://127.0.0.1:7311/mcp`.
 
 | Tool | Inputs | Result |
 |---|---|---|
-| `start_annotation` | `message?`, `url?`, `wait_seconds = 45` | The feedback, or a `session_id` that is still in progress |
+| `start_annotation` | `message?`, `url?`, `context = "window"`, `wait_seconds = 45` | The feedback, or a `session_id` that is still in progress |
 | `wait_for_annotation` | `session_id`, `wait_seconds = 45` | The feedback, "still annotating", or "cancelled" |
 
 Send finishes the session. An open `wait_for_annotation` call returns at once. If
@@ -111,6 +111,7 @@ agent by paste, or to try Tilde without an agent.
 | ⌘↩ | Adds the comment and sends everything |
 | Esc | Closes the comment box |
 | Click a marker | Edits or deletes that annotation |
+| Space on a marker, or a thumbnail in the list | Opens the preview. ← and → show the other annotations; Esc or a click outside closes it |
 | ⌃⌥P or Pause (HUD) | Lets you use your apps; markers stay. Press again to resume |
 | Cancel (HUD or menu) | Closes the session without sending |
 
@@ -123,11 +124,14 @@ under the cursor.
 
 ## Output
 
-The agent gets one text block and one PNG per annotation, in the same order.
+The agent gets one text block and, per annotation, a close-up PNG and a context PNG,
+in that order. The context PNG shows the window the element belongs to (without the
+windows in front of it), or for a region the window that holds it or the screen area
+around it, with the target outlined. `context: "none"` turns context PNGs off.
 For a session that you started, Tilde copies the markdown report to the clipboard.
 The report gives the folder of the screenshots.
 Every sent batch is also saved to `~/.tilde/inbox/<time>_<session>/` as
-`feedback.md` plus `annotation-N.png`.
+`feedback.md` plus `annotation-N.png` and `annotation-N-context.png`.
 
 ## Development
 

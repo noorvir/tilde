@@ -10,9 +10,20 @@ struct Draft: Identifiable {
     /// Quartz point where the numbered marker sits.
     let marker: CGPoint
     let chip: String
-    let capture: Task<Data?, Never>
+    let capture: Task<Captures, Never>
 
     var id: UUID { annotation.id }
+}
+
+enum PreviewImage {
+    case closeUp
+    case context
+}
+
+/// Screenshots taken when a target is picked, before the user finishes the comment.
+struct Captures: Sendable {
+    let image: Data?
+    let contextImage: Data?
 }
 
 /// The comment box that is open: for a new target, or to edit an existing draft.
@@ -26,7 +37,7 @@ struct Pending {
     let frame: CGRect
     let marker: CGPoint
     let chip: String
-    let capture: Task<Data?, Never>
+    let capture: Task<Captures, Never>
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -46,6 +57,13 @@ final class AnnotationController: ObservableObject {
     @Published private(set) var hover: Picked?
     @Published private(set) var composer: Composer?
     @Published private(set) var isPaused = false
+    /// The draft shown in the preview card; annotate clicks wait while it is open.
+    @Published private(set) var previewID: Draft.ID?
+    /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
+    /// when it appears and collapses into it before the panel hides.
+    @Published var isHUDShown = false
+    /// The screenshot that fills the preview card's image area, if any.
+    @Published var expandedPreviewImage: PreviewImage?
     @Published var showsList = false
     @Published var commentText = ""
 
@@ -55,6 +73,7 @@ final class AnnotationController: ObservableObject {
     private var overlays: [OverlayWindow] = []
     private lazy var hud = HUDPanel(controller: self)
     private lazy var commentPanel = CommentPanel(controller: self)
+    private lazy var previewPanel = PreviewPanel(controller: self)
     private var subscription: AnyCancellable?
 
     private var latestHoverPoint: CGPoint?
@@ -113,6 +132,8 @@ final class AnnotationController: ObservableObject {
 
     private func end() {
         commentPanel.close()
+        previewPanel.close()
+        previewID = nil
         for overlay in overlays {
             overlay.close()
         }
@@ -151,9 +172,12 @@ final class AnnotationController: ObservableObject {
         Task {
             var annotations: [Annotation] = []
             for draft in drafts {
-                let image = await draft.capture.value
+                let captures = await draft.capture.value
                 let annotation = draft.annotation
-                annotations.append(Annotation(id: annotation.id, comment: annotation.comment, target: annotation.target, frame: annotation.frame, image: image))
+                annotations.append(Annotation(
+                    id: annotation.id, comment: annotation.comment, target: annotation.target, frame: annotation.frame,
+                    image: captures.image, contextImage: captures.contextImage
+                ))
             }
 
             let feedback = Feedback(annotations: annotations)
@@ -221,7 +245,7 @@ final class AnnotationController: ObservableObject {
     // MARK: - Picking
 
     func mouseMoved(to point: CGPoint) {
-        guard composer == nil, !isPaused else {
+        guard composer == nil, previewID == nil, !isPaused else {
             return
         }
         if isOverPanel(point) {
@@ -254,6 +278,10 @@ final class AnnotationController: ObservableObject {
     }
 
     func click(at point: CGPoint) {
+        if previewID != nil {
+            closePreview()
+            return
+        }
         if let draft = drafts.last(where: { hypot($0.marker.x - point.x, $0.marker.y - point.y) <= 13 }) {
             edit(draft.id)
             return
@@ -272,35 +300,40 @@ final class AnnotationController: ObservableObject {
                 return
             }
             let marker = CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
-            openComposer(target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame)
+            openComposer(target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame, window: picked.window)
         }
     }
 
     func dragEnded(with rect: CGRect) {
+        if previewID != nil {
+            closePreview()
+            return
+        }
         if composer != nil {
             closeComposer()
         }
         let marker = CGPoint(x: rect.maxX, y: rect.minY)
-        openComposer(target: .region, frame: rect, marker: marker, chip: "Region", outline: nil)
+        openComposer(target: .region, frame: rect, marker: marker, chip: "Region", outline: nil, window: picker.window(at: CGPoint(x: rect.midX, y: rect.midY)))
     }
 
-    private func openComposer(target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?) {
-        let captureRect: CGRect
-        if let outline {
-            captureRect = outline.insetBy(dx: -24, dy: -24)
-        } else {
-            captureRect = frame
-        }
-
-        let ownWindows: [NSWindow] = overlays + [hud.window, commentPanel.window]
-        // Windows that were never shown have no window number yet.
-        let hidden = Set(ownWindows.filter { $0.windowNumber > 0 }.map { CGWindowID($0.windowNumber) })
+    /// Opens the comment box for a new target and starts its screenshots. `window` is the
+    /// window the target belongs to. For an element (`outline` set), both screenshots come
+    /// from that window alone, so no other window, Tilde's included, can cover them.
+    private func openComposer(target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?) {
+        // A few points around an element keep its outline inside the image.
+        let closeUpRect = outline.map { $0.insetBy(dx: -4, dy: -4) } ?? frame
+        let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
         let browser = self.browser
+        let capturesContext = session?.capturesContext ?? false
         let capture = Task {
-            if ScreenCapture.isAllowed {
-                return await ScreenCapture.png(of: captureRect, outline: outline, hiding: hidden)
+            guard ScreenCapture.isAllowed else {
+                let image = await browser.snapshot(of: closeUpRect, outline: outline)
+                return Captures(image: image, contextImage: nil)
             }
-            return await browser.snapshot(of: captureRect, outline: outline)
+
+            async let image = Self.closeUpImage(of: closeUpRect, outline: outline, window: window, keeping: keeping)
+            async let contextImage = Self.contextImage(of: frame, isRegion: outline == nil, window: window, keeping: keeping, enabled: capturesContext)
+            return await Captures(image: image, contextImage: contextImage)
         }
 
         hover = nil
@@ -308,6 +341,42 @@ final class AnnotationController: ObservableObject {
         log.notice("comment opened for \(chip, privacy: .public)")
         commentText = ""
         commentPanel.show(chip: chip, isEditing: false, near: marker, below: frame)
+    }
+
+    /// The target alone: an element from its own window, or a region from the screen.
+    nonisolated private static func closeUpImage(
+        of rect: CGRect, outline: CGRect?, window: ElementPicker.WindowInfo?, keeping: Set<CGWindowID>
+    ) async -> Data? {
+        if let outline, let window {
+            let image = await ScreenCapture.png(ofWindow: CGWindowID(window.number), area: rect, outline: outline, maxSide: 1200)
+            if let image {
+                return image
+            }
+        }
+        return await ScreenCapture.png(of: rect, outline: outline, keeping: keeping, maxSide: 1200)
+    }
+
+    /// The whole window the target belongs to, with the target outlined. For a region: the
+    /// window that holds most of it, or else its screen. Nil when `enabled` is false.
+    nonisolated private static func contextImage(
+        of frame: CGRect, isRegion: Bool, window: ElementPicker.WindowInfo?, keeping: Set<CGWindowID>, enabled: Bool
+    ) async -> Data? {
+        guard enabled else {
+            return nil
+        }
+
+        if let window {
+            let inside = window.frame.intersection(frame)
+            let isMostlyInside = !inside.isNull && inside.width * inside.height >= 0.8 * frame.width * frame.height
+            if !isRegion || isMostlyInside {
+                return await ScreenCapture.png(ofWindow: CGWindowID(window.number), area: window.frame, outline: frame, maxSide: 1024)
+            }
+        }
+
+        let center = CGPoint(x: frame.midX, y: frame.midY).flipped
+        let screen = NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.screens.first
+        let bounds = screen?.frame.flipped ?? frame
+        return await ScreenCapture.png(of: bounds, outline: frame, keeping: keeping, maxSide: 1024)
     }
 
     // MARK: - Comments
@@ -336,15 +405,18 @@ final class AnnotationController: ObservableObject {
             }
 
         case .new(let pending):
-            let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil)
+            let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
             drafts.append(Draft(annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture))
             Task {
-                let image = await pending.capture.value
+                let captures = await pending.capture.value
                 guard let index = drafts.firstIndex(where: { $0.id == annotation.id }) else {
                     return
                 }
                 let current = drafts[index].annotation
-                drafts[index].annotation = Annotation(id: current.id, comment: current.comment, target: current.target, frame: current.frame, image: image)
+                drafts[index].annotation = Annotation(
+                    id: current.id, comment: current.comment, target: current.target, frame: current.frame,
+                    image: captures.image, contextImage: captures.contextImage
+                )
             }
         }
 
@@ -355,6 +427,12 @@ final class AnnotationController: ObservableObject {
     }
 
     func deleteDraft(_ id: Draft.ID) {
+        if previewID == id {
+            showAdjacentPreview(1)
+            if previewID == id {
+                closePreview()
+            }
+        }
         drafts.removeAll { $0.id == id }
         if case .edit(id) = composer {
             closeComposer()
@@ -379,7 +457,7 @@ final class AnnotationController: ObservableObject {
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
     /// has it or annotating is paused.
     func makeOverlayKey() {
-        guard composer == nil, !isPaused else {
+        guard composer == nil, previewID == nil, !isPaused else {
             return
         }
         let pointer = NSEvent.mouseLocation
@@ -387,10 +465,57 @@ final class AnnotationController: ObservableObject {
         overlay?.makeKey()
     }
 
-    /// Whether a Quartz point is over Tilde's own HUD or comment box.
+    /// Whether a Quartz point is over Tilde's own HUD, comment box or preview.
+    /// Whether a Quartz point is over the comment box or the preview, which have text fields.
+    func isOverTextPanel(_ point: CGPoint) -> Bool {
+        let point = point.flipped
+        return [commentPanel.window, previewPanel.window].contains { $0.isVisible && $0.frame.contains(point) }
+    }
+
     func isOverPanel(_ point: CGPoint) -> Bool {
         let point = point.flipped
-        return hud.contains(point) || (commentPanel.window.isVisible && commentPanel.window.frame.contains(point))
+        let panels = [commentPanel.window, previewPanel.window]
+        return hud.contains(point) || panels.contains { $0.isVisible && $0.frame.contains(point) }
+    }
+
+    // MARK: - Preview
+
+    /// Opens the preview card on a draft. Closes an open comment box first.
+    func preview(_ id: Draft.ID) {
+        guard drafts.contains(where: { $0.id == id }) else {
+            return
+        }
+        if composer != nil {
+            closeComposer()
+        }
+        hover = nil
+        previewID = id
+        expandedPreviewImage = nil
+        previewPanel.show()
+    }
+
+    /// Moves the preview by `step` drafts, wrapping around at either end. An enlarged
+    /// screenshot stays enlarged, so ← and → compare the same kind of image.
+    func showAdjacentPreview(_ step: Int) {
+        guard let id = previewID, let index = drafts.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let next = (index + step + drafts.count) % drafts.count
+        previewID = drafts[next].id
+    }
+
+    func closePreview() {
+        previewID = nil
+        expandedPreviewImage = nil
+        previewPanel.close()
+        makeOverlayKey()
+    }
+
+    func updateComment(_ id: Draft.ID, _ comment: String) {
+        guard let index = drafts.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        drafts[index].annotation.comment = comment
     }
 
     /// Frame and marker of the comment target that is not yet a draft.

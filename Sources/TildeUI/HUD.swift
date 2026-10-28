@@ -9,13 +9,19 @@ import SwiftUI
 /// pill jump. Transparent parts of the panel let mouse events through to the overlay.
 @MainActor
 final class HUDPanel {
+    static let motion = Animation.spring(duration: 0.35, bounce: 0.12)
+
     let window: NSPanel
-    private let hosting: NSHostingView<HUDView>
+    private let hosting: FirstMouseHostingView<HUDView>
+    private unowned let controller: AnnotationController
+    private var pendingHide: DispatchWorkItem?
 
     init(controller: AnnotationController) {
-        hosting = NSHostingView(rootView: HUDView(controller: controller))
+        self.controller = controller
+        hosting = FirstMouseHostingView(rootView: HUDView(controller: controller))
         hosting.sizingOptions = []
-        window = FloatingPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        // Not key: clicks on the HUD leave keyboard focus with the overlay for Esc and ⌘↩.
+        window = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         window.level = .screenSaver
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         window.backgroundColor = .clear
@@ -35,17 +41,33 @@ final class HUDPanel {
         let visible = screen.visibleFrame
         let width: CGFloat = 560
         let frame = NSRect(x: screen.frame.midX - width / 2, y: visible.minY, width: width, height: visible.height + 4)
+        pendingHide?.cancel()
         window.setFrame(frame, display: true)
         window.orderFrontRegardless()
+
+        // Grow on the next pass, after SwiftUI has laid out the collapsed pill.
+        DispatchQueue.main.async { [controller] in
+            withAnimation(Self.motion) {
+                controller.isHUDShown = true
+            }
+        }
     }
 
+    /// Collapses the pill into its centre, then hides the panel.
     func hide() {
-        window.orderOut(nil)
+        withAnimation(Self.motion) {
+            controller.isHUDShown = false
+        }
+        let hide = DispatchWorkItem { [window] in
+            window.orderOut(nil)
+        }
+        pendingHide = hide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: hide)
     }
 
     /// Whether an AppKit screen point is over the visible HUD content.
     func contains(_ point: NSPoint) -> Bool {
-        guard window.isVisible else {
+        guard window.isVisible, controller.isHUDShown else {
             return false
         }
         let size = hosting.fittingSize
@@ -60,15 +82,17 @@ final class FloatingPanel: NSPanel {
 }
 
 struct HUDView: View {
+    static let width: CGFloat = 462
+
     @ObservedObject var controller: AnnotationController
 
     var body: some View {
         VStack(spacing: 8) {
             pill
-            if controller.phase == .annotating, let message = controller.session?.message, !message.isEmpty {
+            if controller.isHUDShown, controller.phase == .annotating, let message = controller.session?.message, !message.isEmpty {
                 MessageBubble(client: controller.session?.client ?? "Agent", message: message)
             }
-            if controller.phase == .annotating, controller.showsList, !controller.drafts.isEmpty {
+            if controller.isHUDShown, controller.phase == .annotating, controller.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
             }
         }
@@ -77,6 +101,16 @@ struct HUDView: View {
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: controller.showsList)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
+        .animation(HUDPanel.motion, value: controller.phase)
+    }
+
+    /// The pill keeps one width while annotating, so it never jumps between states. After
+    /// Send it shrinks to fit the confirmation.
+    private var pillContentWidth: CGFloat? {
+        if case .sent = controller.phase {
+            return nil
+        }
+        return HUDView.width
     }
 
     @ViewBuilder
@@ -84,19 +118,25 @@ struct HUDView: View {
         HStack(spacing: 4) {
             switch controller.phase {
             case .sent(let confirmation):
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.tildeBlue)
-                Text(confirmation)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.trailing, 6)
+                HStack(spacing: HUDMetrics.iconGap) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.tildeBlue)
+                    Text(confirmation)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
             case .annotating, .idle:
                 annotatingContent
             }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 44)
+        .padding(.leading, HUDMetrics.leadingInset)
+        .padding(.trailing, HUDMetrics.trailingInset)
+        .frame(width: pillContentWidth, height: HUDMetrics.height)
+        .opacity(controller.isHUDShown ? 1 : 0)
+        // Collapsed, the pill has no width; it grows out of its centre to its content.
+        .frame(width: controller.isHUDShown ? nil : 0, height: HUDMetrics.height)
+        .clipShape(Capsule())
         .background(Capsule().fill(Color.tildeInk))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
         .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
@@ -106,7 +146,7 @@ struct HUDView: View {
     private var annotatingContent: some View {
         let count = controller.drafts.count
 
-        HStack(spacing: 9) {
+        HStack(spacing: HUDMetrics.iconGap) {
             PulseDot(isActive: controller.phase == .annotating && !controller.isPaused)
             VStack(alignment: .leading, spacing: 1) {
                 Text(controller.isPaused ? "Paused" : "Annotating")
@@ -116,9 +156,10 @@ struct HUDView: View {
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
             }
+            .lineLimit(1)
         }
-        .padding(.leading, 6)
-        .padding(.trailing, 8)
+        .padding(.trailing, HUDMetrics.iconGap)
+        .frame(maxWidth: .infinity, alignment: .leading)
 
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
@@ -131,7 +172,7 @@ struct HUDView: View {
             controller.togglePause()
         }
 
-        HUDButton(symbol: "trash", help: "Clear annotations") {
+        HUDButton(symbol: "trash", isDestructive: true, help: "Clear annotations") {
             controller.clearDrafts()
         }
         .disabled(count == 0)
@@ -186,11 +227,26 @@ private struct HUDButton: View {
     let symbol: String
     var badge: Int = 0
     var isOn = false
+    var isDestructive = false
     let help: String
     let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
     @State private var isHovered = false
+
+    private var foreground: Color {
+        if isDestructive {
+            return Color.red.opacity(isEnabled ? 1 : 0.4)
+        }
+        return .white.opacity(isEnabled ? 0.9 : 0.3)
+    }
+
+    private var background: Color {
+        if isDestructive {
+            return Color.red.opacity(isHovered && isEnabled ? 0.28 : 0.16)
+        }
+        return .white.opacity(isOn ? 0.16 : (isHovered && isEnabled ? 0.09 : 0))
+    }
 
     var body: some View {
         Button(action: action) {
@@ -202,13 +258,10 @@ private struct HUDButton: View {
                         .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
                 }
             }
-            .foregroundStyle(.white.opacity(isEnabled ? 0.9 : 0.3))
+            .foregroundStyle(foreground)
             .padding(.horizontal, badge > 0 ? 9 : 0)
             .frame(minWidth: 30, minHeight: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(.white.opacity(isOn ? 0.16 : (isHovered && isEnabled ? 0.09 : 0)))
-            )
+            .background(RoundedRectangle(cornerRadius: 9).fill(background))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -251,7 +304,7 @@ private struct MessageBubble: View {
     let message: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: HUDMetrics.iconGap) {
             Image(systemName: "sparkles")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(Color.tildeBlue)
@@ -266,9 +319,10 @@ private struct MessageBubble: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, HUDMetrics.leadingInset)
+        .padding(.trailing, HUDMetrics.trailingInset)
         .padding(.vertical, 9)
-        .frame(maxWidth: 420, alignment: .leading)
+        .frame(width: HUDView.width, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.tildeInk))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.1)))
         .shadow(color: .black.opacity(0.22), radius: 10, y: 3)
@@ -283,17 +337,17 @@ private struct AnnotationList: View {
         VStack(spacing: 0) {
             ForEach(Array(controller.drafts.enumerated()), id: \.element.id) { index, draft in
                 if index > 0 {
-                    Divider().padding(.horizontal, 12)
+                    Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1).padding(.leading, HUDMetrics.leadingInset).padding(.trailing, HUDMetrics.trailingInset)
                 }
                 AnnotationRow(number: index + 1, draft: draft, controller: controller)
             }
         }
         .padding(.vertical, 4)
-        .frame(width: 400)
-        .background(RoundedRectangle(cornerRadius: 16).fill(.white))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.black.opacity(0.08)))
-        .shadow(color: .black.opacity(0.16), radius: 14, y: 4)
-        .environment(\.colorScheme, .light)
+        .frame(width: HUDView.width)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color.tildeInk))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
+        .shadow(color: .black.opacity(0.22), radius: 14, y: 4)
+        .environment(\.colorScheme, .dark)
     }
 }
 
@@ -301,6 +355,7 @@ private struct AnnotationRow: View {
     let number: Int
     let draft: Draft
     @ObservedObject var controller: AnnotationController
+    @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -322,8 +377,8 @@ private struct AnnotationRow: View {
                             .font(.system(size: 11, design: .monospaced))
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.black.opacity(0.06)))
-                            .overlay(Capsule().strokeBorder(Color.black.opacity(0.08)))
+                            .background(Capsule().fill(Color.white.opacity(0.08)))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
                     }
                 }
                 Text(draft.annotation.comment.isEmpty ? "No comment" : draft.annotation.comment)
@@ -334,13 +389,18 @@ private struct AnnotationRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 2) {
-                RowButton(symbol: "pencil") { controller.edit(draft.id) }
-                RowButton(symbol: "trash") { controller.deleteDraft(draft.id) }
-            }
+            // A button's click does not reach the row's tap gesture, so Delete never opens the preview.
+            RowDeleteButton { controller.deleteDraft(draft.id) }
+                .help("Delete")
         }
-        .padding(.horizontal, 12)
+        .padding(.leading, HUDMetrics.leadingInset)
+        .padding(.trailing, HUDMetrics.trailingInset)
         .padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(isHovered ? 0.06 : 0)).padding(.horizontal, 4))
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .onTapGesture { controller.preview(draft.id) }
+        .help("Open preview")
     }
 }
 
@@ -360,24 +420,24 @@ private struct Thumbnail: View {
             }
         }
         .frame(width: 52, height: 36)
-        .background(Color.black.opacity(0.03))
+        .background(Color.white.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.black.opacity(0.1)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.white.opacity(0.1)))
     }
 }
 
-private struct RowButton: View {
-    let symbol: String
+/// Trash button of a list row, red like the other delete buttons.
+private struct RowDeleteButton: View {
     let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
+            Image(systemName: "trash")
                 .font(.system(size: 12.5))
-                .foregroundStyle(Color.black.opacity(isHovered ? 0.8 : 0.45))
+                .foregroundStyle(Color.red.opacity(isHovered ? 1 : 0.85))
                 .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.black.opacity(isHovered ? 0.06 : 0)))
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.red.opacity(isHovered ? 0.26 : 0.12)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -28,6 +28,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        CursorDebug.install()
         let port = UInt16(ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "") ?? 7311
         serverState = ServerState(port: port)
         menu = StatusMenu(server: serverState, browser: browser, controller: controller)
@@ -38,7 +39,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // macOS asks the user to confirm direct screen capture from time to time; a tiny
             // capture at launch shows that consent now instead of in the middle of annotating.
             Task {
-                _ = await ScreenCapture.png(of: CGRect(x: 0, y: 0, width: 1, height: 1), outline: nil, hiding: [])
+                _ = await ScreenCapture.png(of: CGRect(x: 0, y: 0, width: 1, height: 1), outline: nil, keeping: [], maxSide: 1024)
             }
         } else {
             CGRequestScreenCaptureAccess()

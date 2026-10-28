@@ -8,7 +8,7 @@ public func reportText(for feedback: Feedback, folder: URL?) -> String {
     if let folder {
         lines.append("Saved to: \(folder.path)")
     }
-    lines.append("Screenshots: one per annotation, in the same order. Frames are macOS screen points.")
+    lines.append("Screenshots: each annotation has a close-up of the target (primary) and, when captured, a smaller context image of its surroundings with the target outlined in blue. Use the context image only when you need to know where the target sits. Frames are macOS screen points.")
 
     for (index, annotation) in feedback.annotations.enumerated() {
         let number = index + 1
@@ -20,9 +20,15 @@ public func reportText(for feedback: Feedback, folder: URL?) -> String {
         lines.append(contentsOf: details(for: annotation.target))
         lines.append("- Frame: \(frameText(annotation.frame))")
 
-        if annotation.image != nil {
+        if let image = annotation.image {
             lines.append("")
+            lines.append("\(closeUpLabel(number)), \(sizeText(image)):")
             lines.append("![annotation \(number)](\(imageName(number)))")
+        }
+        if let contextImage = annotation.contextImage {
+            lines.append("")
+            lines.append("\(contextLabel(number)), \(sizeText(contextImage)):")
+            lines.append("![annotation \(number) in context](\(contextImageName(number)))")
         }
         if case .element(.web(let element)) = annotation.target, !element.html.isEmpty {
             lines.append("")
@@ -35,9 +41,24 @@ public func reportText(for feedback: Feedback, folder: URL?) -> String {
     return lines.joined(separator: "\n") + "\n"
 }
 
-/// File name of the screenshot for the annotation with this 1-based number.
+/// Caption of an annotation's close-up, in the report and before the image sent to the agent.
+public func closeUpLabel(_ number: Int) -> String {
+    "Annotation \(number) close-up (primary)"
+}
+
+/// Caption of an annotation's context image, in the report and before the image sent to the agent.
+public func contextLabel(_ number: Int) -> String {
+    "Annotation \(number) context (secondary, only to see where the target sits)"
+}
+
+/// File name of the close-up for the annotation with this 1-based number.
 public func imageName(_ number: Int) -> String {
     "annotation-\(number).png"
+}
+
+/// File name of the context screenshot for the annotation with this 1-based number.
+public func contextImageName(_ number: Int) -> String {
+    "annotation-\(number)-context.png"
 }
 
 private func heading(for target: Target) -> String {
@@ -118,6 +139,17 @@ private func snippet(_ text: String) -> String {
         return ""
     }
     return " \"\(words.joined(separator: " ").prefix(120))\""
+}
+
+/// Pixel size of a PNG, read from its IHDR header, such as "640×120 px".
+private func sizeText(_ png: Data) -> String {
+    let bytes = [UInt8](png.prefix(24))
+    guard bytes.count == 24 else {
+        return "size unknown"
+    }
+    let width = bytes[16..<20].reduce(0) { $0 << 8 | Int($1) }
+    let height = bytes[20..<24].reduce(0) { $0 << 8 | Int($1) }
+    return "\(width)×\(height) px"
 }
 
 private func frameText(_ frame: CGRect) -> String {
