@@ -1,5 +1,6 @@
 @testable import TildeUI
 import TildeCore
+import TildeInstaller
 import AppKit
 
 /// Fixed data for UI tests: sessions, drafts and generated screenshots that look the same on
@@ -15,8 +16,8 @@ enum Fixtures {
     }
 
     /// A session from a store the controller does not watch, so no window opens.
-    static func session(client: String = "Codex", message: String? = nil, isLocal: Bool = false) -> SessionStore.Session {
-        SessionStore().start(client: client, message: message, url: nil, isLocal: isLocal)
+    static func session(client: String = "Codex", isLocal: Bool = false) -> SessionStore.Session {
+        SessionStore().start(client: client, url: nil, isLocal: isLocal)
     }
 
     static func id(_ number: Int) -> UUID {
@@ -99,5 +100,57 @@ enum Fixtures {
         )!
         draw(context, CGSize(width: width, height: height))
         return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+    }
+
+    // MARK: - Agent apps
+
+    /// A blue rounded square in place of the apps' icons.
+    static let appIcon = NSImage(size: NSSize(width: 32, height: 32), flipped: false) { rect in
+        NSColor.tildeBlue.setFill()
+        NSBezierPath(roundedRect: rect.insetBy(dx: 2, dy: 2), xRadius: 7, yRadius: 7).fill()
+        return true
+    }
+
+    /// Agent apps in a temporary home: Claude partly installed (Claude Code only), Codex not
+    /// installed with an old backup, Cursor with an invalid config, and Windsurf installed.
+    /// VS Code and Gemini are not there. The files are written directly, so no backup names
+    /// carry today's time.
+    static func agentSetup() throws -> AgentSetup {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ui-\(UUID().uuidString)")
+        let files = [
+            ".claude.json": #"{ "mcpServers": { "tilde": { "type": "http", "url": "http://127.0.0.1:7311/mcp" } } }"#,
+            "Library/Application Support/Claude/claude_desktop_config.json": "{}",
+            ".codex/config.toml": "",
+            ".codex/config.toml.tilde-backup-20261028-120000": "",
+            ".cursor/mcp.json": "{ not json",
+            ".config/devin/mcp_config.json": #"{ "mcpServers": { "tilde": { "serverUrl": "http://127.0.0.1:7311/mcp" } } }"#,
+        ]
+        for (path, text) in files {
+            let url = home.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+
+        let environment = InstallEnvironment.standard(home: home, port: "7311", bridgePath: "/Applications/Tilde.app/Contents/MacOS/tilde-mcp", isolated: true)
+        return AgentSetup(installer: Installer(environment: environment), placeholderIcon: appIcon)
+    }
+
+    /// Settings with fixed agent apps, default shortcuts and a fixed version.
+    static func settingsModel(page: SettingsWindow.Page) throws -> SettingsModel {
+        let defaults = UserDefaults(suiteName: "tilde-tests-\(UUID().uuidString)")!
+        let model = SettingsModel(
+            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: defaults), server: ServerState(port: 7311), version: "0.1.0 (42)",
+            permissions: { (true, false) }
+        )
+        model.page = page
+        return model
+    }
+
+    static func installResult(failed: Int, action: InstallResult.Action = .installed) -> InstallResult {
+        let names = ["Claude", "Codex", "Cursor", "VS Code", "Windsurf (Devin)", "Gemini CLI"]
+        let apps = names.enumerated().map { index, name in
+            InstallResult.App(name: name, icon: appIcon, failed: index >= names.count - failed, changed: true)
+        }
+        return InstallResult(action: action, apps: apps)
     }
 }

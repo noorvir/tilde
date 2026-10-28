@@ -39,7 +39,48 @@ at launch, so it does not interrupt an annotation. Click **Allow**.
 ## Connect an agent
 
 Tilde serves MCP at `http://127.0.0.1:7311/mcp` (set `TILDE_PORT` to change it).
-The menu-bar item has "Connect an Agent" entries that copy these snippets.
+
+Choose **Agents** in the menu-bar menu, or open **Settings** (⌘,) → **Agents**. It lists the known agent
+apps that are on your Mac, each with its own icon and a status dot: green installed, yellow
+partly installed, red error (for example a config that is not valid JSON), grey not
+installed. Each app has Install and Uninstall, and Details with its config file, skill
+and last backup. **Install Everywhere** sets up all of them. After a change, a short note
+at the top of the screen says what happened; its Details button opens this page.
+The **Claude** row sets up both the Claude app and
+Claude Code, because they keep MCP servers in different files: the app starts only stdio
+servers, through `tilde-mcp`, and Claude Code connects over HTTP. Cursor, VS Code and
+Windsurf share an editor base, but each one's agent reads its own MCP file, so each has
+its own row. Tilde adds its MCP server entry and a `tilde` skill (`/tilde`, or
+"annotate with Tilde"), keeps everything else in each file, and saves a timestamped backup
+(`<file>.tilde-backup-<time>`) before it changes a file. Then restart the app.
+
+| App | MCP config | Entry | Skill folder |
+|---|---|---|---|
+| Claude Code | `~/.claude.json` | `mcpServers.tilde`: `type: http`, `url` | `~/.claude/skills` |
+| Claude (desktop) | `~/Library/Application Support/Claude/claude_desktop_config.json` | `mcpServers.tilde`: `command` = `tilde-mcp` (stdio only) | `~/.claude/skills` (Code tab) |
+| Codex | `~/.codex/config.toml` | `[mcp_servers.tilde]`: `url`, `default_tools_approval_mode = "approve"` | `~/.agents/skills` |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers.tilde`: `url` | `~/.agents/skills` |
+| VS Code | `~/Library/Application Support/Code/User/mcp.json` | `servers.tilde`: `type: http`, `url` | `~/.agents/skills` |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers.tilde`: `httpUrl` | `~/.agents/skills` |
+| Windsurf (Devin) | `~/.config/devin/mcp_config.json` | `mcpServers.tilde`: `serverUrl` | `~/.agents/skills` |
+
+Tilde writes through symbolic links, so a skills folder that links into a dotfiles
+repository gets the skill in that repository.
+
+The same installer runs from the command line:
+
+```sh
+/Applications/Tilde.app/Contents/MacOS/tilde-mcp install                 # list apps and status
+/Applications/Tilde.app/Contents/MacOS/tilde-mcp install --all --dry-run
+/Applications/Tilde.app/Contents/MacOS/tilde-mcp install codex cursor --uninstall
+/Applications/Tilde.app/Contents/MacOS/tilde-mcp install claude      # claude-code and claude-desktop
+```
+
+Options: `--all`, `--uninstall`, `--dry-run`, and `--home <dir>`, which
+uses another home folder and finds only apps inside it.
+
+**Copy setup for other agents…** on the same page copies these snippets, for remote
+agents or other apps:
 
 **Claude Code**
 
@@ -83,8 +124,22 @@ Then configure the agent on the server with `http://127.0.0.1:7311/mcp`.
 
 | Tool | Inputs | Result |
 |---|---|---|
-| `start_annotation` | `message?`, `url?`, `context = "window"`, `wait_seconds = 45` | The feedback, or a `session_id` that is still in progress |
+| `start_annotation` | `url?`, `context = "window"`, `wait_seconds = 45` | The feedback, or a `session_id` that is still in progress |
 | `wait_for_annotation` | `session_id`, `wait_seconds = 45` | The feedback, "still annotating", or "cancelled" |
+
+### Skill and resources
+
+The `tilde` skill is the user-facing command: type `/tilde` (or ask the agent to "annotate
+with Tilde") in any app that loads Agent Skills. Settings → Agents writes it. The same text is
+the MCP server's instructions, so agents without skills get it too. It lives only in
+`Sources/TildeSkill/Skill.swift`.
+
+- Resources `tilde://feedback/latest` and one per recent batch hold sent feedback, for
+  example after ⌃⌥A and Send. In Claude Code, type `@tilde:` to attach one. They carry the
+  report as text and the screenshots as PNG blobs; the report gives the inbox folder, so an
+  agent can also open the PNG files.
+- While a tool call waits for you, Tilde streams progress such as "Tilde is open on the
+  user's screen: 2 notes so far" to clients that ask for progress.
 
 Send finishes the session. An open `wait_for_annotation` call returns at once. If
 no call is open, the next call returns the stored result. Use a large
@@ -95,6 +150,9 @@ HTML, styles, React component names and, for React 18 dev builds, the source fil
 The browser keeps cookies between launches, so you log in only once.
 
 Only one session is on screen at a time. Further sessions queue.
+
+When an agent's session opened a page in Tilde's browser, Send or Cancel closes the browser
+and brings the agent's app (the one in front when the session started) back to the front.
 
 ## Annotate
 
@@ -115,7 +173,7 @@ agent by paste, or to try Tilde without an agent.
 | ⌃⌥P or Pause (HUD) | Lets you use your apps; markers stay. Press again to resume |
 | Clear all (HUD trash) | Deletes all annotations and keeps the session; asks first |
 | Cancel (HUD X or menu) | Closes the session without sending; the HUD asks first when there are annotations |
-| Drag the HUD pill | Moves the HUD on that screen. An outline shows the home position; the pill snaps there when close. Reset HUD Position in the menu also puts it back |
+| Drag the HUD pill | Moves the HUD on that screen. An outline shows the home position; the pill snaps there when close. Settings → General → HUD position → Reset also puts it back |
 
 Tilde does not take focus from your app while you annotate.
 
@@ -147,6 +205,7 @@ scripts/e2e.sh       # full flow in one process, no permissions needed
 | Layer | Covers | Run |
 |---|---|---|
 | `TildeCoreTests` | MCP session contract, HTTP server, report path compaction | `swift test --filter TildeCoreTests` |
+| `TildeInstallerTests` | Install, merge, idempotency, uninstall, Codex TOML, the Claude apps together and linked skills folders, in a temporary home | `swift test --filter TildeInstallerTests` |
 | `TildeUITests/BehaviourTests` | Confirm flows, Esc/Return in the confirm state, single delete, close-up and context rules, HUD home, snap distance, on-screen limits | `swift test --filter BehaviourTests` |
 | `TildeUITests/SnapshotTests` | Pixel snapshots of every HUD state, the list, the comment box, the preview, a tooltip, the home outline and the overlay | `swift test --filter SnapshotTests` |
 | `scripts/e2e.sh` | The whole flow with synthesized events: hover, click, comment, preview, region, send, inbox, agent result, capture shapes | `scripts/e2e.sh` |

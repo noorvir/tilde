@@ -1,4 +1,5 @@
 import TildeCore
+import TildeInstaller
 import AppKit
 
 /// Status of the local MCP endpoint, shown in the menu.
@@ -21,6 +22,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var server: HTTPServer?
     private var serverState = ServerState(port: 7311)
     private var menu: StatusMenu?
+    private var settings: SettingsWindow?
+    private var toast: InstallToast?
     private var hotKeys: HotKeys?
 
     override public init() {
@@ -31,8 +34,29 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         CursorDebug.install()
         let port = UInt16(ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "") ?? 7311
         serverState = ServerState(port: port)
-        menu = StatusMenu(server: serverState, browser: browser, controller: controller)
-        hotKeys = HotKeys(controller: controller)
+        let bridge = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/tilde-mcp").path
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let setup = AgentSetup(installer: Installer(environment: .standard(home: home, port: String(port), bridgePath: bridge)))
+        let shortcuts = controller.shortcuts
+        let version = SettingsModel.bundleVersion
+        let toast = InstallToast { [weak self] in
+            self?.settings?.show(.agents)
+        }
+        let model = SettingsModel(
+            setup: setup, shortcuts: shortcuts, server: serverState, version: version,
+            onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.resetHUDPosition() }
+        )
+        let settings = SettingsWindow(model: model)
+        controller.clientIcon = { setup.icon(forClient: $0) }
+        self.toast = toast
+        self.settings = settings
+        menu = StatusMenu(browser: browser, controller: controller, settings: settings, setup: setup, version: version) { toast.show($0) }
+        hotKeys = HotKeys(controller: controller, shortcuts: shortcuts)
+        if let folder = UserDefaults.standard.string(forKey: "captureSettings") {
+            Task {
+                await SettingsCapture.run(settings, model: model, to: URL(fileURLWithPath: (folder as NSString).expandingTildeInPath))
+            }
+        }
         startServer()
 
         if ScreenCapture.isAllowed {

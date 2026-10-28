@@ -24,5 +24,27 @@ public func saveToInbox(_ feedback: Feedback, sessionID: String, root: URL = inb
     return folder
 }
 
-public let inboxRoot = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".tilde/inbox", isDirectory: true)
+/// `~/.tilde/inbox`, or the folder in `TILDE_INBOX` (the e2e harness uses its own).
+public let inboxRoot: URL = {
+    if let path = ProcessInfo.processInfo.environment["TILDE_INBOX"], !path.isEmpty {
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+    return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde/inbox", isDirectory: true)
+}()
+
+/// The newest batch folder in the inbox, or nil when nothing was sent yet.
+public func latestInboxFolder(root: URL = inboxRoot) -> URL? {
+    recentInboxFolders(root: root, limit: 1).first
+}
+
+/// Sent batch folders, newest first.
+public func recentInboxFolders(root: URL = inboxRoot, limit: Int) -> [URL] {
+    let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+    // Folder names start with the time, so the newest sorts first in reverse order.
+    return Array(
+        folders
+            .filter { FileManager.default.fileExists(atPath: $0.appendingPathComponent("feedback.md").path) }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+            .prefix(limit)
+    )
+}

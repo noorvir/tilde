@@ -1,20 +1,31 @@
 import TildeCore
+import TildeInstaller
 import AppKit
 import Combine
 
-/// The menu-bar item: server status, setup commands for agents, permissions.
+/// The menu-bar item: annotation, the agent apps, the browser and Settings. A missing
+/// permission shows as one warning at the top.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let server: ServerState
     private let browser: BrowserController
     private let controller: AnnotationController
+    private let settings: SettingsWindow
+    private let setup: AgentSetup
+    private let version: String
+    private let onResult: (InstallResult) -> Void
     private var subscription: AnyCancellable?
 
-    init(server: ServerState, browser: BrowserController, controller: AnnotationController) {
-        self.server = server
+    init(
+        browser: BrowserController, controller: AnnotationController, settings: SettingsWindow,
+        setup: AgentSetup, version: String, onResult: @escaping (InstallResult) -> Void
+    ) {
         self.browser = browser
         self.controller = controller
+        self.settings = settings
+        self.setup = setup
+        self.version = version
+        self.onResult = onResult
         super.init()
 
         item.button?.image = TildeMark.menuBarImage()
@@ -31,104 +42,145 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        menu.addItem(disabled(statusTitle))
-        menu.addItem(.separator())
+        if let warning = permissionWarning() {
+            menu.addItem(warning)
+            menu.addItem(.separator())
+        }
 
         if controller.session == nil {
-            menu.addItem(action("Start Annotation", #selector(startAnnotation), key: "a"))
+            menu.addItem(action("Start Annotation", #selector(startAnnotation), shortcut: .startAnnotation))
         } else {
             let title = controller.isPaused ? "Resume Annotation" : "Pause Annotation"
-            menu.addItem(action(title, #selector(togglePause), key: "p"))
+            menu.addItem(action(title, #selector(togglePause), shortcut: .togglePause))
             menu.addItem(action("Cancel Annotation", #selector(cancelAnnotation)))
         }
         menu.addItem(.separator())
 
-        menu.addItem(action("Reset HUD Position", #selector(resetHUDPosition)))
+        menu.addItem(agentsItem())
         menu.addItem(action("Open Browser", #selector(openBrowser)))
-        menu.addItem(action("Open Inbox Folder", #selector(openInbox)))
-
-        let connect = NSMenuItem(title: "Connect an Agent", action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        for (index, setup) in setups.enumerated() {
-            let entry = action(setup.title, #selector(copySetup(_:)))
-            entry.tag = index
-            entry.toolTip = setup.text
-            submenu.addItem(entry)
-        }
-        connect.submenu = submenu
-        menu.addItem(connect)
+        let settingsItem = action("Settings", #selector(openSettings))
+        settingsItem.keyEquivalent = ","
+        settingsItem.keyEquivalentModifierMask = .command
+        menu.addItem(settingsItem)
 
         menu.addItem(.separator())
-        menu.addItem(permission("Screen Recording", allowed: ScreenCapture.isAllowed, #selector(openScreenRecordingSettings)))
-        menu.addItem(permission("Accessibility", allowed: AXIsProcessTrusted(), #selector(openAccessibilitySettings)))
-
-        menu.addItem(.separator())
+        let versionItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        versionItem.attributedTitle = NSAttributedString(
+            string: "Tilde \(version)",
+            attributes: [.font: NSFont.menuFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
+        )
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
         menu.addItem(NSMenuItem(title: "Quit Tilde", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
-    private var statusTitle: String {
-        if let session = controller.session {
-            return "Annotating for \(session.client)"
+    // MARK: - Agents
+
+    /// One row per agent app on this Mac with its status and icon; each opens Install and
+    /// Uninstall.
+    private func agentsItem() -> NSMenuItem {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let rows = setup.foundRows
+        if rows.isEmpty {
+            let none = NSMenuItem(title: "No agent apps found", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            submenu.addItem(none)
         }
-        switch server.status {
-        case .starting:
-            return "Starting on port \(server.port)"
-        case .ready(let port):
-            return "Ready · http://127.0.0.1:\(port)/mcp"
-        case .failed(let message):
-            return "Port \(server.port) unavailable: \(message)"
+
+        for row in rows {
+            let status = setup.status(of: row)
+            let entry = NSMenuItem(title: row.name, action: nil, keyEquivalent: "")
+            entry.image = rowImage(icon: setup.icon(for: row), status: status)
+
+            // The status leads the submenu; a tooltip on the row would cover the submenu.
+            let choices = NSMenu()
+            choices.autoenablesItems = false
+            for harness in setup.present(row) {
+                let label = setup.installer.status(of: harness).label
+                let line = NSMenuItem(title: row.harnesses.count > 1 ? "\(harness.name): \(label)" : label, action: nil, keyEquivalent: "")
+                line.isEnabled = false
+                choices.addItem(line)
+            }
+            choices.addItem(.separator())
+            let install = action(status == .installed ? "Reinstall" : "Install", #selector(install(_:)))
+            install.representedObject = row.id
+            choices.addItem(install)
+            if status != .notInstalled {
+                let uninstall = action("Uninstall", #selector(uninstall(_:)))
+                uninstall.representedObject = row.id
+                choices.addItem(uninstall)
+            }
+            entry.submenu = choices
+            submenu.addItem(entry)
+        }
+
+        submenu.addItem(.separator())
+        let everywhere = action("Install Everywhere", #selector(installEverywhere))
+        everywhere.isEnabled = !rows.isEmpty
+        submenu.addItem(everywhere)
+        submenu.addItem(action("Manage in Settings", #selector(openAgentSettings)))
+
+        let item = action("Agents", nil)
+        item.submenu = submenu
+        return item
+    }
+
+    /// A 6 pt status dot, then the 16 pt app icon, in one image so every row lines up.
+    private func rowImage(icon: NSImage, status: InstallStatus) -> NSImage {
+        let color: NSColor
+        switch status {
+        case .installed: color = .systemGreen
+        case .partlyInstalled: color = .systemYellow
+        case .failed: color = .systemRed
+        case .notInstalled, .notFound: color = .tertiaryLabelColor
+        }
+        let image = NSImage(size: NSSize(width: 28, height: 16), flipped: false) { _ in
+            color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 1, y: 5, width: 6, height: 6)).fill()
+            icon.draw(in: NSRect(x: 12, y: 0, width: 16, height: 16))
+            return true
+        }
+        image.accessibilityDescription = status.label
+        return image
+    }
+
+    private func row(_ sender: NSMenuItem) -> AgentSetup.Row? {
+        AgentSetup.rows.first { $0.id == sender.representedObject as? String }
+    }
+
+    @objc private func install(_ sender: NSMenuItem) {
+        if let row = row(sender) {
+            onResult(setup.install([row]))
         }
     }
 
-    // MARK: - Setup commands
-
-    private struct Setup {
-        let title: String
-        let text: String
+    @objc private func uninstall(_ sender: NSMenuItem) {
+        if let row = row(sender) {
+            onResult(setup.uninstall([row]))
+        }
     }
 
-    private var setups: [Setup] {
-        let url = "http://127.0.0.1:\(server.port)/mcp"
-        let shim = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/tilde-mcp").path
-        return [
-            Setup(title: "Copy Claude Code Command", text: "claude mcp add --scope user --transport http tilde \(url)"),
-            Setup(title: "Copy Codex Config (config.toml)", text: "[mcp_servers.tilde]\nurl = \"\(url)\"\ndefault_tools_approval_mode = \"approve\"\n"),
-            Setup(title: "Copy JSON Config (HTTP)", text: #"{ "mcpServers": { "tilde": { "url": "\#(url)" } } }"#),
-            Setup(title: "Copy JSON Config (stdio)", text: #"{ "mcpServers": { "tilde": { "command": "\#(shim)" } } }"#),
-            Setup(title: "Copy SSH Tunnel for Remote Agents", text: "ssh -R \(server.port):127.0.0.1:\(server.port) <host>"),
-        ]
+    @objc private func installEverywhere() {
+        onResult(setup.install(setup.foundRows))
     }
 
-    @objc private func copySetup(_ sender: NSMenuItem) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(setups[sender.tag].text, forType: .string)
+    @objc private func openAgentSettings() {
+        settings.show(.agents)
     }
 
-    // MARK: - Actions
+    // MARK: - Permissions
 
-    @objc private func startAnnotation() {
-        controller.startLocal()
-    }
-
-    @objc private func togglePause() {
-        controller.togglePause()
-    }
-
-    @objc private func cancelAnnotation() {
-        controller.cancel()
-    }
-
-    @objc private func resetHUDPosition() {
-        controller.resetHUDPosition()
-    }
-
-    @objc private func openBrowser() {
-        browser.show()
-    }
-
-    @objc private func openInbox() {
-        try? FileManager.default.createDirectory(at: inboxRoot, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(inboxRoot)
+    private func permissionWarning() -> NSMenuItem? {
+        let missing = [
+            ("Screen Recording", ScreenCapture.isAllowed, #selector(openScreenRecordingSettings)),
+            ("Accessibility", AXIsProcessTrusted(), #selector(openAccessibilitySettings)),
+        ].filter { !$0.1 }
+        guard let first = missing.first else {
+            return nil
+        }
+        let names = missing.map(\.0).joined(separator: " and ")
+        return action("Allow \(names)", first.2)
     }
 
     @objc private func openScreenRecordingSettings() {
@@ -142,30 +194,36 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
-    // MARK: - Items
+    // MARK: - Actions
 
-    /// A `key` shows the matching ⌃⌥ global shortcut from `HotKeys`.
-    private func action(_ title: String, _ selector: Selector, key: String = "") -> NSMenuItem {
-        let entry = NSMenuItem(title: title, action: selector, keyEquivalent: key)
-        entry.keyEquivalentModifierMask = [.control, .option]
+    @objc private func openSettings() {
+        settings.show(.general)
+    }
+
+    @objc private func startAnnotation() {
+        controller.startLocal()
+    }
+
+    @objc private func togglePause() {
+        controller.togglePause()
+    }
+
+    @objc private func cancelAnnotation() {
+        controller.cancel()
+    }
+
+    @objc private func openBrowser() {
+        browser.show()
+    }
+
+    /// A `shortcut` shows that global shortcut.
+    private func action(_ title: String, _ selector: Selector?, shortcut: ShortcutStore.Action? = nil) -> NSMenuItem {
+        let entry = NSMenuItem(title: title, action: selector, keyEquivalent: "")
         entry.target = self
-        return entry
-    }
-
-    private func disabled(_ title: String) -> NSMenuItem {
-        let entry = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        entry.isEnabled = false
-        return entry
-    }
-
-    private func permission(_ name: String, allowed: Bool, _ selector: Selector) -> NSMenuItem {
-        if allowed {
-            let entry = disabled("\(name): allowed")
-            entry.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
-            return entry
+        if let shortcut, let keys = controller.shortcuts.shortcut(for: shortcut) {
+            entry.keyEquivalent = keys.keyEquivalent
+            entry.keyEquivalentModifierMask = keys.modifierFlags
         }
-        let entry = action("\(name): not allowed. Open Settings", selector)
-        entry.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
         return entry
     }
 }

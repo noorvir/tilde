@@ -75,6 +75,10 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
         webView.load(URLRequest(url: url))
     }
 
+    func close() {
+        window?.close()
+    }
+
     func reloadOrStop() {
         if isLoading {
             webView.stopLoading()

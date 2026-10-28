@@ -13,11 +13,15 @@ public struct HTTPResponse: Sendable {
     public var status: Int
     public var headers: [String: String]
     public var body: Data
+    /// When set, the server sends `body` first, then each chunk as it arrives, and closes the
+    /// connection when the stream ends. Used for server-sent events.
+    public var stream: AsyncStream<Data>?
 
-    public init(status: Int, headers: [String: String] = [:], body: Data = Data()) {
+    public init(status: Int, headers: [String: String] = [:], body: Data = Data(), stream: AsyncStream<Data>? = nil) {
         self.status = status
         self.headers = headers
         self.body = body
+        self.stream = stream
     }
 }
 
@@ -153,7 +157,9 @@ public final class HTTPServer: @unchecked Sendable {
     private func send(_ response: HTTPResponse, on connection: NWConnection) {
         var head = "HTTP/1.1 \(response.status) \(Self.reason(response.status))\r\n"
         var headers = response.headers
-        headers["Content-Length"] = String(response.body.count)
+        if response.stream == nil {
+            headers["Content-Length"] = String(response.body.count)
+        }
         headers["Connection"] = "close"
         for (name, value) in headers {
             head += "\(name): \(value)\r\n"
@@ -162,9 +168,23 @@ public final class HTTPServer: @unchecked Sendable {
 
         var payload = Data(head.utf8)
         payload.append(response.body)
-        connection.send(content: payload, completion: .contentProcessed { _ in
-            connection.cancel()
-        })
+        guard let stream = response.stream else {
+            connection.send(content: payload, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+            return
+        }
+
+        // Without a length, the end of the stream is marked by closing the connection.
+        connection.send(content: payload, completion: .idempotent)
+        Task {
+            for await chunk in stream {
+                connection.send(content: chunk, completion: .idempotent)
+            }
+            connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
+                connection.cancel()
+            })
+        }
     }
 
     private static func reason(_ status: Int) -> String {

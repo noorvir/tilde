@@ -32,7 +32,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleVersion</key><string>BUILD_NUMBER</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -41,6 +41,10 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+# The build number counts the commits, so each build of a newer commit sorts higher.
+build_number="$(git rev-list --count HEAD 2>/dev/null || echo 1)"
+sed -i '' "s/BUILD_NUMBER/$build_number/" "$app/Contents/Info.plist"
 
 # Ad-hoc signatures normally pin macOS privacy permissions to one exact build. An explicit
 # designated requirement keeps Screen Recording and Accessibility grants across rebuilds.

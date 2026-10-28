@@ -59,7 +59,13 @@ final class AnnotationController: ObservableObject {
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var session: SessionStore.Session?
-    @Published private(set) var drafts: [Draft] = []
+    @Published private(set) var drafts: [Draft] = [] {
+        didSet {
+            if let session, drafts.count != oldValue.count {
+                store.updateNoteCount(drafts.count, for: session.id)
+            }
+        }
+    }
     @Published private(set) var hover: Picked?
     @Published private(set) var composer: Composer?
     @Published private(set) var isPaused = false
@@ -77,6 +83,7 @@ final class AnnotationController: ObservableObject {
 
     private let store: SessionStore
     private let browser: BrowserController
+    let shortcuts: ShortcutStore
     private let picker: ElementPicker
     private var overlays: [OverlayWindow] = []
     private lazy var hud = HUDPanel(controller: self)
@@ -90,11 +97,17 @@ final class AnnotationController: ObservableObject {
     private var isPointerOverPanel = false
     private var isHoverRunning = false
     private var isSending = false
+    /// The app that was in front when an agent's session opened Tilde's browser. The session
+    /// ends with the browser closed and this app in front again, so the user is back in the chat.
+    private var returnApp: NSRunningApplication?
+    /// The icon of the agent app with this display name, for the HUD; nil when unknown.
+    var clientIcon: (String) -> NSImage? = { _ in nil }
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
 
-    init(store: SessionStore, browser: BrowserController) {
+    init(store: SessionStore, browser: BrowserController, shortcuts: ShortcutStore? = nil) {
         self.store = store
         self.browser = browser
+        self.shortcuts = shortcuts ?? ShortcutStore()
         picker = ElementPicker(browser: browser)
 
         subscription = store.$sessions
@@ -130,6 +143,9 @@ final class AnnotationController: ObservableObject {
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
 
         if let url = session.url {
+            if !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
+                returnApp = frontmost
+            }
             browser.show(url)
         }
 
@@ -155,6 +171,13 @@ final class AnnotationController: ObservableObject {
         composer = nil
         session = nil
         drafts = []
+
+        if let returnApp {
+            self.returnApp = nil
+            browser.close()
+            NSApp.yieldActivation(to: returnApp)
+            returnApp.activate()
+        }
 
         if case .sent = phase {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
@@ -221,7 +244,7 @@ final class AnnotationController: ObservableObject {
             hud.show()
             return
         }
-        _ = store.start(client: "You", message: nil, url: nil, isLocal: true)
+        _ = store.start(client: "You", url: nil, isLocal: true)
     }
 
     func cancel() {

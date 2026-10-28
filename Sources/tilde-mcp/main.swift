@@ -1,9 +1,14 @@
 // Stdio bridge for harnesses that start MCP servers as processes.
 // Forwards each newline-delimited JSON-RPC message to the Tilde app's HTTP endpoint
 // and writes replies to stdout. Starts the app when it is not running.
+// `tilde-mcp install` instead sets up agent apps; see Install.swift.
 
 import AppKit
 import Foundation
+
+if CommandLine.arguments.dropFirst().first == "install" {
+    exit(runInstall(Array(CommandLine.arguments.dropFirst(2))))
+}
 
 let port = ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "7311"
 let endpoint = URL(string: "http://127.0.0.1:\(port)/mcp")!

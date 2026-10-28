@@ -92,7 +92,6 @@ final class Harness {
             try await client.initialize(name: "codex-mcp-client")
             let started = try await client.call("start_annotation", [
                 "url": "http://127.0.0.1:\(pagePort)/",
-                "message": "Check the documents table: owner chips and spacing.",
                 "wait_seconds": 0,
             ])
             try check(started.text.contains("still annotating"), "start_annotation returns in-progress status")

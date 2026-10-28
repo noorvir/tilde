@@ -224,10 +224,6 @@ struct HUDView: View {
     var body: some View {
         VStack(spacing: 8) {
             pill
-            if controller.isHUDShown, controller.phase == .annotating, let message = controller.session?.message, !message.isEmpty {
-                MessageBubble(client: controller.session?.client ?? "Agent", message: message)
-                    .transition(Self.zoom)
-            }
             if controller.isHUDShown, controller.phase == .annotating, controller.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
                     .transition(Self.zoom)
@@ -244,7 +240,7 @@ struct HUDView: View {
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
     }
 
-    /// How the message and list appear and go with the HUD: the same zoom as the pill.
+    /// How the list appears and goes with the HUD: the same zoom as the pill.
     private static let zoom = AnyTransition.scale(scale: 0.5, anchor: .top).combined(with: .opacity)
 
     private var pillScale: CGFloat {
@@ -324,7 +320,7 @@ struct HUDView: View {
                 Text(controller.isPaused ? "Paused" : "Annotating")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
-                Text(subtitle)
+                subtitle
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
             }
@@ -340,7 +336,7 @@ struct HUDView: View {
         }
         .disabled(count == 0)
 
-        HUDButton(symbol: controller.isPaused ? "play.fill" : "pause.fill", isOn: controller.isPaused, help: "\(controller.isPaused ? "Resume" : "Pause") annotating (\(HotKeys.pauseTitle))") {
+        HUDButton(symbol: controller.isPaused ? "play.fill" : "pause.fill", isOn: controller.isPaused, help: pauseHelp) {
             controller.togglePause()
         }
 
@@ -423,16 +419,37 @@ struct HUDView: View {
         return "Send to \(session.client)  ⌘↩"
     }
 
-    private var subtitle: String {
-        if controller.isPaused {
-            return "\(HotKeys.pauseTitle) to resume"
+    private var pauseHelp: String {
+        let action = controller.isPaused ? "Resume" : "Pause"
+        guard let shortcut = controller.shortcuts.shortcut(for: .togglePause) else {
+            return "\(action) annotating"
         }
+        return "\(action) annotating (\(shortcut.title))"
+    }
+
+    /// "for Codex · 2 notes", with the agent app's icon before its name.
+    @ViewBuilder
+    private var subtitle: some View {
         let client = controller.session?.client ?? "Agent"
         let count = controller.drafts.count
-        if count == 0 {
-            return "for \(client) · click or drag"
+        let detail = count == 0 ? "click or drag" : "\(count) \(count == 1 ? "note" : "notes")"
+        let icon = controller.session?.isLocal == false ? controller.clientIcon(client) : nil
+
+        if controller.isPaused, let shortcut = controller.shortcuts.shortcut(for: .togglePause) {
+            Text("\(shortcut.title) to resume")
+        } else if controller.isPaused {
+            Text("Resume to continue")
+        } else if let icon {
+            HStack(spacing: 3) {
+                Text("for")
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 14, height: 14)
+                Text("\(client) · \(detail)")
+            }
+        } else {
+            Text("for \(client) · \(detail)")
         }
-        return "for \(client) · \(count) \(count == 1 ? "note" : "notes")"
     }
 }
 
@@ -484,7 +501,7 @@ private struct HUDButton: View {
 }
 
 /// A text button for the pill's confirm state; destructive ones are red like Delete.
-private struct PillTextButton: View {
+struct PillTextButton: View {
     let title: String
     let isDestructive: Bool
     let action: () -> Void
@@ -512,12 +529,21 @@ private struct PillTextButton: View {
     }
 }
 
+extension EnvironmentValues {
+    /// Draws looping animations at rest. `PhaseAnimator` runs on its own clock and ignores
+    /// `disablesAnimations`, so snapshot tests set this to render the same frame every time.
+    @Entry var freezesMotion = false
+}
+
 private struct PulseDot: View {
     let isActive: Bool
+    @Environment(\.freezesMotion) private var freezesMotion
 
     var body: some View {
         ZStack {
-            if isActive {
+            if isActive, freezesMotion {
+                ring.scaleEffect(0.5)
+            } else if isActive {
                 // The animation is scoped to the ring so it never animates the HUD layout.
                 PhaseAnimator([false, true]) { expanded in
                     ring
@@ -538,36 +564,6 @@ private struct PulseDot: View {
         Circle()
             .fill(Color.tildeBlue.opacity(0.35))
             .frame(width: 18, height: 18)
-    }
-}
-
-private struct MessageBubble: View {
-    let client: String
-    let message: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: HUDMetrics.iconGap) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.tildeBlue)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(client)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text(message)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.leading, HUDMetrics.leadingInset)
-        .padding(.trailing, HUDMetrics.trailingInset)
-        .padding(.vertical, 9)
-        .frame(width: HUDView.width, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.tildeInk))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.22), radius: 10, y: 3)
     }
 }
 

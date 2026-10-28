@@ -1,5 +1,6 @@
 @testable import TildeCore
 import Foundation
+import TildeSkill
 import Testing
 
 @MainActor
@@ -14,11 +15,10 @@ struct MCPServerTests {
     @Test func sendBetweenWaitsIsReturnedByTheNextWait() async throws {
         let sessionID = try await initialize(client: "codex-mcp-client")
 
-        let started = try await call("start_annotation", ["message": "Check the table", "wait_seconds": 0], session: sessionID)
+        let started = try await call("start_annotation", ["message": "Ignored by Tilde", "wait_seconds": 0], session: sessionID)
         let id = try #require(store.active?.id)
         #expect(text(of: started).contains("still annotating"))
         #expect(store.active?.client == "Codex")
-        #expect(store.active?.message == "Check the table")
 
         store.finish(id, with: .sent(try sampleFeedback(), folder: nil))
 
@@ -84,7 +84,71 @@ struct MCPServerTests {
         #expect(response.status == 403)
     }
 
+    @Test func instructionsAreTheSkillAndThereAreNoPrompts() async throws {
+        let initialized = try await request("initialize", ["protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "codex-mcp-client", "version": "1"]])
+        #expect(initialized["instructions"] as? String == tildeSkillBody)
+        let capabilities = try #require(initialized["capabilities"] as? [String: Any])
+        #expect(capabilities.keys.sorted() == ["resources", "tools"])
+
+        let response = await post(["jsonrpc": "2.0", "id": 3, "method": "prompts/list", "params": [:]], session: nil)
+        let body = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+        #expect((body["error"] as? [String: Any])?["code"] as? Int == -32601)
+    }
+
+    @Test func sentBatchesAreResources() async throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let server = MCPServer(store: store, inbox: inbox)
+
+        let empty = try await request("resources/list", [:], on: server)
+        #expect((empty["resources"] as? [[String: Any]])?.isEmpty == true)
+
+        let folder = try saveToInbox(try sampleFeedback(), sessionID: "abc", root: inbox)
+        let list = try await request("resources/list", [:], on: server)
+        let resources = try #require(list["resources"] as? [[String: Any]])
+        #expect(resources.map { $0["uri"] as? String } == ["tilde://feedback/latest", "tilde://feedback/\(folder.lastPathComponent)"])
+        #expect((resources[1]["title"] as? String)?.hasSuffix("· the badge is misaligned") == true)
+
+        let read = try await request("resources/read", ["uri": "tilde://feedback/latest"], on: server)
+        let contents = try #require(read["contents"] as? [[String: Any]])
+        #expect(contents.map { $0["mimeType"] as? String } == ["text/markdown", "image/png", "image/png"])
+        #expect((contents[0]["text"] as? String)?.contains("> the badge is misaligned") == true)
+        #expect(contents[1]["uri"] as? String == "tilde://feedback/latest/annotation-1.png")
+        #expect(contents[1]["blob"] as? String == Data([0x89, 0x50, 0x4E, 0x47]).base64EncodedString())
+
+        let missing = await post(["jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": ["uri": "tilde://feedback/../x"]], session: nil, on: server)
+        let body = try #require(try JSONSerialization.jsonObject(with: missing.body) as? [String: Any])
+        #expect(body["error"] != nil)
+    }
+
+    @Test func waitingToolCallsStreamProgressThenTheResult() async throws {
+        let session = store.start(client: "Codex", url: nil)
+        store.updateNoteCount(2, for: session.id)
+        let response = await post([
+            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": ["name": "wait_for_annotation", "arguments": ["session_id": session.id, "wait_seconds": 30], "_meta": ["progressToken": 7]],
+        ], session: nil, accept: "application/json, text/event-stream")
+        #expect(response.headers["Content-Type"] == "text/event-stream")
+
+        var events = try #require(response.stream).makeAsyncIterator()
+        let first = try #require(await events.next())
+        #expect(String(decoding: first, as: UTF8.self).contains("2 notes so far"))
+
+        store.finish(session.id, with: .cancelled)
+        var last = Data()
+        while let event = await events.next() {
+            last = event
+        }
+        #expect(String(decoding: last, as: UTF8.self).contains("cancelled the annotation session"))
+    }
+
     // MARK: - Helpers
+
+    private func request(_ method: String, _ params: [String: Any], on server: MCPServer? = nil) async throws -> [String: Any] {
+        let response = await post(["jsonrpc": "2.0", "id": 3, "method": method, "params": params], session: nil, on: server)
+        let body = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+        return try #require(body["result"] as? [String: Any])
+    }
 
     private func initialize(client: String) async throws -> String {
         let response = await post([
@@ -103,13 +167,13 @@ struct MCPServerTests {
         return try #require(body["result"] as? [String: Any])
     }
 
-    private func post(_ message: [String: Any], session: String?) async -> HTTPResponse {
-        var headers = ["host": "127.0.0.1:7311", "content-type": "application/json"]
+    private func post(_ message: [String: Any], session: String?, accept: String = "application/json", on server: MCPServer? = nil) async -> HTTPResponse {
+        var headers = ["host": "127.0.0.1:7311", "content-type": "application/json", "accept": accept]
         if let session {
             headers["mcp-session-id"] = session
         }
         let body = try! JSONSerialization.data(withJSONObject: message)
-        return await server.handle(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: body))
+        return await (server ?? self.server).handle(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: body))
     }
 
     private func text(of result: [String: Any]) -> String {
@@ -139,7 +203,43 @@ struct HTTPServerTests {
         let server = try HTTPServer(port: 0) { request in
             HTTPResponse(status: 200, headers: ["X-Path": request.path], body: request.body)
         }
-        let port = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt16, Error>) in
+        let port = try await start(server)
+        defer { server.stop() }
+
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp?x=1")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("hello".utf8)
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        let http = try #require(response as? HTTPURLResponse)
+        #expect(http.statusCode == 200)
+        #expect(http.value(forHTTPHeaderField: "X-Path") == "/mcp")
+        #expect(String(data: data, encoding: .utf8) == "hello")
+    }
+
+    @Test func streamsChunksUntilTheStreamEnds() async throws {
+        let server = try HTTPServer(port: 0) { _ in
+            let (stream, continuation) = AsyncStream<Data>.makeStream()
+            Task {
+                for chunk in ["one ", "two ", "three"] {
+                    continuation.yield(Data(chunk.utf8))
+                    try? await Task.sleep(for: .milliseconds(20))
+                }
+                continuation.finish()
+            }
+            return HTTPResponse(status: 200, headers: ["Content-Type": "text/event-stream"], stream: stream)
+        }
+        let port = try await start(server)
+        defer { server.stop() }
+
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp")!)
+        request.httpMethod = "POST"
+        let (data, _) = try await URLSession.shared.data(for: request)
+        #expect(String(data: data, encoding: .utf8) == "one two three")
+    }
+
+    private func start(_ server: HTTPServer) async throws -> UInt16 {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt16, Error>) in
             let resumed = Locked(false)
             server.start { status in
                 guard resumed.swap(true) == false else {
@@ -155,17 +255,6 @@ struct HTTPServerTests {
                 }
             }
         }
-        defer { server.stop() }
-
-        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp?x=1")!)
-        request.httpMethod = "POST"
-        request.httpBody = Data("hello".utf8)
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        let http = try #require(response as? HTTPURLResponse)
-        #expect(http.statusCode == 200)
-        #expect(http.value(forHTTPHeaderField: "X-Path") == "/mcp")
-        #expect(String(data: data, encoding: .utf8) == "hello")
     }
 }
 

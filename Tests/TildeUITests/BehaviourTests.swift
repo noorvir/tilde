@@ -127,4 +127,24 @@ struct BehaviourTests {
             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code
         ))
     }
+
+    // MARK: - Shortcuts
+
+    @Test func shortcutsAreSavedClearedResetAndNeverShared() {
+        let suite = "tilde-tests-\(UUID().uuidString)"
+        let store = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let controlShiftK = Shortcut(keyCode: 40, modifiers: NSEvent.ModifierFlags([.control, .shift]).rawValue, key: "K")
+
+        #expect(store.set(controlShiftK, for: .startAnnotation) == nil)
+        #expect(store.set(controlShiftK, for: .togglePause) == .startAnnotation)
+        #expect(store.shortcut(for: .togglePause) == ShortcutStore.Action.togglePause.defaultShortcut)
+        #expect(store.set(nil, for: .togglePause) == nil)
+
+        let reopened = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        #expect(reopened.shortcut(for: .startAnnotation)?.caps == ["⌃", "⇧", "K"])
+        #expect(reopened.shortcut(for: .togglePause) == nil)
+
+        reopened.reset(.togglePause)
+        #expect(ShortcutStore(defaults: UserDefaults(suiteName: suite)!).shortcut(for: .togglePause)?.title == "⌃⌥P")
+    }
 }

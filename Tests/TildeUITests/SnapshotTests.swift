@@ -15,6 +15,58 @@ struct SnapshotTests {
         controller = try await Fixtures.controller()
     }
 
+    // MARK: - Install toast and settings
+
+    private func assertToast(_ result: InstallResult, named name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let state = ToastState()
+        state.result = result
+        state.isShown = true
+        try await Snapshot.assertView(InstallToastView(state: state), size: CGSize(width: 560, height: 76), named: name, sourceLocation: sourceLocation)
+    }
+
+    @Test func installToastSuccess() async throws {
+        try await assertToast(Fixtures.installResult(failed: 0), named: "toast-installed")
+    }
+
+    @Test func installToastPartlyFailed() async throws {
+        try await assertToast(Fixtures.installResult(failed: 1), named: "toast-partly-failed")
+    }
+
+    @Test func installToastOneAppRemoved() async throws {
+        let result = InstallResult(action: .removed, apps: [.init(name: "Cursor", icon: Fixtures.appIcon, failed: false, changed: true)])
+        try await assertToast(result, named: "toast-removed-one")
+    }
+
+    private func assertSettings(_ model: SettingsModel, named name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+            try await Snapshot.assertView(SettingsView(model: model), size: CGSize(width: 760, height: 600), appearance: appearance, named: "\(name)-\(suffix)", sourceLocation: sourceLocation)
+        }
+    }
+
+    @Test func settingsGeneral() async throws {
+        try await assertSettings(try Fixtures.settingsModel(page: .general), named: "settings-general")
+    }
+
+    @Test func settingsAgents() async throws {
+        try await assertSettings(try Fixtures.settingsModel(page: .agents), named: "settings-agents")
+    }
+
+    @Test func settingsAgentsOpen() async throws {
+        let model = try Fixtures.settingsModel(page: .agents)
+        model.expandedAgents = ["Claude", "Codex"]
+        try await assertSettings(model, named: "settings-agents-open")
+    }
+
+    @Test func settingsShortcuts() async throws {
+        try await assertSettings(try Fixtures.settingsModel(page: .shortcuts), named: "settings-shortcuts")
+    }
+
+    @Test func settingsShortcutRecording() async throws {
+        let model = try Fixtures.settingsModel(page: .shortcuts)
+        model.recordingShortcut = .togglePause
+        try await assertSettings(model, named: "settings-shortcuts-recording")
+    }
+
     // MARK: - HUD
 
     private func assertHUD(_ name: String, height: CGFloat = 80, sourceLocation: SourceLocation = #_sourceLocation) async throws {
@@ -61,9 +113,10 @@ struct SnapshotTests {
         try await assertHUD("hud-copied")
     }
 
-    @Test func hudAgentMessage() async throws {
-        controller.setStateForTesting(session: Fixtures.session(message: "Check the documents table: owner chips and spacing."))
-        try await assertHUD("hud-agent-message", height: 150)
+    @Test func hudClientIcon() async throws {
+        controller.clientIcon = { $0 == "Codex" ? Fixtures.appIcon : nil }
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2))
+        try await assertHUD("hud-client-icon")
     }
 
     @Test func hudListOneRow() async throws {

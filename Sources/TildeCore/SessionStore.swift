@@ -8,13 +8,14 @@ public final class SessionStore: ObservableObject {
         public let id: String
         /// Display name of the agent harness that asked, such as "Codex".
         public let client: String
-        public let message: String?
         public let url: URL?
         /// Started by the user from Tilde itself; no agent waits for the result.
         public let isLocal: Bool
         /// Whether each annotation also gets a screenshot of the window around it.
         public let capturesContext: Bool
         public fileprivate(set) var state: State
+        /// Annotations the user has made so far, for progress messages.
+        public fileprivate(set) var noteCount = 0
     }
 
     public enum State: Sendable {
@@ -53,10 +54,10 @@ public final class SessionStore: ObservableObject {
         sessions.first { $0.id == id }
     }
 
-    public func start(client: String, message: String?, url: URL?, isLocal: Bool = false, capturesContext: Bool = true) -> Session {
+    public func start(client: String, url: URL?, isLocal: Bool = false, capturesContext: Bool = true) -> Session {
         let state: State = active == nil ? .annotating : .queued
         let session = Session(
-            id: Self.newID(), client: client, message: message, url: url,
+            id: Self.newID(), client: client, url: url,
             isLocal: isLocal, capturesContext: capturesContext, state: state
         )
         sessions.append(session)
@@ -85,6 +86,13 @@ public final class SessionStore: ObservableObject {
                 waiter.resume(returning: self.session(id)?.state ?? .cancelled)
             }
         }
+    }
+
+    public func updateNoteCount(_ count: Int, for id: String) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        sessions[index].noteCount = count
     }
 
     /// Finishes a session with `.sent` or `.cancelled` and starts the next queued one.
