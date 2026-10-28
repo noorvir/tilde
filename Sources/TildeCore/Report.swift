@@ -47,7 +47,10 @@ private func heading(for target: Target) -> String {
     case .element(.web(let element)):
         return "Web element on \(element.url)"
     case .element(.native(let element)):
-        return "Element in \(element.app)"
+        guard let bundleID = element.bundleID else {
+            return "Element in \(element.app)"
+        }
+        return "Element in \(element.app) (\(bundleID))"
     }
 }
 
@@ -77,6 +80,9 @@ private func details(for target: Target) -> [String] {
         var lines: [String] = []
         if let window = element.window {
             lines.append("- Window: \(window)")
+        }
+        if let url = element.url {
+            lines.append("- URL: \(url)")
         }
         lines.append("- Role: \(element.role)")
         if let title = element.title {

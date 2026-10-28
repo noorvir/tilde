@@ -95,8 +95,8 @@ final class ElementPicker {
 
     private func windowPick(_ window: WindowInfo) -> Picked {
         let element = NativeElement(
-            app: window.app, window: window.title, role: "AXWindow",
-            title: window.title, value: nil, label: nil, identifier: nil, path: []
+            app: window.app, bundleID: Self.bundleID(of: window.pid), window: window.title, role: "AXWindow",
+            title: window.title, value: nil, label: nil, identifier: nil, url: nil, path: []
         )
         let size = "\(Int(window.frame.width))×\(Int(window.frame.height))"
         return Picked(frame: window.frame, element: .native(element), chip: "window", details: ["window  \(size)", window.app])
@@ -123,16 +123,19 @@ final class ElementPicker {
         let label = text(element, kAXDescriptionAttribute)
         let value = text(element, kAXValueAttribute)
         let identifier = text(element, "AXIdentifier") ?? domIdentifier(element)
+        let ancestors = ancestors(of: element)
 
         let native = NativeElement(
             app: window.app,
+            bundleID: bundleID(of: window.pid),
             window: window.title,
             role: role,
             title: title,
             value: value,
             label: label,
             identifier: identifier,
-            path: rolePath(of: element)
+            url: ancestors.url,
+            path: compactPath(ancestors.nodes)
         )
 
         let chip = roleDescription ?? String(role.dropFirst(role.hasPrefix("AX") ? 2 : 0))
@@ -154,14 +157,22 @@ final class ElementPicker {
     }
 
     nonisolated private static func text(_ element: AXUIElement, _ name: String) -> String? {
-        guard let value: String = attribute(element, name) else {
+        clipped(attribute(element, name), to: 200)
+    }
+
+    /// Trimmed text, cut to `limit` characters with an ellipsis; nil when empty.
+    nonisolated private static func clipped(_ value: String?, to limit: Int) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil
         }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return nil
+        if trimmed.count <= limit {
+            return trimmed
         }
-        return String(trimmed.prefix(200))
+        return trimmed.prefix(limit) + "…"
+    }
+
+    nonisolated private static func bundleID(of pid: pid_t) -> String? {
+        NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
     }
 
     nonisolated private static func frame(of element: AXUIElement) -> CGRect? {
@@ -191,8 +202,10 @@ final class ElementPicker {
 
     /// Browsers expose the DOM id and classes of web content as Accessibility attributes.
     nonisolated private static func domIdentifier(_ element: AXUIElement) -> String? {
-        let id = text(element, "AXDOMIdentifier")
-        let classes: [String] = attribute(element, "AXDOMClassList") ?? []
+        selector(id: text(element, "AXDOMIdentifier"), classes: attribute(element, "AXDOMClassList") ?? [])
+    }
+
+    nonisolated private static func selector(id: String?, classes: [String]) -> String? {
         if id == nil && classes.isEmpty {
             return nil
         }
@@ -201,24 +214,46 @@ final class ElementPicker {
         if let id {
             selector += "#\(id)"
         }
-        for name in classes.prefix(4) {
+        for name in classes.prefix(2) {
             selector += ".\(name)"
         }
         return selector
     }
 
-    nonisolated private static func rolePath(of element: AXUIElement) -> [String] {
-        var roles: [String] = []
+    /// The element and its ancestors up to the window, outermost first, with the URL of the
+    /// nearest web area. Reads each node's attributes in one Accessibility call.
+    nonisolated private static func ancestors(of element: AXUIElement) -> (nodes: [AccessibilityNode], url: String?) {
+        let names = [kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute, "AXIdentifier", "AXDOMIdentifier", "AXDOMClassList", "AXURL", kAXParentAttribute] as CFArray
+        var nodes: [AccessibilityNode] = []
+        var url: String?
         var current: AXUIElement? = element
 
-        while let node = current, roles.count < 12 {
-            let role: String = attribute(node, kAXRoleAttribute) ?? "?"
+        while let node = current, nodes.count < 40 {
+            var values: CFArray?
+            guard AXUIElementCopyMultipleAttributeValues(node, names, [], &values) == .success,
+                  let values = values as? [Any], values.count == 8
+            else {
+                break
+            }
+
+            let role = values[0] as? String ?? "AXUnknown"
             if role == kAXApplicationRole {
                 break
             }
-            roles.append(role)
-            current = attribute(node, kAXParentAttribute)
+            if url == nil, role == "AXWebArea", let address = values[6] as? URL, address.absoluteString != "about:blank" {
+                url = address.absoluteString
+            }
+
+            let name = clipped(values[1] as? String, to: 40) ?? clipped(values[2] as? String, to: 40) ?? clipped(values[3] as? String, to: 40)
+            let selector = selector(id: clipped(values[4] as? String, to: 40), classes: values[5] as? [String] ?? [])
+            nodes.append(AccessibilityNode(role: role, name: name, selector: selector))
+
+            let parent = values[7] as CFTypeRef
+            guard CFGetTypeID(parent) == AXUIElementGetTypeID() else {
+                break
+            }
+            current = (parent as! AXUIElement)
         }
-        return roles.reversed()
+        return (nodes.reversed(), url)
     }
 }
