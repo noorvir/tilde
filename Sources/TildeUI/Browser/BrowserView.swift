@@ -34,8 +34,31 @@ struct BrowserView: View {
             .allowsHitTesting(false)
         }
         .tildeTooltipHostAboveAppKit()
+        .overlay(alignment: .topTrailing) {
+            if let controller = browser.controller {
+                EmbeddedPauseToast(controller: controller)
+            }
+        }
         .animation(.easeInOut(duration: 0.2), value: browser.showsNotes)
         .ignoresSafeArea()
+    }
+}
+
+/// The pause note under the toolbar's HUD, right-aligned with it, drawn above the page.
+private struct EmbeddedPauseToast: View {
+    @ObservedObject var controller: AnnotationController
+
+    var body: some View {
+        if controller.isHUDInBrowser, let notice = controller.pauseNotice {
+            AboveAppKit {
+                PauseToast(notice: notice, controller: controller)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            }
+            .frame(width: HUDView.width, height: 72)
+            .padding(.top, BrowserMetrics.toolbarHeight + 4)
+            .padding(.trailing, BrowserMetrics.frame)
+            .transition(.opacity)
+        }
     }
 }
 

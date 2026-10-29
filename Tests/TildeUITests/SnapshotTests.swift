@@ -149,6 +149,13 @@ struct SnapshotTests {
         try await assertHUD("hud-confirm-cancel-1")
     }
 
+    @Test func hudPauseNotice() async throws {
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), isPaused: true, pauseNotice: .escape)
+        try await assertHUD("hud-pause-notice", height: 130)
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), isAutoPaused: true, pauseNotice: .otherApp)
+        try await assertHUD("hud-pause-notice-other-app", height: 130)
+    }
+
     @Test func hudConfirmRestore() async throws {
         controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), confirmation: .restore(Fixtures.record(notes: 3)))
         try await assertHUD("hud-confirm-restore")

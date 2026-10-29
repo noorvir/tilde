@@ -80,6 +80,15 @@ final class AnnotationController: ObservableObject {
     /// Paused because another app is in front of a session limited to one window; ends when
     /// the window's app (or Tilde) comes back to the front.
     @Published private(set) var isAutoPaused = false
+
+    /// Why annotating just paused, for the note below the HUD.
+    enum PauseNotice: Equatable {
+        case escape
+        case otherApp
+    }
+
+    @Published private(set) var pauseNotice: PauseNotice?
+    private var pauseNoticeTimer: Timer?
     /// The HUD is in the toolbar of Tilde's browser, as the session is limited to it, and the
     /// floating HUD is hidden. It stays there through the Sent confirmation.
     @Published private(set) var isHUDInBrowser = false
@@ -285,6 +294,8 @@ final class AnnotationController: ObservableObject {
 
     private func end() {
         stopCheckpoints()
+        pauseNotice = nil
+        pauseNoticeTimer?.invalidate()
         stopTracking()
         confirmation = nil
         commentPanel.close()
@@ -489,6 +500,7 @@ final class AnnotationController: ObservableObject {
 
     /// Asks in the pill before cancelling, unless there is nothing to lose.
     func requestCancel() {
+        pauseNotice = nil
         guard !drafts.isEmpty else {
             cancel()
             return
@@ -546,6 +558,7 @@ final class AnnotationController: ObservableObject {
     private func pauseKeepingKeyboard() {
         isPaused = true
         applyPause()
+        showPauseNotice(.escape)
         if !isHUDInBrowser {
             let pointer = NSEvent.mouseLocation
             (overlays.first { $0.frame.contains(pointer) } ?? overlays.first)?.makeKey()
@@ -904,7 +917,33 @@ final class AnnotationController: ObservableObject {
     /// Puts the overlays in step with the pause state; every start, resume and scope change
     /// goes through here. Resuming puts the overlay back above its window, which a click in
     /// that window (such as on the browser's Annotate button) raised over it.
+    /// Shows one pause note at a time, for 10 seconds.
+    private func showPauseNotice(_ notice: PauseNotice) {
+        pauseNotice = notice
+        restartPauseNoticeTimer()
+    }
+
+    /// The pointer on the note keeps it; leaving it gives it 10 seconds again.
+    func holdPauseNotice(_ isHeld: Bool) {
+        pauseNoticeTimer?.invalidate()
+        if !isHeld, pauseNotice != nil {
+            restartPauseNoticeTimer()
+        }
+    }
+
+    private func restartPauseNoticeTimer() {
+        pauseNoticeTimer?.invalidate()
+        pauseNoticeTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.pauseNotice = nil
+            }
+        }
+    }
+
     private func applyPause() {
+        if !isEffectivelyPaused {
+            pauseNotice = nil
+        }
         hasLoggedHover = false
         hasLoggedMove = false
         log.notice("annotating \(self.isEffectivelyPaused ? "paused" : "on", privacy: .public) (paused \(self.isPaused), auto \(self.isAutoPaused), overlays \(self.overlays.count))")
@@ -931,6 +970,9 @@ final class AnnotationController: ObservableObject {
             log.notice("\(pauses ? "auto-paused" : "auto-resumed", privacy: .public) for frontmost pid \(pid ?? 0)")
             isAutoPaused = pauses
             applyPause()
+            if pauses {
+                showPauseNotice(.otherApp)
+            }
         }
         orderAboveScope()
     }
@@ -1575,7 +1617,8 @@ extension AnnotationController {
         scope: ElementPicker.WindowInfo? = nil,
         isPickingWindow: Bool = false,
         isHUDInBrowser: Bool = false,
-        isAutoPaused: Bool = false
+        isAutoPaused: Bool = false,
+        pauseNotice: PauseNotice? = nil
     ) {
         self.session = session
         self.drafts = drafts
@@ -1589,6 +1632,7 @@ extension AnnotationController {
         self.isPickingWindow = isPickingWindow
         self.isHUDInBrowser = isHUDInBrowser
         self.isAutoPaused = isAutoPaused
+        self.pauseNotice = pauseNotice
         isHUDShown = true
     }
 }

@@ -235,6 +235,10 @@ struct HUDView: View {
     private var floating: some View {
         VStack(spacing: 8) {
             pill
+            if controller.isHUDShown, let notice = controller.pauseNotice {
+                PauseToast(notice: notice, controller: controller)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             if controller.isHUDShown, controller.phase == .annotating, controller.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
                     .transition(Self.zoom)
@@ -249,6 +253,7 @@ struct HUDView: View {
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
         .animation(HUDPanel.motion, value: controller.phase)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
+        .animation(.easeOut(duration: 0.15), value: controller.pauseNotice)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -371,7 +376,11 @@ struct HUDView: View {
         }
         .disabled(count == 0)
 
-        HUDButton(image: controller.isPaused ? Image(nsImage: TildeMark.annotateIcon) : Image(systemName: "pause.fill"), isOn: controller.isPaused, help: pauseHelp) {
+        // Paused, Annotate is the main action: blue, not filled like a selected button.
+        HUDButton(
+            image: controller.isPaused ? Image(nsImage: TildeMark.annotateIcon) : Image(systemName: "pause.fill"),
+            tint: controller.isPaused ? .tildeBlue : nil, help: pauseHelp
+        ) {
             controller.togglePause()
         }
 
@@ -651,6 +660,8 @@ private struct HUDButton: View {
     var badge: Int = 0
     var isOn = false
     var isDestructive = false
+    /// The icon's colour, such as Tilde blue for the main action.
+    var tint: Color?
     let help: String
     let action: () -> Void
 
@@ -661,6 +672,9 @@ private struct HUDButton: View {
     private var foreground: Color {
         if isDestructive {
             return Color.red.opacity(isEnabled ? 1 : 0.4)
+        }
+        if let tint {
+            return tint.opacity(isEnabled ? 1 : 0.4)
         }
         return .white.opacity(isEnabled ? 0.9 : 0.3)
     }
@@ -727,6 +741,42 @@ struct PillTextButton: View {
             return Color.red.opacity(isHovered ? 0.28 : 0.16)
         }
         return .white.opacity(isHovered ? 0.16 : 0.09)
+    }
+}
+
+/// A short note below the HUD after it paused: how to go on. It goes after 10 seconds, or at
+/// once on resume, discard or send; the pointer on it keeps it.
+struct PauseToast: View {
+    let notice: AnnotationController.PauseNotice
+    @ObservedObject var controller: AnnotationController
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.tildeBlue)
+            Text(text)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .frame(maxWidth: HUDView.width, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.tildeInk))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1)))
+        .shadow(color: .black.opacity(0.22), radius: 10, y: 3)
+        .fixedSize()
+        .onHover { controller.holdPauseNotice($0) }
+    }
+
+    private var text: String {
+        switch notice {
+        case .escape:
+            return "Paused"
+        case .otherApp:
+            return "Paused while another app is in front"
+        }
     }
 }
 
