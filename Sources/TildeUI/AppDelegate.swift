@@ -24,10 +24,43 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menu: StatusMenu?
     private var settings: SettingsWindow?
     private var toast: InstallToast?
+    private var restorePrompt: RestorePrompt?
     private var hotKeys: HotKeys?
+    private var browserEvents: Any?
 
     override public init() {
         super.init()
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        controller.saveBeforeQuitting()
+    }
+
+    /// An agent waiting again for its session after Tilde restarted gets it back with its
+    /// notes; the newest other unfinished session with notes is offered to restore.
+    private func offerUnfinishedSession() {
+        let controller = self.controller
+        controller.archive.prune()
+        store.reattach = { id in controller.reattach(id) }
+
+        let prompt = RestorePrompt { record in
+            // An agent may have taken its session back meanwhile.
+            guard controller.archive.record(record.id)?.state == .active, controller.session?.id != record.id else {
+                return
+            }
+            controller.restore(record)
+        } onDiscard: { record in
+            controller.discard(record)
+        }
+        restorePrompt = prompt
+
+        let unfinished = controller.archive.all().filter { $0.state == .active }
+        for empty in unfinished where empty.notes.isEmpty {
+            controller.discard(empty)
+        }
+        if let newest = unfinished.first(where: { !$0.notes.isEmpty }) {
+            prompt.show(newest)
+        }
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
@@ -42,8 +75,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let toast = InstallToast { [weak self] in
             self?.settings?.show(.agents)
         }
+        let controller = self.controller
+        let history = HistoryModel(archive: controller.archive) {
+            controller.session?.id
+        } onRestore: { record in
+            controller.restore(record)
+        } icon: { record in
+            record.isLocal ? nil : setup.icon(forClient: record.client)
+        }
         let model = SettingsModel(
-            setup: setup, shortcuts: shortcuts, server: serverState, version: version,
+            setup: setup, shortcuts: shortcuts, browser: browser, history: history, server: serverState, version: version,
             onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.resetHUDPosition() }
         )
         let settings = SettingsWindow(model: model)
@@ -52,12 +93,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settings = settings
         menu = StatusMenu(browser: browser, controller: controller, settings: settings, setup: setup, version: version) { toast.show($0) }
         hotKeys = HotKeys(controller: controller, shortcuts: shortcuts)
+        NSApp.mainMenu = MainMenu.make(browser: browser, settings: settings)
+        browserEvents = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .keyDown]) { [browser] event in
+            browser.handle(event) ? nil : event
+        }
         if let folder = UserDefaults.standard.string(forKey: "captureSettings") {
             Task {
-                await SettingsCapture.run(settings, model: model, to: URL(fileURLWithPath: (folder as NSString).expandingTildeInPath))
+                await SettingsCapture.run(settings, model: model, browser: self.browser, to: URL(fileURLWithPath: (folder as NSString).expandingTildeInPath))
             }
         }
         startServer()
+        offerUnfinishedSession()
 
         if ScreenCapture.isAllowed {
             // macOS asks the user to confirm direct screen capture from time to time; a tiny

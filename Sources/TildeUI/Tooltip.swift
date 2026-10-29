@@ -14,13 +14,24 @@ extension View {
         overlayPreferenceValue(TooltipKey.self) { tooltip in
             GeometryReader { proxy in
                 if let tooltip {
-                    let target = proxy[tooltip.anchor]
-                    TooltipBubble(text: tooltip.text)
-                        .fixedSize()
-                        .position(x: target.midX, y: target.maxY + 20)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+                    TooltipLayer(text: tooltip.text, target: proxy[tooltip.anchor])
                 }
+            }
+        }
+    }
+
+    /// `tildeTooltipHost` for a view with AppKit content, such as a web view, which would
+    /// cover tooltips drawn by SwiftUI; this one draws them above it.
+    func tildeTooltipHostAboveAppKit() -> some View {
+        overlayPreferenceValue(TooltipKey.self) { tooltip in
+            GeometryReader { proxy in
+                let target = tooltip.map { proxy[$0.anchor] }
+                AboveAppKit {
+                    if let tooltip, let target {
+                        TooltipLayer(text: tooltip.text, target: target)
+                    }
+                }
+                .allowsHitTesting(false)
             }
         }
     }
@@ -64,6 +75,19 @@ private struct TooltipSource: ViewModifier {
             .anchorPreference(key: TooltipKey.self, value: .bounds) { anchor in
                 isShown ? Tooltip(text: text, anchor: anchor) : nil
             }
+    }
+}
+
+private struct TooltipLayer: View {
+    let text: String
+    let target: CGRect
+
+    var body: some View {
+        TooltipBubble(text: text)
+            .fixedSize()
+            .position(x: target.midX, y: target.maxY + 20)
+            .allowsHitTesting(false)
+            .transition(.opacity)
     }
 }
 

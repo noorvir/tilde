@@ -1,4 +1,5 @@
 import AppKit
+import TildeCore
 import SwiftUI
 
 /// Tilde's settings: a sidebar of pages beside cards of rows, in the system's light or dark
@@ -9,6 +10,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         case general
         case agents
         case shortcuts
+        case history
 
         var id: String { rawValue }
 
@@ -17,6 +19,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             case .general: "General"
             case .agents: "Agents"
             case .shortcuts: "Shortcuts"
+            case .history: "History"
             }
         }
 
@@ -25,6 +28,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             case .general: "gearshape.fill"
             case .agents: "point.3.connected.trianglepath.dotted"
             case .shortcuts: "keyboard.fill"
+            case .history: "clock.fill"
             }
         }
 
@@ -33,6 +37,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             case .general: Color(white: 0.55)
             case .agents: .tildeBlue
             case .shortcuts: Color(white: 0.3)
+            case .history: .orange
             }
         }
     }
@@ -42,6 +47,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     init(model: SettingsModel) {
         self.model = model
+    }
+
+    @objc func showGeneral(_ sender: Any?) {
+        show(.general)
     }
 
     func show(_ page: Page) {
@@ -97,25 +106,33 @@ final class SettingsModel: ObservableObject {
     @Published var recordingShortcut: ShortcutStore.Action?
     let setup: AgentSetup
     let shortcuts: ShortcutStore
+    let browser: BrowserController
+    let history: HistoryModel
     let server: ServerState
     let version: String
     let onResult: (InstallResult) -> Void
     let onResetHUD: () -> Void
+    /// The Chromium profiles whose logins Tilde's browser can import.
+    let browserProfiles: () -> [ChromiumProfile]
     /// Whether macOS allows Tilde to record the screen and to use Accessibility.
     let permissions: () -> (screenRecording: Bool, accessibility: Bool)
 
     init(
-        setup: AgentSetup, shortcuts: ShortcutStore, server: ServerState, version: String,
+        setup: AgentSetup, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, version: String,
         onResult: @escaping (InstallResult) -> Void = { _ in }, onResetHUD: @escaping () -> Void = {},
+        browserProfiles: @escaping () -> [ChromiumProfile] = { BrowserCookies.profiles() },
         permissions: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (ScreenCapture.isAllowed, AXIsProcessTrusted()) }
     ) {
         self.setup = setup
         self.shortcuts = shortcuts
+        self.browser = browser
+        self.history = history
         self.server = server
         self.version = version
         self.onResult = onResult
         self.onResetHUD = onResetHUD
         self.permissions = permissions
+        self.browserProfiles = browserProfiles
     }
 
     /// "0.1.0 (12)" from the app bundle.
@@ -161,6 +178,8 @@ struct SettingsView: View {
             AgentSettings(setup: model.setup, expanded: $model.expandedAgents, onResult: model.onResult)
         case .shortcuts:
             ShortcutSettings(shortcuts: model.shortcuts, recording: $model.recordingShortcut)
+        case .history:
+            HistorySettings(history: model.history)
         }
     }
 }

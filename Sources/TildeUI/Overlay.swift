@@ -1,14 +1,26 @@
 import AppKit
 import Combine
 
-/// Transparent full-screen window that receives hover, click and drag while annotating.
+/// Transparent window that receives hover, click and drag while annotating: one per screen
+/// above everything, or, for a session limited to one window, one the size of that window
+/// ordered just above it, so windows brought in front of it cover it too.
 final class OverlayWindow: NSPanel {
     static let overlayLevel = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
 
-    init(screen: NSScreen, controller: AnnotationController) {
-        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        level = Self.overlayLevel
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+    /// On one window, ordered just above it, instead of on a whole screen.
+    let isWindowSized: Bool
+
+    convenience init(screen: NSScreen, controller: AnnotationController) {
+        self.init(frame: screen.frame, level: Self.overlayLevel, isWindowSized: false, controller: controller)
+    }
+
+    /// `frame` in AppKit screen coordinates.
+    init(frame: CGRect, level: NSWindow.Level, isWindowSized: Bool, controller: AnnotationController) {
+        self.isWindowSized = isWindowSized
+        super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        self.level = level
+        // A window's overlay stays on that window's Space; screen overlays show on every Space.
+        collectionBehavior = isWindowSized ? [.fullScreenAuxiliary, .ignoresCycle] : [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
@@ -16,7 +28,7 @@ final class OverlayWindow: NSPanel {
         acceptsMouseMovedEvents = true
         // Fully transparent windows let clicks through unless this is set explicitly.
         ignoresMouseEvents = false
-        setFrame(screen.frame, display: false)
+        setFrame(frame, display: false)
         let view = OverlayView(controller: controller)
         contentView = view
         // Esc and ⌘↩ reach the view only when it is the first responder.
@@ -24,6 +36,11 @@ final class OverlayWindow: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    /// Covers exactly the frame it is given, also under the menu bar, like the window it is on.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
 }
 
 /// Draws the hover highlight, drafts with numbered markers, the pending target and the drag
@@ -34,11 +51,14 @@ final class OverlayView: NSView {
     private var dragStart: CGPoint?
     private var dragRect: CGRect?
     private var hoveredMarker: Draft.ID?
+    /// Where the comment cards of the browser's page notes are, in view coordinates, for clicks.
+    private var noteCards: [(id: Draft.ID, rect: CGRect)] = []
 
     init(controller: AnnotationController) {
         self.controller = controller
         super.init(frame: .zero)
-        subscription = controller.objectWillChange
+        // The browser's notes move with its page.
+        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.needsDisplay = true }
     }
@@ -63,14 +83,14 @@ final class OverlayView: NSView {
         updateCursor(at: NSEvent.mouseLocation.flipped, source: "cursorUpdate")
     }
 
-    /// The only place that sets the cursor while annotating: an arrow over the HUD, a
-    /// crosshair outside Tilde's panels. Over the comment box and the preview it sets nothing,
+    /// The only place that sets the cursor while annotating: an arrow over the HUD and
+    /// outside a scoped window, a crosshair elsewhere. Over the comment box and the preview it sets nothing,
     /// so their text fields keep the text cursor.
     private func updateCursor(at point: CGPoint, source: String) {
         let cursor: NSCursor?
         if controller.isOverTextPanel(point) {
             cursor = nil
-        } else if controller.isOverPanel(point) || controller.previewID != nil {
+        } else if controller.isOverPanel(point) || controller.previewID != nil || !controller.allows(point) {
             cursor = .arrow
         } else {
             cursor = .crosshair
@@ -104,12 +124,18 @@ final class OverlayView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let point = screenPoint(event)
         updateCursor(at: point, source: "mouseMoved")
-        let marker = controller.drafts.last { hypot($0.marker.x - point.x, $0.marker.y - point.y) <= 13 }?.id
+        let markers = controller.drafts.filter { $0.anchor == nil }.compactMap { draft in controller.noteMarker(draft).map { (draft.id, $0) } }
+            + controller.pageNotes.map { ($0.draft.id, $0.marker) }
+        let marker = markers.last { hypot($0.1.x - point.x, $0.1.y - point.y) <= 13 }?.0
         if marker != hoveredMarker {
             hoveredMarker = marker
             needsDisplay = true
         }
         controller.mouseMoved(to: point)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        controller.scroll(event, at: screenPoint(event))
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -144,34 +170,34 @@ final class OverlayView: NSView {
             needsDisplay = true
         }
 
+        let point = screenPoint(event)
+        let viewPoint = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
         if let rect = dragRect, rect.width >= 8, rect.height >= 8 {
             controller.dragEnded(with: rect)
+        } else if let card = noteCards.last(where: { $0.rect.contains(viewPoint) }) {
+            controller.showNoteInPanel(card.id)
         } else {
             controller.click(at: screenPoint(event))
         }
     }
 
     override func keyDown(with event: NSEvent) {
-        if controller.isPaused {
-            super.keyDown(with: event)
+        if event.keyCode == 53 {
+            controller.escapePressed()
             return
         }
         if controller.confirmation != nil {
-            if event.keyCode == 53 {
-                controller.dismissConfirmation()
-            } else if event.keyCode == 36 {
+            if event.keyCode == 36 {
                 controller.confirm()
             }
             return
         }
-        if event.keyCode == 49, let id = hoveredMarker {
-            controller.preview(id)
+        if controller.isPaused {
+            super.keyDown(with: event)
             return
         }
-        if event.keyCode == 53 {
-            if controller.composer != nil {
-                controller.closeComposer()
-            }
+        if event.keyCode == 49, let id = hoveredMarker {
+            controller.preview(id)
             return
         }
         if event.keyCode == 36 && event.modifierFlags.contains(.command) {
@@ -186,14 +212,37 @@ final class OverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let blue = NSColor.tildeBlue
 
-        for (index, draft) in controller.drafts.enumerated() {
-            let rect = draft.annotation.frame.offsetBy(dx: -origin.x, dy: -origin.y)
-            if case .region = draft.annotation.target {
-                drawRect(rect, fill: blue.withAlphaComponent(0.06), stroke: blue.withAlphaComponent(0.7), dashed: true)
-            } else {
-                drawRect(rect, fill: .clear, stroke: blue.withAlphaComponent(0.35), dashed: false)
+        // A window-sized overlay outlines its window; Tilde's browser has its dark frame.
+        if controller.scope != nil, !controller.isInBrowser, (window as? OverlayWindow)?.isWindowSized == true {
+            let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 10, yRadius: 10)
+            outline.lineWidth = 2
+            blue.withAlphaComponent(0.6).setStroke()
+            outline.stroke()
+        }
+
+        // Notes on a web page in Tilde's browser are drawn by the browser, attached to their
+        // elements, so they scroll with the page; the overlay's marks would stay behind.
+        // Notes on elements in other apps follow them, and hide while they are out of view.
+        for (index, draft) in controller.drafts.enumerated() where draft.anchor == nil {
+            guard let frame = controller.noteFrame(draft), let marker = controller.noteMarker(draft) else {
+                continue
             }
-            drawMarker(index + 1, at: draft.marker)
+            drawNote(draft, frame: frame.offsetBy(dx: -origin.x, dy: -origin.y))
+            drawMarker(index + 1, at: marker)
+        }
+        // With the browser's notes panel hidden, its notes look like any others, on the page,
+        // each with its comment beside it.
+        let pageNotes = controller.pageNotes
+        for note in pageNotes {
+            drawNote(note.draft, frame: note.frame.offsetBy(dx: -origin.x, dy: -origin.y))
+            drawMarker(note.number, at: note.marker)
+        }
+        noteCards = []
+        for note in pageNotes.sorted(by: { $0.marker.y < $1.marker.y }) {
+            let anchor = CGPoint(x: note.marker.x - origin.x, y: note.marker.y - origin.y)
+            let element = note.frame.offsetBy(dx: -origin.x, dy: -origin.y)
+            let card = drawCommentCard(Self.commentText(note.draft), beside: anchor, element: element, avoiding: noteCards.map(\.rect), maxLines: 3)
+            noteCards.append((note.draft.id, card))
         }
 
         if let pending = controller.pendingTarget {
@@ -217,8 +266,27 @@ final class OverlayView: NSView {
             drawLabel(hover.details, near: rect)
         }
 
-        if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.composer == nil {
-            drawTooltip(draft.annotation.comment.isEmpty ? "(no comment)" : draft.annotation.comment, at: draft.marker)
+        // Page notes show their comment already.
+        if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.composer == nil,
+           !pageNotes.contains(where: { $0.draft.id == id })
+        {
+            if let marker = controller.noteMarker(draft) {
+                drawTooltip(Self.commentText(draft), at: marker)
+            }
+        }
+    }
+
+    private static func commentText(_ draft: Draft) -> String {
+        draft.annotation.comment.isEmpty ? "(no comment)" : draft.annotation.comment
+    }
+
+    /// A note's outline: dashed and lightly filled for a region, a light line for an element.
+    private func drawNote(_ draft: Draft, frame rect: CGRect) {
+        let blue = NSColor.tildeBlue
+        if case .region = draft.annotation.target {
+            drawRect(rect, fill: blue.withAlphaComponent(0.06), stroke: blue.withAlphaComponent(0.7), dashed: true)
+        } else {
+            drawRect(rect, fill: .clear, stroke: blue.withAlphaComponent(0.35), dashed: false)
         }
     }
 
@@ -278,6 +346,48 @@ final class OverlayView: NSView {
         NSColor.tildeInk.setFill()
         NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
         text.draw(at: NSPoint(x: box.minX + 7, y: box.minY + 4))
+    }
+
+    /// A note's comment in the tooltip's card, at most `maxLines` lines and 240 pt wide, right
+    /// of its marker, or left of the element when there is no room; moved down below cards in
+    /// `avoiding`. Returns where it was drawn.
+    private func drawCommentCard(_ comment: String, beside anchor: CGPoint, element: CGRect, avoiding placed: [CGRect], maxLines: Int) -> CGRect {
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        let text = NSAttributedString(string: comment, attributes: [
+            .font: font,
+            .foregroundColor: NSColor(white: 0.12, alpha: 1),
+            .paragraphStyle: paragraph,
+        ])
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        let limit = NSSize(width: 240, height: lineHeight * CGFloat(maxLines))
+        let size = text.boundingRect(with: limit, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine]).size
+        let width = ceil(size.width) + 24
+        let height = min(ceil(size.height), limit.height) + 16
+
+        var box = NSRect(x: anchor.x + 16, y: anchor.y - height / 2, width: width, height: height)
+        if box.maxX > bounds.width - 4 {
+            box.origin.x = element.minX - 16 - width
+        }
+        box.origin.x = max(box.minX, 4)
+        while let overlap = placed.first(where: { $0.insetBy(dx: 0, dy: -3).intersects(box) }) {
+            box.origin.y = overlap.maxY + 6
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowBlurRadius = 12
+        shadow.shadowOffset = NSSize(width: 0, height: -2)
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.18)
+        shadow.set()
+        let radius = min(12, box.height / 2)
+        NSColor.white.setFill()
+        NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        text.draw(with: NSRect(x: box.minX + 12, y: box.minY + 8, width: box.width - 24, height: box.height - 16), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        return box
     }
 
     private func drawTooltip(_ comment: String, at point: CGPoint) {

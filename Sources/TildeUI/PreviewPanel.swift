@@ -195,7 +195,7 @@ struct PreviewView: View {
         case .element(.web(let element)):
             return "<\(element.tag)> on \(element.url)"
         case .element(.native(let element)):
-            return "\(element.role) in \(element.app)"
+            return "\(friendlyRoleName(element.role)) in \(element.app)"
         }
     }
 }

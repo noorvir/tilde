@@ -26,6 +26,8 @@ private struct ShortcutRow: View {
     @Binding var recording: ShortcutStore.Action?
     @State private var conflict: String?
     @State private var monitor: Any?
+    /// Takes a modifier tapped twice as the shortcut while recording.
+    @State private var doubleTaps: DoubleTapMonitor?
 
     private var isRecording: Bool {
         recording == action
@@ -34,7 +36,7 @@ private struct ShortcutRow: View {
     var body: some View {
         let shortcut = shortcuts.shortcut(for: action)
 
-        SettingsRow(title: action.title, subtitle: conflict ?? action.subtitle, subtitleIsError: conflict != nil) {
+        SettingsRow(title: action.title, subtitle: conflict ?? Self.hint(for: shortcut) ?? action.subtitle, subtitleIsError: conflict != nil) {
             HStack(spacing: 10) {
                 if shortcut != action.defaultShortcut {
                     Button {
@@ -46,8 +48,8 @@ private struct ShortcutRow: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Reset to \(action.defaultShortcut.title)")
-                    .accessibilityLabel("Reset to \(action.defaultShortcut.title)")
+                    .help("Reset to \(action.defaultShortcut?.title ?? "no shortcut")")
+                    .accessibilityLabel("Reset to \(action.defaultShortcut?.title ?? "no shortcut")")
                 }
 
                 Button {
@@ -56,7 +58,7 @@ private struct ShortcutRow: View {
                     KeyCaps(caps: shortcut?.caps, isRecording: isRecording)
                 }
                 .buttonStyle(.plain)
-                .help(isRecording ? "Press the new shortcut, or Esc to stop" : "Click to record a new shortcut")
+                .help(isRecording ? "Press the new keys, or tap a modifier twice. Esc stops" : "Click to record a new shortcut")
             }
         }
         .onChange(of: isRecording, initial: true) { _, isRecording in
@@ -70,10 +72,12 @@ private struct ShortcutRow: View {
     }
 
     /// Takes the next key press: Esc stops, Delete clears the shortcut, and a key with ⌃, ⌥
-    /// or ⌘ becomes the shortcut unless another Tilde shortcut has it.
+    /// or ⌘ becomes the shortcut unless another Tilde shortcut has it; so does a modifier
+    /// tapped twice.
     private func startMonitor() {
         conflict = nil
         stopMonitor()
+        startDoubleTapMonitor()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             switch Int(event.keyCode) {
             case 53:
@@ -82,12 +86,12 @@ private struct ShortcutRow: View {
                 _ = shortcuts.set(nil, for: action)
                 recording = nil
             default:
-                guard let shortcut = Shortcut(event: event) else {
+                guard let combo = KeyCombo(event: event) else {
                     NSSound.beep()
                     return nil
                 }
-                if let other = shortcuts.set(shortcut, for: action) {
-                    conflict = "\(shortcut.title) is already used by \(other.title)"
+                if let other = shortcuts.set(.keys(combo), for: action) {
+                    conflict = "\(combo.title) is already used by \(other.title)"
                     NSSound.beep()
                     return nil
                 }
@@ -102,6 +106,27 @@ private struct ShortcutRow: View {
             NSEvent.removeMonitor(monitor)
         }
         monitor = nil
+        doubleTaps?.invalidate()
+        doubleTaps = nil
+    }
+
+    /// While recording, a modifier tapped twice by itself becomes the shortcut.
+    private func startDoubleTapMonitor() {
+        doubleTaps = DoubleTapMonitor(global: false) {
+            Set(DoubleTapKey.allCases)
+        } onDoubleTap: { key in
+            _ = shortcuts.set(.doubleTap(key), for: action)
+            recording = nil
+        }
+    }
+
+    /// A known clash of a double tap with a macOS shortcut.
+    static func hint(for shortcut: Shortcut?) -> String? {
+        switch shortcut?.doubleTapKey {
+        case .control: "If Dictation uses Control twice, pick another"
+        case .function: "fn twice is the usual Dictation shortcut"
+        default: nil
+        }
     }
 }
 

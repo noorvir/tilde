@@ -10,8 +10,16 @@ public func reportText(for feedback: Feedback, folder: URL?) -> String {
     }
     lines.append("Screenshots: each annotation has a close-up of the target (primary) and, when captured, a smaller context image of its surroundings with the target outlined in blue. Use the context image only when you need to know where the target sits. Frames are macOS screen points.")
 
+    // With more than one web page, a line names each page before its annotations.
+    let pages = Set(feedback.annotations.compactMap(pageURL(of:)))
+    var lastPage: String?
     for (index, annotation) in feedback.annotations.enumerated() {
         let number = index + 1
+        if pages.count > 1, let page = pageURL(of: annotation), page != lastPage {
+            lines.append("")
+            lines.append("# Page: \(page)")
+            lastPage = page
+        }
         lines.append("")
         lines.append("## \(number). \(heading(for: annotation.target))")
         lines.append("")
@@ -105,7 +113,7 @@ private func details(for target: Target) -> [String] {
         if let url = element.url {
             lines.append("- URL: \(url)")
         }
-        lines.append("- Role: \(element.role)")
+        lines.append("- Role: \(friendlyRoleName(element.role)) (\(element.role))")
         if let title = element.title {
             lines.append("- Title: \(title)")
         }
@@ -154,4 +162,11 @@ private func sizeText(_ png: Data) -> String {
 
 private func frameText(_ frame: CGRect) -> String {
     "x=\(Int(frame.minX)) y=\(Int(frame.minY)) w=\(Int(frame.width)) h=\(Int(frame.height))"
+}
+
+private func pageURL(of annotation: Annotation) -> String? {
+    if case .element(.web(let element)) = annotation.target {
+        return element.url
+    }
+    return nil
 }

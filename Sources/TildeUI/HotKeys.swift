@@ -15,7 +15,7 @@ final class HotKeys {
     init(controller: AnnotationController, shortcuts: ShortcutStore) {
         self.shortcuts = shortcuts
         actions = [
-            1: { controller.startLocal() },
+            1: { controller.startOrResume() },
             2: { controller.togglePause() },
         ]
 
@@ -50,7 +50,8 @@ final class HotKeys {
 
         let ids: [ShortcutStore.Action: UInt32] = [.startAnnotation: 1, .togglePause: 2]
         for (action, id) in ids {
-            guard let shortcut = shortcuts.shortcut(for: action) else {
+            // Double taps are watched by the controller, not registered as hot keys.
+            guard let shortcut = shortcuts.shortcut(for: action)?.combo else {
                 continue
             }
             var reference: EventHotKeyRef?

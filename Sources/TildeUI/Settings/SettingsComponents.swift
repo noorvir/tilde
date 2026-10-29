@@ -96,10 +96,11 @@ struct SettingsRow<Accessory: View, Trailing: View>: View {
                     accessory
                 }
                 if let subtitle {
+                    // Wraps rather than truncating.
                     Text(subtitle)
                         .font(.system(size: 12))
                         .foregroundStyle(subtitleIsError ? Color.red : Color.secondary)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)

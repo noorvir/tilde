@@ -32,12 +32,12 @@ public struct Annotation: Sendable, Identifiable {
     }
 }
 
-public enum Target: Sendable {
+public enum Target: Sendable, Codable {
     case region
     case element(Element)
 }
 
-public enum Element: Sendable {
+public enum Element: Sendable, Codable {
     case web(WebElement)
     case native(NativeElement)
 }
@@ -57,8 +57,27 @@ public struct WebElement: Sendable, Codable, Equatable {
     public let styles: String
 }
 
+/// A plain name for an Accessibility role, such as "Text" for `AXStaticText`; unknown roles
+/// lose their "AX" prefix.
+public func friendlyRoleName(_ role: String) -> String {
+    let names = [
+        "AXStaticText": "Text", "AXButton": "Button", "AXImage": "Image", "AXLink": "Link",
+        "AXTextField": "Text field", "AXTextArea": "Text area", "AXCheckBox": "Checkbox",
+        "AXRadioButton": "Radio button", "AXPopUpButton": "Pop-up button", "AXMenuButton": "Menu button",
+        "AXComboBox": "Combo box", "AXSlider": "Slider", "AXTabGroup": "Tabs", "AXTable": "Table",
+        "AXRow": "Row", "AXCell": "Cell", "AXList": "List", "AXOutline": "Outline", "AXGroup": "Group",
+        "AXScrollArea": "Scroll area", "AXToolbar": "Toolbar", "AXWindow": "Window", "AXSheet": "Sheet",
+        "AXHeading": "Heading", "AXWebArea": "Web page", "AXMenuItem": "Menu item", "AXSwitch": "Switch",
+        "AXSearchField": "Search field", "AXDisclosureTriangle": "Disclosure", "AXSplitGroup": "Split view",
+    ]
+    if let name = names[role] {
+        return name
+    }
+    return role.hasPrefix("AX") ? String(role.dropFirst(2)) : role
+}
+
 /// An accessibility element picked in any other app.
-public struct NativeElement: Sendable, Equatable {
+public struct NativeElement: Sendable, Equatable, Codable {
     public let app: String
     public let bundleID: String?
     public let window: String?

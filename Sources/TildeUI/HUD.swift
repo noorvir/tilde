@@ -215,6 +215,9 @@ struct HUDView: View {
     static let width: CGFloat = 462
 
     @ObservedObject var controller: AnnotationController
+    /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
+    /// does not move, and tooltips drawn by the browser.
+    var isEmbedded = false
     /// Called while the pill is dragged; `true` when the drag ends.
     var onDrag: (_ ended: Bool) -> Void = { _ in }
     /// Reports the frame of the visible content in the window, top-left origin.
@@ -222,6 +225,14 @@ struct HUDView: View {
     @State private var isPillHovered = false
 
     var body: some View {
+        if isEmbedded {
+            pill
+        } else {
+            floating
+        }
+    }
+
+    private var floating: some View {
         VStack(spacing: 8) {
             pill
             if controller.isHUDShown, controller.phase == .annotating, controller.showsList, !controller.drafts.isEmpty {
@@ -259,8 +270,24 @@ struct HUDView: View {
         return HUDView.width
     }
 
+    /// The pill's content width, the same in every state; embedded, the same without the
+    /// pill's insets.
+    static let embeddedWidth = width - HUDMetrics.leadingInset - HUDMetrics.trailingInset
+
     @ViewBuilder
     private var pill: some View {
+        if isEmbedded {
+            pillContent
+                .frame(width: pillContentWidth.map { _ in Self.embeddedWidth }, height: 30)
+                .environment(\.isHUDEmbedded, true)
+        } else {
+            floatingPill
+        }
+    }
+
+    /// The pill's content on the browser's toolbar: no capsule, and controls with the
+    /// toolbar's corners.
+    private var pillContent: some View {
         HStack(spacing: 4) {
             switch controller.phase {
             case .sent(let confirmation):
@@ -289,6 +316,10 @@ struct HUDView: View {
                 }
             }
         }
+    }
+
+    private var floatingPill: some View {
+        pillContent
         .padding(.leading, HUDMetrics.leadingInset)
         .padding(.trailing, HUDMetrics.trailingInset)
         .frame(width: pillContentWidth, height: HUDMetrics.height)
@@ -315,9 +346,9 @@ struct HUDView: View {
         let count = controller.drafts.count
 
         HStack(spacing: HUDMetrics.iconGap) {
-            PulseDot(isActive: controller.phase == .annotating && !controller.isPaused)
+            PulseDot(isActive: controller.phase == .annotating && !controller.isEffectivelyPaused)
             VStack(alignment: .leading, spacing: 1) {
-                Text(controller.isPaused ? "Paused" : "Annotating")
+                Text(title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                 subtitle
@@ -331,31 +362,38 @@ struct HUDView: View {
 
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
-        HUDButton(symbol: "list.bullet", badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide annotations" : "Show annotations") {
-            controller.showsList.toggle()
+        HUDButton(image: Image(systemName: "macwindow"), isOn: controller.scope != nil || controller.isPickingWindow, help: windowHelp) {
+            controller.toggleWindowScope()
+        }
+
+        HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide annotations" : "Show annotations") {
+            controller.showNotes()
         }
         .disabled(count == 0)
 
-        HUDButton(symbol: controller.isPaused ? "play.fill" : "pause.fill", isOn: controller.isPaused, help: pauseHelp) {
+        HUDButton(image: controller.isPaused ? Image(nsImage: TildeMark.annotateIcon) : Image(systemName: "pause.fill"), isOn: controller.isPaused, help: pauseHelp) {
             controller.togglePause()
         }
 
-        HUDButton(symbol: "trash", isDestructive: true, help: "Clear all annotations and keep annotating") {
+        HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all annotations and keep annotating") {
             controller.requestClearAll()
         }
         .disabled(count == 0)
 
+        // A session without an agent copies the report. Both labels take the space of the wider
+        // one, so the pill never shifts.
+        let copies = controller.session?.isLocal == true
         Button(action: controller.send) {
-            HStack(spacing: 5) {
-                Text("Send")
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 10.5, weight: .bold))
+            ZStack {
+                sendLabel("Send", symbol: "arrow.up").hidden()
+                sendLabel("Copy", symbol: "doc.on.doc").hidden()
+                sendLabel(copies ? "Copy" : "Send", symbol: copies ? "doc.on.doc" : "arrow.up")
             }
             .font(.system(size: 12.5, weight: .semibold))
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .frame(height: 28)
-            .background(Capsule().fill(Color.tildeBlue))
+            .background(HUDShape(height: 28).fill(Color.tildeBlue))
             .opacity(count == 0 && controller.composer == nil ? 0.4 : 1)
         }
         .buttonStyle(.plain)
@@ -363,7 +401,7 @@ struct HUDView: View {
         .tildeTooltip(sendHelp)
         .padding(.leading, 4)
 
-        HUDButton(symbol: "xmark", help: "Cancel: discard everything and close") {
+        HUDButton(image: Image(systemName: "xmark"), help: "Cancel and close (Esc)") {
             controller.requestCancel()
         }
     }
@@ -382,7 +420,9 @@ struct HUDView: View {
             case .clearAll:
                 Text("Clear \(all)?")
             case .cancelSession:
-                Text("Discard \(all) and close?")
+                Text("Discard and close?")
+            case .restore(let record):
+                Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(record.notes.count) saved?")
             }
         }
         .font(.system(size: 13, weight: .semibold))
@@ -390,22 +430,36 @@ struct HUDView: View {
         .lineLimit(1)
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        PillTextButton(title: "Cancel", isDestructive: false) {
+        PillTextButton(title: "Cancel", key: "esc", isDestructive: false) {
             controller.dismissConfirmation()
         }
-        .tildeTooltip("Keep the annotations (Esc)")
+        .tildeTooltip("Keep the annotations")
 
         switch confirmation {
         case .clearAll:
-            PillTextButton(title: "Clear", isDestructive: true) {
+            PillTextButton(title: "Clear", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
-            .tildeTooltip("Delete all annotations (↩)")
+            .tildeTooltip("Delete all annotations")
         case .cancelSession:
-            PillTextButton(title: "Discard", isDestructive: true) {
+            PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
-            .tildeTooltip("Discard everything and close (↩)")
+            .tildeTooltip("Discard \(all) and close")
+        case .restore:
+            PillTextButton(title: "Replace", key: "↩", isDestructive: true) {
+                controller.confirm()
+            }
+            .tildeTooltip("Replace the notes with the saved session's")
+        }
+    }
+
+    /// Icon first, then the label, as in macOS buttons.
+    private func sendLabel(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.system(size: 10.5, weight: .bold))
+            Text(title)
         }
     }
 
@@ -419,42 +473,181 @@ struct HUDView: View {
         return "Send to \(session.client)  ⌘↩"
     }
 
-    private var pauseHelp: String {
-        let action = controller.isPaused ? "Resume" : "Pause"
-        guard let shortcut = controller.shortcuts.shortcut(for: .togglePause) else {
-            return "\(action) annotating"
+    private var windowHelp: String {
+        if let name = controller.scopeName {
+            return "Annotating only \(name). Click to annotate all windows"
         }
-        return "\(action) annotating (\(shortcut.title))"
+        if controller.isPickingWindow {
+            return "Click a window to annotate only it, or Esc"
+        }
+        return "Annotate a specific window"
     }
 
-    /// "for Codex · 2 notes", with the agent app's icon before its name.
-    @ViewBuilder
-    private var subtitle: some View {
-        let client = controller.session?.client ?? "Agent"
-        let count = controller.drafts.count
-        let detail = count == 0 ? "click or drag" : "\(count) \(count == 1 ? "note" : "notes")"
-        let icon = controller.session?.isLocal == false ? controller.clientIcon(client) : nil
-
-        if controller.isPaused, let shortcut = controller.shortcuts.shortcut(for: .togglePause) {
-            Text("\(shortcut.title) to resume")
-        } else if controller.isPaused {
-            Text("Resume to continue")
-        } else if let icon {
-            HStack(spacing: 3) {
-                Text("for")
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 14, height: 14)
-                Text("\(client) · \(detail)")
-            }
-        } else {
-            Text("for \(client) · \(detail)")
+    /// "Pause (Esc)", and when paused "Annotate (Double-tap ⌃)".
+    private var pauseHelp: String {
+        guard controller.isPaused else {
+            return "Pause (Esc)"
         }
+        guard let shortcut = controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause) else {
+            return "Annotate"
+        }
+        return "Annotate (\(shortcut.title))"
+    }
+
+    private var title: String {
+        if controller.isEffectivelyPaused {
+            return "Paused"
+        }
+        return controller.isPickingWindow ? "Choose a window" : "Annotating"
+    }
+
+    /// The subtitle: the first candidate that fits the fixed pill, so words drop out and the
+    /// text never ends in "…".
+    private var subtitle: some View {
+        let candidates = Self.subtitleCandidates(
+            client: controller.session?.isLocal == false ? controller.session?.client : nil,
+            clientIcon: controller.session.flatMap { $0.isLocal ? nil : controller.clientIcon($0.client) },
+            // The browser's own toolbar needs no "in Tilde Browser".
+            scopeName: isEmbedded ? nil : controller.scopeName,
+            scopeIcon: controller.scopeIcon,
+            notes: controller.drafts.count,
+            state: subtitleState
+        )
+        return ViewThatFits(in: .horizontal) {
+            ForEach(Array(candidates.enumerated()), id: \.offset) { _, parts in
+                SubtitleLine(parts: parts)
+            }
+        }
+    }
+
+    private var subtitleState: SubtitleState {
+        if let notice = controller.notice {
+            return .notice(notice)
+        }
+        if controller.isPaused {
+            return .paused(shortcut: controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause))
+        }
+        if controller.isAutoPaused {
+            return .waitingForWindow
+        }
+        return controller.isPickingWindow ? .choosingWindow : .annotating
+    }
+
+    enum SubtitleState: Equatable {
+        case annotating
+        case choosingWindow
+        case paused(shortcut: Shortcut?)
+        /// Another app is in front of the window being annotated.
+        case waitingForWindow
+        case notice(String)
+    }
+
+    /// One piece of the subtitle: an optional word, an optional app icon, and a name or text.
+    struct SubtitlePart: Equatable {
+        var prefix: String?
+        var icon: NSImage?
+        var text: String?
+    }
+
+    /// The width the title column has in the fixed pill, for the narrowest layout (the paused
+    /// state with its badge). Every subtitle's shortest candidate fits it.
+    static let subtitleWidth: CGFloat = 120
+    static let subtitleFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
+
+    /// Subtitles from fullest to shortest, such as "for Codex · in Chrome · 2 notes", then
+    /// without the words, then without the names, keeping the icons.
+    static func subtitleCandidates(
+        client: String?, clientIcon: NSImage?, scopeName: String?, scopeIcon: NSImage?, notes: Int, state: SubtitleState
+    ) -> [[SubtitlePart]] {
+        switch state {
+        case .notice(let text):
+            return [[SubtitlePart(text: text)]]
+        case .paused(let shortcut):
+            guard let shortcut else {
+                return [[SubtitlePart(text: "Annotate to continue")], [SubtitlePart(text: "Paused")]]
+            }
+            // "Double-tap ⌃ to resume", then "⌃ twice to resume".
+            return [
+                [SubtitlePart(text: "\(shortcut.title) to resume")],
+                [SubtitlePart(text: "\(shortcut.shortTitle) to resume")],
+                [SubtitlePart(text: "Paused")],
+            ]
+        case .waitingForWindow:
+            return [[SubtitlePart(text: "Click the window to continue")], [SubtitlePart(text: "Click the window")]]
+        case .choosingWindow:
+            return [[SubtitlePart(text: "Esc cancels")]]
+        case .annotating:
+            break
+        }
+
+        let detail = notes == 0 ? "click or drag" : "\(notes) \(notes == 1 ? "note" : "notes")"
+        let full = [
+            client.map { SubtitlePart(prefix: "for", icon: clientIcon, text: $0) },
+            scopeName.map { SubtitlePart(prefix: "in", icon: scopeIcon, text: $0) },
+            SubtitlePart(text: detail),
+        ].compactMap { $0 }
+
+        // Each step drops more: "click or drag", then the words, then the names behind icons.
+        let steps: [(SubtitlePart) -> SubtitlePart?] = [
+            { $0.text == "click or drag" && full.count > 1 ? nil : $0 },
+            { SubtitlePart(icon: $0.icon, text: $0.text) },
+            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon) },
+        ]
+        var candidates = [full]
+        for step in steps {
+            let next = candidates[candidates.count - 1].compactMap(step)
+            if next != candidates.last, !next.isEmpty {
+                candidates.append(next)
+            }
+        }
+        return candidates
+    }
+
+    /// The width of a subtitle candidate in the HUD's subtitle font.
+    static func width(of parts: [SubtitlePart]) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [.font: subtitleFont]
+        let separator = (" · " as NSString).size(withAttributes: attributes).width
+        let widths = parts.map { part in
+            let words = [part.prefix, part.text].compactMap { $0 }
+            let text = words.map { ($0 as NSString).size(withAttributes: attributes).width }.reduce(0, +)
+            let gaps = CGFloat(max(words.count + (part.icon == nil ? 0 : 1) - 1, 0)) * 3
+            return text + (part.icon == nil ? 0 : 14) + gaps
+        }
+        return widths.reduce(0, +) + CGFloat(max(parts.count - 1, 0)) * separator
+    }
+}
+
+/// A subtitle candidate on one line, laid out at its ideal width so ViewThatFits can measure it.
+private struct SubtitleLine: View {
+    let parts: [HUDView.SubtitlePart]
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                if index > 0 {
+                    Text("·")
+                }
+                if let prefix = part.prefix {
+                    Text(prefix)
+                }
+                if let icon = part.icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .frame(width: 14, height: 14)
+                }
+                if let text = part.text {
+                    Text(text)
+                }
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
     }
 }
 
 private struct HUDButton: View {
-    let symbol: String
+    /// An SF Symbol, or a template image such as `TildeMark.annotateIcon`.
+    let image: Image
     var badge: Int = 0
     var isOn = false
     var isDestructive = false
@@ -462,6 +655,7 @@ private struct HUDButton: View {
     let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.isHUDEmbedded) private var isHUDEmbedded
     @State private var isHovered = false
 
     private var foreground: Color {
@@ -481,7 +675,7 @@ private struct HUDButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: symbol)
+                image
                     .font(.system(size: 12, weight: .semibold))
                 if badge > 0 {
                     Text("\(badge)")
@@ -491,7 +685,7 @@ private struct HUDButton: View {
             .foregroundStyle(foreground)
             .padding(.horizontal, badge > 0 ? 9 : 0)
             .frame(minWidth: 30, minHeight: 30)
-            .background(RoundedRectangle(cornerRadius: 9).fill(background))
+            .background(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9).fill(background))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -503,19 +697,26 @@ private struct HUDButton: View {
 /// A text button for the pill's confirm state; destructive ones are red like Delete.
 struct PillTextButton: View {
     let title: String
+    /// A small key cap after the title, such as "esc", for the key that does the same.
+    var key: String?
     let isDestructive: Bool
     let action: () -> Void
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 12.5, weight: .semibold))
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                if let key {
+                    KeyHint(key: key)
+                }
+            }
                 .foregroundStyle(isDestructive ? Color.red : .white.opacity(0.9))
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(Capsule().fill(background))
-                .contentShape(Capsule())
+                .background(HUDShape(height: 28).fill(background))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -529,10 +730,45 @@ struct PillTextButton: View {
     }
 }
 
+/// The key that does the same as a button, after its label: borderless on a faint fill, in
+/// the label's colour, centred on it. ↩ is the SF Symbol, which sits centred where the
+/// character sits high.
+struct KeyHint: View {
+    let key: String
+
+    var body: some View {
+        Group {
+            if key == "↩" {
+                Image(systemName: "return")
+                    .font(.system(size: 9.5, weight: .semibold))
+            } else {
+                Text(key)
+                    .font(.system(size: 11, weight: .medium))
+            }
+        }
+        .opacity(0.75)
+        .padding(.horizontal, 4)
+        .frame(minWidth: 18, minHeight: 16, maxHeight: 16)
+        .background(RoundedRectangle(cornerRadius: 4).fill(.foreground.opacity(0.15)))
+    }
+}
+
 extension EnvironmentValues {
     /// Draws looping animations at rest. `PhaseAnimator` runs on its own clock and ignores
     /// `disablesAnimations`, so snapshot tests set this to render the same frame every time.
     @Entry var freezesMotion = false
+    /// The HUD is on the browser's toolbar, so its controls use the toolbar's corners.
+    @Entry var isHUDEmbedded = false
+}
+
+/// A pill control's shape: round ends in the floating HUD, the toolbar's corners on it.
+private struct HUDShape: Shape {
+    let height: CGFloat
+    @Environment(\.isHUDEmbedded) private var isHUDEmbedded
+
+    func path(in rect: CGRect) -> Path {
+        RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : height / 2).path(in: rect)
+    }
 }
 
 private struct PulseDot: View {

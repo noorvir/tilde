@@ -2,13 +2,14 @@ import AppKit
 import OSLog
 import ScreenCaptureKit
 
-/// Writes PNGs of the live Settings window, every page in light and dark, so a change can be
+/// Writes PNGs of the live Settings window (every page) and the browser window, in light and
+/// dark, so a change can be
 /// checked on the real window. Run `open -n /Applications/Tilde.app --args -captureSettings <folder>`.
 @MainActor
 enum SettingsCapture {
     private static let log = Logger(subsystem: "dev.tilde.app", category: "settings-capture")
 
-    static func run(_ settings: SettingsWindow, model: SettingsModel, to folder: URL) async {
+    static func run(_ settings: SettingsWindow, model: SettingsModel, browser: BrowserController, to folder: URL) async {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let states: [(name: String, page: SettingsWindow.Page, expanded: Set<String>)] = [
             ("general", .general, []), ("agents", .agents, []), ("agents-open", .agents, ["Claude", "Codex"]), ("shortcuts", .shortcuts, []),
@@ -27,10 +28,21 @@ enum SettingsCapture {
                 try? data.write(to: folder.appendingPathComponent("live-\(state.name)-\(suffix).png"))
             }
         }
+        settings.window?.close()
+
+        browser.show(URL(string: "https://example.com"))
+        for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+            browser.window?.appearance = NSAppearance(named: appearance)
+            try? await Task.sleep(for: .seconds(2))
+            if let window = browser.window, let data = await png(of: window) {
+                try? data.write(to: folder.appendingPathComponent("live-browser-\(suffix).png"))
+            }
+        }
         NSApp.terminate(nil)
     }
 
-    private static func png(of window: NSWindow) async -> Data? {
+    /// The window as it is on screen, as PNG, or nil without Screen Recording.
+    static func png(of window: NSWindow) async -> Data? {
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             guard let target = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else {

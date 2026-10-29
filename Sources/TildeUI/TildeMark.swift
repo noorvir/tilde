@@ -25,6 +25,47 @@ public enum TildeMark {
         return image
     }
 
+    /// The "Annotate" icon, 14 pt: the selection corners with a cursor arrow at the lower
+    /// right. A template image, so it takes the button's colour.
+    static let annotateIcon: NSImage = {
+        let image = NSImage(size: NSSize(width: 14, height: 14), flipped: false) { _ in
+            NSColor.black.set()
+            // The corners leave the lower right open for the arrow.
+            let corners = NSBezierPath()
+            let frame = NSRect(x: 1, y: 1, width: 12, height: 12)
+            let length: CGFloat = 3.5
+            corners.move(to: NSPoint(x: frame.minX, y: frame.maxY - length))
+            corners.line(to: NSPoint(x: frame.minX, y: frame.maxY))
+            corners.line(to: NSPoint(x: frame.minX + length, y: frame.maxY))
+            corners.move(to: NSPoint(x: frame.maxX - length, y: frame.maxY))
+            corners.line(to: NSPoint(x: frame.maxX, y: frame.maxY))
+            corners.line(to: NSPoint(x: frame.maxX, y: frame.maxY - length))
+            corners.move(to: NSPoint(x: frame.minX, y: frame.minY + length))
+            corners.line(to: NSPoint(x: frame.minX, y: frame.minY))
+            corners.line(to: NSPoint(x: frame.minX + length, y: frame.minY))
+            corners.lineWidth = 1.5
+            corners.lineCapStyle = .round
+            corners.lineJoinStyle = .round
+            corners.stroke()
+
+            // A cursor arrow with its tip in the middle, pointing up and left.
+            let arrow = NSBezierPath()
+            arrow.move(to: NSPoint(x: 6.5, y: 7.5))
+            arrow.line(to: NSPoint(x: 13, y: 5.2))
+            arrow.line(to: NSPoint(x: 10.2, y: 4.2))
+            arrow.line(to: NSPoint(x: 9.2, y: 1.2))
+            arrow.close()
+            arrow.lineJoinStyle = .round
+            arrow.lineWidth = 1
+            arrow.fill()
+            arrow.stroke()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Annotate"
+        return image
+    }()
+
     /// The app icon at `size` pixels: a white selection frame with a small white tilde on a
     /// blue rounded square with the standard macOS icon margin.
     public static func appIconImage(size: CGFloat) -> NSImage {

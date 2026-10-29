@@ -52,11 +52,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         } else {
             let title = controller.isPaused ? "Resume Annotation" : "Pause Annotation"
             menu.addItem(action(title, #selector(togglePause), shortcut: .togglePause))
+            let windowTitle = controller.scope == nil ? "Annotate a Specific Window" : "Annotate All Windows"
+            menu.addItem(action(windowTitle, #selector(toggleWindowScope)))
             menu.addItem(action("Cancel Annotation", #selector(cancelAnnotation)))
         }
         menu.addItem(.separator())
 
         menu.addItem(agentsItem())
+        menu.addItem(historyItem())
         menu.addItem(action("Open Browser", #selector(openBrowser)))
         let settingsItem = action("Settings", #selector(openSettings))
         settingsItem.keyEquivalent = ","
@@ -72,6 +75,49 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         versionItem.isEnabled = false
         menu.addItem(versionItem)
         menu.addItem(NSMenuItem(title: "Quit Tilde", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    }
+
+    // MARK: - History
+
+    /// The last five sessions, each restoring its notes (or showing History when it cannot be
+    /// restored), then Show All.
+    private func historyItem() -> NSMenuItem {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let records = controller.archive.all().prefix(5)
+        if records.isEmpty {
+            let none = NSMenuItem(title: "No sessions yet", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            submenu.addItem(none)
+        }
+        for record in records {
+            let count = record.notes.count
+            let title = "\(record.title) · \(count) \(count == 1 ? "note" : "notes") · \(record.updated.formatted(date: .abbreviated, time: .shortened))"
+            let entry = action(title, #selector(openHistoryEntry(_:)))
+            entry.representedObject = record.id
+            submenu.addItem(entry)
+        }
+        submenu.addItem(.separator())
+        submenu.addItem(action("Show All", #selector(showHistory)))
+
+        let item = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+
+    @objc private func openHistoryEntry(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let record = controller.archive.record(id) else {
+            return
+        }
+        if !record.notes.isEmpty, record.id != controller.session?.id {
+            controller.restore(record)
+        } else {
+            showHistory()
+        }
+    }
+
+    @objc private func showHistory() {
+        settings.show(.history)
     }
 
     // MARK: - Agents
@@ -212,15 +258,21 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         controller.cancel()
     }
 
+    /// Opens the browser and annotates only in it.
     @objc private func openBrowser() {
-        browser.show()
+        controller.annotateInBrowser()
+    }
+
+    @objc private func toggleWindowScope() {
+        controller.toggleWindowScope()
     }
 
     /// A `shortcut` shows that global shortcut.
     private func action(_ title: String, _ selector: Selector?, shortcut: ShortcutStore.Action? = nil) -> NSMenuItem {
         let entry = NSMenuItem(title: title, action: selector, keyEquivalent: "")
         entry.target = self
-        if let shortcut, let keys = controller.shortcuts.shortcut(for: shortcut) {
+        // A double tap cannot show as a key equivalent.
+        if let shortcut, let keys = controller.shortcuts.shortcut(for: shortcut)?.combo {
             entry.keyEquivalent = keys.keyEquivalent
             entry.keyEquivalentModifierMask = keys.modifierFlags
         }

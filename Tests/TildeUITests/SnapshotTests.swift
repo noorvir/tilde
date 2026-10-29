@@ -67,6 +67,52 @@ struct SnapshotTests {
         try await assertSettings(model, named: "settings-shortcuts-recording")
     }
 
+    @Test func settingsHistory() async throws {
+        let archive = Fixtures.archive()
+        archive.save(Fixtures.record(id: "s1", state: .active, notes: 3))
+        archive.save(Fixtures.record(id: "s2", client: "You", isLocal: true, state: .sent, notes: 1, updated: Date(timeIntervalSince1970: 1_792_990_000), pageURL: nil))
+        archive.save(Fixtures.record(id: "s3", client: "Claude Code", state: .cancelled, notes: 2, updated: Date(timeIntervalSince1970: 1_792_900_000), pageURL: "http://localhost:3000/"))
+        archive.flush()
+        let history = HistoryModel(archive: archive)
+        history.expanded = ["s1"]
+        try await assertSettings(try Fixtures.settingsModel(page: .history, history: history), named: "settings-history")
+    }
+
+    @Test func restorePrompt() async throws {
+        let state = RestorePromptState()
+        state.record = Fixtures.record(notes: 3, updated: Date().addingTimeInterval(-720))
+        state.isShown = true
+        try await Snapshot.assertView(RestorePromptView(state: state), size: CGSize(width: 560, height: 76), named: "restore-prompt")
+    }
+
+    // MARK: - Browser notes
+
+    @Test func notesPanelWithActiveAndMutedNotes() async throws {
+        let browser = BrowserController()
+        var drafts = Fixtures.drafts(3)
+        drafts[0].anchor = PageAnchor(url: "https://example.test/docs", selector: "td > .chip", text: "Alex", documentRect: .zero)
+        drafts[1].anchor = PageAnchor(url: "https://example.test/docs", selector: "button", text: "Share", documentRect: .zero)
+        drafts[2].anchor = PageAnchor(url: "https://example.test/settings", selector: nil, text: nil, documentRect: .zero)
+        controller.setStateForTesting(session: Fixtures.session(), drafts: drafts)
+        browser.setStateForTesting(pageURL: "https://example.test/docs", anchorRects: [drafts[0].id: CGRect(x: 10, y: 10, width: 80, height: 20)])
+        let panel = NotesPanel(controller: controller, browser: browser).frame(width: BrowserMetrics.panelWidth, height: 520)
+        try await Snapshot.assertView(panel.background(Color(white: 0.1)), size: CGSize(width: BrowserMetrics.panelWidth, height: 520), named: "browser-notes")
+    }
+
+    @Test func browserToolbarWithHUD() async throws {
+        let browser = BrowserController()
+        let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive())
+        // Lets the controller's first store update pass, as `Fixtures.controller()` does.
+        try await Task.sleep(for: .milliseconds(20))
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), isHUDInBrowser: true)
+        let size = CGSize(width: BrowserMetrics.minWindowWidth, height: BrowserMetrics.toolbarHeight)
+        let toolbar = BrowserToolbar(browser: browser, controller: controller).background(Color(white: 0.1))
+        try await Snapshot.assertView(toolbar, size: size, named: "browser-toolbar-annotating")
+
+        controller.setStateForTesting(session: Fixtures.session(), drafts: [], isPaused: true, isHUDInBrowser: true)
+        try await Snapshot.assertView(toolbar, size: size, named: "browser-toolbar-paused")
+    }
+
     // MARK: - HUD
 
     private func assertHUD(_ name: String, height: CGFloat = 80, sourceLocation: SourceLocation = #_sourceLocation) async throws {
@@ -103,6 +149,11 @@ struct SnapshotTests {
         try await assertHUD("hud-confirm-cancel-1")
     }
 
+    @Test func hudConfirmRestore() async throws {
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), confirmation: .restore(Fixtures.record(notes: 3)))
+        try await assertHUD("hud-confirm-restore")
+    }
+
     @Test func hudSent() async throws {
         controller.setStateForTesting(session: nil, phase: .sent(confirmation: "Sent to Codex"))
         try await assertHUD("hud-sent")
@@ -111,6 +162,16 @@ struct SnapshotTests {
     @Test func hudCopied() async throws {
         controller.setStateForTesting(session: nil, phase: .sent(confirmation: "Copied to clipboard"))
         try await assertHUD("hud-copied")
+    }
+
+    @Test func hudScopedToOneWindow() async throws {
+        controller.setStateForTesting(session: Fixtures.session(), scope: Fixtures.window)
+        try await assertHUD("hud-scoped")
+    }
+
+    @Test func hudChoosingAWindow() async throws {
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(1), isPickingWindow: true)
+        try await assertHUD("hud-choosing-window")
     }
 
     @Test func hudClientIcon() async throws {
@@ -215,5 +276,23 @@ struct SnapshotTests {
     @Test func overlayMarkers() async throws {
         controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(3))
         try await assertOverlay("overlay-markers")
+    }
+
+    /// With the browser's notes panel hidden, notes on the open page are drawn like any others,
+    /// where the page reports their elements.
+    @Test func overlayPageNotesWithPanelHidden() async throws {
+        var drafts = Fixtures.drafts(2)
+        drafts[0].anchor = PageAnchor(url: "https://example.test/docs", selector: "td > .chip", text: "Alex", documentRect: .zero)
+        drafts[1].anchor = PageAnchor(url: "https://example.test/docs", selector: "button", text: "Share", documentRect: .zero)
+        controller.setStateForTesting(session: Fixtures.session(), drafts: drafts)
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 340
+        // The page fills the overlay; its top-left corner is the screen's.
+        controller.browser.setStateForTesting(
+            pageURL: "https://example.test/docs",
+            anchorRects: [drafts[0].id: CGRect(x: 40, y: 60, width: 160, height: 40), drafts[1].id: CGRect(x: 260, y: 180, width: 120, height: 60)],
+            pageFrame: CGRect(x: 0, y: primaryHeight - 340, width: 520, height: 340),
+            showsNotes: false
+        )
+        try await assertOverlay("overlay-page-notes")
     }
 }

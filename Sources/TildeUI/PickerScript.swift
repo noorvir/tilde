@@ -1,6 +1,8 @@
 /// Injected into every page of Tilde's browser. `window.__tilde.inspect(x, y)` returns a
 /// JSON string describing the element at a viewport point (fields match `WebElement`,
-/// plus `rect`, `color` and `font` for the hover label), or null.
+/// plus `rect`, scroll, `color` and `font` for the hover label), or null.
+/// `window.__tilde.resolve(anchors)` finds annotated elements again, and the page posts
+/// "changed" to the `tilde` message handler when they may have moved.
 let pickerScript = #"""
 (() => {
   if (window.__tilde) return;
@@ -72,7 +74,78 @@ let pickerScript = #"""
     };
   }
 
+  // Tells Tilde that elements may have moved: on scroll, resize, DOM changes and in-page
+  // navigation (pushState, popstate). At most once per frame.
+  let notifyQueued = false;
+  function notify() {
+    if (notifyQueued) return;
+    notifyQueued = true;
+    requestAnimationFrame(() => {
+      notifyQueued = false;
+      const handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.tilde;
+      if (handler) handler.postMessage('changed');
+    });
+  }
+  addEventListener('scroll', notify, { passive: true, capture: true });
+  addEventListener('resize', notify);
+  addEventListener('popstate', notify);
+  addEventListener('hashchange', notify);
+  for (const name of ['pushState', 'replaceState']) {
+    const original = history[name];
+    history[name] = function (...args) {
+      const result = original.apply(this, args);
+      notify();
+      return result;
+    };
+  }
+  let mutationTimer = null;
+  new MutationObserver(() => {
+    clearTimeout(mutationTimer);
+    mutationTimer = setTimeout(notify, 150);
+  }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+
+  const textOf = (element) => (element.innerText || element.textContent || '').trim();
+
+  // The smallest element whose text starts with the snippet, for anchors whose selector broke.
+  function findByText(snippet) {
+    const needle = snippet.slice(0, 60);
+    let best = null;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+    for (let node = walker.nextNode(), seen = 0; node && seen < 5000; node = walker.nextNode(), seen++) {
+      if (textOf(node).startsWith(needle) && (!best || best.contains(node))) best = node;
+    }
+    return best;
+  }
+
   window.__tilde = {
+    /// Viewport rects for anchors: the selector first (if its text still matches), then the
+    /// text, then a region's document rect. null when the element is not on the page.
+    resolve(anchors) {
+      const result = {};
+      for (const anchor of anchors) {
+        let element = null;
+        if (anchor.selector) {
+          try { element = document.querySelector(anchor.selector); } catch (error) { element = null; }
+          if (element && anchor.text && !textOf(element).startsWith(anchor.text.slice(0, 60))) element = null;
+          if (!element && anchor.text) element = findByText(anchor.text);
+        }
+        if (element) {
+          const r = element.getBoundingClientRect();
+          result[anchor.id] = { x: r.x, y: r.y, width: r.width, height: r.height };
+        } else if (!anchor.selector) {
+          const r = anchor.rect;
+          result[anchor.id] = { x: r.x - scrollX, y: r.y - scrollY, width: r.width, height: r.height };
+        } else {
+          result[anchor.id] = null;
+        }
+      }
+      return JSON.stringify(result);
+    },
+
+    scroll() {
+      return [scrollX, scrollY];
+    },
+
     inspect(x, y) {
       const element = document.elementFromPoint(x, y);
       if (!element) return null;
@@ -94,6 +167,8 @@ let pickerScript = #"""
         source: react.source,
         styles: styles.text,
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        scrollX: scrollX,
+        scrollY: scrollY,
         color: style.color,
         font: styles.font,
       });

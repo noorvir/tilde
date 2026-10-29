@@ -13,6 +13,15 @@ struct Picked {
     let details: [String]
     /// The window the element belongs to; set by `ElementPicker.pick`.
     var window: ElementPicker.WindowInfo?
+    /// Where the element is on its web page; set for elements in Tilde's browser.
+    var anchor: PageAnchor?
+    /// The Accessibility element, for elements in other apps, so a note can follow it.
+    var tracked: TrackedElement?
+
+    /// The same element after its window moved by `delta`.
+    func moved(by delta: CGVector) -> Picked {
+        Picked(frame: frame.offsetBy(dx: delta.dx, dy: delta.dy), element: element, chip: chip, details: details, window: window, anchor: anchor, tracked: tracked)
+    }
 }
 
 /// Finds the element under a screen point: DOM data in Tilde's browser, the Accessibility
@@ -26,16 +35,22 @@ final class ElementPicker {
         self.browser = browser
     }
 
-    func pick(at point: CGPoint) async -> Picked? {
-        guard let window = window(at: point) else {
+    /// With `scope`, picks only in that window, also where another window covers it.
+    func pick(at point: CGPoint, in scope: WindowInfo? = nil) async -> Picked? {
+        guard let window = window(at: point, in: scope) else {
             return nil
         }
 
         var picked: Picked?
         if window.number == browser.windowNumber {
-            picked = await browser.inspect(at: point)
+            // Only the page knows its elements; Accessibility would give Tilde's own views.
+            guard var element = await browser.inspect(at: point) else {
+                return nil
+            }
+            element.window = window
+            return element
         }
-        if picked == nil, AXIsProcessTrusted() {
+        if AXIsProcessTrusted() {
             picked = await withCheckedContinuation { continuation in
                 accessibilityQueue.async {
                     continuation.resume(returning: Self.accessibilityPick(at: point, in: window))
@@ -50,7 +65,7 @@ final class ElementPicker {
 
     // MARK: - Windows
 
-    struct WindowInfo: Sendable {
+    struct WindowInfo: Sendable, Equatable {
         let number: Int
         let pid: pid_t
         let app: String
@@ -58,8 +73,56 @@ final class ElementPicker {
         let frame: CGRect
     }
 
-    /// The topmost window under a Quartz point that annotate mode can pick from.
-    func window(at point: CGPoint) -> WindowInfo? {
+    /// The whole window under a Quartz point, for choosing the window to annotate.
+    func windowTarget(at point: CGPoint) -> Picked? {
+        guard let window = window(at: point) else {
+            return nil
+        }
+        var picked = windowPick(window)
+        picked.window = window
+        return picked
+    }
+
+    /// Brings an app to the front, such as the agent's chat app after a session. Since macOS 14
+    /// an app in the background cannot activate another one, but Accessibility can, so this
+    /// uses it when Tilde is allowed and falls back to asking the app.
+    static func bringToFront(_ app: NSRunningApplication) {
+        if AXIsProcessTrusted() {
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetAttributeValue(element, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        }
+        app.activate()
+    }
+
+    /// The window with this number as it is now, or nil when it is closed or hidden.
+    func currentWindow(number: Int) -> WindowInfo? {
+        // Tilde's own windows from AppKit, which knows of them before the window list does.
+        if let own = NSApp.window(withWindowNumber: number) {
+            guard own.isVisible, !own.isMiniaturized else {
+                return nil
+            }
+            let title = own.title.isEmpty ? nil : own.title
+            return WindowInfo(number: number, pid: ProcessInfo.processInfo.processIdentifier, app: "Tilde", title: title, frame: own.frame.flipped)
+        }
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(number)) as? [[String: Any]] ?? []
+        guard let info = list.first, info[kCGWindowIsOnscreen as String] as? Bool == true,
+              let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+              let frame = CGRect(dictionaryRepresentation: bounds)
+        else {
+            return nil
+        }
+        let pid = info[kCGWindowOwnerPID as String] as? pid_t ?? 0
+        let app = info[kCGWindowOwnerName as String] as? String ?? "App"
+        let title = (info[kCGWindowName as String] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return WindowInfo(number: number, pid: pid, app: app, title: title, frame: frame)
+    }
+
+    /// The topmost window under a Quartz point that annotate mode can pick from, or `scope`
+    /// (as it is now) when it is set and holds the point.
+    func window(at point: CGPoint, in scope: WindowInfo? = nil) -> WindowInfo? {
+        if let scope {
+            return currentWindow(number: scope.number).flatMap { $0.frame.contains(point) ? $0 : nil }
+        }
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let screenFrames = NSScreen.screens.map(\.frame.flipped)
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -139,14 +202,16 @@ final class ElementPicker {
             path: compactPath(ancestors.nodes)
         )
 
-        let chip = roleDescription ?? String(role.dropFirst(role.hasPrefix("AX") ? 2 : 0))
+        // The plain role name, capitalised like the role description ("text" from AXStaticText).
+        let chip = roleDescription.map { $0.prefix(1).uppercased() + $0.dropFirst() } ?? friendlyRoleName(role)
         var details = ["\(chip)  \(Int(frame.width))×\(Int(frame.height))"]
         if let name = title ?? label ?? value {
             details.append("\"\(name.prefix(40))\"")
         }
         details.append(window.app)
 
-        return Picked(frame: frame, element: .native(native), chip: chip, details: details)
+        let tracked = TrackedElement(element: element, pid: window.pid, identity: ElementTracker.identity(of: element))
+        return Picked(frame: frame, element: .native(native), chip: chip, details: details, tracked: tracked)
     }
 
     nonisolated private static func attribute<T>(_ element: AXUIElement, _ name: String) -> T? {

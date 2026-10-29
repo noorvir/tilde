@@ -104,6 +104,12 @@ final class Harness {
         if session.url == nil {
             browser.show(URL(string: "http://127.0.0.1:\(pagePort)/"))
         }
+        if session.url != nil {
+            try await until("the session is limited to the browser window") { self.isScopedToBrowser }
+            try check(isScopedToBrowser, "a session that opens a page annotates only the browser window")
+            try check(controller.isPaused, "a session that opens a page starts paused, so the user can browse")
+            controller.togglePause()
+        }
         try await until("the page is loaded", timeout: 30) { await self.pageIsReady() }
         // On a Mac with more displays, other apps' windows can cover the page. Keep it on the
         // main display and above normal windows so hover and clicks reach it.
@@ -112,8 +118,65 @@ final class Harness {
             let size = page.frame.size
             page.level = .floating
             page.setFrame(NSRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width, height: size.height), display: true)
+            // This process runs in the background, so another app is in front.
+            controller.frontmostAppChanged(to: ProcessInfo.processInfo.processIdentifier)
+
+            // The HUD is in the browser's toolbar, and the floating one is hidden.
+            try check(controller.isHUDInBrowser && hudWindow?.isVisible != true, "the browser's toolbar hosts the HUD and the floating HUD is hidden")
+
+            // The overlay sits on the page only and follows the window with no lag.
+            let overlay = try require(overlays.first, "an overlay")
+            try check(overlays.count == 1 && overlay.isWindowSized, "a session on one window has one overlay on that window")
+            try check(overlay.frame == browser.pageFrame && overlay.frame.maxY < page.frame.maxY - 40, "the overlay covers the page, not the toolbar")
+            let moved = page.frame.offsetBy(dx: -40, dy: 30)
+            let start = Date()
+            page.setFrame(moved, display: true)
+            try check(overlay.frame == browser.pageFrame, "the overlay follows the window in the same run loop turn, got \(overlay.frame) for \(browser.pageFrame as Any)")
+            print("overlay followed the window in \(Int(Date().timeIntervalSince(start) * 1_000_000)) µs")
+            page.setFrame(moved.offsetBy(dx: 40, dy: -30), display: true)
+
+            // Another app in front pauses the session; the window's app coming back resumes it.
+            controller.frontmostAppChanged(to: 1)
+            try check(controller.isAutoPaused && overlay.ignoresMouseEvents, "another app in front pauses the session and lets clicks through")
+            controller.frontmostAppChanged(to: ProcessInfo.processInfo.processIdentifier)
+            try check(!controller.isAutoPaused && !overlay.ignoresMouseEvents, "the window's app in front again resumes the session")
+
+            // A click in the browser, such as on its Annotate button, raises it over the
+            // overlay; the overlay goes back above it, also after pause and resume.
+            func overlayIsAbovePage() -> Bool {
+                let above = CGWindowListCopyWindowInfo([.optionOnScreenAboveWindow], CGWindowID(page.windowNumber)) as? [[String: Any]] ?? []
+                return above.contains { $0[kCGWindowNumber as String] as? Int == overlay.windowNumber }
+            }
+            page.makeKeyAndOrderFront(nil)
+            try await until("the overlay goes back above the browser after a click in it", timeout: 1) { overlayIsAbovePage() }
+            controller.togglePause()
+            page.makeKeyAndOrderFront(nil)
+            controller.togglePause()
+            try await until("the overlay is above the browser after pause and resume", timeout: 1) { overlayIsAbovePage() }
+            try check(overlayIsAbovePage(), "hover reaches the page after a click in the browser and after pause and resume")
         }
         await render("01-start")
+
+        // Scrolling while annotating scrolls the page under the pointer.
+        if isScopedToBrowser {
+            _ = try await browser.webView.evaluateJavaScript("document.body.style.minHeight = '4000px'; window.scrollTo(0, 0)")
+            let page = try require(NSApp.windows.first { $0.windowNumber == self.browser.windowNumber }, "the browser window")
+            let point = CGPoint(x: page.frame.midX, y: page.frame.midY).flipped
+            let event = try require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -300, wheel2: 0, wheel3: 0), "a scroll event")
+            event.location = point
+            let scroll = try require(NSEvent(cgEvent: event), "a scroll event")
+            // The page's new height reaches WebKit's scrolling on its next frame, so scroll until it does.
+            try await until("scrolling while annotating scrolls the page", timeout: 5) {
+                self.controller.scroll(scroll, at: point)
+                try? await Task.sleep(for: .milliseconds(100))
+                return ((try? await self.browser.webView.evaluateJavaScript("window.scrollY")) as? Double ?? 0) > 0
+            }
+            let scrolled = (try? await browser.webView.evaluateJavaScript("window.scrollY")) as? Double ?? 0
+            try check(scrolled > 0, "scrolling while annotating scrolls the page, scrollY \(scrolled)")
+            _ = try await browser.webView.evaluateJavaScript("document.body.style.minHeight = ''; window.scrollTo(0, 0)")
+        } else {
+            throw CheckFailure(description: "the scroll check needs a session on the browser")
+        }
 
         // Element: hover, click, comment with Return.
         let chip = try await screenRect(ofFirst: "tbody tr:nth-child(2) td:nth-child(3) .chip")
@@ -125,6 +188,14 @@ final class Harness {
             return self.controller.hover?.chip == "span"
         }
         try check(controller.hover?.chip == "span", "hover chip is span, got \(controller.hover?.details ?? [])")
+
+        // Moving the browser moves the highlight with the page at once.
+        if let page = NSApp.windows.first(where: { $0.windowNumber == browser.windowNumber }), let before = controller.hover?.frame {
+            page.setFrameOrigin(NSPoint(x: page.frame.minX + 40, y: page.frame.minY - 30))
+            let after = controller.hover?.frame
+            page.setFrameOrigin(NSPoint(x: page.frame.minX - 40, y: page.frame.minY + 30))
+            try check(after == before.offsetBy(dx: 40, dy: 30), "the highlight moves with the browser window, got \(after as Any) for \(before)")
+        }
         await render("02-hover")
 
         mouse(.leftMouseDown, at: chipCenter)
@@ -139,6 +210,41 @@ final class Harness {
         // Preview: opens on the draft, shows its comment, closes and gives annotate mode back.
         let first = controller.drafts[0]
         try await until("the first screenshots are captured") { self.controller.drafts.first?.annotation.image != nil }
+
+        // The notes panel: the note is active on its page, muted on another, active again
+        // after going back.
+        try await until("the note is found on its page") { self.browser.anchorRects[self.controller.drafts[0].id] != nil }
+        try check(browser.showsNotes, "the browser shows the notes panel")
+        await captureBrowser("08-browser-notes")
+        let firstPage = browser.pageURL
+        browser.show(URL(string: "http://127.0.0.1:\(pagePort)/other"))
+        try await until("another page loads") { self.browser.pageURL != firstPage && !self.browser.isLoading }
+        try await until("the note is muted on another page") { self.browser.anchorRects.isEmpty }
+        await captureBrowser("09-browser-other-page")
+        browser.webView.goBack()
+        try await until("the note is active again after going back") { self.browser.anchorRects[self.controller.drafts[0].id] != nil }
+        try check(browser.pageURL == firstPage, "back on the first page, its note is active with a line")
+        await captureBrowser("10-browser-back")
+
+        // When the page changes under a note, its outline and line follow the element; the
+        // overlay draws no second, fixed outline for it.
+        let before = try require(browser.anchorRects[controller.drafts[0].id], "the note's rect")
+        _ = try await browser.webView.evaluateJavaScript("document.body.style.paddingTop = '120px'")
+        try await until("the note follows its element down") {
+            (self.browser.anchorRects[self.controller.drafts[0].id]?.minY ?? 0) >= before.minY + 119
+        }
+        await captureBrowser("11-browser-page-moved")
+        _ = try await browser.webView.evaluateJavaScript("document.body.style.paddingTop = ''")
+
+        // A muted note opens its page and shows its element there.
+        let note = controller.drafts[0].id
+        browser.show(URL(string: "http://127.0.0.1:\(pagePort)/other"))
+        try await until("another page loads again") { self.browser.pageURL != firstPage && !self.browser.isLoading }
+        browser.reveal(note)
+        try await until("a muted note opens its page and flashes its element", timeout: 5) {
+            self.browser.pageURL == firstPage && self.browser.flashedNote == note
+        }
+        try check(browser.selectedNote == note, "the opened note is selected")
         controller.preview(first.id)
         try await until("the preview opens") { self.previewWindow?.isVisible == true }
         if let previewWindow {
@@ -155,7 +261,7 @@ final class Harness {
         let pausedWidth = hudPillWidth
         controller.togglePause()
         controller.showsList = true
-        if let hudWindow {
+        if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04d-hud-list")
         }
         controller.showsList = false
@@ -164,12 +270,12 @@ final class Harness {
         // Clear all and cancel ask first, in the pill, at the same width; Cancel keeps everything.
         controller.requestClearAll()
         let confirmWidth = hudPillWidth
-        if let hudWindow {
+        if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04e-confirm-clear")
         }
         controller.dismissConfirmation()
         controller.requestCancel()
-        if let hudWindow {
+        if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04f-confirm-cancel")
         }
         controller.dismissConfirmation()
@@ -179,7 +285,7 @@ final class Harness {
         )
 
         // The pointer over the pill is over Tilde's UI; the empty panel below the HUD is not.
-        if let hudWindow {
+        if let hudWindow, hudWindow.isVisible {
             let pill = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 16 - HUDMetrics.height / 2).flipped
             let below = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 600).flipped
             try check(controller.isOverPanel(pill) && !controller.isOverPanel(below), "the pill counts as UI and the empty panel below it does not")
@@ -209,7 +315,7 @@ final class Harness {
             return false
         }
         await render("07-sent")
-        if let hudWindow {
+        if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "07b-hud-sent")
         }
 
@@ -217,6 +323,15 @@ final class Harness {
             throw CheckFailure(description: "session is not sent")
         }
         try check(feedback.annotations.count == 2, "two annotations sent")
+        // The session is kept in the history with its notes and images.
+        controller.archive.flush()
+        try await until("the sent session is saved with its images", timeout: 5) {
+            self.controller.archive.flush()
+            guard let record = self.controller.archive.record(session.id), let note = record.notes.first else {
+                return false
+            }
+            return record.state == .sent && record.notes.count == 2 && self.controller.archive.images(of: note, in: record.id).image != nil
+        }
         try check(folder.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("feedback.md").path) } == true, "inbox feedback.md written")
         print("inbox: \(folder?.path ?? "none")")
 
@@ -239,8 +354,7 @@ final class Harness {
         let imageCount = feedback.annotations.flatMap { [$0.image, $0.contextImage] }.compactMap { $0 }.count
         try check(result.images.count == imageCount && imageCount >= 2, "agent receives \(imageCount) images, got \(result.images.count)")
 
-        // With Screen Recording: the close-up is the element alone (4 pt around it) and the
-        // context is its whole window.
+        // The close-up is the element alone (4 pt around it) and the context is its page.
         if let closeUp = feedback.annotations[0].image.flatMap(NSBitmapImageRep.init(data:)),
            let context = feedback.annotations[0].contextImage.flatMap(NSBitmapImageRep.init(data:)),
            let page = NSApp.windows.first(where: { $0.windowNumber == browser.windowNumber })
@@ -248,10 +362,27 @@ final class Harness {
             let closeUpRatio = Double(closeUp.pixelsWide) / Double(closeUp.pixelsHigh)
             let chipRatio = (chip.width + 8) / (chip.height + 8)
             try check(abs(closeUpRatio - chipRatio) < 0.1, "close-up is the element alone, got \(closeUp.pixelsWide)×\(closeUp.pixelsHigh) for \(chip.size)")
+            // In Tilde's browser, the context is the visible page, drawn by the web view.
             let contextRatio = Double(context.pixelsWide) / Double(context.pixelsHigh)
-            let windowRatio = page.frame.width / page.frame.height
-            try check(abs(contextRatio - windowRatio) < 0.05, "context is the whole window, got \(context.pixelsWide)×\(context.pixelsHigh) for \(page.frame.size)")
+            let pageFrame = browser.pageFrame ?? page.frame
+            let pageRatio = pageFrame.width / pageFrame.height
+            try check(abs(contextRatio - pageRatio) < 0.05, "context is the visible page, got \(context.pixelsWide)×\(context.pixelsHigh) for \(pageFrame.size)")
         }
+
+        // Open Browser: a session limited to the browser that ends its scope when the
+        // browser closes.
+        try await until("the first session is over") { self.controller.session == nil }
+        controller.annotateInBrowser()
+        try await until("Open Browser limits the session to the browser") { self.isScopedToBrowser }
+        try check(controller.isPaused, "Open Browser starts paused")
+        browser.close()
+        try await until("the scope ends when the browser closes", timeout: 5) { self.controller.scope == nil }
+        try check(controller.notice == "Window closed", "the HUD says the window closed")
+        controller.cancel()
+    }
+
+    private var isScopedToBrowser: Bool {
+        controller.scope != nil && controller.scope?.number == browser.windowNumber
     }
 
     // MARK: - Page
@@ -354,6 +485,15 @@ final class Harness {
     // MARK: - Rendering
 
     /// Renders Tilde's visible windows into one screen-sized PNG, back to front.
+    /// The browser window as it is on screen (needs Screen Recording), into build/e2e.
+    private func captureBrowser(_ name: String) async {
+        try? await Task.sleep(for: .milliseconds(400))
+        guard let window = browser.window, let data = await SettingsCapture.png(of: window) else {
+            return
+        }
+        try? data.write(to: outputFolder.appendingPathComponent("\(name).png"))
+    }
+
     private func render(_ name: String) async {
         try? await Task.sleep(for: .milliseconds(250))
         guard let screen = NSScreen.screens.first else {

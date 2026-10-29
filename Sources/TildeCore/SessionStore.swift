@@ -39,6 +39,10 @@ public final class SessionStore: ObservableObject {
     private var waiters: [String: [UUID: CheckedContinuation<State, Never>]] = [:]
     private let finishedLimit = 50
 
+    /// Asked for a session id this store does not know, such as an agent waiting again for a
+    /// session from before Tilde restarted. Returns whether it started that session again.
+    public var reattach: ((String) -> Bool)?
+
     public init() {}
 
     public var active: Session? {
@@ -54,10 +58,11 @@ public final class SessionStore: ObservableObject {
         sessions.first { $0.id == id }
     }
 
-    public func start(client: String, url: URL?, isLocal: Bool = false, capturesContext: Bool = true) -> Session {
+    /// `id`: a session's own id when it starts again after Tilde restarted.
+    public func start(id: String? = nil, client: String, url: URL?, isLocal: Bool = false, capturesContext: Bool = true) -> Session {
         let state: State = active == nil ? .annotating : .queued
         let session = Session(
-            id: Self.newID(), client: client, url: url,
+            id: id ?? Self.newID(), client: client, url: url,
             isLocal: isLocal, capturesContext: capturesContext, state: state
         )
         sessions.append(session)
@@ -67,6 +72,9 @@ public final class SessionStore: ObservableObject {
     /// Returns the session state once it finishes, or its current state after `seconds`.
     /// Returns nil for an unknown session.
     public func wait(for id: String, seconds: Double) async -> State? {
+        if session(id) == nil, reattach?(id) != true {
+            return nil
+        }
         guard let session = session(id) else {
             return nil
         }

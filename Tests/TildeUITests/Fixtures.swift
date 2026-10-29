@@ -9,8 +9,30 @@ import AppKit
 enum Fixtures {
     /// A controller with an empty store. Waits for the store's first update, which arrives
     /// on the next run loop pass and would otherwise reset the state a test sets.
+    /// An empty archive in a temporary folder.
+    static func archive() -> SessionArchive {
+        SessionArchive(root: FileManager.default.temporaryDirectory.appendingPathComponent("tilde-sessions-\(UUID().uuidString)", isDirectory: true))
+    }
+
+    /// A saved session with the fixture drafts' notes.
+    static func record(
+        id: String = "a1b2c3d4", client: String = "Codex", isLocal: Bool = false, state: SessionRecord.State = .active,
+        notes count: Int = 2, updated: Date = Date(timeIntervalSince1970: 1_793_000_000), pageURL: String? = "https://example.test/docs"
+    ) -> SessionRecord {
+        let notes = drafts(count, withImages: false).map { draft in
+            SessionRecord.Note(
+                id: draft.id, comment: draft.annotation.comment, target: draft.annotation.target, frame: draft.annotation.frame,
+                marker: draft.marker, chip: draft.chip, anchor: draft.anchor
+            )
+        }
+        return SessionRecord(
+            id: id, created: updated.addingTimeInterval(-300), updated: updated, client: client, isLocal: isLocal, state: state,
+            pageURL: pageURL, scopeApp: nil, notes: notes, reportFolder: nil
+        )
+    }
+
     static func controller() async throws -> AnnotationController {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController())
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive())
         try await Task.sleep(for: .milliseconds(20))
         return controller
     }
@@ -102,6 +124,9 @@ enum Fixtures {
         return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
     }
 
+    /// A window that annotations can be limited to.
+    static let window = ElementPicker.WindowInfo(number: 4242, pid: 999_999, app: "Safari", title: "Docs", frame: CGRect(x: 100, y: 100, width: 800, height: 600))
+
     // MARK: - Agent apps
 
     /// A blue rounded square in place of the apps' icons.
@@ -136,11 +161,12 @@ enum Fixtures {
     }
 
     /// Settings with fixed agent apps, default shortcuts and a fixed version.
-    static func settingsModel(page: SettingsWindow.Page) throws -> SettingsModel {
+    static func settingsModel(page: SettingsWindow.Page, history: HistoryModel? = nil) throws -> SettingsModel {
         let defaults = UserDefaults(suiteName: "tilde-tests-\(UUID().uuidString)")!
         let model = SettingsModel(
-            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: defaults), server: ServerState(port: 7311), version: "0.1.0 (42)",
-            permissions: { (true, false) }
+            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: defaults), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
+            server: ServerState(port: 7311), version: "0.1.0 (42)",
+            browserProfiles: { [] }, permissions: { (true, false) }
         )
         model.page = page
         return model

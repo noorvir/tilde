@@ -8,4 +8,5 @@ set -eu
 cd "$(dirname "$0")/.."
 swift build --product tilde-e2e
 # Keep test batches out of the user's inbox, where /mcp__tilde__feedback would find them.
-TILDE_INBOX="$PWD/build/e2e/inbox" exec .build/debug/tilde-e2e --out build/e2e "$@"
+rm -rf "$PWD/build/e2e/sessions"
+TILDE_INBOX="$PWD/build/e2e/inbox" TILDE_SESSIONS="$PWD/build/e2e/sessions" exec .build/debug/tilde-e2e --out build/e2e "$@"

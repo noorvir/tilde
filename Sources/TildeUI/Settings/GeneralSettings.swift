@@ -53,6 +53,8 @@ struct GeneralSettings: View {
                 }
             }
 
+            BrowserSettings(browser: model.browser, profiles: model.browserProfiles())
+
             SettingsSection("HUD") {
                 SettingsRow(title: "Position", subtitle: "Back to the top centre of each screen") {
                     Button("Reset", action: model.onResetHUD)
@@ -101,6 +103,101 @@ private struct PermissionRow: View {
             if !isAllowed {
                 Button("Open Settings", action: openSettings)
                     .buttonStyle(SettingsButtonStyle())
+            }
+        }
+    }
+}
+
+/// Logins for Tilde's browser: import a Chromium profile's cookies, or clear the browser.
+private struct BrowserSettings: View {
+    let browser: BrowserController
+    let profiles: [ChromiumProfile]
+    @State private var profile: ChromiumProfile?
+    @State private var isImporting = false
+    @State private var error: String?
+    @State private var asksToClear = false
+    @AppStorage("BrowserImport.summary") private var lastImport = ""
+
+    var body: some View {
+        SettingsSection("Browser") {
+            SettingsRow(title: "Import logins", subtitle: subtitle, subtitleIsError: error != nil) {
+                HStack(spacing: 10) {
+                    if profiles.count > 1 {
+                        Picker("Profile", selection: $profile) {
+                            ForEach(profiles, id: \.self) { profile in
+                                Text(profile.title).tag(Optional(profile))
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    Button(action: importLogins) {
+                        // While importing, a spinner takes the label's place at the same width.
+                        ZStack {
+                            Text("Import").opacity(isImporting ? 0 : 1)
+                            if isImporting {
+                                ProgressView().controlSize(.small)
+                            }
+                        }
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                    .disabled(profiles.isEmpty || isImporting)
+                    .accessibilityLabel("Import")
+                }
+            }
+            SettingsDivider()
+            SettingsRow(title: "Browser data", subtitle: "Cookies, logins and cache of Tilde's browser") {
+                Button("Clear") {
+                    asksToClear = true
+                }
+                .buttonStyle(SettingsButtonStyle())
+            }
+        }
+        .onAppear {
+            profile = profile ?? profiles.first
+        }
+        .confirmationDialog("Clear Tilde's browser data?", isPresented: $asksToClear) {
+            Button("Clear", role: .destructive) {
+                Task {
+                    await browser.clearData()
+                    lastImport = ""
+                }
+            }
+        } message: {
+            Text("You will be logged out of every site in Tilde's browser.")
+        }
+    }
+
+    private var subtitle: String {
+        if let error {
+            return error
+        }
+        if profiles.isEmpty {
+            return "No Chrome, Arc, Brave or Edge profile found"
+        }
+        if !lastImport.isEmpty {
+            return lastImport
+        }
+        return "From \(profile?.browser.name ?? "Chrome") into Tilde's browser. Stays on this Mac."
+    }
+
+    /// Reads the profile's cookies off the main thread (macOS may ask for the Keychain
+    /// password), then adds them to the browser. Only counts are kept.
+    private func importLogins() {
+        guard let profile else {
+            return
+        }
+        isImporting = true
+        error = nil
+        Task {
+            defer { isImporting = false }
+            do {
+                let result = try await Task.detached { try BrowserCookies.cookies(of: profile) }.value
+                await browser.add(result.cookies)
+                let time = Date().formatted(date: .abbreviated, time: .shortened)
+                lastImport = "\(result.cookies.count) cookies from \(profile.title), \(time)"
+            } catch {
+                self.error = "Could not import: \(error)"
             }
         }
     }

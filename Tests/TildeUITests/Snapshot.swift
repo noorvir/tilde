@@ -40,6 +40,9 @@ enum Snapshot {
         view.layoutSubtreeIfNeeded()
         // Lets SwiftUI commit its layers; animations are off, so the result is final.
         try await Task.sleep(for: .milliseconds(150))
+        // Overlay scrollers whatever the Mac's scroll bar setting (it follows a connected
+        // mouse), so scroll views have the same width everywhere.
+        useOverlayScrollers(in: view)
         view.layoutSubtreeIfNeeded()
 
         let context = try #require(bitmapContext(width: Int(size.width) * scale, height: Int(size.height) * scale))
@@ -58,6 +61,15 @@ enum Snapshot {
         }
         window.contentView = nil
         return try #require(context.makeImage())
+    }
+
+    private static func useOverlayScrollers(in view: NSView) {
+        if let scrollView = view as? NSScrollView {
+            scrollView.scrollerStyle = .overlay
+        }
+        for subview in view.subviews {
+            useOverlayScrollers(in: subview)
+        }
     }
 
     private static func bitmapContext(width: Int, height: Int) -> CGContext? {
