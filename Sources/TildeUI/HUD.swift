@@ -258,7 +258,7 @@ struct HUDView: View {
         if !controller.isHUDShown {
             return 0.5
         }
-        return isPillHovered ? 1.03 : 1
+        return isPillHovered ? 1.015 : 1
     }
 
     /// The pill keeps one width while annotating, so it never jumps between states. After
