@@ -21,6 +21,8 @@ struct Draft: Identifiable {
     var page: Task<PageIdentity?, Never>?
     /// The app of its window.
     var sourcePID: pid_t?
+    /// The part of its window that the picture check looks at, when that is not its frame.
+    var pictureArea: CGRect?
 
     var id: UUID { annotation.id }
 }
@@ -62,6 +64,7 @@ struct Pending {
     var fingerprint: Task<NoteFingerprint?, Never>?
     var page: Task<PageIdentity?, Never>?
     var sourcePID: pid_t?
+    var pictureArea: CGRect?
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -809,7 +812,7 @@ final class AnnotationController: ObservableObject {
             }
             return ContentCheck(
                 id: draft.id, window: window, windowFrame: windowFrames[window], pid: draft.sourcePID,
-                frame: trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint: fingerprint, page: draft.page
+                frame: draft.pictureArea ?? trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint: fingerprint, page: draft.page
             )
         }
         guard !checks.isEmpty else {
@@ -1624,10 +1627,14 @@ final class AnnotationController: ObservableObject {
             guard let picked else {
                 return
             }
-            let marker = CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
+            // A window that shows no elements, such as the iOS Simulator: the note stays at the
+            // click, and only what is around the click tells whether it is still on screen.
+            let isWholeWindow = picked.chip == "window"
+            let marker = isWholeWindow ? point : CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
             openComposer(
                 target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame,
-                window: picked.window, anchor: picked.anchor, tracked: picked.tracked
+                window: picked.window, anchor: picked.anchor, tracked: picked.tracked,
+                pictureArea: isWholeWindow ? CGRect(x: point.x - 80, y: point.y - 50, width: 160, height: 100) : nil
             )
         }
     }
@@ -1661,7 +1668,7 @@ final class AnnotationController: ObservableObject {
     /// from that window alone, so no other window, Tilde's included, can cover them.
     private func openComposer(
         target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor? = nil,
-        tracked: TrackedElement? = nil
+        tracked: TrackedElement? = nil, pictureArea: CGRect? = nil
     ) {
         let closeUpRect = Self.closeUpRect(frame: frame, outline: outline)
         let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
@@ -1692,12 +1699,13 @@ final class AnnotationController: ObservableObject {
         var page: Task<PageIdentity?, Never>?
         if anchor == nil, let window {
             let windowID = CGWindowID(window.number)
-            fingerprint = Task { await NoteFingerprint.capture(window: windowID, area: frame) }
+            let area = pictureArea ?? frame
+            fingerprint = Task { await NoteFingerprint.capture(window: windowID, area: area) }
             page = Task.detached { PageIdentity.read(pid: window.pid, windowFrame: window.frame) }
         }
         composer = .new(Pending(
             target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked,
-            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid
+            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid, pictureArea: pictureArea
         ))
         log.notice("comment opened for \(chip, privacy: .public)")
         commentText = ""
@@ -1779,7 +1787,7 @@ final class AnnotationController: ObservableObject {
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
             drafts.append(Draft(
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture, anchor: pending.anchor,
-                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID
+                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
             ))
             startOcclusion()
             startContentChecks()

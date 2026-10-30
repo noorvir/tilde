@@ -79,8 +79,8 @@ struct NoteVisibilityTests {
         #expect(note.update(similarity: 0.8) == false)
         #expect(note.update(similarity: 0.8) == false)
         // Two matching readings bring it back.
-        #expect(note.update(similarity: 0.95) == false)
-        #expect(note.update(similarity: 0.95) == true)
+        #expect(note.update(similarity: 0.99) == false)
+        #expect(note.update(similarity: 0.99) == true)
     }
 
     private func picture(_ level: (Int, Int) -> UInt8) -> NoteFingerprint {

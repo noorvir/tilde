@@ -110,7 +110,7 @@
    "isVisible": false,
    "readings": 0
   },
-  "similarity": 0.95,
+  "similarity": 0.99,
   "expect": {
    "note": {
     "isVisible": false
@@ -123,7 +123,7 @@
    "isVisible": false,
    "readings": 1
   },
-  "similarity": 0.95,
+  "similarity": 0.99,
   "expect": {
    "note": {
     "isVisible": true
@@ -136,7 +136,33 @@
    "isVisible": true,
    "readings": 1
   },
-  "similarity": 0.8,
+  "similarity": 0.975,
+  "expect": {
+   "note": {
+    "isVisible": true
+   }
+  }
+ },
+ {
+  "name": "A region in a window without elements: content changed, twice, hides it",
+  "note": {
+   "isVisible": true,
+   "readings": 1
+  },
+  "similarity": 0.85,
+  "expect": {
+   "note": {
+    "isVisible": false
+   }
+  }
+ },
+ {
+  "name": "A region in a window without elements: content restored, twice, shows it",
+  "note": {
+   "isVisible": false,
+   "readings": 1
+  },
+  "similarity": 0.99,
   "expect": {
    "note": {
     "isVisible": true

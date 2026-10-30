@@ -546,6 +546,39 @@ struct UXSpecs {
         }
     }
 
+    @Test func aRegionInTheRealSimulatorHidesOnAnotherScreenAndComesBack() async throws {
+        let simulator = try SimulatorScreens()
+        defer { simulator.stop() }
+        try simulator.show("first")
+        for _ in 0..<120 where simulator.window == nil {
+            try await Task.sleep(for: .seconds(1))
+        }
+        try await Task.sleep(for: .seconds(3))
+        try await withApp { app in
+            let window = try #require(simulator.window)
+            try await Task.sleep(for: .seconds(1))
+            try await app.menu("Start Annotation")
+            try await app.waitToSee("Annotating")
+            let start = CGPoint(x: window.minX + window.width * 0.56, y: window.minY + window.height * 0.35)
+            try await app.drag(from: start, to: CGPoint(x: start.x + 90, y: start.y + 70))
+            try await app.waitToSee("add")
+            try await app.type("On a region")
+            try await app.waitToSee("On a region", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+            let hud = try await app.waitToSee("Annotating")
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            let area = CGRect(x: window.minX + window.width * 0.5, y: window.minY + window.height * 0.2, width: window.width * 0.3, height: window.height * 0.6)
+            try await app.waitForBlue(in: area, atLeast: 20)
+
+            try simulator.show("second")
+            try await app.waitForBlue(in: area, atMost: 0, timeout: 10)
+
+            try simulator.show("first")
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 10)
+        }
+    }
+
     @Test func aNoteInANativeAppHidesOnAnotherPaneAndComesBack() async throws {
         func open(_ pane: String) {
             let process = Process()

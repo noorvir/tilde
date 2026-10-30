@@ -4,7 +4,9 @@ import ScreenCaptureKit
 /// A tiny greyscale picture of what a note is on, to tell whether that content is still on
 /// screen in apps that do not describe their contents, such as the iOS Simulator.
 struct NoteFingerprint: Equatable, Sendable {
-    static let side = 48
+    /// The longer side of the picture, in pixels. Sharp enough to read: small text on rows of
+    /// the same layout must look different.
+    static let longestSide: CGFloat = 400
     /// Points of surroundings around the note's area: a small piece of text alone looks like
     /// any other, while its surroundings tell pages apart.
     static let context: CGFloat = 40
@@ -44,17 +46,17 @@ struct NoteFingerprint: Equatable, Sendable {
 
     /// Scales any image down to a fingerprint.
     init?(image: CGImage) {
-        let side = Self.side
-        var levels = [UInt8](repeating: 0, count: side * side)
+        let (width, height) = (image.width, image.height)
+        var levels = [UInt8](repeating: 0, count: width * height)
         let drawn: Bool = levels.withUnsafeMutableBytes { bytes in
             guard let context = CGContext(
-                data: bytes.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                data: bytes.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width,
                 space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
             ) else {
                 return false
             }
             context.interpolationQuality = .low
-            context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
         guard drawn else {
@@ -81,8 +83,9 @@ struct NoteFingerprint: Equatable, Sendable {
         }
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = rect.offsetBy(dx: -frame.minX, dy: -frame.minY)
-        configuration.width = side
-        configuration.height = side
+        let scale = min(2, longestSide / max(rect.width, rect.height))
+        configuration.width = Int(rect.width * scale)
+        configuration.height = Int(rect.height * scale)
         configuration.showsCursor = false
         let filter = SCContentFilter(desktopIndependentWindow: window)
         guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) else {
@@ -96,8 +99,8 @@ struct NoteFingerprint: Equatable, Sendable {
 /// Whether a note's content is on screen, from how alike its area is to its fingerprint over
 /// time. Two thresholds and two readings in a row keep it from flickering.
 struct NoteVisibility: Equatable, Codable {
-    static let hideBelow = 0.75
-    static let showAbove = 0.85
+    static let hideBelow = 0.97
+    static let showAbove = 0.985
     static let readingsToChange = 2
 
     private(set) var isVisible = true
