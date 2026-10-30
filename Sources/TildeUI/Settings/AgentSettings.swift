@@ -90,7 +90,7 @@ private struct AgentRow: View {
                 StatusDot(status: status)
                 Spacer(minLength: 16)
                 Toggle(row.name, isOn: installed(status))
-                    .toggleStyle(.switch)
+                    .toggleStyle(TildeSwitchStyle())
                     .controlSize(.small)
                     .labelsHidden()
             }

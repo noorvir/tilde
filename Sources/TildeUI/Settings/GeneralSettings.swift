@@ -18,7 +18,7 @@ struct GeneralSettings: View {
             SettingsSection("Application") {
                 SettingsRow(title: "Launch at login", subtitle: launchError, subtitleIsError: launchError != nil) {
                     Toggle("Launch at login", isOn: $launchesAtLogin)
-                        .toggleStyle(.switch)
+                        .toggleStyle(TildeSwitchStyle())
                         .labelsHidden()
                         .onChange(of: launchesAtLogin) { _, isOn in
                             setLaunchAtLogin(isOn)
