@@ -1,3 +1,4 @@
+import Foundation
 @testable import TildeUI
 import CoreGraphics
 import Testing
@@ -146,5 +147,21 @@ struct HoldGestureTests {
         gesture.otherInput()
         #expect(gesture.delayPassed(at: 1.15) == nil)
         #expect(gesture.flagsChanged(key: false, others: false, at: 1.2) == nil)
+    }
+}
+
+struct SlowAppsTests {
+    @Test func threeSlowAnswersPauseAnAppForAWhile() {
+        let apps = SlowApps()
+        let now = Date()
+        apps.record(1, took: 0.3, now: now)
+        apps.record(1, took: 0.3, now: now)
+        #expect(!apps.isSlow(1, now: now))
+        apps.record(1, took: 0.3, now: now)
+        #expect(apps.isSlow(1, now: now))
+        #expect(!apps.isSlow(2, now: now))
+        #expect(!apps.isSlow(1, now: now.addingTimeInterval(11)))
+        apps.record(1, took: 0.01, now: now.addingTimeInterval(11))
+        #expect(!apps.isSlow(1, now: now.addingTimeInterval(11)))
     }
 }

@@ -37,7 +37,10 @@ final class ElementPicker {
     }
 
     /// With `scope`, picks only in that window, also where another window covers it.
-    func pick(at point: CGPoint, in scope: WindowInfo? = nil) async -> Picked? {
+    private let slowApps = SlowApps()
+
+    /// `isMoving`: for the highlight under a moving pointer, not for a click.
+    func pick(at point: CGPoint, isMoving: Bool = false, in scope: WindowInfo? = nil) async -> Picked? {
         guard let window = window(at: point, in: scope) else {
             return nil
         }
@@ -51,12 +54,15 @@ final class ElementPicker {
             element.window = window
             return element
         }
-        if AXIsProcessTrusted() {
+        // While the pointer moves, an app that answers slowly must not hold up the highlight.
+        if AXIsProcessTrusted(), !isMoving || !slowApps.isSlow(window.pid) {
+            let slowApps = self.slowApps
             picked = await withCheckedContinuation { continuation in
                 accessibilityQueue.async {
                     let started = Date()
-                    let picked = Self.accessibilityPick(at: point, in: window)
+                    let picked = Self.accessibilityPick(at: point, in: window, isMoving: isMoving)
                     let took = Date().timeIntervalSince(started)
+                    slowApps.record(window.pid, took: took)
                     if took > 0.05 {
                         Self.log.notice("element lookup took \(Int(took * 1000), privacy: .public) ms in \(window.app, privacy: .public)")
                     }
@@ -186,13 +192,24 @@ final class ElementPicker {
 
     // MARK: - Accessibility
 
-    nonisolated private static func accessibilityPick(at point: CGPoint, in window: WindowInfo) -> Picked? {
+    nonisolated private static func accessibilityPick(at point: CGPoint, in window: WindowInfo, isMoving: Bool) -> Picked? {
         let app = AXUIElementCreateApplication(window.pid)
         AXUIElementSetMessagingTimeout(app, 0.3)
 
         var hit: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success,
-              let element = hit,
+        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success else {
+            return nil
+        }
+        // Chromium and WebKit answer with the whole page at first and find the element
+        // meanwhile. A click must get the element; a moving pointer asks again anyway.
+        for _ in 0..<(isMoving ? 0 : 4) {
+            guard let found = hit, let role: String = attribute(found, kAXRoleAttribute), ["AXScrollArea", "AXWebArea"].contains(role) else {
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.06)
+            AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit)
+        }
+        guard let element = hit,
               let frame = frame(of: element),
               frame.width >= 1, frame.height >= 1
         else {
@@ -339,5 +356,30 @@ final class ElementPicker {
             current = (parent as! AXUIElement)
         }
         return (nodes.reversed(), url)
+    }
+}
+
+/// Apps whose Accessibility answers are too slow for a moving pointer. Three slow answers in a
+/// row put an app here for 10 seconds; it is asked again after that.
+final class SlowApps: @unchecked Sendable {
+    private struct Record {
+        var slowInARow = 0
+        var until: Date?
+    }
+    private static let slow: TimeInterval = 0.2
+    private let lock = NSLock()
+    private var records: [pid_t: Record] = [:]
+
+    func isSlow(_ pid: pid_t, now: Date = Date()) -> Bool {
+        lock.withLock { records[pid]?.until.map { $0 > now } ?? false }
+    }
+
+    func record(_ pid: pid_t, took: TimeInterval, now: Date = Date()) {
+        lock.withLock {
+            var record = records[pid] ?? Record()
+            record.slowInARow = took >= Self.slow ? record.slowInARow + 1 : 0
+            record.until = record.slowInARow >= 3 ? now.addingTimeInterval(10) : nil
+            records[pid] = record
+        }
     }
 }

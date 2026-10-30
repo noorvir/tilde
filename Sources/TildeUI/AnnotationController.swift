@@ -1546,7 +1546,7 @@ final class AnnotationController: ObservableObject {
         Task {
             while let next = latestHoverPoint {
                 latestHoverPoint = nil
-                let picked = await picker.pick(at: next, in: scope)
+                let picked = await picker.pick(at: next, isMoving: true, in: scope)
                 if picked != nil, !hasLoggedHover {
                     hasLoggedHover = true
                     log.notice("first highlight \(picked?.chip ?? "", privacy: .public)")
