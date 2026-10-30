@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Two screens with the same layout, for the UX specs: tildeux://first and tildeux://second.
+/// Two screens with the same layout, for the UX specs: the file /tmp/tilde-ux-screen says which.
 @main
 struct TwoScreens: App {
     @State private var screen = "first"
@@ -18,7 +18,9 @@ struct TwoScreens: App {
                 .padding()
                 .navigationTitle(screen.capitalized)
             }
-            .onOpenURL { screen = $0.host() ?? "first" }
+            .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
+                screen = (try? String(contentsOfFile: "/tmp/tilde-ux-screen", encoding: .utf8)) ?? "first"
+            }
         }
     }
 }

@@ -637,22 +637,22 @@ final class SimulatorScreens {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let source = root.appendingPathComponent("scripts/ux-sim-app").path
         let app = FileManager.default.temporaryDirectory.appendingPathComponent("TwoScreens.app").path
-        try Self.run("rm -rf \"\(app)\"; mkdir -p \"\(app)\"; cp \"\(source)/Info.plist\" \"\(app)/\"; xcrun -sdk iphonesimulator swiftc -parse-as-library -target arm64-apple-ios17.0-simulator \"\(source)/App.swift\" -o \"\(app)/TwoScreens\" && codesign -s - \"\(app)\"")
-        try Self.run("xcrun simctl boot \"\(Self.device)\" 2>/dev/null; xcrun simctl bootstatus \"\(Self.device)\" >/dev/null; open \"$(xcode-select -p)/Applications/Simulator.app\"; xcrun simctl install \"\(Self.device)\" \"\(app)\"; xcrun simctl launch \"\(Self.device)\" dev.tilde.ux.twoscreens")
+        // The device stays booted and the app installed between runs: booting takes minutes.
+        try Self.run("xcrun simctl boot \"\(Self.device)\" 2>/dev/null; xcrun simctl bootstatus \"\(Self.device)\" >/dev/null; open \"$(xcode-select -p)/../Applications/DeviceHub.app\"; xcrun simctl get_app_container \"\(Self.device)\" dev.tilde.ux.twoscreens >/dev/null 2>&1 || { mkdir -p \"\(app)\"; cp \"\(source)/Info.plist\" \"\(app)/\"; xcrun -sdk iphonesimulator swiftc -parse-as-library -target arm64-apple-ios17.0-simulator \"\(source)/App.swift\" -o \"\(app)/TwoScreens\" && codesign -s - \"\(app)\"; xcrun simctl install \"\(Self.device)\" \"\(app)\"; }; xcrun simctl launch --terminate-running-process \"\(Self.device)\" dev.tilde.ux.twoscreens >/dev/null")
     }
 
     func show(_ screen: String) throws {
-        try Self.run("xcrun simctl openurl \"\(Self.device)\" tildeux://\(screen)")
+        // The Simulator shares the Mac's files. A link would ask before it opens the app.
+        try screen.write(toFile: "/tmp/tilde-ux-screen", atomically: true, encoding: .utf8)
     }
 
     var window: CGRect? {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        let bounds = list.first { $0[kCGWindowOwnerName as String] as? String == "Simulator" && $0[kCGWindowLayer as String] as? Int == 0 }?[kCGWindowBounds as String] as? NSDictionary
+        let bounds = list.first { $0[kCGWindowOwnerName as String] as? String == "Device Hub" && $0[kCGWindowLayer as String] as? Int == 0 }?[kCGWindowBounds as String] as? NSDictionary
         return bounds.flatMap { CGRect(dictionaryRepresentation: $0) }
     }
 
     func stop() {
-        try? Self.run("xcrun simctl shutdown \"\(Self.device)\"; killall Simulator")
     }
 
     private static func run(_ command: String) throws {

@@ -528,13 +528,14 @@ struct UXSpecs {
             try await Task.sleep(for: .seconds(1))
         }
         try await Task.sleep(for: .seconds(4))
-        let window = try #require(simulator.window)
         try await withApp { app in
+            let window = try #require(simulator.window)
             try await Task.sleep(for: .seconds(1))
-            try await app.doubleTap("control")
+            try await app.menu("Start Annotation")
             try await app.waitToSee("Annotating")
-            try await addSmallNote(app, at: CGPoint(x: window.midX, y: window.minY + window.height * 0.45))
-            let area = window.divided(atDistance: window.height * 0.15, from: .minYEdge).remainder
+            // A row on the phone, which sits right of the sidebar in Device Hub.
+            try await addSmallNote(app, at: CGPoint(x: window.minX + window.width * 0.6, y: window.minY + window.height * 0.4))
+            let area = CGRect(x: window.minX + window.width * 0.5, y: window.minY + window.height * 0.2, width: window.width * 0.3, height: window.height * 0.6)
             try await app.waitForBlue(in: area, atLeast: 20)
 
             try simulator.show("second")
