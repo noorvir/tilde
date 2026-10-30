@@ -89,6 +89,8 @@ let pickerScript = #"""
   addEventListener('scroll', notify, { passive: true, capture: true });
   addEventListener('resize', notify);
   addEventListener('popstate', notify);
+  // Back to a page kept in memory: nothing else fires.
+  addEventListener('pageshow', notify);
   addEventListener('hashchange', notify);
   for (const name of ['pushState', 'replaceState']) {
     const original = history[name];

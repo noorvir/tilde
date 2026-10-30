@@ -194,9 +194,9 @@ final class TildeApp {
 
     func click(at point: CGPoint) async throws {
         try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
-        try await Task.sleep(for: .milliseconds(30))
+        try await Task.sleep(for: .milliseconds(100))
         try await drive("mouse", ["type": "click", "x": point.x, "y": point.y])
-        try await Task.sleep(for: .milliseconds(40))
+        try await Task.sleep(for: .milliseconds(100))
     }
 
     func drag(from start: CGPoint, to end: CGPoint) async throws {

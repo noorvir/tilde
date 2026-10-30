@@ -229,9 +229,9 @@ func mouse(_ body: [String: Any]) async {
         post(.leftMouseUp, at: point)
     case "click":
         post(.mouseMoved, at: point)
-        try? await Task.sleep(for: .milliseconds(20))
+        try? await Task.sleep(for: .milliseconds(70))
         post(.leftMouseDown, at: point)
-        try? await Task.sleep(for: .milliseconds(20))
+        try? await Task.sleep(for: .milliseconds(50))
         post(.leftMouseUp, at: point)
     case "drag":
         let end = CGPoint(x: body["toX"] as? Double ?? point.x, y: body["toY"] as? Double ?? point.y)

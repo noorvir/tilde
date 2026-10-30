@@ -41,6 +41,10 @@ enum ElementTracker {
         guard isAlive(tracked.element), let frame = frame(of: tracked.element) else {
             return (nil, tracked, true)
         }
+        // Lists reuse their rows: the same element with other text is other content.
+        if showsOtherText(tracked) {
+            return (nil, tracked, false)
+        }
         return (visibleFrame(frame, clips: clips(of: tracked.element)), tracked, false)
     }
 
@@ -97,6 +101,13 @@ enum ElementTracker {
             }
         }
         return nil
+    }
+
+    private static func showsOtherText(_ tracked: TrackedElement) -> Bool {
+        guard tracked.identity.role == kAXStaticTextRole, let original = tracked.identity.name else {
+            return false
+        }
+        return name(of: tracked.element) != original
     }
 
     /// Whether the element is still in its window. An element of a page that left can go on

@@ -882,6 +882,19 @@ final class AnnotationController: ObservableObject {
         return trackedFrames[draft.id] ?? draft.annotation.frame
     }
 
+    /// ⌘[ or ⌘] while the overlay has the keyboard: in Tilde's browser, or else in the app in
+    /// front, as if the overlay were not there.
+    func navigateHistory(_ event: NSEvent) {
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if let front, front != getpid() {
+            event.cgEvent?.postToPid(front)
+        } else if event.keyCode == 33 {
+            browser.goBack(nil)
+        } else {
+            browser.goForward(nil)
+        }
+    }
+
     /// Where a note's numbered marker is now, at its element's top-right corner.
     func noteMarker(_ draft: Draft) -> CGPoint? {
         guard trackedElements[draft.id] != nil else {

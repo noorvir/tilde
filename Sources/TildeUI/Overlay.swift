@@ -192,6 +192,11 @@ final class OverlayView: NSView {
             }
             return
         }
+        // Back and forward belong to the page under the overlay.
+        if event.modifierFlags.contains(.command), event.keyCode == 33 || event.keyCode == 30 {
+            controller.navigateHistory(event)
+            return
+        }
         if controller.isPaused {
             super.keyDown(with: event)
             return

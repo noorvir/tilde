@@ -15,9 +15,10 @@ fi
 
 [ -d "/Applications/Google Chrome.app" ] || brew install --cask google-chrome
 xattr -dr com.apple.quarantine "/Applications/Google Chrome.app" 2>/dev/null || true
-# A grey accent: blue on screen can then only be a note. System Settings has blue controls.
-defaults write -g AppleAccentColor -int -1
-defaults write -g AppleHighlightColor -string "0.847059 0.847059 0.862745 Graphite"
+# The look the window baselines were recorded with.
+defaults delete -g AppleAccentColor 2>/dev/null || true
+defaults delete -g AppleHighlightColor 2>/dev/null || true
+defaults write -g AppleKeyboardUIMode -int 0
 
 sudo defaults write /Library/Preferences/com.apple.screensaver idleTime 0
 sudo pmset -a displaysleep 0 sleep 0
@@ -44,6 +45,8 @@ for app in TildeDriver TildeUX Tilde; do
     /usr/libexec/PlistBuddy -c "Add :file\\:///${here#/}/build/$app.app/:kScreenCaptureApprovalLastAlerted date Sat Jan 01 00:00:00 UTC 2050" "$approvals" 2>/dev/null || true
 done
 killall replayd 2>/dev/null || true
+# The size of a MacBook screen, in the layout the window baselines were recorded in.
+swift "$(dirname "$0")/ux-vm-display.swift"
 # Nothing left on the screen for the specs to click by mistake.
 killall Terminal 2>/dev/null || true
 sudo killall tccd 2>/dev/null || true

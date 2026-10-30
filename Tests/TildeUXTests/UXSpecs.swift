@@ -31,6 +31,7 @@ struct UXSpecs {
         try await app.type(comment)
         try await app.waitToSee(comment, timeout: 3)
         try await app.key(.enter)
+        try await app.waitNotToSee("add")
     }
 
     // MARK: - Agent flow
@@ -111,8 +112,14 @@ struct UXSpecs {
             try await app.doubleTap("control")
             let button = try await app.waitToSee("Pause (Esc)")
             try await app.hover(over: CGPoint(x: button.frame.midX, y: button.frame.midY))
-            for _ in 0..<150 where try await app.seen().filter({ $0.name == "Pause (Esc)" && $0.role == "AXStaticText" }).isEmpty {
-                try await Task.sleep(for: .milliseconds(20))
+            // The pointer rests on it, also if the HUD was still appearing when it first moved.
+            // Off the button and back once the HUD has settled, so that the HUD sees it enter.
+            try await Task.sleep(for: .milliseconds(600))
+            try await app.hover(over: CGPoint(x: button.frame.midX, y: button.frame.maxY + 200))
+            try await Task.sleep(for: .milliseconds(100))
+            try await app.hover(over: CGPoint(x: button.frame.midX, y: button.frame.midY))
+            for _ in 0..<60 where try await app.seen().filter({ $0.name == "Pause (Esc)" && $0.role == "AXStaticText" }).isEmpty {
+                try await Task.sleep(for: .milliseconds(50))
             }
             let texts = try await app.seen().filter { $0.name == "Pause (Esc)" && $0.role == "AXStaticText" }
             let tooltip = try #require(texts.first)
@@ -315,10 +322,11 @@ struct UXSpecs {
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
             let frame = ChangingWindow.frame
-            try await addSmallNote(app, at: CGPoint(x: frame.minX + 80, y: frame.minY + 100))
+            // On the text of the first row.
+            try await addSmallNote(app, at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
 
             // Its number is there, its box is not.
-            let area = frame.insetBy(dx: -30, dy: -30)
+            let area = frame
             try await app.waitForBlue(in: area, atLeast: 20, atMost: 900)
 
             for _ in 0..<3 {
