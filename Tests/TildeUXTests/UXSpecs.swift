@@ -15,7 +15,7 @@ struct UXSpecs {
     /// on any Mac, so a second click may be needed.
     private func annotate(_ app: TildeApp) async throws {
         try await app.press("Annotate (Double-tap ⌃)")
-        try await Task.sleep(for: .milliseconds(500))
+        try await Task.sleep(for: .milliseconds(100))
         if try await app.seen().contains(where: { $0.name == "Annotate (Double-tap ⌃)" }) {
             try await app.press("Annotate (Double-tap ⌃)")
         }
@@ -27,7 +27,7 @@ struct UXSpecs {
         try await app.clickText(text)
         // The comment box shows its key hints once it is open and takes the keyboard.
         try await app.waitToSee("add")
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(40))
         try await app.type(comment)
         try await app.waitToSee(comment, timeout: 3)
         try await app.key(.enter)
@@ -111,7 +111,9 @@ struct UXSpecs {
             try await app.doubleTap("control")
             let button = try await app.waitToSee("Pause (Esc)")
             try await app.hover(over: CGPoint(x: button.frame.midX, y: button.frame.midY))
-            try await Task.sleep(for: .milliseconds(900))
+            for _ in 0..<150 where try await app.seen().filter({ $0.name == "Pause (Esc)" && $0.role == "AXStaticText" }).isEmpty {
+                try await Task.sleep(for: .milliseconds(20))
+            }
             let texts = try await app.seen().filter { $0.name == "Pause (Esc)" && $0.role == "AXStaticText" }
             let tooltip = try #require(texts.first)
             let window = try #require(try await app.seen().first { $0.role == "AXWindow" && $0.frame.contains(button.frame) })
@@ -297,7 +299,7 @@ struct UXSpecs {
         try await Task.sleep(for: .seconds(1))
         try await app.click(at: point)
         try await app.waitToSee("add")
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(40))
         try await app.type("On this page")
         try await app.waitToSee("On this page", timeout: 3)
         try await app.key(.enter)
@@ -515,7 +517,7 @@ struct UXSpecs {
             let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
             let bounds = list.first { $0[kCGWindowOwnerName as String] as? String == "System Settings" && $0[kCGWindowLayer as String] as? Int == 0 }?[kCGWindowBounds as String] as? NSDictionary
             found = bounds.flatMap { CGRect(dictionaryRepresentation: $0) }
-            try await Task.sleep(for: .milliseconds(500))
+            try await Task.sleep(for: .milliseconds(100))
         }
         let frame = try #require(found)
         try await withApp { app in
@@ -574,7 +576,7 @@ struct UXSpecs {
             let frame = ChangingWindow.frame
             try await app.click(at: CGPoint(x: frame.midX, y: frame.midY))
             try await app.waitToSee("add")
-            try await Task.sleep(for: .milliseconds(300))
+            try await Task.sleep(for: .milliseconds(40))
 
             // In the comment box: a new line, and the box stays open.
             try await app.type("first")

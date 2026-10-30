@@ -1,3 +1,12 @@
+## Two suites
+
+| Suite | Command | Covers | When | Limit |
+|---|---|---|---|---|
+| UX | `scripts/ux.sh` | Tilde itself, its own browser and a test window, with picture comparison | Every commit | 30 s goal, fails above 60 s |
+| Release check | `scripts/e2e-release.sh` | Notes in real Safari, Chrome, System Settings and the Simulator | Before a release, or to be sure | Fails above 120 s |
+
+Both take over the screen: on a shared Mac, run them in the VM with `scripts/ux-vm.sh`.
+
 # UX specs
 
 Black-box specs of what a user sees and does. They import nothing from Tilde: they run the

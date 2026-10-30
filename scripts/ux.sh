@@ -63,7 +63,23 @@ if [ "$real_running" = 1 ]; then
     sleep 1
 fi
 status=0
-TILDE_UX=1 TILDE_UX_APP="$PWD/build/TildeUX.app" TILDE_UX_FIXTURE="$(swift build --show-bin-path)/tilde-ux-fixture" swift test --filter "$filter" || status=$?
+# The real apps are the release check, scripts/e2e-release.sh: not in this suite.
+real_apps="aNoteInABrowser|aNoteInASinglePage|aNoteFollows|aNoteInTheReal|aNoteInANative"
+limit=${TILDE_UX_LIMIT:-60}
+if [ -n "${TILDE_UX_REAL_APPS:-}" ]; then
+    set -- --filter "$real_apps"
+else
+    set -- --filter "$filter" --skip "$real_apps"
+fi
+swift build --build-tests >/dev/null
+started=$(date +%s)
+TILDE_UX=1 TILDE_UX_APP="$PWD/build/TildeUX.app" TILDE_UX_FIXTURE="$(swift build --show-bin-path)/tilde-ux-fixture" swift test --skip-build "$@" || status=$?
+took=$(($(date +%s) - started))
+echo "Took $took s (limit $limit s)."
+if [ "$took" -gt "$limit" ]; then
+    echo "Over the time limit." >&2
+    status=4
+fi
 pkill -f TildeDriver.app/Contents/MacOS/TildeDriver 2>/dev/null || true
 if [ "$real_running" = 1 ]; then
     open /Applications/Tilde.app

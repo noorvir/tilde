@@ -229,21 +229,21 @@ func mouse(_ body: [String: Any]) async {
         post(.leftMouseUp, at: point)
     case "click":
         post(.mouseMoved, at: point)
-        try? await Task.sleep(for: .milliseconds(80))
+        try? await Task.sleep(for: .milliseconds(20))
         post(.leftMouseDown, at: point)
-        try? await Task.sleep(for: .milliseconds(60))
+        try? await Task.sleep(for: .milliseconds(20))
         post(.leftMouseUp, at: point)
     case "drag":
         let end = CGPoint(x: body["toX"] as? Double ?? point.x, y: body["toY"] as? Double ?? point.y)
         post(.mouseMoved, at: point)
-        try? await Task.sleep(for: .milliseconds(80))
+        try? await Task.sleep(for: .milliseconds(20))
         post(.leftMouseDown, at: point)
         for step in 1...12 {
             let t = CGFloat(step) / 12
             try? await Task.sleep(for: .milliseconds(25))
             post(.leftMouseDragged, at: CGPoint(x: point.x + (end.x - point.x) * t, y: point.y + (end.y - point.y) * t))
         }
-        try? await Task.sleep(for: .milliseconds(60))
+        try? await Task.sleep(for: .milliseconds(20))
         post(.leftMouseUp, at: end)
     default:
         break
@@ -264,7 +264,7 @@ func type(_ text: String) async {
             event?.flags = []
             event?.post(tap: .cghidEventTap)
         }
-        try? await Task.sleep(for: .milliseconds(15))
+        try? await Task.sleep(for: .milliseconds(1))
     }
 }
 

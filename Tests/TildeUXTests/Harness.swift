@@ -139,10 +139,10 @@ final class TildeApp {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp")!, timeoutInterval: 2)
             request.httpMethod = "GET"
             if (try? await URLSession.shared.data(for: request)) != nil {
-                try await Task.sleep(for: .milliseconds(500))
+                try await Task.sleep(for: .milliseconds(100))
                 return
             }
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(30))
         }
         throw UXFailure(description: "Tilde did not start its MCP server")
     }
@@ -172,31 +172,31 @@ final class TildeApp {
 
     func key(_ key: Key, command: Bool = false, shift: Bool = false, option: Bool = false) async throws {
         try await drive("key", ["code": key.rawValue, "command": command, "shift": shift, "option": option])
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(40))
     }
 
     func type(_ text: String) async throws {
         try await drive("type", ["text": text])
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(for: .milliseconds(30))
     }
 
     func doubleTap(_ modifier: String) async throws {
         try await drive("tap", ["key": modifier])
         try await Task.sleep(for: .milliseconds(80))
         try await drive("tap", ["key": modifier])
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(80))
     }
 
     func hold(_ modifier: String, down: Bool) async throws {
         try await drive("modifier", ["key": modifier, "down": down])
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(80))
     }
 
     func click(at point: CGPoint) async throws {
         try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
-        try await Task.sleep(for: .milliseconds(200))
+        try await Task.sleep(for: .milliseconds(30))
         try await drive("mouse", ["type": "click", "x": point.x, "y": point.y])
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(40))
     }
 
     func hover(over point: CGPoint) async throws {
@@ -208,7 +208,7 @@ final class TildeApp {
         // Windows can still be moving just after they open: wait until it holds still.
         var element = try await waitToSee(text, sourceLocation: sourceLocation)
         for _ in 0..<20 {
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(30))
             let again = try await waitToSee(text, sourceLocation: sourceLocation)
             if again.frame == element.frame {
                 break
@@ -228,7 +228,7 @@ final class TildeApp {
             if let found = try await seen().first(where: { $0.name == name }) {
                 return found
             }
-            try await Task.sleep(for: .milliseconds(150))
+            try await Task.sleep(for: .milliseconds(20))
         }
         await saveScreenshot(named: name)
         let names = try await seen().compactMap(\.name)
@@ -252,7 +252,7 @@ final class TildeApp {
             if try await !seen().contains(where: { $0.name == name }) {
                 return
             }
-            try await Task.sleep(for: .milliseconds(150))
+            try await Task.sleep(for: .milliseconds(20))
         }
         Issue.record("\"\(name)\" is still on screen", sourceLocation: sourceLocation)
     }
@@ -265,7 +265,7 @@ final class TildeApp {
             if let found = try await seen().first(where: { $0.name?.contains(part) == true }) {
                 return found
             }
-            try await Task.sleep(for: .milliseconds(150))
+            try await Task.sleep(for: .milliseconds(20))
         }
         let names = try await seen().compactMap(\.name)
         Issue.record("No text with \"\(part)\" on screen. On screen: \(names.prefix(40))", sourceLocation: sourceLocation)
@@ -278,7 +278,7 @@ final class TildeApp {
     func openMenu() async throws {
         let item = try await waitToSeeRole("AXMenuBarItem")
         try await click(at: CGPoint(x: item.frame.midX, y: item.frame.midY))
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(80))
     }
 
     /// Opens the menu and presses an item. The app keeps the keyboard in the menu afterwards,
@@ -287,7 +287,7 @@ final class TildeApp {
         try await openMenu()
         try await waitToSee(item)
         try await drive("press", ["pid": pid, "name": item, "role": "AXMenuItem"])
-        try await Task.sleep(for: .milliseconds(500))
+        try await Task.sleep(for: .milliseconds(100))
     }
 
     private func waitToSeeRole(_ role: String) async throws -> Seen {
@@ -295,7 +295,7 @@ final class TildeApp {
             if let found = try await seen().first(where: { $0.role == role }) {
                 return found
             }
-            try await Task.sleep(for: .milliseconds(200))
+            try await Task.sleep(for: .milliseconds(30))
         }
         throw UXFailure(description: "no \(role) on screen")
     }
@@ -333,7 +333,7 @@ final class TildeApp {
             if last >= atLeast, last <= atMost {
                 return
             }
-            try await Task.sleep(for: .milliseconds(300))
+            try await Task.sleep(for: .milliseconds(40))
         }
         Issue.record("\(last) blue pixels, expected \(atLeast)...\(atMost)", sourceLocation: sourceLocation)
         await saveScreenshot(named: "blue-\(sourceLocation.line)")
@@ -344,7 +344,7 @@ final class TildeApp {
     /// Compares the app's window with this title to its baseline PNG, leaving out the version
     /// text at the bottom of the sidebar, which changes with every build.
     func expectWindow(titled title: String, matches name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        try await Task.sleep(for: .milliseconds(500))
+        try await Task.sleep(for: .milliseconds(100))
         let reply = try await drive("window", ["pid": pid, "title": title])
         guard let encoded = reply["png"] as? String, let picture = Data(base64Encoded: encoded) else {
             Issue.record("No window titled \(title)", sourceLocation: sourceLocation)
