@@ -254,10 +254,11 @@ struct TildeSwitchStyle: ToggleStyle {
                 }
                 .contentShape(Capsule())
                 .onTapGesture { configuration.isOn.toggle() }
-                .accessibilityElement()
-                .accessibilityLabel(configuration.label)
-                .accessibilityValue(configuration.isOn ? "On" : "Off")
-                .accessibilityAddTraits(.isButton)
+                .accessibilityRepresentation {
+                    Toggle(isOn: configuration.$isOn) {
+                        configuration.label
+                    }
+                }
         }
     }
 }
