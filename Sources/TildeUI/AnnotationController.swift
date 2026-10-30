@@ -1629,11 +1629,13 @@ final class AnnotationController: ObservableObject {
             }
             // A window that shows no elements, such as the iOS Simulator: the note stays at the
             // click, and only what is around the click tells whether it is still on screen.
-            let isWholeWindow = picked.chip == "window"
+            // Such an app may also answer with one large group, as the phone in Device Hub.
+            let isLargeGroup = picked.chip == "Group" && picked.frame.width >= 150 && picked.frame.height >= 150
+            let isWholeWindow = picked.chip == "window" || isLargeGroup
             let marker = isWholeWindow ? point : CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
             openComposer(
                 target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame,
-                window: picked.window, anchor: picked.anchor, tracked: picked.tracked,
+                window: picked.window, anchor: picked.anchor, tracked: isWholeWindow ? nil : picked.tracked,
                 pictureArea: isWholeWindow ? CGRect(x: point.x - 80, y: point.y - 50, width: 160, height: 100) : nil
             )
         }
