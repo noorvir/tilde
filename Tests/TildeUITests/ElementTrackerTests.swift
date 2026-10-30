@@ -65,3 +65,28 @@ struct OcclusionTests {
         #expect(result.missing == [9])
     }
 }
+
+struct NoteVisibilityTests {
+    @Test func aNoteHidesAndComesBackWithoutFlicker() {
+        var note = NoteVisibility()
+        // One odd reading changes nothing.
+        #expect(note.update(difference: 0.5) == true)
+        #expect(note.update(difference: 0.01) == true)
+        // Two in a row hide it.
+        #expect(note.update(difference: 0.5) == true)
+        #expect(note.update(difference: 0.5) == false)
+        // Between the thresholds it stays as it is.
+        #expect(note.update(difference: 0.09) == false)
+        #expect(note.update(difference: 0.09) == false)
+        // Two matching readings bring it back.
+        #expect(note.update(difference: 0.01) == false)
+        #expect(note.update(difference: 0.01) == true)
+    }
+
+    @Test func fingerprintDifferenceIsZeroToOne() {
+        let black = NoteFingerprint(levels: [UInt8](repeating: 0, count: 256))
+        let white = NoteFingerprint(levels: [UInt8](repeating: 255, count: 256))
+        #expect(black.difference(from: black) == 0)
+        #expect(black.difference(from: white) == 1)
+    }
+}

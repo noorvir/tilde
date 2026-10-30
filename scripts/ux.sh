@@ -34,6 +34,7 @@ PY
 fi
 
 scripts/build-app.sh >/dev/null
+swift build --product tilde-ux-fixture >/dev/null
 scripts/build-driver.sh >/dev/null
 
 # A copy with its own identity: its own user defaults and permissions.
@@ -62,7 +63,7 @@ if [ "$real_running" = 1 ]; then
     sleep 1
 fi
 status=0
-TILDE_UX=1 TILDE_UX_APP="$PWD/build/TildeUX.app" swift test --filter "$filter" || status=$?
+TILDE_UX=1 TILDE_UX_APP="$PWD/build/TildeUX.app" TILDE_UX_FIXTURE="$(swift build --show-bin-path)/tilde-ux-fixture" swift test --filter "$filter" || status=$?
 pkill -f TildeDriver.app/Contents/MacOS/TildeDriver 2>/dev/null || true
 if [ "$real_running" = 1 ]; then
     open /Applications/Tilde.app

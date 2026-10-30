@@ -292,6 +292,44 @@ final class TildeApp {
         throw UXFailure(description: "no \(role) on screen")
     }
 
+    // MARK: - Screen pictures
+
+    /// How many Tilde-blue pixels are on screen in this area: notes are drawn, so they have no
+    /// accessibility elements to read.
+    func bluePixels(in area: CGRect) async throws -> Int {
+        let (data, _) = try await URLSession.shared.data(from: Self.driver.appendingPathComponent("screenshot"))
+        guard let picture = NSBitmapImageRep(data: data), let screen = NSScreen.screens.first else {
+            throw UXFailure(description: "no screenshot")
+        }
+        let scale = Double(picture.pixelsWide) / screen.frame.width
+        var count = 0
+        for y in stride(from: Int(area.minY * scale), to: Int(area.maxY * scale), by: 2) {
+            for x in stride(from: Int(area.minX * scale), to: Int(area.maxX * scale), by: 2) {
+                guard let color = picture.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+                    continue
+                }
+                if color.blueComponent > 0.8, color.redComponent < 0.35, color.greenComponent > 0.25, color.greenComponent < 0.65 {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+
+    /// Waits until the area has at least, or at most, this many blue pixels.
+    func waitForBlue(in area: CGRect, atLeast: Int = 0, atMost: Int = .max, timeout: Double = 6, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let end = Date().addingTimeInterval(timeout)
+        var last = 0
+        while Date() < end {
+            last = try await bluePixels(in: area)
+            if last >= atLeast, last <= atMost {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(300))
+        }
+        Issue.record("\(last) blue pixels, expected \(atLeast)...\(atMost)", sourceLocation: sourceLocation)
+    }
+
     // MARK: - Window pictures
 
     /// Compares the app's window with this title to its baseline PNG, leaving out the version
@@ -396,6 +434,31 @@ final class MCPAgent {
             throw UXFailure(description: "\(method) failed: \(body)")
         }
         return result
+    }
+}
+
+/// A window of another app whose whole content changes, like a page change in the Simulator.
+final class ChangingWindow {
+    /// The window on screen, in screen points from the top left.
+    static let frame = CGRect(x: 300, y: 200, width: 500, height: 400)
+    private let file = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-page-\(UUID().uuidString)")
+    private let process = Process()
+
+    init() throws {
+        try "red".write(to: file, atomically: true, encoding: .utf8)
+        process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["TILDE_UX_FIXTURE"] ?? "")
+        process.arguments = [file.path]
+        try process.run()
+        Thread.sleep(forTimeInterval: 1)
+    }
+
+    func show(_ page: String) throws {
+        try page.write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    func close() {
+        process.terminate()
+        waitForExit(process)
     }
 }
 

@@ -60,7 +60,7 @@ struct ConnectorLines: View {
                 return nil
             }
             let number = (browser.controller?.drafts.firstIndex { $0.id == id } ?? 0) + 1
-            return Line(card: card, element: element, number: number, isSelected: browser.selectedNote == id, isFlashing: browser.flashedNote == id)
+            return Line(card: card, element: element, number: number, isSelected: browser.selectedNote == id || browser.hoveredNote == id, isFlashing: browser.flashedNote == id)
         }
     }
 }
@@ -74,9 +74,12 @@ private struct LinesCanvas: View {
             for line in lines {
                 // Light by default, a little stronger for the selected note.
                 let strength = line.isSelected ? 0.85 : 0.5
-                let outline = Path(roundedRect: line.element.insetBy(dx: -2, dy: -2), cornerRadius: 4)
-                context.fill(outline, with: .color(blue.opacity(line.isFlashing ? 0.25 : line.isSelected ? 0.08 : 0.03)))
-                context.stroke(outline, with: .color(blue.opacity(strength)), lineWidth: 1)
+                // The box shows only for the selected or hovered note.
+                if line.isSelected || line.isFlashing {
+                    let outline = Path(roundedRect: line.element.insetBy(dx: -2, dy: -2), cornerRadius: 4)
+                    context.fill(outline, with: .color(blue.opacity(line.isFlashing ? 0.25 : 0.08)))
+                    context.stroke(outline, with: .color(blue.opacity(strength)), lineWidth: 1)
+                }
 
                 let start = CGPoint(x: line.card.minX, y: line.card.midY)
                 let end = CGPoint(x: line.element.maxX + 2, y: line.element.midY)

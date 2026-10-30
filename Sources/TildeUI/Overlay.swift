@@ -288,7 +288,10 @@ final class OverlayView: NSView {
 
         noteCards = []
         for note in notes {
-            drawNote(note.draft, frame: note.frame.offsetBy(dx: -origin.x, dy: -origin.y))
+            // Once made, a note is only its number; its box shows on hover or selection.
+            if hoveredMarker == note.draft.id || controller.browser.selectedNote == note.draft.id {
+                drawNote(note.draft, frame: note.frame.offsetBy(dx: -origin.x, dy: -origin.y))
+            }
             drawMarker(note.number, at: note.marker)
             if note.isOnPage {
                 let anchor = CGPoint(x: note.marker.x - origin.x, y: note.marker.y - origin.y)

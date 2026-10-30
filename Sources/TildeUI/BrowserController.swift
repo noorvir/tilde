@@ -26,6 +26,8 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
     #endif
     /// The note whose element the page highlights.
     @Published var selectedNote: UUID?
+    /// The note whose card is under the pointer.
+    @Published var hoveredNote: UUID?
     /// The note whose outline flashes after Tilde scrolled to it.
     @Published private(set) var flashedNote: UUID?
     /// A note to scroll to once its page has loaded and its element is found.

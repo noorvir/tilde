@@ -175,7 +175,10 @@ private struct NoteCard: View {
         .opacity(isOnPage ? 1 : 0.45)
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            isHovered = hovering
+            browser.hoveredNote = hovering ? draft.id : nil
+        }
         .anchorPreference(key: NoteGeometry.self, value: .bounds) { NoteGeometry.Value(cards: [draft.id: $0]) }
         .onAppear { comment = draft.annotation.comment }
         .accessibilityElement(children: .contain)

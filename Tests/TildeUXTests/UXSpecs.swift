@@ -288,6 +288,39 @@ struct UXSpecs {
         }
     }
 
+    // MARK: - What is on screen
+
+    @Test func aNoteShowsOnlyItsNumberAndOnlyWhileItsPageIsOnScreen() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.midX, y: frame.midY))
+            try await app.waitToSee("add")
+            try await Task.sleep(for: .milliseconds(300))
+            try await app.type("On the red page")
+            try await app.waitToSee("On the red page", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+
+            // Away from the note: its number is there, its box is not.
+            try await app.hover(over: CGPoint(x: frame.maxX + 150, y: frame.maxY + 100))
+            let area = frame.insetBy(dx: -30, dy: -30)
+            try await app.waitForBlue(in: area, atLeast: 20, atMost: 900)
+
+            // Another page: the note hides, and stays in the session.
+            try window.show("green")
+            try await app.waitForBlue(in: area, atMost: 0)
+            try await app.waitToSeeText(containing: "1 note")
+
+            // Back: it shows again.
+            try window.show("red")
+            try await app.waitForBlue(in: area, atLeast: 20)
+        }
+    }
+
     // MARK: - Window picker
 
     @Test func choosingAWindowCanBeCancelledWithEsc() async throws {

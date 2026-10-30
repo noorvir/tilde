@@ -23,6 +23,9 @@ let package = Package(
         .executableTarget(name: "tilde-e2e", dependencies: ["TildeCore", "TildeUI"], exclude: ["fixture.html"]),
         // Posts real input and captures the screen for tests on a real display; see scripts/build-driver.sh.
         .executableTarget(name: "tilde-driver", dependencies: ["TildeCore"]),
+        // A window whose whole content changes, for the UX specs: stands in for an app that
+        // does not describe its contents, such as the iOS Simulator.
+        .executableTarget(name: "tilde-ux-fixture"),
         .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill"]),
         .testTarget(name: "TildeInstallerTests", dependencies: ["TildeInstaller", "TildeSkill"]),
         // Snapshot and behaviour tests of the UI; they render offscreen and need a logged-in Mac.

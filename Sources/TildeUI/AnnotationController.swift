@@ -15,6 +15,8 @@ struct Draft: Identifiable {
     var anchor: PageAnchor?
     /// The window it is on, so windows in front of that window cover it.
     var sourceWindow: Int?
+    /// What its area looked like when it was made, to hide it when that content goes.
+    var fingerprint: Task<NoteFingerprint?, Never>?
 
     var id: UUID { annotation.id }
 }
@@ -53,6 +55,7 @@ struct Pending {
     var anchor: PageAnchor?
     var tracked: TrackedElement?
     var sourceWindow: Int?
+    var fingerprint: Task<NoteFingerprint?, Never>?
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -302,6 +305,7 @@ final class AnnotationController: ObservableObject {
     private func end() {
         stopCheckpoints()
         stopOcclusion()
+        stopContentChecks()
         pauseNotice = nil
         pauseNoticeTimer?.invalidate()
         stopTracking()
@@ -676,11 +680,82 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    // MARK: - Whether a note's content is on screen
+
+    /// Notes whose content is gone from their window, such as after a page change. They stay
+    /// in the session, the list and the report; only their marks hide.
+    @Published private(set) var contentGoneNotes: Set<Draft.ID> = []
+    private var visibilities: [Draft.ID: NoteVisibility] = [:]
+    private var contentTimer: Timer?
+    private var isCheckingContent = false
+
+    /// Compares each note's area with its fingerprint three times a second.
+    private func startContentChecks() {
+        guard contentTimer == nil else {
+            return
+        }
+        contentTimer = Timer.scheduledTimer(withTimeInterval: 0.33, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.checkContent()
+            }
+        }
+    }
+
+    private func stopContentChecks() {
+        contentTimer?.invalidate()
+        contentTimer = nil
+        visibilities = [:]
+        contentGoneNotes = []
+    }
+
+    private func checkContent() {
+        guard !isCheckingContent, phase == .annotating else {
+            return
+        }
+        let checks = drafts.compactMap { draft -> (Draft.ID, Int, CGRect, Task<NoteFingerprint?, Never>)? in
+            guard let window = draft.sourceWindow, let fingerprint = draft.fingerprint, !hiddenNotes.contains(draft.id), !hiddenWindows.contains(window) else {
+                return nil
+            }
+            return (draft.id, window, trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint)
+        }
+        guard !checks.isEmpty else {
+            return
+        }
+        isCheckingContent = true
+        Task { [weak self] in
+            var differences: [Draft.ID: Double] = [:]
+            for (id, window, frame, fingerprint) in checks {
+                guard let original = await fingerprint.value, let now = await NoteFingerprint.capture(window: CGWindowID(window), area: frame) else {
+                    continue
+                }
+                differences[id] = now.difference(from: original)
+            }
+            self?.applyContentChecks(differences)
+        }
+    }
+
+    private func applyContentChecks(_ differences: [Draft.ID: Double]) {
+        isCheckingContent = false
+        var gone = contentGoneNotes
+        for (id, difference) in differences {
+            var visibility = visibilities[id] ?? NoteVisibility()
+            if visibility.update(difference: difference) {
+                gone.remove(id)
+            } else {
+                gone.insert(id)
+            }
+            visibilities[id] = visibility
+        }
+        if gone != contentGoneNotes {
+            contentGoneNotes = gone
+        }
+    }
+
     // MARK: - Following elements in other apps
 
     /// Where a note's element is on screen now, or nil while it is out of view or gone.
     func noteFrame(_ draft: Draft) -> CGRect? {
-        if hiddenNotes.contains(draft.id) {
+        if hiddenNotes.contains(draft.id) || contentGoneNotes.contains(draft.id) {
             return nil
         }
         return trackedFrames[draft.id] ?? draft.annotation.frame
@@ -1491,8 +1566,15 @@ final class AnnotationController: ObservableObject {
         }
 
         hover = nil
+        // Pages in Tilde's browser report their elements; other windows are compared by picture.
+        var fingerprint: Task<NoteFingerprint?, Never>?
+        if anchor == nil, let window {
+            let windowID = CGWindowID(window.number)
+            fingerprint = Task { await NoteFingerprint.capture(window: windowID, area: frame) }
+        }
         composer = .new(Pending(
-            target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked, sourceWindow: window?.number
+            target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked,
+            sourceWindow: window?.number, fingerprint: fingerprint
         ))
         log.notice("comment opened for \(chip, privacy: .public)")
         commentText = ""
@@ -1574,9 +1656,10 @@ final class AnnotationController: ObservableObject {
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
             drafts.append(Draft(
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture, anchor: pending.anchor,
-                sourceWindow: pending.sourceWindow
+                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint
             ))
             startOcclusion()
+            startContentChecks()
             if let tracked = pending.tracked {
                 trackedElements[annotation.id] = tracked
                 startTracking()
