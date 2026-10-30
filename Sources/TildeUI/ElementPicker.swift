@@ -1,5 +1,6 @@
 import TildeCore
 import AppKit
+import os
 import ApplicationServices
 
 /// An element under the cursor, ready to be annotated.
@@ -53,7 +54,13 @@ final class ElementPicker {
         if AXIsProcessTrusted() {
             picked = await withCheckedContinuation { continuation in
                 accessibilityQueue.async {
-                    continuation.resume(returning: Self.accessibilityPick(at: point, in: window))
+                    let started = Date()
+                    let picked = Self.accessibilityPick(at: point, in: window)
+                    let took = Date().timeIntervalSince(started)
+                    if took > 0.05 {
+                        Self.log.notice("element lookup took \(Int(took * 1000), privacy: .public) ms in \(window.app, privacy: .public)")
+                    }
+                    continuation.resume(returning: picked)
                 }
             }
         }
@@ -128,6 +135,8 @@ final class ElementPicker {
 
     /// The windows on screen that the user sees and can annotate, front to back: other apps'
     /// windows and Tilde's browser, not Tilde's overlays, HUD or the menu bar.
+    nonisolated private static let log = Logger(subsystem: "dev.tilde.app", category: "picker")
+
     func windowStack() -> [WindowInfo] {
         Self.windowStack(
             browserWindow: browser.windowNumber, screenFrames: NSScreen.screens.map(\.frame.flipped), overlayLevel: OverlayWindow.overlayLevel.rawValue
@@ -182,19 +191,8 @@ final class ElementPicker {
         AXUIElementSetMessagingTimeout(app, 0.3)
 
         var hit: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success else {
-            return nil
-        }
-        // Chromium answers with the whole page at first and finds the element meanwhile, so a
-        // click with no hover before it would note the whole page.
-        for _ in 0..<4 {
-            guard let found = hit, let role: String = attribute(found, kAXRoleAttribute), ["AXScrollArea", "AXWebArea"].contains(role) else {
-                break
-            }
-            Thread.sleep(forTimeInterval: 0.06)
-            AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit)
-        }
-        guard let element = hit,
+        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success,
+              let element = hit,
               let frame = frame(of: element),
               frame.width >= 1, frame.height >= 1
         else {
