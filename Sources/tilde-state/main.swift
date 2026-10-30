@@ -16,7 +16,6 @@ guard arguments.count >= 4, arguments[1] == "render" else {
 }
 
 Task { @MainActor in
-    NSApplication.shared.setActivationPolicy(.prohibited)
     let out = URL(fileURLWithPath: arguments[2], isDirectory: true)
     var failed = false
     for path in arguments[3...] {

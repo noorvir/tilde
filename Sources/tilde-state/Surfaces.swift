@@ -138,8 +138,8 @@ enum Surfaces {
         if state.savedSessions == true {
             let archive = Fixtures.archive()
             archive.save(Fixtures.record(id: "s1", state: .active, notes: 3))
-            archive.save(Fixtures.record(id: "s2", client: "You", isLocal: true, state: .sent, notes: 1, updated: Date(timeIntervalSince1970: 1_792_990_000)))
-            archive.save(Fixtures.record(id: "s3", client: "Claude Code", state: .cancelled, notes: 2, updated: Date(timeIntervalSince1970: 1_792_980_000)))
+            archive.save(Fixtures.record(id: "s2", client: "You", isLocal: true, state: .sent, notes: 1, updated: Date(timeIntervalSince1970: 1_792_990_000), pageURL: nil))
+            archive.save(Fixtures.record(id: "s3", client: "Claude Code", state: .cancelled, notes: 2, updated: Date(timeIntervalSince1970: 1_792_900_000), pageURL: "http://localhost:3000/"))
             archive.flush()
             history = HistoryModel(archive: archive)
             history?.expanded = ["s1"]
