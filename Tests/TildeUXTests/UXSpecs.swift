@@ -693,6 +693,32 @@ struct UXSpecs {
         }
     }
 
+    @Test func pastingALongCommentKeepsTheTopOfTheBoxOnScreen() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            let hint = try await app.waitToSee("add")
+            let chip = try #require(try await app.seen().first { $0.role == "AXStaticText" && $0.frame.maxY < hint.frame.minY })
+            let copy = Process()
+            copy.executableURL = URL(fileURLWithPath: "/bin/sh")
+            copy.arguments = ["-c", "yes \"A long line of pasted text that wraps in the comment box\" | head -200 | pbcopy"]
+            try copy.run()
+            waitForExit(copy)
+            try await app.key(.v, command: true)
+            try await Task.sleep(for: .milliseconds(500))
+            let after = try #require(try await app.seen().first { $0.name == chip.name && $0.role == "AXStaticText" })
+            #expect(abs(after.frame.minY - chip.frame.minY) < 1)
+            let moved = try await app.waitToSee("add")
+            #expect(moved.frame.minY > hint.frame.minY + 200)
+            let screen = try #require(NSScreen.screens.first)
+            #expect(moved.frame.maxY < screen.frame.height)
+        }
+    }
+
     @Test func shiftReturnAddsALineInTheCommentBoxAndInThePreviewAndEscClosesThePreview() async throws {
         let window = try ChangingWindow()
         defer { window.close() }

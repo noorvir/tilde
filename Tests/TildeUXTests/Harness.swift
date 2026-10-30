@@ -46,6 +46,7 @@ enum Key: Int {
     case w = 13
     case a = 0
     case z = 6
+    case v = 9
     case leftBracket = 33
     case rightBracket = 30
 }

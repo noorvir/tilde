@@ -23,7 +23,9 @@ final class CommentPanel {
     /// right, kept inside the screen. Both are in Quartz coordinates.
     func show(chip: String, isEditing: Bool, near marker: CGPoint, below target: CGRect) {
         // A fresh hosting view resets focus and local state for each comment.
-        let hosting = FittingHostingView(rootView: CommentView(controller: controller, chip: chip, isEditing: isEditing))
+        let hosting = FittingHostingView(rootView: CommentView(controller: controller, chip: chip, isEditing: isEditing) { [weak self] change in
+            self?.grow(by: change)
+        })
         let size = hosting.fittingSize
         let anchor = marker.flipped
         let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.screens[0]
@@ -43,14 +45,26 @@ final class CommentPanel {
         // Attach the content once the panel is key, so the text field can take focus on appear.
         window.contentView = hosting
 
-        // Grow downward as the comment wraps, keeping the top edge in place.
-        hosting.onSizeChange = { [weak window] size in
-            guard let window, window.frame.size != size else {
+        // The final size, once SwiftUI has laid out the content.
+        hosting.onSizeChange = { [weak self] size in
+            guard let self, self.window.frame.size != size else {
                 return
             }
-            let frame = window.frame
-            window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height), display: true)
+            self.grow(by: size.height - self.window.frame.height)
         }
+    }
+
+    /// Grows downward, keeping the top edge in place, and upward only when the screen ends.
+    /// It runs before the content changes, so the content never has less room than it needs:
+    /// it would be cut off at the top until the window caught up.
+    private func grow(by change: CGFloat) {
+        var frame = window.frame
+        frame.size.height += change
+        frame.origin.y -= change
+        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame, frame.minY < visible.minY {
+            frame.origin.y = min(visible.minY, visible.maxY - frame.height)
+        }
+        window.setFrame(frame, display: false)
     }
 
     func close() {
@@ -75,6 +89,7 @@ private struct CommentEditor: NSViewRepresentable {
     let draft: CommentDraft
     @Binding var height: CGFloat
     @Binding var isEmpty: Bool
+    let onHeightChange: (CGFloat) -> Void
     let onSubmit: () -> Void
     let onCancel: () -> Void
 
@@ -155,6 +170,7 @@ private struct CommentEditor: NSViewRepresentable {
             let used = max(line, ceil(manager.usedRect(for: container).height))
             let height = min(used, CommentEditor.maxHeight)
             if parent.height != height {
+                parent.onHeightChange(height - parent.height)
                 parent.height = height
             }
         }
@@ -185,6 +201,8 @@ struct CommentView: View {
     @ObservedObject var controller: AnnotationController
     let chip: String
     let isEditing: Bool
+    /// Called with the change in height just before the box changes size.
+    var onHeightChange: (CGFloat) -> Void = { _ in }
     @State private var editorHeight = ceil(NSLayoutManager().defaultLineHeight(for: NSFont.systemFont(ofSize: 14)))
     @State private var isEmpty = true
 
@@ -212,7 +230,7 @@ struct CommentView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                CommentEditor(draft: controller.commentDraft, height: $editorHeight, isEmpty: $isEmpty) {
+                CommentEditor(draft: controller.commentDraft, height: $editorHeight, isEmpty: $isEmpty, onHeightChange: onHeightChange) {
                     controller.submitComment(thenSend: false)
                 } onCancel: {
                     controller.escapePressed()

@@ -65,6 +65,7 @@ enum Surfaces {
         case "comment":
             let controller = try await controller(state)
             let isEditing = state.editing ?? false
+            controller.commentText = state.commentText ?? ""
             if isEditing, let draft = controller.drafts.first {
                 apply(state, drafts: controller.drafts, composer: .edit(draft.id), to: controller)
                 controller.commentText = draft.annotation.comment

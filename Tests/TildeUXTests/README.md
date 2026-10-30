@@ -1,3 +1,7 @@
+## Known issues
+
+`aNoteInTheRealSimulator...` is not reliable: it failed once in 2 runs on the same code (the note did not hide on the other screen), cause unknown. It stays in the release check.
+
 ## The release check
 
 `scripts/e2e-release.sh` runs 5 flows with real input and real apps: an agent session with its report, a note in a real browser and back, a note in the Simulator, the hold key, and restore after a crash. It runs before a release or to be sure, and fails above 3 minutes. For every commit, use `scripts/ui-check.sh`: see Tests/Contract/README.md.
