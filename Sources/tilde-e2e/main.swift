@@ -159,7 +159,7 @@ final class Harness {
 
         // Scrolling while annotating scrolls the page under the pointer.
         if isScopedToBrowser {
-            _ = try await browser.webView.evaluateJavaScript("document.body.style.minHeight = '4000px'; window.scrollTo(0, 0)")
+            _ = try await browser.webView.evaluateJavaScript("document.body.style.minHeight = '4000px'; window.scrollTo(0, 0); true")
             let page = try require(NSApp.windows.first { $0.windowNumber == self.browser.windowNumber }, "the browser window")
             let point = CGPoint(x: page.frame.midX, y: page.frame.midY).flipped
             let event = try require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -300, wheel2: 0, wheel3: 0), "a scroll event")
@@ -173,7 +173,7 @@ final class Harness {
             }
             let scrolled = (try? await browser.webView.evaluateJavaScript("window.scrollY")) as? Double ?? 0
             try check(scrolled > 0, "scrolling while annotating scrolls the page, scrollY \(scrolled)")
-            _ = try await browser.webView.evaluateJavaScript("document.body.style.minHeight = ''; window.scrollTo(0, 0)")
+            _ = try await browser.webView.evaluateJavaScript("document.body.style.minHeight = ''; window.scrollTo(0, 0); true")
         } else {
             throw CheckFailure(description: "the scroll check needs a session on the browser")
         }

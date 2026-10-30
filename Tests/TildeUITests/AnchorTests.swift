@@ -27,7 +27,7 @@ struct AnchorTests {
         #expect(browser.anchorRects[id]?.minY == 120)
 
         // The selector breaks; the text still finds the element.
-        _ = try await browser.webView.evaluateJavaScript("document.getElementById('target').removeAttribute('id')")
+        _ = try await browser.webView.evaluateJavaScript("document.getElementById('target').removeAttribute('id'); true")
         browser.anchors = [id: PageAnchor(url: "https://example.test/a", selector: "#target", text: "Avatar and name", documentRect: .zero)]
         browser.resolveAnchors()
         try await Task.sleep(for: .milliseconds(300))

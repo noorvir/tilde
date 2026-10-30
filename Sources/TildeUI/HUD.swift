@@ -713,6 +713,7 @@ private struct HUDButton: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .tildeTooltip(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -811,9 +812,16 @@ struct KeyHint: View {
     }
 }
 
+private struct HUDEmbeddedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 extension EnvironmentValues {
     /// The HUD is on the browser's toolbar, so its controls use the toolbar's corners.
-    @Entry var isHUDEmbedded = false
+    var isHUDEmbedded: Bool {
+        get { self[HUDEmbeddedKey.self] }
+        set { self[HUDEmbeddedKey.self] = newValue }
+    }
 }
 
 /// A pill control's shape: round ends in the floating HUD, the toolbar's corners on it.

@@ -28,5 +28,6 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign - --identifier dev.tilde.driver "$app"
+# The designated requirement keeps the Accessibility and Screen Recording grants across rebuilds.
+codesign --force --sign - --identifier dev.tilde.driver -r='designated => identifier "dev.tilde.driver"' "$app"
 echo "Built $app"

@@ -8,6 +8,10 @@
 //   POST /mouse {"type": "move|click|down|up|drag", "x", "y", "toX"?, "toY"?}
 //   POST /type  {"text": "..."}
 //   POST /key   {"code": 36, "command": true}
+//   POST /tap   {"key": "control|option|shift|command|function"}  a modifier pressed and released
+//   POST /ax    {"pid": 123}               the app's windows and menu bar extras as a JSON tree
+//   POST /press {"pid": 123, "name": "..."} AXPress on the first element with that name
+//   POST /window {"pid": 123, "title": "..."} a picture of that window, as base64 PNG
 // Coordinates are Quartz screen points (top-left origin of the main display).
 
 import TildeCore
@@ -60,9 +64,141 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
         key(CGKeyCode(body["code"] as? Int ?? 0), command: body["command"] as? Bool ?? false)
         return json(["ok": true])
 
+    case ("POST", "/tap"):
+        await tap(body["key"] as? String ?? "")
+        return json(["ok": true])
+
+    case ("POST", "/ax"):
+        let pid = pid_t(body["pid"] as? Int ?? 0)
+        maxDepth = body["depth"] as? Int ?? 40
+        return json(["tree": roots(of: pid).map { node($0, depth: 0) }])
+
+    case ("POST", "/window"):
+        return json(["png": windowPicture(pid: body["pid"] as? Int ?? 0, title: body["title"] as? String ?? "") as Any])
+
+    case ("POST", "/press"):
+        let pid = pid_t(body["pid"] as? Int ?? 0)
+        let name = body["name"] as? String ?? ""
+        for root in roots(of: pid) {
+            if let element = find(name, role: body["role"] as? String, in: root, depth: 0) {
+                // Off this thread: pressing a menu bar item blocks until its menu closes.
+                nonisolated(unsafe) let target = element
+                DispatchQueue.global().async {
+                    AXUIElementPerformAction(target, kAXPressAction as CFString)
+                }
+                return json(["ok": true])
+            }
+        }
+        return json(["ok": false])
+
     default:
         return HTTPResponse(status: 404)
     }
+}
+
+func windowPicture(pid: Int, title: String) -> String? {
+    let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+    let window = list.first { $0[kCGWindowOwnerPID as String] as? Int == pid && $0[kCGWindowName as String] as? String == title }
+    guard let number = window?[kCGWindowNumber as String] as? Int else {
+        return nil
+    }
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+    let capture = Process()
+    capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    capture.arguments = ["-x", "-o", "-l\(number)", file.path]
+    try? capture.run()
+    capture.waitUntilExit()
+    return (try? Data(contentsOf: file))?.base64EncodedString()
+}
+
+func tap(_ name: String) async {
+    let keys: [String: (CGKeyCode, CGEventFlags)] = [
+        "control": (59, .maskControl), "option": (58, .maskAlternate), "shift": (56, .maskShift),
+        "command": (55, .maskCommand), "function": (63, .maskSecondaryFn),
+    ]
+    guard let (code, flag) = keys[name] else {
+        return
+    }
+    let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true)
+    down?.flags = flag
+    down?.post(tap: .cghidEventTap)
+    try? await Task.sleep(for: .milliseconds(40))
+    let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
+    up?.flags = []
+    up?.post(tap: .cghidEventTap)
+}
+
+func roots(of pid: pid_t) -> [AXUIElement] {
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 1)
+    // Some of the app's panels report the application itself, which would loop for ever.
+    var roots: [AXUIElement] = (axValue(app, kAXWindowsAttribute) as [AXUIElement]? ?? []).filter(isNotApplication)
+    if let extras: AXUIElement = axValue(app, "AXExtrasMenuBar") {
+        roots.append(extras)
+    }
+    return roots
+}
+
+func axValue<T>(_ element: AXUIElement, _ name: String) -> T? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else {
+        return nil
+    }
+    return value as? T
+}
+
+/// The element's user-visible name: its title, description or text value.
+func axName(_ element: AXUIElement) -> String? {
+    for key in [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute] {
+        if let text: String = axValue(element, key), !text.isEmpty {
+            return text
+        }
+    }
+    return nil
+}
+
+nonisolated(unsafe) var maxDepth = 40
+
+func isNotApplication(_ element: AXUIElement) -> Bool {
+    (axValue(element, kAXRoleAttribute) as String?) != kAXApplicationRole
+}
+
+func node(_ element: AXUIElement, depth: Int) -> [String: Any] {
+    var result: [String: Any] = ["role": axValue(element, kAXRoleAttribute) as String? ?? ""]
+    result["name"] = axName(element)
+    result["enabled"] = axValue(element, kAXEnabledAttribute) as Bool? ?? true
+    var position = CGPoint.zero
+    var size = CGSize.zero
+    var value: CFTypeRef?
+    if AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &value) == .success, let value {
+        AXValueGetValue(value as! AXValue, .cgPoint, &position)
+    }
+    value = nil
+    if AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success, let value {
+        AXValueGetValue(value as! AXValue, .cgSize, &size)
+    }
+    result["frame"] = [position.x, position.y, size.width, size.height]
+    if depth < maxDepth {
+        let children: [AXUIElement] = axValue(element, kAXChildrenAttribute) ?? []
+        result["children"] = children.filter(isNotApplication).prefix(500).map { node($0, depth: depth + 1) }
+    }
+    return result
+}
+
+func find(_ name: String, role: String?, in element: AXUIElement, depth: Int) -> AXUIElement? {
+    if axName(element) == name, role == nil || role == axValue(element, kAXRoleAttribute) as String? {
+        return element
+    }
+    guard depth < 40 else {
+        return nil
+    }
+    let children: [AXUIElement] = axValue(element, kAXChildrenAttribute) ?? []
+    for child in children.filter(isNotApplication) {
+        if let found = find(name, role: role, in: child, depth: depth + 1) {
+            return found
+        }
+    }
+    return nil
 }
 
 func mouse(_ body: [String: Any]) async {
@@ -108,6 +244,8 @@ func type(_ text: String) async {
         for isDown in [true, false] {
             let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: isDown)
             event?.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+            // Explicitly none: posted events otherwise keep the modifiers of the last shortcut.
+            event?.flags = []
             event?.post(tap: .cghidEventTap)
         }
         try? await Task.sleep(for: .milliseconds(15))
@@ -117,9 +255,7 @@ func type(_ text: String) async {
 func key(_ code: CGKeyCode, command: Bool) {
     for isDown in [true, false] {
         let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: isDown)
-        if command {
-            event?.flags = .maskCommand
-        }
+        event?.flags = command ? .maskCommand : []
         event?.post(tap: .cghidEventTap)
     }
 }
