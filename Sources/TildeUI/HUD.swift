@@ -464,6 +464,8 @@ struct HUDView: View {
                 Text("Clear \(all)?")
             case .cancelSession:
                 Text("Discard and close?")
+            case .discardComment:
+                Text("Discard comment?")
             case .restore(let record):
                 Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(record.notes.count) saved?")
             }
@@ -489,6 +491,11 @@ struct HUDView: View {
                 controller.confirm()
             }
             .tildeTooltip("Discard \(all) and close")
+        case .discardComment:
+            PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
+                controller.confirm()
+            }
+            .tildeTooltip("Discard the comment you are writing")
         case .restore:
             PillTextButton(title: "Replace", key: "↩", isDestructive: true) {
                 controller.confirm()

@@ -419,5 +419,97 @@
     "applyPause"
    ]
   }
+ },
+ {
+  "name": "Clicking away with text saves the note",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true
+  },
+  "event": "clickAway",
+  "expect": {
+   "effects": [
+    "saveComment"
+   ]
+  }
+ },
+ {
+  "name": "Clicking away from an empty note drops it",
+  "state": {
+   "commentOpen": true
+  },
+  "event": "clickAway",
+  "expect": {
+   "effects": [
+    "closeComposer"
+   ]
+  }
+ },
+ {
+  "name": "A click with no comment open saves nothing",
+  "state": {},
+  "event": "clickAway",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "Esc on a comment with text asks first",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": "discardComment"
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Esc on an empty comment closes it",
+  "state": {
+   "commentOpen": true
+  },
+  "event": "escape",
+  "expect": {
+   "effects": [
+    "closeComposer"
+   ]
+  }
+ },
+ {
+  "name": "Esc again keeps writing",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true,
+   "confirmation": "discardComment"
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": null,
+    "commentOpen": true
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Return to the question discards the comment",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true,
+   "confirmation": "discardComment"
+  },
+  "event": "confirm",
+  "expect": {
+   "state": {
+    "confirmation": null
+   },
+   "effects": [
+    "closeComposer"
+   ]
+  }
  }
 ]

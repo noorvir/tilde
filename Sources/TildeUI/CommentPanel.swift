@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import os
 
 /// The comment box that opens next to a new or edited annotation.
 @MainActor
@@ -58,26 +59,125 @@ final class CommentPanel {
     }
 }
 
-/// The text of the comment being written.
+/// The text of the comment being written. Not published: typing changes nothing else on screen.
 @MainActor
-final class CommentDraft: ObservableObject {
-    @Published var text = ""
+final class CommentDraft {
+    var text = ""
 }
 
-/// The text field of the comment: only this view changes as the user types.
-private struct CommentField: View {
-    @ObservedObject var draft: CommentDraft
-    var focused: FocusState<Bool>.Binding
-    let onSubmit: () -> Void
+/// The comment's text, in a plain text view: a key changes the text and nothing else, and the
+/// box changes size only when the number of lines does.
+private struct CommentEditor: NSViewRepresentable {
+    static let font = NSFont.systemFont(ofSize: 14)
+    /// Grows with the text up to about 400 pt, then scrolls.
+    static let maxHeight: CGFloat = 400
 
-    var body: some View {
-        TextField("Add a comment", text: $draft.text, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(.system(size: 14))
-            // Grows with the text up to about 400 pt, then scrolls.
-            .lineLimit(1...23)
-            .focused(focused)
-            .onSubmit(onSubmit)
+    let draft: CommentDraft
+    @Binding var height: CGFloat
+    @Binding var isEmpty: Bool
+    let onSubmit: () -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.borderType = .noBorder
+        let text = FocusedTextView(frame: .zero)
+        text.isRichText = false
+        text.allowsUndo = true
+        text.drawsBackground = false
+        text.font = Self.font
+        text.textColor = .white
+        text.insertionPointColor = .controlAccentColor
+        text.textContainerInset = .zero
+        text.textContainer?.lineFragmentPadding = 0
+        text.textContainer?.widthTracksTextView = true
+        text.isVerticallyResizable = true
+        text.isHorizontallyResizable = false
+        text.autoresizingMask = .width
+        text.isAutomaticQuoteSubstitutionEnabled = false
+        text.isAutomaticDashSubstitutionEnabled = false
+        text.string = draft.text
+        text.delegate = context.coordinator
+        scroll.documentView = text
+        return scroll
+    }
+
+    func updateNSView(_ view: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        // The first layout knows the width, so the text of an edited note gets its height.
+        DispatchQueue.main.async {
+            if let text = view.documentView as? NSTextView {
+                context.coordinator.updateHeight(of: text)
+            }
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: CommentEditor
+        private let log = Logger(subsystem: "dev.tilde.app", category: "typing")
+
+        init(_ parent: CommentEditor) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let text = notification.object as? NSTextView else {
+                return
+            }
+            parent.draft.text = text.string
+            if parent.isEmpty != text.string.isEmpty {
+                parent.isEmpty = text.string.isEmpty
+            }
+            updateHeight(of: text)
+            if let event = NSApp.currentEvent, event.type == .keyDown {
+                let took = ProcessInfo.processInfo.systemUptime - event.timestamp
+                if took > 0.016 {
+                    log.notice("key took \(Int(took * 1000), privacy: .public) ms")
+                }
+            }
+        }
+
+        func updateHeight(of text: NSTextView) {
+            guard let manager = text.layoutManager, let container = text.textContainer else {
+                return
+            }
+            manager.ensureLayout(for: container)
+            let line = ceil(manager.defaultLineHeight(for: CommentEditor.font))
+            let used = max(line, ceil(manager.usedRect(for: container).height))
+            let height = min(used, CommentEditor.maxHeight)
+            if parent.height != height {
+                parent.height = height
+            }
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.insertNewline(_:)):
+                parent.onSubmit()
+                return true
+            case #selector(NSResponder.cancelOperation(_:)):
+                parent.onCancel()
+                return true
+            default:
+                return false
+            }
+        }
+    }
+}
+
+private final class FocusedTextView: NSTextView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.makeFirstResponder(self)
     }
 }
 
@@ -85,7 +185,8 @@ struct CommentView: View {
     @ObservedObject var controller: AnnotationController
     let chip: String
     let isEditing: Bool
-    @FocusState private var focused: Bool
+    @State private var editorHeight = ceil(NSLayoutManager().defaultLineHeight(for: NSFont.systemFont(ofSize: 14)))
+    @State private var isEmpty = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -111,8 +212,19 @@ struct CommentView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                CommentField(draft: controller.commentDraft, focused: $focused) {
+                CommentEditor(draft: controller.commentDraft, height: $editorHeight, isEmpty: $isEmpty) {
                     controller.submitComment(thenSend: false)
+                } onCancel: {
+                    controller.escapePressed()
+                }
+                .frame(height: editorHeight)
+                .overlay(alignment: .topLeading) {
+                    if isEmpty {
+                        Text("Add a comment")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.tertiary)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .padding(.vertical, 3)
 
@@ -148,8 +260,8 @@ struct CommentView: View {
         .shadow(color: .black.opacity(0.24), radius: 16, y: 6)
         .padding(18)
         .environment(\.colorScheme, .dark)
-        .onExitCommand { controller.closeComposer() }
-        .onAppear { focused = true }
+        .onExitCommand { controller.escapePressed() }
+        .onAppear { isEmpty = controller.commentDraft.text.isEmpty }
     }
 
     private func hint(_ key: String, _ label: String) -> some View {

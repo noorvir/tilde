@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    520,
+    80
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "notes": 1,
+  "confirmation": "discardComment"
+}

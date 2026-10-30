@@ -5,11 +5,11 @@ import Foundation
 struct SessionFlow: Codable, Equatable {
     enum Event: String, Codable {
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
-        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront
+        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway
     }
 
     enum Effect: String, Codable {
-        case applyPause, closeComposer, closePreview, cancelWindowPick
+        case applyPause, closeComposer, saveComment, closePreview, cancelWindowPick
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case cancelSession, clearDrafts, restoreDrafts
@@ -24,13 +24,14 @@ struct SessionFlow: Codable, Equatable {
     var autoPaused = false
     var holdPaused = false
     var commentOpen = false
+    var commentHasText = false
     var previewOpen = false
     var pickingWindow = false
-    /// "clearAll", "cancelSession" or "restore".
+    /// "clearAll", "cancelSession", "discardComment" or "restore".
     var confirmation: String?
 
     private enum CodingKeys: String, CodingKey {
-        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, commentOpen, previewOpen, pickingWindow, confirmation
+        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, commentOpen, commentHasText, previewOpen, pickingWindow, confirmation
     }
 
     init() {}
@@ -44,6 +45,7 @@ struct SessionFlow: Codable, Equatable {
         autoPaused = try values.decodeIfPresent(Bool.self, forKey: .autoPaused) ?? false
         holdPaused = try values.decodeIfPresent(Bool.self, forKey: .holdPaused) ?? false
         commentOpen = try values.decodeIfPresent(Bool.self, forKey: .commentOpen) ?? false
+        commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
         previewOpen = try values.decodeIfPresent(Bool.self, forKey: .previewOpen) ?? false
         pickingWindow = try values.decodeIfPresent(Bool.self, forKey: .pickingWindow) ?? false
         confirmation = try values.decodeIfPresent(String.self, forKey: .confirmation)
@@ -53,6 +55,15 @@ struct SessionFlow: Codable, Equatable {
         switch event {
         case .escape:
             if commentOpen {
+                // Esc on a comment with text asks first, and Esc again keeps writing.
+                if confirmation == "discardComment" {
+                    confirmation = nil
+                    return []
+                }
+                if commentHasText {
+                    confirmation = "discardComment"
+                    return []
+                }
                 return [.closeComposer]
             }
             if previewOpen {
@@ -120,6 +131,7 @@ struct SessionFlow: Codable, Equatable {
             switch asked {
             case "clearAll": return [.clearDrafts]
             case "cancelSession": return [.cancelSession]
+            case "discardComment": return [.closeComposer]
             default: return [.restoreDrafts]
             }
 
@@ -141,6 +153,13 @@ struct SessionFlow: Codable, Equatable {
             }
             holdPaused = false
             return [.plainClicksOff, .applyPause]
+
+        case .clickAway:
+            // What was written is never lost by a click; an empty note is not worth keeping.
+            guard commentOpen else {
+                return []
+            }
+            return commentHasText ? [.saveComment] : [.closeComposer]
 
         case .otherAppInFront:
             guard !autoPaused else {

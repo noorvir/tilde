@@ -31,6 +31,8 @@ struct Draft: Identifiable {
 enum Confirmation: Equatable {
     case clearAll
     case cancelSession
+    /// Throw away the comment being written.
+    case discardComment
     /// Replace the notes on screen with a saved session's.
     case restore(SessionRecord)
 }
@@ -550,11 +552,13 @@ final class AnnotationController: ObservableObject {
         flow.autoPaused = isAutoPaused
         flow.holdPaused = isHoldPaused
         flow.commentOpen = composer != nil
+        flow.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         flow.previewOpen = previewID != nil
         flow.pickingWindow = isPickingWindow
         switch confirmation {
         case .clearAll: flow.confirmation = "clearAll"
         case .cancelSession: flow.confirmation = "cancelSession"
+        case .discardComment: flow.confirmation = "discardComment"
         case .restore: flow.confirmation = "restore"
         case nil: flow.confirmation = nil
         }
@@ -571,6 +575,7 @@ final class AnnotationController: ObservableObject {
         switch next.confirmation {
         case "clearAll": confirmation = .clearAll
         case "cancelSession": confirmation = .cancelSession
+        case "discardComment": confirmation = .discardComment
         case "restore": break
         default: confirmation = nil
         }
@@ -583,6 +588,7 @@ final class AnnotationController: ObservableObject {
         switch effect {
         case .applyPause: applyPause()
         case .closeComposer: closeComposer()
+        case .saveComment: submitComment(thenSend: false)
         case .closePreview: closePreview()
         case .cancelWindowPick: cancelWindowPick()
         case .keepKeyboard:
@@ -677,6 +683,10 @@ final class AnnotationController: ObservableObject {
     }
 
     func refreshOcclusion() {
+        // Nothing moves on purpose while the user types, and typing must stay instant.
+        guard composer == nil else {
+            return
+        }
         var windows = Set(drafts.compactMap(\.sourceWindow))
         if !pageNotes.isEmpty, let number = browser.windowNumber {
             windows.insert(number)
@@ -806,7 +816,7 @@ final class AnnotationController: ObservableObject {
     }
 
     private func checkContent() {
-        guard !isCheckingContent, phase == .annotating else {
+        guard !isCheckingContent, phase == .annotating, composer == nil else {
             return
         }
         let checks = drafts.compactMap { draft -> ContentCheck? in
@@ -916,7 +926,7 @@ final class AnnotationController: ObservableObject {
     func refreshTracking() {
         let ids = Set(drafts.map(\.id))
         trackedElements = trackedElements.filter { ids.contains($0.key) }
-        guard !isTracking, !trackedElements.isEmpty else {
+        guard !isTracking, !trackedElements.isEmpty, composer == nil else {
             return
         }
         isTracking = true
@@ -983,6 +993,9 @@ final class AnnotationController: ObservableObject {
         checkpointTimer?.invalidate()
         checkpointTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
+                guard self?.composer == nil else {
+                    return
+                }
                 self?.saveSession()
             }
         }
@@ -1618,7 +1631,7 @@ final class AnnotationController: ObservableObject {
             return
         }
         if composer != nil {
-            closeComposer()
+            dispatch(.clickAway)
             return
         }
 
@@ -1657,7 +1670,7 @@ final class AnnotationController: ObservableObject {
             return
         }
         if composer != nil {
-            closeComposer()
+            dispatch(.clickAway)
         }
         let marker = CGPoint(x: rect.maxX, y: rect.minY)
         let window = scope ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
@@ -1768,6 +1781,10 @@ final class AnnotationController: ObservableObject {
     func edit(_ id: Draft.ID) {
         guard let draft = drafts.first(where: { $0.id == id }) else {
             return
+        }
+        // The comment being written stays, also when another note is opened.
+        if composer != nil {
+            dispatch(.clickAway)
         }
         hover = nil
         composer = .edit(id)
@@ -1928,7 +1945,7 @@ final class AnnotationController: ObservableObject {
             return
         }
         if composer != nil {
-            closeComposer()
+            dispatch(.clickAway)
         }
         hover = nil
         previewID = id

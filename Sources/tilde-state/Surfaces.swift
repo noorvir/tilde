@@ -112,6 +112,7 @@ enum Surfaces {
         let confirmation: Confirmation? = switch state.confirmation {
         case "clearAll": .clearAll
         case "cancelSession": .cancelSession
+        case "discardComment": .discardComment
         case "restore": .restore(Fixtures.record(notes: 3))
         default: nil
         }
