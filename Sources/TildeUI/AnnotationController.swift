@@ -128,7 +128,12 @@ final class AnnotationController: ObservableObject {
     /// The screenshot that fills the preview card's image area, if any.
     @Published var expandedPreviewImage: PreviewImage?
     @Published var showsList = false
-    @Published var commentText = ""
+    /// Apart from the rest of the state: typing must not redraw the HUD and the overlay.
+    let commentDraft = CommentDraft()
+    var commentText: String {
+        get { commentDraft.text }
+        set { commentDraft.text = newValue }
+    }
 
     private let store: SessionStore
     let browser: BrowserController

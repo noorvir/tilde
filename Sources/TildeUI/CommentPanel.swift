@@ -58,6 +58,29 @@ final class CommentPanel {
     }
 }
 
+/// The text of the comment being written.
+@MainActor
+final class CommentDraft: ObservableObject {
+    @Published var text = ""
+}
+
+/// The text field of the comment: only this view changes as the user types.
+private struct CommentField: View {
+    @ObservedObject var draft: CommentDraft
+    var focused: FocusState<Bool>.Binding
+    let onSubmit: () -> Void
+
+    var body: some View {
+        TextField("Add a comment", text: $draft.text, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.system(size: 14))
+            // Grows with the text up to about 400 pt, then scrolls.
+            .lineLimit(1...23)
+            .focused(focused)
+            .onSubmit(onSubmit)
+    }
+}
+
 struct CommentView: View {
     @ObservedObject var controller: AnnotationController
     let chip: String
@@ -88,14 +111,10 @@ struct CommentView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Add a comment", text: $controller.commentText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
-                    // Grows with the text up to about 400 pt, then scrolls.
-                    .lineLimit(1...23)
-                    .focused($focused)
-                    .onSubmit { controller.submitComment(thenSend: false) }
-                    .padding(.vertical, 3)
+                CommentField(draft: controller.commentDraft, focused: $focused) {
+                    controller.submitComment(thenSend: false)
+                }
+                .padding(.vertical, 3)
 
                 Button {
                     controller.submitComment(thenSend: false)

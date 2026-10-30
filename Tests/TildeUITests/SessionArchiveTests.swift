@@ -173,3 +173,16 @@ struct SessionArchiveTests {
         #expect(condition())
     }
 }
+
+@MainActor
+struct CommentTypingTests {
+    @Test func typingDoesNotRedrawTheHUDOrTheOverlay() {
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController())
+        var changes = 0
+        let subscription = controller.objectWillChange.sink { changes += 1 }
+        controller.commentText = "typed"
+        #expect(changes == 0)
+        #expect(controller.commentText == "typed")
+        subscription.cancel()
+    }
+}

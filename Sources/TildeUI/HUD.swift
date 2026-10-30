@@ -242,6 +242,7 @@ func insertNewlineOnShiftReturn(_ event: NSEvent, in window: NSWindow) -> Bool {
 }
 
 struct HUDView: View {
+    @Environment(\.isHUDEmbedded) private var isHUDEmbedded
     static let width: CGFloat = 462
 
     @ObservedObject var controller: AnnotationController
@@ -435,7 +436,7 @@ struct HUDView: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .frame(height: 28)
-            .background(HUDShape(height: 28).fill(Color.tildeBlue))
+            .background(HUDShape(height: 28, isHUDEmbedded: isHUDEmbedded).fill(Color.tildeBlue))
             .opacity(count == 0 && controller.composer == nil ? 0.4 : 1)
         }
         .buttonStyle(.plain)
@@ -744,6 +745,7 @@ private struct HUDButton: View {
 
 /// A text button for the pill's confirm state; destructive ones are red like Delete.
 struct PillTextButton: View {
+    @Environment(\.isHUDEmbedded) private var isHUDEmbedded
     let title: String
     /// A small key cap after the title, such as "esc", for the key that does the same.
     var key: String?
@@ -763,7 +765,7 @@ struct PillTextButton: View {
                 .foregroundStyle(isDestructive ? Color.red : .white.opacity(0.9))
                 .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(HUDShape(height: 28).fill(background))
+                .background(HUDShape(height: 28, isHUDEmbedded: isHUDEmbedded).fill(background))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -852,7 +854,7 @@ extension EnvironmentValues {
 /// A pill control's shape: round ends in the floating HUD, the toolbar's corners on it.
 private struct HUDShape: Shape {
     let height: CGFloat
-    @Environment(\.isHUDEmbedded) private var isHUDEmbedded
+    let isHUDEmbedded: Bool
 
     func path(in rect: CGRect) -> Path {
         RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : height / 2).path(in: rect)
