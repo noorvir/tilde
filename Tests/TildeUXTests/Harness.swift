@@ -45,6 +45,7 @@ enum Key: Int {
     case enter = 36
     case w = 13
     case a = 0
+    case z = 6
 }
 
 /// The built app in a throwaway environment, driven from outside: real input and the
@@ -167,8 +168,8 @@ final class TildeApp {
         try await clickText(name, sourceLocation: sourceLocation)
     }
 
-    func key(_ key: Key, command: Bool = false) async throws {
-        try await drive("key", ["code": key.rawValue, "command": command])
+    func key(_ key: Key, command: Bool = false, shift: Bool = false, option: Bool = false) async throws {
+        try await drive("key", ["code": key.rawValue, "command": command, "shift": shift, "option": option])
         try await Task.sleep(for: .milliseconds(300))
     }
 

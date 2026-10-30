@@ -221,6 +221,24 @@ final class HUDPanel {
 /// Borderless panel that can take keyboard focus without activating other windows.
 final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, insertNewlineOnShiftReturn(event, in: self) {
+            return
+        }
+        super.sendEvent(event)
+    }
+}
+
+/// Shift-Return and Option-Return add a line in a text field of a panel, as in chat apps; a
+/// SwiftUI field would take Shift-Return as Return and submit. Returns whether it did.
+func insertNewlineOnShiftReturn(_ event: NSEvent, in window: NSWindow) -> Bool {
+    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    guard [36, 76].contains(event.keyCode), modifiers == .shift || modifiers == .option, let editor = window.firstResponder as? NSTextView else {
+        return false
+    }
+    editor.insertNewlineIgnoringFieldEditor(nil)
+    return true
 }
 
 struct HUDView: View {

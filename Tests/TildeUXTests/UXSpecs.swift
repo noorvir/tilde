@@ -323,6 +323,76 @@ struct UXSpecs {
         }
     }
 
+    // MARK: - Writing a comment
+
+    @Test func shiftReturnAddsALineInTheCommentBoxAndInThePreviewAndEscClosesThePreview() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.midX, y: frame.midY))
+            try await app.waitToSee("add")
+            try await Task.sleep(for: .milliseconds(300))
+
+            // In the comment box: a new line, and the box stays open.
+            try await app.type("first")
+            try await app.key(.enter, shift: true)
+            try await app.type("second")
+            try await app.waitToSee("first\nsecond", timeout: 3)
+
+            // The usual editing keys: select all and type over, undo it, and Option-Return.
+            let oneLine = try await app.waitToSee("first\nsecond")
+            try await app.key(.a, command: true)
+            try await app.type("x")
+            try await app.waitToSee("x", timeout: 3)
+            try await app.key(.z, command: true)
+            try await app.waitToSeeText(containing: "first", timeout: 3)
+            try await app.key(.a, command: true)
+            try await app.type("first")
+            try await app.key(.enter, option: true)
+            try await app.type("second")
+            try await app.waitToSee("first\nsecond", timeout: 3)
+
+            // The box grows with its lines.
+            try await app.key(.enter, shift: true)
+            try await app.type("third")
+            let taller = try await app.waitToSee("first\nsecond\nthird", timeout: 3)
+            #expect(taller.frame.height > oneLine.frame.height)
+            try await app.key(.a, command: true)
+            try await app.type("first")
+            try await app.key(.enter, shift: true)
+            try await app.type("second")
+            try await app.waitToSee("first\nsecond", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+
+            // In the preview, with the text box focused.
+            try await app.press("Show annotations")
+            try await app.press("first\nsecond")
+            try await app.waitToSee("1 of 1")
+            try await app.press("first\nsecond")
+            try await app.key(.enter, shift: true)
+            try await app.type("third")
+            let before = try await app.waitToSeeText(containing: "third", timeout: 3)
+
+            // It grows with its text, to 400 pt at most, then scrolls.
+            for _ in 0..<30 {
+                try await app.key(.enter, shift: true)
+                try await app.type("line")
+            }
+            let long = try await app.waitToSeeText(containing: "line\nline\nline", timeout: 3)
+            #expect(long.frame.height > before.frame.height)
+            #expect(long.frame.height <= 440)
+            #expect(long.frame.height >= 200)
+
+            // Esc closes it at once, also from the text box.
+            try await app.key(.escape)
+            try await app.waitNotToSee("1 of 1")
+        }
+    }
+
     // MARK: - Window picker
 
     @Test func choosingAWindowCanBeCancelledWithEsc() async throws {

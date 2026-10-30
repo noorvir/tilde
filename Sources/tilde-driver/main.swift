@@ -61,7 +61,7 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
         return json(["ok": true])
 
     case ("POST", "/key"):
-        key(CGKeyCode(body["code"] as? Int ?? 0), command: body["command"] as? Bool ?? false)
+        key(CGKeyCode(body["code"] as? Int ?? 0), command: body["command"] as? Bool ?? false, shift: body["shift"] as? Bool ?? false, option: body["option"] as? Bool ?? false)
         return json(["ok": true])
 
     case ("POST", "/tap"):
@@ -252,10 +252,20 @@ func type(_ text: String) async {
     }
 }
 
-func key(_ code: CGKeyCode, command: Bool) {
+func key(_ code: CGKeyCode, command: Bool, shift: Bool, option: Bool) {
     for isDown in [true, false] {
         let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: isDown)
-        event?.flags = command ? .maskCommand : []
+        var flags: CGEventFlags = []
+        if command {
+            flags.insert(.maskCommand)
+        }
+        if shift {
+            flags.insert(.maskShift)
+        }
+        if option {
+            flags.insert(.maskAlternate)
+        }
+        event?.flags = flags
         event?.post(tap: .cghidEventTap)
     }
 }

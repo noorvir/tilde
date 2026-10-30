@@ -91,7 +91,8 @@ struct CommentView: View {
                 TextField("Add a comment", text: $controller.commentText, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14))
-                    .lineLimit(1...6)
+                    // Grows with the text up to about 400 pt, then scrolls.
+                    .lineLimit(1...23)
                     .focused($focused)
                     .onSubmit { controller.submitComment(thenSend: false) }
                     .padding(.vertical, 3)

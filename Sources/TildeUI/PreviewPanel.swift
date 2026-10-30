@@ -18,7 +18,7 @@ final class PreviewPanel {
         panel.onKey = { [unowned panel] event in
             let isEditing = panel.firstResponder is NSTextView
             switch event.keyCode {
-            case 53 where isEditing, 36 where isEditing && !event.modifierFlags.contains(.shift):
+            case 36 where isEditing && !event.modifierFlags.contains(.shift):
                 panel.makeFirstResponder(nil)
             case 53 where controller.expandedPreviewImage != nil:
                 controller.expandedPreviewImage = nil
@@ -60,6 +60,11 @@ final class PreviewPanel {
         let origin = NSPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2)
         window.setFrame(NSRect(origin: origin, size: size), display: true)
         window.makeKeyAndOrderFront(nil)
+        // Without this, Esc and the arrows would go to the app in front.
+        if !window.isKeyWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKey()
+        }
         window.makeFirstResponder(nil)
     }
 
@@ -75,7 +80,7 @@ private final class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, onKey?(event) == true {
+        if event.type == .keyDown, onKey?(event) == true || insertNewlineOnShiftReturn(event, in: self) {
             return
         }
         super.sendEvent(event)
@@ -272,7 +277,8 @@ private struct CommentEditor: View {
             .textFieldStyle(.plain)
             .font(.system(size: 14))
             .foregroundStyle(.white)
-            .lineLimit(3, reservesSpace: true)
+            // Grows with the text up to about 400 pt, then scrolls.
+            .lineLimit(3...23)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
