@@ -95,7 +95,7 @@ struct NoteFingerprint: Equatable, Sendable {
 
 /// Whether a note's content is on screen, from how alike its area is to its fingerprint over
 /// time. Two thresholds and two readings in a row keep it from flickering.
-struct NoteVisibility: Equatable {
+struct NoteVisibility: Equatable, Codable {
     static let hideBelow = 0.75
     static let showAbove = 0.85
     static let readingsToChange = 2

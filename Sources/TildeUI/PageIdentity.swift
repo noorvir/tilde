@@ -4,7 +4,7 @@ import os
 
 /// Which page a window shows: its web address, or else its title. It tells pages apart in
 /// browsers (also when a page changes its address without loading) and in most apps.
-struct PageIdentity: Equatable, Sendable {
+struct PageIdentity: Equatable, Sendable, Codable {
     /// The address without its fragment; nil outside web content.
     var url: String?
     var title: String?

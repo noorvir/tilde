@@ -1,0 +1,423 @@
+[
+ {
+  "name": "Esc while annotating pauses and keeps the keyboard",
+  "state": {},
+  "event": "escape",
+  "expect": {
+   "state": {
+    "paused": true
+   },
+   "effects": [
+    "applyPause",
+    "showEscapeNotice",
+    "keepKeyboard"
+   ]
+  }
+ },
+ {
+  "name": "Esc while paused with no notes ends the session",
+  "state": {
+   "paused": true
+  },
+  "event": "escape",
+  "expect": {
+   "effects": [
+    "clearNotice",
+    "cancelSession"
+   ]
+  }
+ },
+ {
+  "name": "Esc while paused with notes asks first",
+  "state": {
+   "paused": true,
+   "notes": 2
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": "cancelSession"
+   },
+   "effects": [
+    "clearNotice"
+   ]
+  }
+ },
+ {
+  "name": "Esc closes the comment box first",
+  "state": {
+   "commentOpen": true,
+   "notes": 1
+  },
+  "event": "escape",
+  "expect": {
+   "effects": [
+    "closeComposer"
+   ],
+   "state": {
+    "paused": false
+   }
+  }
+ },
+ {
+  "name": "Esc closes the preview",
+  "state": {
+   "previewOpen": true,
+   "notes": 1
+  },
+  "event": "escape",
+  "expect": {
+   "effects": [
+    "closePreview"
+   ]
+  }
+ },
+ {
+  "name": "Esc stops choosing a window",
+  "state": {
+   "pickingWindow": true
+  },
+  "event": "escape",
+  "expect": {
+   "effects": [
+    "cancelWindowPick"
+   ]
+  }
+ },
+ {
+  "name": "Esc dismisses a question and keeps the notes",
+  "state": {
+   "confirmation": "clearAll",
+   "notes": 2
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": null,
+    "notes": 2
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Pausing gives the keyboard back",
+  "state": {},
+  "event": "togglePause",
+  "expect": {
+   "state": {
+    "paused": true
+   },
+   "effects": [
+    "applyPause",
+    "giveKeyboardBack",
+    "takeKeyboard"
+   ]
+  }
+ },
+ {
+  "name": "Annotate resumes also from an automatic pause",
+  "state": {
+   "paused": true,
+   "autoPaused": true
+  },
+  "event": "togglePause",
+  "expect": {
+   "state": {
+    "paused": false,
+    "autoPaused": false
+   }
+  }
+ },
+ {
+  "name": "No pause after the session ended",
+  "state": {
+   "isAnnotating": false
+  },
+  "event": "togglePause",
+  "expect": {
+   "state": {
+    "paused": false
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Resume after an automatic pause",
+  "state": {
+   "autoPaused": true
+  },
+  "event": "resume",
+  "expect": {
+   "state": {
+    "autoPaused": false
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Resume does nothing when not paused",
+  "state": {},
+  "event": "resume",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "The shortcut starts a session when there is none",
+  "state": {
+   "hasSession": false,
+   "isAnnotating": false
+  },
+  "event": "startShortcut",
+  "expect": {
+   "effects": [
+    "startLocalSession"
+   ]
+  }
+ },
+ {
+  "name": "The shortcut resumes a paused session",
+  "state": {
+   "paused": true
+  },
+  "event": "startShortcut",
+  "expect": {
+   "state": {
+    "paused": false
+   }
+  }
+ },
+ {
+  "name": "The shortcut shows the HUD while annotating",
+  "state": {},
+  "event": "startShortcut",
+  "expect": {
+   "effects": [
+    "showHUD"
+   ]
+  }
+ },
+ {
+  "name": "Clear with no notes does not ask",
+  "state": {},
+  "event": "requestClearAll",
+  "expect": {
+   "state": {
+    "confirmation": null
+   }
+  }
+ },
+ {
+  "name": "Clear with notes asks",
+  "state": {
+   "notes": 3
+  },
+  "event": "requestClearAll",
+  "expect": {
+   "state": {
+    "confirmation": "clearAll"
+   }
+  }
+ },
+ {
+  "name": "Cancel with no notes ends at once",
+  "state": {},
+  "event": "requestCancel",
+  "expect": {
+   "effects": [
+    "clearNotice",
+    "cancelSession"
+   ]
+  }
+ },
+ {
+  "name": "Cancel with notes asks",
+  "state": {
+   "notes": 1
+  },
+  "event": "requestCancel",
+  "expect": {
+   "state": {
+    "confirmation": "cancelSession"
+   }
+  }
+ },
+ {
+  "name": "Yes to clear clears",
+  "state": {
+   "notes": 3,
+   "confirmation": "clearAll"
+  },
+  "event": "confirm",
+  "expect": {
+   "state": {
+    "confirmation": null
+   },
+   "effects": [
+    "clearDrafts"
+   ]
+  }
+ },
+ {
+  "name": "Yes to cancel ends the session",
+  "state": {
+   "notes": 3,
+   "confirmation": "cancelSession"
+  },
+  "event": "confirm",
+  "expect": {
+   "effects": [
+    "cancelSession"
+   ]
+  }
+ },
+ {
+  "name": "Yes to restore replaces the notes",
+  "state": {
+   "notes": 3,
+   "confirmation": "restore"
+  },
+  "event": "confirm",
+  "expect": {
+   "effects": [
+    "restoreDrafts"
+   ]
+  }
+ },
+ {
+  "name": "Return with no question does nothing",
+  "state": {},
+  "event": "confirm",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "No to a question keeps everything",
+  "state": {
+   "notes": 3,
+   "confirmation": "restore"
+  },
+  "event": "dismissConfirmation",
+  "expect": {
+   "state": {
+    "confirmation": null,
+    "notes": 3
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Holding the key lets clicks through",
+  "state": {},
+  "event": "holdBegan",
+  "expect": {
+   "state": {
+    "holdPaused": true
+   },
+   "effects": [
+    "plainClicksOn",
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Holding does nothing while typing a comment",
+  "state": {
+   "commentOpen": true
+  },
+  "event": "holdBegan",
+  "expect": {
+   "state": {
+    "holdPaused": false
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Holding does nothing in the preview",
+  "state": {
+   "previewOpen": true
+  },
+  "event": "holdBegan",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "Holding does nothing while paused",
+  "state": {
+   "paused": true
+  },
+  "event": "holdBegan",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "Holding does nothing with no session",
+  "state": {
+   "isAnnotating": false,
+   "hasSession": false
+  },
+  "event": "holdBegan",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "Letting go resumes",
+  "state": {
+   "holdPaused": true
+  },
+  "event": "holdEnded",
+  "expect": {
+   "state": {
+    "holdPaused": false
+   },
+   "effects": [
+    "plainClicksOff",
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Letting go after no hold does nothing",
+  "state": {},
+  "event": "holdEnded",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "Another app in front pauses a scoped session",
+  "state": {},
+  "event": "otherAppInFront",
+  "expect": {
+   "state": {
+    "autoPaused": true
+   },
+   "effects": [
+    "applyPause",
+    "showOtherAppNotice"
+   ]
+  }
+ },
+ {
+  "name": "Its app in front again resumes",
+  "state": {
+   "autoPaused": true
+  },
+  "event": "scopeAppInFront",
+  "expect": {
+   "state": {
+    "autoPaused": false
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ }
+]

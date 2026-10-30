@@ -96,8 +96,51 @@ for name in names {
     }
 }
 
+// State plus event gives state: each row's `expect` must be part of the result.
+func contains(_ whole: Any?, _ part: Any?) -> Bool {
+    if let part = part as? [String: Any] {
+        guard let whole = whole as? [String: Any] else { return false }
+        return part.allSatisfy { contains(whole[$0.key], $0.value) }
+    }
+    if part is NSNull {
+        return whole == nil || whole is NSNull
+    }
+    if let part = part as? NSObject, let whole = whole as? NSObject {
+        return part == whole
+    }
+    return false
+}
+
+let tables = (try? FileManager.default.contentsOfDirectory(atPath: contract.appendingPathComponent("transitions").path))?.filter { $0.hasSuffix(".json") } ?? []
+var rowCount = 0
+for table in tables.sorted() {
+    let path = contract.appendingPathComponent("transitions/\(table)")
+    let process = Process()
+    process.executableURL = bin.appendingPathComponent("tilde-state")
+    process.arguments = ["transition", path.path]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    try process.run()
+    let output = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [[String: Any]] ?? []
+    let results = (try? JSONSerialization.jsonObject(with: output)) as? [[String: Any]] ?? []
+    guard rows.count == results.count else {
+        failures.append("\(table): got \(results.count) results for \(rows.count) rows")
+        continue
+    }
+    for (row, result) in zip(rows, results) {
+        rowCount += 1
+        // Missing keys in the result are nil, so an expected null matches them.
+        if !contains(result, row["expect"]) {
+            failures.append("\(table): \(row["name"] ?? "?"): got \(result), expected \(row["expect"] ?? "?")")
+        }
+    }
+}
+
 failures.forEach { print("FAIL \($0)") }
 let total = Date().timeIntervalSince(started)
+print("\(rowCount) transition rows")
 print(String(format: "%d states in %.1f s (drawing %.1f s, limit %.0f s), %d failed", names.count, total, rendered, limit, failures.count))
 if total > limit {
     print("Over the time limit.")

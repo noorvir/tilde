@@ -497,34 +497,13 @@ final class AnnotationController: ObservableObject {
     }
 
     func togglePause() {
-        guard phase == .annotating else {
-            return
-        }
-        isPaused.toggle()
-        // Annotate pressed on purpose resumes, whatever app was last in front.
-        if !isPaused {
-            isAutoPaused = false
-        }
-        applyPause()
-        if isPaused {
-            // A key overlay would keep the keyboard; give it back to the user's app.
-            NSWorkspace.shared.frontmostApplication?.activate()
-        }
-        makeOverlayKey()
+        dispatch(.togglePause)
     }
 
     /// Annotates again after any pause: one the user chose, or one while another app was in
     /// front.
     func resume() {
-        if isPaused {
-            togglePause()
-            return
-        }
-        guard isAutoPaused else {
-            return
-        }
-        isAutoPaused = false
-        applyPause()
+        dispatch(.resume)
     }
 
     func clearDrafts() {
@@ -535,94 +514,109 @@ final class AnnotationController: ObservableObject {
 
     /// Asks in the pill before clearing all annotations.
     func requestClearAll() {
-        guard !drafts.isEmpty else {
-            return
-        }
-        confirmation = .clearAll
+        dispatch(.requestClearAll)
     }
 
     /// Asks in the pill before cancelling, unless there is nothing to lose.
     func requestCancel() {
-        pauseNotice = nil
-        guard !drafts.isEmpty else {
-            cancel()
-            return
-        }
-        confirmation = .cancelSession
+        dispatch(.requestCancel)
     }
 
     func confirm() {
-        guard let confirmation else {
-            return
-        }
-        self.confirmation = nil
-        switch confirmation {
-        case .clearAll:
-            clearDrafts()
-        case .cancelSession:
-            cancel()
-        case .restore(let record):
-            replaceDrafts(with: record)
-        }
+        dispatch(.confirm)
     }
 
     func dismissConfirmation() {
-        confirmation = nil
+        dispatch(.dismissConfirmation)
     }
 
     /// Esc while Tilde has the keyboard: closes the comment box or preview, ends choosing a
     /// window, dismisses a question; else pauses, and when paused asks to discard the session.
     func escapePressed() {
-        if composer != nil {
-            closeComposer()
-            return
-        }
-        if previewID != nil {
-            closePreview()
-            return
-        }
-        if isPickingWindow {
-            cancelWindowPick()
-            return
-        }
-        if confirmation != nil {
-            dismissConfirmation()
-            return
-        }
-        if phase == .annotating, !isPaused {
-            pauseKeepingKeyboard()
-            return
-        }
-        requestCancel()
+        dispatch(.escape)
     }
 
-    /// Pauses, but Tilde keeps the keyboard, so the next Esc reaches it; a click in another
-    /// app gives that app the keyboard.
-    private func pauseKeepingKeyboard() {
-        isPaused = true
-        applyPause()
-        showPauseNotice(.escape)
-        if !isHUDInBrowser {
-            let pointer = NSEvent.mouseLocation
-            (overlays.first { $0.frame.contains(pointer) } ?? overlays.first)?.makeKey()
+    /// This session's state as the flow knows it.
+    private var flow: SessionFlow {
+        var flow = SessionFlow()
+        flow.isAnnotating = phase == .annotating
+        flow.hasSession = session != nil
+        flow.notes = drafts.count
+        flow.paused = isPaused
+        flow.autoPaused = isAutoPaused
+        flow.holdPaused = isHoldPaused
+        flow.commentOpen = composer != nil
+        flow.previewOpen = previewID != nil
+        flow.pickingWindow = isPickingWindow
+        switch confirmation {
+        case .clearAll: flow.confirmation = "clearAll"
+        case .cancelSession: flow.confirmation = "cancelSession"
+        case .restore: flow.confirmation = "restore"
+        case nil: flow.confirmation = nil
+        }
+        return flow
+    }
+
+    private func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = []) {
+        var next = flow
+        let asked = confirmation
+        let effects = next.handle(event)
+        isPaused = next.paused
+        isAutoPaused = next.autoPaused
+        isHoldPaused = next.holdPaused
+        switch next.confirmation {
+        case "clearAll": confirmation = .clearAll
+        case "cancelSession": confirmation = .cancelSession
+        case "restore": break
+        default: confirmation = nil
+        }
+        for effect in effects {
+            run(effect, asked: asked, holdFlag: holdFlag)
+        }
+    }
+
+    private func run(_ effect: SessionFlow.Effect, asked: Confirmation?, holdFlag: NSEvent.ModifierFlags) {
+        switch effect {
+        case .applyPause: applyPause()
+        case .closeComposer: closeComposer()
+        case .closePreview: closePreview()
+        case .cancelWindowPick: cancelWindowPick()
+        case .keepKeyboard:
+            // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
+            if !isHUDInBrowser {
+                let pointer = NSEvent.mouseLocation
+                (overlays.first { $0.frame.contains(pointer) } ?? overlays.first)?.makeKey()
+            }
+        case .giveKeyboardBack:
+            // A key overlay would keep the keyboard; give it back to the user's app.
+            NSWorkspace.shared.frontmostApplication?.activate()
+        case .takeKeyboard: makeOverlayKey()
+        case .showEscapeNotice: showPauseNotice(.escape)
+        case .showOtherAppNotice: showPauseNotice(.otherApp)
+        case .clearNotice: pauseNotice = nil
+        case .cancelSession: cancel()
+        case .clearDrafts: clearDrafts()
+        case .restoreDrafts:
+            if case .restore(let record) = asked {
+                replaceDrafts(with: record)
+            }
+        case .startLocalSession: startLocal()
+        case .showHUD:
+            if isHUDInBrowser {
+                browser.show()
+            } else {
+                hud.show()
+            }
+        case .plainClicksOn:
+            PlainClickTap.start(removing: holdFlag)
+        case .plainClicksOff:
+            PlainClickTap.stop()
         }
     }
 
     /// The start shortcut: starts a session, resumes a paused one, or shows the HUD.
     func startOrResume() {
-        guard session != nil else {
-            startLocal()
-            return
-        }
-        if isPaused {
-            togglePause()
-            return
-        }
-        if isHUDInBrowser {
-            browser.show()
-        } else {
-            hud.show()
-        }
+        dispatch(.startShortcut)
     }
 
     // MARK: - Windows in front of notes
@@ -738,29 +732,15 @@ final class AnnotationController: ObservableObject {
     }
 
     private func holdChanged(_ output: HoldGesture.Output, key: DoubleTapKey) {
-        guard phase == .annotating else {
-            return
-        }
         switch output {
         case .began:
-            // Not while typing a comment, where these keys are for the text.
-            guard composer == nil, previewID == nil, !isPaused else {
-                return
-            }
-            isHoldPaused = true
-            PlainClickTap.start(removing: key.flag)
-            applyPause()
+            dispatch(.holdBegan, holdFlag: key.flag)
             // With the browser in front, its page takes the first click only when it is key.
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), browser.window?.isVisible == true {
+            if isHoldPaused, NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), browser.window?.isVisible == true {
                 browser.window?.makeKey()
             }
         case .ended:
-            guard isHoldPaused else {
-                return
-            }
-            isHoldPaused = false
-            PlainClickTap.stop()
-            applyPause()
+            dispatch(.holdEnded)
         }
     }
 
@@ -1285,12 +1265,8 @@ final class AnnotationController: ObservableObject {
     func frontmostAppChanged(to pid: pid_t?) {
         let pauses = Self.autoPauses(frontmost: pid, scopePID: scope?.pid, ownPID: ProcessInfo.processInfo.processIdentifier)
         if pauses != isAutoPaused {
-            log.notice("\(pauses ? "auto-paused" : "auto-resumed", privacy: .public) for frontmost pid \(pid ?? 0)")
-            isAutoPaused = pauses
-            applyPause()
-            if pauses {
-                showPauseNotice(.otherApp)
-            }
+            log.notice("\(pauses ? "auto-paused" : "auto-resumed", privacy: .public) for frontmost pid \(pid ?? 0, privacy: .public)")
+            dispatch(pauses ? .otherAppInFront : .scopeAppInFront)
         }
         orderAboveScope()
     }

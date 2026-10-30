@@ -1,0 +1,146 @@
+[
+ {
+  "name": "The same address is the same page, whatever the title",
+  "original": {
+   "url": "https://x.com/home",
+   "title": "Home / X"
+  },
+  "page": {
+   "url": "https://x.com/home",
+   "title": "(1) Home / X"
+  },
+  "expect": {
+   "samePage": true
+  }
+ },
+ {
+  "name": "Another address is another page, with the same title",
+  "original": {
+   "url": "https://x.com/home",
+   "title": "T"
+  },
+  "page": {
+   "url": "https://x.com/explore",
+   "title": "T"
+  },
+  "expect": {
+   "samePage": false
+  }
+ },
+ {
+  "name": "A single page app route is another page",
+  "original": {
+   "url": "http://a/spa.html",
+   "title": "T"
+  },
+  "page": {
+   "url": "http://a/spa.html?route=b",
+   "title": "T"
+  },
+  "expect": {
+   "samePage": false
+  }
+ },
+ {
+  "name": "Another title is another page in a native app",
+  "original": {
+   "title": "Sound"
+  },
+  "page": {
+   "title": "Keyboard"
+  },
+  "expect": {
+   "samePage": false
+  }
+ },
+ {
+  "name": "The same title cannot tell: the picture decides",
+  "original": {
+   "title": "iPhone 16"
+  },
+  "page": {
+   "title": "iPhone 16"
+  },
+  "expect": {
+   "samePage": null
+  }
+ },
+ {
+  "name": "A failed address read does not hide the note",
+  "original": {
+   "url": "https://x.com/home",
+   "title": "T"
+  },
+  "page": {
+   "title": "T"
+  },
+  "expect": {
+   "samePage": null
+  }
+ },
+ {
+  "name": "One bad reading does not hide a note",
+  "note": {
+   "isVisible": true,
+   "readings": 0
+  },
+  "similarity": 0.1,
+  "expect": {
+   "note": {
+    "isVisible": true
+   }
+  }
+ },
+ {
+  "name": "Two bad readings hide it",
+  "note": {
+   "isVisible": true,
+   "readings": 1
+  },
+  "similarity": 0.1,
+  "expect": {
+   "note": {
+    "isVisible": false
+   }
+  }
+ },
+ {
+  "name": "One good reading does not show it",
+  "note": {
+   "isVisible": false,
+   "readings": 0
+  },
+  "similarity": 0.95,
+  "expect": {
+   "note": {
+    "isVisible": false
+   }
+  }
+ },
+ {
+  "name": "Two good readings show it",
+  "note": {
+   "isVisible": false,
+   "readings": 1
+  },
+  "similarity": 0.95,
+  "expect": {
+   "note": {
+    "isVisible": true
+   }
+  }
+ },
+ {
+  "name": "A reading between the thresholds changes nothing",
+  "note": {
+   "isVisible": true,
+   "readings": 1
+  },
+  "similarity": 0.8,
+  "expect": {
+   "note": {
+    "isVisible": true
+   }
+  }
+ }
+]
