@@ -27,6 +27,7 @@ final class HUDPanel {
     /// have a top-left origin. The hosting view has no sizing options, so its fitting size
     /// is zero and cannot give this.
     private var contentFrame: CGRect = .zero
+    private var clickMonitor: Any?
 
     private static let width: CGFloat = 560
     private static let positionsKey = "HUDPositions"
@@ -44,6 +45,13 @@ final class HUDPanel {
         window.hasShadow = false
         window.isReleasedWhenClosed = false
         window.contentView = hosting
+        // A click on the HUD gives Tilde the keyboard, for Esc and ↩.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window, weak controller] event in
+            if event.window === window {
+                MainActor.assumeIsolated { controller?.takeKeyboard() }
+            }
+            return event
+        }
         hosting.rootView = HUDView(controller: controller) { [weak self] ended in
             self?.dragPill(ended: ended)
         } onContentFrame: { [weak self] frame in
@@ -55,6 +63,10 @@ final class HUDPanel {
     func show() {
         pendingHide?.cancel()
         place()
+        // Lays the collapsed pill out at its place now. The first time, the hosting view has
+        // never been laid out, and its first layout inside the zoom below would animate the
+        // pill in from the window's left edge.
+        hosting.layoutSubtreeIfNeeded()
         window.orderFrontRegardless()
 
         // Grow on the next pass, after SwiftUI has laid out the collapsed pill.
@@ -351,7 +363,18 @@ struct HUDView: View {
         let count = controller.drafts.count
 
         HStack(spacing: HUDMetrics.iconGap) {
-            PulseDot(isActive: controller.phase == .annotating && !controller.isEffectivelyPaused)
+            // Where the status dot was: pause while annotating, Annotate (blue) while paused.
+            HUDButton(
+                image: controller.isEffectivelyPaused ? Image(nsImage: TildeMark.annotateIcon) : Image(systemName: "pause.fill"),
+                size: 26, tint: controller.isEffectivelyPaused ? .tildeBlue : nil, help: pauseHelp
+            ) {
+                if controller.isEffectivelyPaused {
+                    controller.resume()
+                } else {
+                    controller.togglePause()
+                }
+            }
+            .padding(.leading, -4)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
@@ -375,14 +398,6 @@ struct HUDView: View {
             controller.showNotes()
         }
         .disabled(count == 0)
-
-        // Paused, Annotate is the main action: blue, not filled like a selected button.
-        HUDButton(
-            image: controller.isPaused ? Image(nsImage: TildeMark.annotateIcon) : Image(systemName: "pause.fill"),
-            tint: controller.isPaused ? .tildeBlue : nil, help: pauseHelp
-        ) {
-            controller.togglePause()
-        }
 
         HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all annotations and keep annotating") {
             controller.requestClearAll()
@@ -494,7 +509,7 @@ struct HUDView: View {
 
     /// "Pause (Esc)", and when paused "Annotate (Double-tap ⌃)".
     private var pauseHelp: String {
-        guard controller.isPaused else {
+        guard controller.isEffectivelyPaused else {
             return "Pause (Esc)"
         }
         guard let shortcut = controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause) else {
@@ -514,8 +529,9 @@ struct HUDView: View {
     /// text never ends in "…".
     private var subtitle: some View {
         let candidates = Self.subtitleCandidates(
-            client: controller.session?.isLocal == false ? controller.session?.client : nil,
-            clientIcon: controller.session.flatMap { $0.isLocal ? nil : controller.clientIcon($0.client) },
+            // A local session's report goes to the clipboard, like an agent's goes to the agent.
+            client: controller.session.map { $0.isLocal ? "Clipboard" : $0.client },
+            clientIcon: controller.session.flatMap { $0.isLocal ? Self.clipboardIcon : controller.clientIcon($0.client) },
             // The browser's own toolbar needs no "in Tilde Browser".
             scopeName: isEmbedded ? nil : controller.scopeName,
             scopeIcon: controller.scopeIcon,
@@ -561,6 +577,7 @@ struct HUDView: View {
     /// The width the title column has in the fixed pill, for the narrowest layout (the paused
     /// state with its badge). Every subtitle's shortest candidate fits it.
     static let subtitleWidth: CGFloat = 120
+    static let clipboardIcon = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Clipboard")
     static let subtitleFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
 
     /// Subtitles from fullest to shortest, such as "for Codex · in Chrome · 2 notes", then
@@ -571,35 +588,24 @@ struct HUDView: View {
         switch state {
         case .notice(let text):
             return [[SubtitlePart(text: text)]]
-        case .paused(let shortcut):
-            guard let shortcut else {
-                return [[SubtitlePart(text: "Annotate to continue")], [SubtitlePart(text: "Paused")]]
-            }
-            // "Double-tap ⌃ to resume", then "⌃ twice to resume".
-            return [
-                [SubtitlePart(text: "\(shortcut.title) to resume")],
-                [SubtitlePart(text: "\(shortcut.shortTitle) to resume")],
-                [SubtitlePart(text: "Paused")],
-            ]
         case .waitingForWindow:
             return [[SubtitlePart(text: "Click the window to continue")], [SubtitlePart(text: "Click the window")]]
         case .choosingWindow:
             return [[SubtitlePart(text: "Esc cancels")]]
-        case .annotating:
+        // Paused, it still says where the report goes; the button's tooltip has the shortcut.
+        case .annotating, .paused:
             break
         }
 
-        let detail = notes == 0 ? "click or drag" : "\(notes) \(notes == 1 ? "note" : "notes")"
+        let detail = notes == 0 ? nil : "\(notes) \(notes == 1 ? "note" : "notes")"
         let full = [
             client.map { SubtitlePart(prefix: "for", icon: clientIcon, text: $0) },
             scopeName.map { SubtitlePart(prefix: "in", icon: scopeIcon, text: $0) },
-            SubtitlePart(text: detail),
+            detail.map { SubtitlePart(text: $0) },
         ].compactMap { $0 }
 
-        // Each step drops more: "click or drag", then the words, then the names behind icons.
+        // Each step drops more: the words, then the names behind icons.
         let steps: [(SubtitlePart) -> SubtitlePart?] = [
-            { $0.text == "click or drag" && full.count > 1 ? nil : $0 },
-            { SubtitlePart(icon: $0.icon, text: $0.text) },
             { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon) },
         ]
         var candidates = [full]
@@ -658,6 +664,8 @@ private struct HUDButton: View {
     /// An SF Symbol, or a template image such as `TildeMark.annotateIcon`.
     let image: Image
     var badge: Int = 0
+    /// The smallest width and the height.
+    var size: CGFloat = 30
     var isOn = false
     var isDestructive = false
     /// The icon's colour, such as Tilde blue for the main action.
@@ -698,7 +706,7 @@ private struct HUDButton: View {
             }
             .foregroundStyle(foreground)
             .padding(.horizontal, badge > 0 ? 9 : 0)
-            .frame(minWidth: 30, minHeight: 30)
+            .frame(minWidth: size, minHeight: size)
             .background(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9).fill(background))
             .contentShape(Rectangle())
         }
@@ -804,9 +812,6 @@ struct KeyHint: View {
 }
 
 extension EnvironmentValues {
-    /// Draws looping animations at rest. `PhaseAnimator` runs on its own clock and ignores
-    /// `disablesAnimations`, so snapshot tests set this to render the same frame every time.
-    @Entry var freezesMotion = false
     /// The HUD is on the browser's toolbar, so its controls use the toolbar's corners.
     @Entry var isHUDEmbedded = false
 }
@@ -818,38 +823,6 @@ private struct HUDShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : height / 2).path(in: rect)
-    }
-}
-
-private struct PulseDot: View {
-    let isActive: Bool
-    @Environment(\.freezesMotion) private var freezesMotion
-
-    var body: some View {
-        ZStack {
-            if isActive, freezesMotion {
-                ring.scaleEffect(0.5)
-            } else if isActive {
-                // The animation is scoped to the ring so it never animates the HUD layout.
-                PhaseAnimator([false, true]) { expanded in
-                    ring
-                        .scaleEffect(expanded ? 1 : 0.5)
-                        .opacity(expanded ? 0 : 1)
-                } animation: { expanded in
-                    expanded ? .easeOut(duration: 1.4) : nil
-                }
-            }
-            Circle()
-                .fill(isActive ? Color.tildeBlue : Color.white.opacity(0.4))
-                .frame(width: 8, height: 8)
-        }
-        .frame(width: 18, height: 18)
-    }
-
-    private var ring: some View {
-        Circle()
-            .fill(Color.tildeBlue.opacity(0.35))
-            .frame(width: 18, height: 18)
     }
 }
 

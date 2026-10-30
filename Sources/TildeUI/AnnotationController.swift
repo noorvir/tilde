@@ -13,6 +13,8 @@ struct Draft: Identifiable {
     let capture: Task<Captures, Never>
     /// Where the annotation is on its web page, for annotations in Tilde's browser.
     var anchor: PageAnchor?
+    /// The window it is on, so windows in front of that window cover it.
+    var sourceWindow: Int?
 
     var id: UUID { annotation.id }
 }
@@ -50,6 +52,7 @@ struct Pending {
     let capture: Task<Captures, Never>
     var anchor: PageAnchor?
     var tracked: TrackedElement?
+    var sourceWindow: Int?
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -96,7 +99,11 @@ final class AnnotationController: ObservableObject {
     /// The draft shown in the preview card; annotate clicks wait while it is open.
     @Published private(set) var previewID: Draft.ID?
     /// A destructive HUD action waiting for the user to confirm it in the pill.
-    @Published private(set) var confirmation: Confirmation?
+    @Published private(set) var confirmation: Confirmation? {
+        didSet { watchConfirmationKeys() }
+    }
+    /// Takes ↩ and Esc for the question from any of Tilde's windows, also from a text field.
+    private var confirmationKeyMonitor: Any?
     /// The window annotations are limited to; nil means anything on screen.
     @Published private(set) var scope: ElementPicker.WindowInfo?
     /// Waiting for a click on the window to limit annotations to.
@@ -294,6 +301,7 @@ final class AnnotationController: ObservableObject {
 
     private func end() {
         stopCheckpoints()
+        stopOcclusion()
         pauseNotice = nil
         pauseNoticeTimer?.invalidate()
         stopTracking()
@@ -484,6 +492,20 @@ final class AnnotationController: ObservableObject {
         makeOverlayKey()
     }
 
+    /// Annotates again after any pause: one the user chose, or one while another app was in
+    /// front.
+    func resume() {
+        if isPaused {
+            togglePause()
+            return
+        }
+        guard isAutoPaused else {
+            return
+        }
+        isAutoPaused = false
+        applyPause()
+    }
+
     func clearDrafts() {
         drafts = []
         commentPanel.close()
@@ -579,6 +601,78 @@ final class AnnotationController: ObservableObject {
             browser.show()
         } else {
             hud.show()
+        }
+    }
+
+    // MARK: - Windows in front of notes
+
+    /// For each window with notes, the frames of the windows in front of it; a window not on
+    /// screen (closed, minimised, on another Space) is in `hiddenWindows`, and its notes hide.
+    @Published private(set) var windowCovers: [Int: [CGRect]] = [:]
+    @Published private(set) var hiddenWindows: Set<Int> = []
+    /// How far back each window with notes is: 0 for the front window.
+    private(set) var windowDepth: [Int: Int] = [:]
+    private var occlusionTimer: Timer?
+
+    struct StackWindow: Equatable {
+        let number: Int
+        let frame: CGRect
+    }
+
+    /// The windows in front of each of `windows` in a front-to-back `stack`, and the ones
+    /// missing from it.
+    nonisolated static func covers(of windows: Set<Int>, in stack: [StackWindow]) -> (covers: [Int: [CGRect]], missing: Set<Int>) {
+        var covers: [Int: [CGRect]] = [:]
+        var missing: Set<Int> = []
+        for window in windows {
+            guard let index = stack.firstIndex(where: { $0.number == window }) else {
+                missing.insert(window)
+                continue
+            }
+            let frame = stack[index].frame
+            covers[window] = stack[..<index].map(\.frame).filter { $0.intersects(frame) }
+        }
+        return (covers, missing)
+    }
+
+    /// Checks four times a second, and when another app comes to the front, which windows
+    /// cover the windows that have notes.
+    private func startOcclusion() {
+        refreshOcclusion()
+        guard occlusionTimer == nil else {
+            return
+        }
+        occlusionTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshOcclusion()
+            }
+        }
+    }
+
+    private func stopOcclusion() {
+        occlusionTimer?.invalidate()
+        occlusionTimer = nil
+        windowCovers = [:]
+        hiddenWindows = []
+        windowDepth = [:]
+    }
+
+    func refreshOcclusion() {
+        var windows = Set(drafts.compactMap(\.sourceWindow))
+        if !pageNotes.isEmpty, let number = browser.windowNumber {
+            windows.insert(number)
+        }
+        guard !windows.isEmpty else {
+            return
+        }
+        let stack = picker.windowStack().map { StackWindow(number: $0.number, frame: $0.frame) }
+        let result = Self.covers(of: windows, in: stack)
+        windowDepth = Dictionary(uniqueKeysWithValues: stack.enumerated().filter { windows.contains($0.element.number) }.map { ($0.element.number, $0.offset) })
+        if result.covers != windowCovers {
+            windowCovers = result.covers
+        }
+        if result.missing != hiddenWindows {
+            hiddenWindows = result.missing
         }
     }
 
@@ -917,8 +1011,12 @@ final class AnnotationController: ObservableObject {
     /// Puts the overlays in step with the pause state; every start, resume and scope change
     /// goes through here. Resuming puts the overlay back above its window, which a click in
     /// that window (such as on the browser's Annotate button) raised over it.
-    /// Shows one pause note at a time, for 10 seconds.
+    /// Shows one pause note at a time, for 10 seconds, when turned on with the hidden
+    /// setting `hudPauseToast` (the HUD's yellow pause button shows the pause instead).
     private func showPauseNotice(_ notice: PauseNotice) {
+        guard UserDefaults.standard.bool(forKey: "hudPauseToast") else {
+            return
+        }
         pauseNotice = notice
         restartPauseNoticeTimer()
     }
@@ -1393,7 +1491,9 @@ final class AnnotationController: ObservableObject {
         }
 
         hover = nil
-        composer = .new(Pending(target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked))
+        composer = .new(Pending(
+            target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked, sourceWindow: window?.number
+        ))
         log.notice("comment opened for \(chip, privacy: .public)")
         commentText = ""
         commentPanel.show(chip: chip, isEditing: false, near: marker, below: frame)
@@ -1472,7 +1572,11 @@ final class AnnotationController: ObservableObject {
 
         case .new(let pending):
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
-            drafts.append(Draft(annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture, anchor: pending.anchor))
+            drafts.append(Draft(
+                annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture, anchor: pending.anchor,
+                sourceWindow: pending.sourceWindow
+            ))
+            startOcclusion()
             if let tracked = pending.tracked {
                 trackedElements[annotation.id] = tracked
                 startTracking()
@@ -1526,6 +1630,55 @@ final class AnnotationController: ObservableObject {
 
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
     /// has it or annotating is paused.
+    /// ↩ confirms and Esc dismisses the question in the HUD, whichever of Tilde's windows has
+    /// the keyboard: the overlay, the floating HUD, or the browser with a text field focused.
+    /// Keys typed in other apps never reach it.
+    private func watchConfirmationKeys() {
+        if confirmation == nil {
+            if let confirmationKeyMonitor {
+                NSEvent.removeMonitor(confirmationKeyMonitor)
+            }
+            confirmationKeyMonitor = nil
+            return
+        }
+        guard confirmationKeyMonitor == nil else {
+            return
+        }
+        confirmationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handleConfirmationKey(event.keyCode) == true ? nil : event
+            }
+        }
+    }
+
+    /// Returns whether the key answered the question on screen.
+    func handleConfirmationKey(_ keyCode: UInt16) -> Bool {
+        guard confirmation != nil else {
+            return false
+        }
+        switch keyCode {
+        case 53:
+            dismissConfirmation()
+            return true
+        case 36, 76:
+            confirm()
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// A click on the floating HUD gives Tilde the keyboard, so Esc and ↩ reach it next. The
+    /// HUD is a non-activating panel: without this, keys stay with the app in front.
+    func takeKeyboard() {
+        guard session != nil else {
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let pointer = NSEvent.mouseLocation
+        (overlays.first { $0.frame.contains(pointer) } ?? overlays.first)?.makeKey()
+    }
+
     func makeOverlayKey() {
         guard composer == nil, previewID == nil, !isEffectivelyPaused else {
             return

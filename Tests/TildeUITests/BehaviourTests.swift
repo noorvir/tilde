@@ -249,11 +249,19 @@ struct BehaviourTests {
         }
     }
 
-    @Test func localSubtitlesLeaveOutTheClient() {
-        let candidates = HUDView.subtitleCandidates(client: nil, clientIcon: nil, scopeName: "Google Chrome", scopeIcon: nil, notes: 0, state: .annotating)
+    @Test func subtitlesSayWhereTheReportGoesInBothStates() {
+        let local = HUDView.subtitleCandidates(client: "Clipboard", clientIcon: nil, scopeName: "Google Chrome", scopeIcon: nil, notes: 0, state: .annotating)
+        #expect(local.first == [HUDView.SubtitlePart(prefix: "for", text: "Clipboard"), HUDView.SubtitlePart(prefix: "in", text: "Google Chrome")])
 
-        #expect(candidates.first == [HUDView.SubtitlePart(prefix: "in", text: "Google Chrome"), HUDView.SubtitlePart(text: "click or drag")])
-        #expect(candidates.contains([HUDView.SubtitlePart(prefix: "in", text: "Google Chrome")]))
+        let paused = HUDView.subtitleCandidates(client: "Codex", clientIcon: nil, scopeName: nil, scopeIcon: nil, notes: 2, state: .paused(shortcut: .doubleTap(.control)))
+        #expect(paused.first == [HUDView.SubtitlePart(prefix: "for", text: "Codex"), HUDView.SubtitlePart(text: "2 notes")])
+    }
+
+    @Test func tooltipsStayInsideTheAreaThatDrawsThem() {
+        let near = CGRect(x: 10, y: 10, width: 26, height: 26)
+        let x = TooltipLayer.centerX(text: "Annotate (Double-tap ⌃)", target: near, width: 528)
+        #expect(x > near.midX)
+        #expect(TooltipLayer.centerX(text: "Pause", target: CGRect(x: 250, y: 10, width: 26, height: 26), width: 528) == 263)
     }
 
     // MARK: - Auto-pause
@@ -384,6 +392,25 @@ struct BehaviourTests {
         controller.escapePressed()
         #expect(controller.confirmation == nil)
         #expect(controller.drafts.count == 2)
+    }
+
+    @Test func theQuestionTakesReturnAndEscFromAnyOfTildesWindows() async throws {
+        let controller = try await Fixtures.controller()
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), isPaused: true, confirmation: .clearAll)
+
+        // Other keys pass on, such as to a focused text field.
+        #expect(controller.handleConfirmationKey(0) == false)
+        #expect(controller.handleConfirmationKey(53))
+        #expect(controller.confirmation == nil)
+        #expect(controller.drafts.count == 2)
+
+        // Paused in a popped-out session: Esc asks, ↩ answers.
+        controller.escapePressed()
+        #expect(controller.confirmation == .cancelSession)
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), isPaused: true, confirmation: .clearAll)
+        #expect(controller.handleConfirmationKey(36))
+        #expect(controller.drafts.isEmpty)
+        #expect(controller.handleConfirmationKey(36) == false)
     }
 
     @Test func escEndsChoosingAWindowFirst() async throws {

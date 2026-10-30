@@ -123,38 +123,41 @@ final class ElementPicker {
         if let scope {
             return currentWindow(number: scope.number).flatMap { $0.frame.contains(point) ? $0 : nil }
         }
+        return windowStack().first { $0.frame.contains(point) }
+    }
+
+    /// The windows on screen that the user sees and can annotate, front to back: other apps'
+    /// windows and Tilde's browser, not Tilde's overlays, HUD or the menu bar.
+    func windowStack() -> [WindowInfo] {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let screenFrames = NSScreen.screens.map(\.frame.flipped)
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 
-        for info in list {
+        return list.compactMap { info in
             let number = info[kCGWindowNumber as String] as? Int ?? 0
             let pid = info[kCGWindowOwnerPID as String] as? pid_t ?? 0
             let alpha = info[kCGWindowAlpha as String] as? Double ?? 1
             let layer = info[kCGWindowLayer as String] as? Int ?? 0
             let app = info[kCGWindowOwnerName as String] as? String ?? "App"
             guard let bounds = info[kCGWindowBounds as String] as? NSDictionary,
-                  let frame = CGRect(dictionaryRepresentation: bounds),
-                  frame.contains(point)
+                  let frame = CGRect(dictionaryRepresentation: bounds)
             else {
-                continue
+                return nil
             }
             // Windows above the overlay never receive its clicks; Window Server owns the menu bar.
             guard alpha > 0.01, layer < OverlayWindow.overlayLevel.rawValue, app != "Window Server",
                   pid != ownPID || number == browser.windowNumber
             else {
-                continue
+                return nil
             }
             // Screen-sized windows above the normal layer are invisible backdrops (the Dock's,
             // lock screen shields), not content.
             if layer != 0 && screenFrames.contains(frame) {
-                continue
+                return nil
             }
-
             let title = (info[kCGWindowName as String] as? String).flatMap { $0.isEmpty ? nil : $0 }
             return WindowInfo(number: number, pid: pid, app: app, title: title, frame: frame)
         }
-        return nil
     }
 
     private func windowPick(_ window: WindowInfo) -> Picked {

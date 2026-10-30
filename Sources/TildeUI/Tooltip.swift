@@ -14,7 +14,7 @@ extension View {
         overlayPreferenceValue(TooltipKey.self) { tooltip in
             GeometryReader { proxy in
                 if let tooltip {
-                    TooltipLayer(text: tooltip.text, target: proxy[tooltip.anchor])
+                    TooltipLayer(text: tooltip.text, target: proxy[tooltip.anchor], bounds: proxy.size)
                 }
             }
         }
@@ -28,7 +28,7 @@ extension View {
                 let target = tooltip.map { proxy[$0.anchor] }
                 AboveAppKit {
                     if let tooltip, let target {
-                        TooltipLayer(text: tooltip.text, target: target)
+                        TooltipLayer(text: tooltip.text, target: target, bounds: proxy.size)
                     }
                 }
                 .allowsHitTesting(false)
@@ -78,16 +78,30 @@ private struct TooltipSource: ViewModifier {
     }
 }
 
-private struct TooltipLayer: View {
+/// A tooltip under its target, moved sideways to stay whole inside the area that draws it.
+struct TooltipLayer: View {
     let text: String
     let target: CGRect
+    let bounds: CGSize
 
     var body: some View {
         TooltipBubble(text: text)
             .fixedSize()
-            .position(x: target.midX, y: target.maxY + 20)
+            .position(x: Self.centerX(text: text, target: target, width: bounds.width), y: target.maxY + 20)
             .allowsHitTesting(false)
             .transition(.opacity)
+    }
+}
+
+extension TooltipLayer {
+    /// The bubble's centre: under the target, but at least 4 pt inside both edges.
+    static func centerX(text: String, target: CGRect, width: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+        let half = ((text as NSString).size(withAttributes: [.font: font]).width + 18) / 2
+        guard width > 2 * (half + 4) else {
+            return width / 2
+        }
+        return min(max(target.midX, half + 4), width - half - 4)
     }
 }
 

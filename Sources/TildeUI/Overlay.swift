@@ -222,28 +222,7 @@ final class OverlayView: NSView {
 
         // Notes on a web page in Tilde's browser are drawn by the browser, attached to their
         // elements, so they scroll with the page; the overlay's marks would stay behind.
-        // Notes on elements in other apps follow them, and hide while they are out of view.
-        for (index, draft) in controller.drafts.enumerated() where draft.anchor == nil {
-            guard let frame = controller.noteFrame(draft), let marker = controller.noteMarker(draft) else {
-                continue
-            }
-            drawNote(draft, frame: frame.offsetBy(dx: -origin.x, dy: -origin.y))
-            drawMarker(index + 1, at: marker)
-        }
-        // With the browser's notes panel hidden, its notes look like any others, on the page,
-        // each with its comment beside it.
-        let pageNotes = controller.pageNotes
-        for note in pageNotes {
-            drawNote(note.draft, frame: note.frame.offsetBy(dx: -origin.x, dy: -origin.y))
-            drawMarker(note.number, at: note.marker)
-        }
-        noteCards = []
-        for note in pageNotes.sorted(by: { $0.marker.y < $1.marker.y }) {
-            let anchor = CGPoint(x: note.marker.x - origin.x, y: note.marker.y - origin.y)
-            let element = note.frame.offsetBy(dx: -origin.x, dy: -origin.y)
-            let card = drawCommentCard(Self.commentText(note.draft), beside: anchor, element: element, avoiding: noteCards.map(\.rect), maxLines: 3)
-            noteCards.append((note.draft.id, card))
-        }
+        drawNotes()
 
         if let pending = controller.pendingTarget {
             let rect = pending.frame.offsetBy(dx: -origin.x, dy: -origin.y)
@@ -268,7 +247,7 @@ final class OverlayView: NSView {
 
         // Page notes show their comment already.
         if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.composer == nil,
-           !pageNotes.contains(where: { $0.draft.id == id })
+           !controller.pageNotes.contains(where: { $0.draft.id == id })
         {
             if let marker = controller.noteMarker(draft) {
                 drawTooltip(Self.commentText(draft), at: marker)
@@ -278,6 +257,50 @@ final class OverlayView: NSView {
 
     private static func commentText(_ draft: Draft) -> String {
         draft.annotation.comment.isEmpty ? "(no comment)" : draft.annotation.comment
+    }
+
+    /// Every note not on a web page in Tilde's browser (those the browser draws, unless its
+    /// notes panel is hidden), back window first: a note is drawn, then cleared where windows
+    /// in front of its window cover it, so a window in front hides the notes behind it.
+    private func drawNotes() {
+        struct Note {
+            let number: Int
+            let draft: Draft
+            let frame: CGRect
+            let marker: CGPoint
+            let window: Int?
+            let isOnPage: Bool
+        }
+        var notes: [Note] = []
+        for (index, draft) in controller.drafts.enumerated() where draft.anchor == nil {
+            // Notes on elements in other apps follow them, and hide while out of view.
+            guard let frame = controller.noteFrame(draft), let marker = controller.noteMarker(draft) else {
+                continue
+            }
+            notes.append(Note(number: index + 1, draft: draft, frame: frame, marker: marker, window: draft.sourceWindow, isOnPage: false))
+        }
+        let browserWindow = controller.browser.windowNumber
+        for note in controller.pageNotes {
+            notes.append(Note(number: note.number, draft: note.draft, frame: note.frame, marker: note.marker, window: browserWindow, isOnPage: true))
+        }
+        notes = notes.filter { note in note.window.map { !controller.hiddenWindows.contains($0) } ?? true }
+        notes.sort { (controller.windowDepth[$0.window ?? -1] ?? 0) > (controller.windowDepth[$1.window ?? -1] ?? 0) }
+
+        noteCards = []
+        for note in notes {
+            drawNote(note.draft, frame: note.frame.offsetBy(dx: -origin.x, dy: -origin.y))
+            drawMarker(note.number, at: note.marker)
+            if note.isOnPage {
+                let anchor = CGPoint(x: note.marker.x - origin.x, y: note.marker.y - origin.y)
+                let element = note.frame.offsetBy(dx: -origin.x, dy: -origin.y)
+                let card = drawCommentCard(Self.commentText(note.draft), beside: anchor, element: element, avoiding: noteCards.map(\.rect), maxLines: 3)
+                noteCards.append((note.draft.id, card))
+            }
+            for cover in note.window.flatMap({ controller.windowCovers[$0] }) ?? [] {
+                NSColor.clear.setFill()
+                cover.offsetBy(dx: -origin.x, dy: -origin.y).fill(using: .copy)
+            }
+        }
     }
 
     /// A note's outline: dashed and lightly filled for a region, a light line for an element.

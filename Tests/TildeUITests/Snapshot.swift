@@ -19,7 +19,7 @@ enum Snapshot {
     static let maxDifferentRatio = 0.001
 
     static func assertView<V: View>(_ view: V, size: CGSize, appearance: NSAppearance.Name = .darkAqua, named name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        let hosting = NSHostingView(rootView: view.transaction { $0.disablesAnimations = true }.environment(\.freezesMotion, true))
+        let hosting = NSHostingView(rootView: view.transaction { $0.disablesAnimations = true })
         let image = try await render(hosting, size: size, appearance: appearance)
         try compare(image, named: name, sourceLocation: sourceLocation)
     }
