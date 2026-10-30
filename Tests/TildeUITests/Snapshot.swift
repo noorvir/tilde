@@ -32,7 +32,20 @@ enum Snapshot {
 
     // MARK: - Rendering
 
+    /// Overlay scrollers whatever the Mac's scroll bar setting (it follows a connected mouse),
+    /// so scroll views have the same width everywhere. SwiftUI reads the class property when
+    /// it lays out, so setting the style on the views afterwards is too late.
+    private static let fixesScrollerStyle: Void = {
+        guard let original = class_getClassMethod(NSScroller.self, #selector(getter: NSScroller.preferredScrollerStyle)),
+              let fixed = class_getClassMethod(NSScroller.self, #selector(getter: NSScroller.tildeSnapshotScrollerStyle))
+        else {
+            return
+        }
+        method_exchangeImplementations(original, fixed)
+    }()
+
     private static func render(_ view: NSView, size: CGSize, windowOrigin: NSPoint = .zero, appearance: NSAppearance.Name = .darkAqua) async throws -> CGImage {
+        _ = fixesScrollerStyle
         let window = NSWindow(contentRect: NSRect(origin: windowOrigin, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: appearance)
         window.contentView = view
@@ -40,9 +53,6 @@ enum Snapshot {
         view.layoutSubtreeIfNeeded()
         // Lets SwiftUI commit its layers; animations are off, so the result is final.
         try await Task.sleep(for: .milliseconds(150))
-        // Overlay scrollers whatever the Mac's scroll bar setting (it follows a connected
-        // mouse), so scroll views have the same width everywhere.
-        useOverlayScrollers(in: view)
         view.layoutSubtreeIfNeeded()
 
         let context = try #require(bitmapContext(width: Int(size.width) * scale, height: Int(size.height) * scale))
@@ -61,15 +71,6 @@ enum Snapshot {
         }
         window.contentView = nil
         return try #require(context.makeImage())
-    }
-
-    private static func useOverlayScrollers(in view: NSView) {
-        if let scrollView = view as? NSScrollView {
-            scrollView.scrollerStyle = .overlay
-        }
-        for subview in view.subviews {
-            useOverlayScrollers(in: subview)
-        }
     }
 
     private static func bitmapContext(width: Int, height: Int) -> CGContext? {
@@ -201,4 +202,8 @@ enum Snapshot {
         }
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
+}
+
+private extension NSScroller {
+    @objc class var tildeSnapshotScrollerStyle: NSScroller.Style { .overlay }
 }
