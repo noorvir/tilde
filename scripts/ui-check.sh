@@ -6,4 +6,5 @@ set -eu
 cd "$(dirname "$0")/.."
 swift build --product tilde-state >/dev/null
 swift build --product tilde-ui-check >/dev/null
+scripts/stamp-sdk.sh "$(swift build --show-bin-path)/tilde-state"
 exec "$(swift build --show-bin-path)/tilde-ui-check" "$@"
