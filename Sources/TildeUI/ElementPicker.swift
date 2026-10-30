@@ -38,6 +38,7 @@ final class ElementPicker {
 
     /// With `scope`, picks only in that window, also where another window covers it.
     private let slowApps = SlowApps()
+    private var lastPicks: [pid_t: Picked] = [:]
 
     /// `isMoving`: for the highlight under a moving pointer, not for a click.
     func pick(at point: CGPoint, isMoving: Bool = false, in scope: WindowInfo? = nil) async -> Picked? {
@@ -71,6 +72,13 @@ final class ElementPicker {
             }
         }
 
+        // An app too slow to ask keeps its last answer under the pointer, so that the highlight
+        // does not jump to the whole window and back.
+        if picked != nil {
+            lastPicks[window.pid] = picked
+        } else if isMoving, slowApps.isSlow(window.pid), let last = lastPicks[window.pid], last.frame.contains(point) {
+            picked = last
+        }
         var result = picked ?? windowPick(window)
         result.window = window
         return result

@@ -14,6 +14,7 @@ app="build/Tilde.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/Tilde" "$bin/tilde-mcp" "$app/Contents/MacOS/"
+scripts/stamp-sdk.sh "$app/Contents/MacOS/Tilde"
 
 iconset="build/AppIcon.iconset"
 rm -rf "$iconset"
