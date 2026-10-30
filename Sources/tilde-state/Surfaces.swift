@@ -8,7 +8,7 @@ import SwiftUI
 enum Surfaces {
     static func image(of state: UIState) async throws -> CGImage {
         let size = state.size.map { CGSize(width: $0[0], height: $0[1]) } ?? .zero
-        let appearance: NSAppearance.Name = state.appearance == "dark" ? .darkAqua : .aqua
+        let appearance: NSAppearance.Name = state.appearance == "light" ? .aqua : .darkAqua
         func hosted<V: View>(_ view: V, size: CGSize) async throws -> CGImage {
             let hosting = NSHostingView(rootView: view.transaction { $0.disablesAnimations = true })
             return try await Renderer.render(hosting, size: size, appearance: appearance)
