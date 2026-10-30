@@ -290,36 +290,247 @@ struct UXSpecs {
 
     // MARK: - What is on screen
 
-    @Test func aNoteShowsOnlyItsNumberAndOnlyWhileItsPageIsOnScreen() async throws {
+    /// Adds a note on the small text at a point and rests the pointer on the HUD.
+    private func addSmallNote(_ app: TildeApp, at point: CGPoint) async throws {
+        // As a user does: the pointer rests on the element before the click.
+        try await app.hover(over: point)
+        try await Task.sleep(for: .seconds(1))
+        try await app.click(at: point)
+        try await app.waitToSee("add")
+        try await Task.sleep(for: .milliseconds(300))
+        try await app.type("On this page")
+        try await app.waitToSee("On this page", timeout: 3)
+        try await app.key(.enter)
+        try await app.waitToSeeText(containing: "1 note")
+        let hud = try await app.waitToSee("Annotating")
+        try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+    }
+
+    @Test func aNoteOnSmallTextHidesOnAnotherPageWithTheSameLayoutAndComesBack() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
             let frame = ChangingWindow.frame
-            try await app.click(at: CGPoint(x: frame.midX, y: frame.midY))
-            try await app.waitToSee("add")
-            try await Task.sleep(for: .milliseconds(300))
-            try await app.type("On the red page")
-            try await app.waitToSee("On the red page", timeout: 3)
-            try await app.key(.enter)
-            try await app.waitToSeeText(containing: "1 note")
+            try await addSmallNote(app, at: CGPoint(x: frame.minX + 80, y: frame.minY + 100))
 
             // Its number is there, its box is not.
-            // The pointer rests on the HUD, where nothing gets a hover highlight.
-            let hud = try await app.waitToSee("Annotating")
-            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
             let area = frame.insetBy(dx: -30, dy: -30)
             try await app.waitForBlue(in: area, atLeast: 20, atMost: 900)
 
-            // Another page: the note hides, and stays in the session.
-            try window.show("green")
-            try await app.waitForBlue(in: area, atMost: 0)
-            try await app.waitToSeeText(containing: "1 note")
+            for _ in 0..<3 {
+                // Another page: the note hides, and stays in the session.
+                try window.show("b")
+                try await app.waitForBlue(in: area, atMost: 0)
+                try await app.waitToSeeText(containing: "1 note")
 
-            // Back: it shows again, also when the page is not quite the same as before.
+                // Back: it shows again.
+                try window.show("a")
+                try await app.waitForBlue(in: area, atLeast: 20)
+            }
+
+            // A small change elsewhere on the page does not hide it.
             try window.show("almost")
+            try await Task.sleep(for: .seconds(2))
             try await app.waitForBlue(in: area, atLeast: 20)
+        }
+    }
+
+    @Test(arguments: WebPages.Browser.allCases)
+    func aNoteInABrowserHidesOnAnotherPageAndComesBack(browser: WebPages.Browser) async throws {
+        let pages = try WebPages(browser: browser)
+        defer {
+            pages.quitBrowser()
+            pages.stop()
+        }
+        pages.go(to: pages.first)
+        try await pages.waitForPage()
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            // Chrome starts to describe its page when the session starts.
+            try await Task.sleep(for: .seconds(2))
+            let page = try #require(pages.pageArea)
+            try await addSmallNote(app, at: CGPoint(x: page.minX + 120, y: page.minY + 300))
+            // Below the HUD, whose Send button is blue too.
+            let area = page.divided(atDistance: 200, from: .minYEdge).remainder
+            try await app.waitForBlue(in: area, atLeast: 20)
+
+            pages.go(to: pages.second)
+            try await app.waitForBlue(in: area, atMost: 0)
+
+            pages.go(to: pages.first)
+            try await app.waitForBlue(in: area, atLeast: 20)
+        }
+    }
+
+    @Test(arguments: WebPages.Browser.allCases)
+    func aNoteInASinglePageAppHidesOnARouteWithTheSameContentAndComesBack(browser: WebPages.Browser) async throws {
+        let pages = try WebPages(browser: browser)
+        defer {
+            pages.quitBrowser()
+            pages.stop()
+        }
+        pages.go(to: pages.singlePage)
+        try await pages.waitForPage()
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            // Chrome starts to describe its page when the session starts.
+            try await Task.sleep(for: .seconds(2))
+            let page = try #require(pages.pageArea)
+            try await addSmallNote(app, at: CGPoint(x: page.minX + 120, y: page.minY + 300))
+            // Below the HUD, whose Send button is blue too.
+            let area = page.divided(atDistance: 200, from: .minYEdge).remainder
+            try await app.waitForBlue(in: area, atLeast: 20)
+
+            // The page changes its address without loading, as X does.
+            func press(_ button: CGPoint) async throws {
+                try await app.hold("option", down: true)
+                try await app.click(at: CGPoint(x: page.minX + button.x, y: page.minY + button.y))
+                try await app.hold("option", down: false)
+                // Away from the page, or the highlight under the pointer counts as blue.
+                let hud = try await app.waitToSee("Annotating")
+                try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            }
+            try await press(WebPages.forward)
+            try await app.waitForBlue(in: area, atMost: 0)
+
+            try await press(WebPages.back)
+            // Chrome can take seconds to report the address after going back.
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
+        }
+    }
+
+    @Test(arguments: WebPages.Browser.allCases)
+    func aNoteFollowsTheBackAndForwardKeysOfTheBrowser(browser: WebPages.Browser) async throws {
+        let pages = try WebPages(browser: browser)
+        defer {
+            pages.quitBrowser()
+            pages.stop()
+        }
+        pages.go(to: pages.first)
+        try await pages.waitForPage()
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await Task.sleep(for: .seconds(2))
+            let page = try #require(pages.pageArea)
+            try await addSmallNote(app, at: CGPoint(x: page.minX + 120, y: page.minY + 300))
+            let area = page.divided(atDistance: 200, from: .minYEdge).remainder
+            try await app.waitForBlue(in: area, atLeast: 20)
+
+            // A link in the same tab, as a user follows one.
+            try await app.hold("option", down: true)
+            try await app.click(at: CGPoint(x: page.minX + WebPages.load.x, y: page.minY + WebPages.load.y))
+            try await app.hold("option", down: false)
+            let hud = try await app.waitToSee("Annotating")
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            try await app.waitForBlue(in: area, atMost: 0)
+
+            try await app.key(.leftBracket, command: true)
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
+
+            try await app.key(.rightBracket, command: true)
+            try await app.waitForBlue(in: area, atMost: 0, timeout: 15)
+
+            try await app.key(.leftBracket, command: true)
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
+        }
+    }
+
+    @Test func aNoteInTildesBrowserHidesOnAnotherPageAndComesBack() async throws {
+        let page = try TestPage()
+        defer { page.stop() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
+            _ = try await agent.call("start_annotation", ["url": page.url, "wait_seconds": 0])
+            try await app.waitToSee("Paused")
+            let heading = try await app.waitToSee("Welcome page", timeout: 20)
+            try await annotate(app)
+            try await app.waitToSee("Annotating")
+            try await addNote(app, on: "Welcome page", comment: "On this page")
+            try await app.waitToSeeText(containing: "1 note")
+            let area = heading.frame.insetBy(dx: -30, dy: -20)
+            try await app.waitForBlue(in: area, atLeast: 20)
+
+            try await app.hold("option", down: true)
+            try await app.clickText("Other page")
+            try await app.hold("option", down: false)
+            try await app.waitToSee("Other page heading", timeout: 20)
+            try await app.waitForBlue(in: area, atMost: 0)
+
+            try await app.key(.leftBracket, command: true)
+            try await app.waitToSee("Welcome page", timeout: 20)
+            try await app.waitForBlue(in: area, atLeast: 20)
+        }
+    }
+
+    @Test func aNoteInTheRealSimulatorHidesOnAnotherScreenAndComesBack() async throws {
+        let simulator = try SimulatorScreens()
+        defer { simulator.stop() }
+        try simulator.show("first")
+        for _ in 0..<120 where simulator.window == nil {
+            try await Task.sleep(for: .seconds(1))
+        }
+        try await Task.sleep(for: .seconds(4))
+        let window = try #require(simulator.window)
+        try await withApp { app in
+            try await Task.sleep(for: .seconds(1))
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await addSmallNote(app, at: CGPoint(x: window.midX, y: window.minY + window.height * 0.45))
+            let area = window.divided(atDistance: window.height * 0.15, from: .minYEdge).remainder
+            try await app.waitForBlue(in: area, atLeast: 20)
+
+            try simulator.show("second")
+            try await app.waitForBlue(in: area, atMost: 0, timeout: 10)
+
+            try simulator.show("first")
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 10)
+        }
+    }
+
+    @Test func aNoteInANativeAppHidesOnAnotherPaneAndComesBack() async throws {
+        func open(_ pane: String) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = ["x-apple.systempreferences:\(pane)"]
+            try? process.run()
+            waitForExit(process)
+        }
+        open("com.apple.Sound-Settings.extension")
+        try await Task.sleep(for: .seconds(3))
+        defer {
+            let quit = Process()
+            quit.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+            quit.arguments = ["System Settings"]
+            try? quit.run()
+            waitForExit(quit)
+        }
+        // It can take a while to open the first time.
+        var found: CGRect?
+        for _ in 0..<40 where found == nil {
+            let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+            let bounds = list.first { $0[kCGWindowOwnerName as String] as? String == "System Settings" && $0[kCGWindowLayer as String] as? Int == 0 }?[kCGWindowBounds as String] as? NSDictionary
+            found = bounds.flatMap { CGRect(dictionaryRepresentation: $0) }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        let frame = try #require(found)
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await addSmallNote(app, at: CGPoint(x: frame.midX + 80, y: frame.minY + 200))
+            // Without the sidebar, whose icons are blue, the HUD and any notification.
+            let content = CGRect(x: frame.minX + frame.width * 0.35, y: frame.minY + 90, width: frame.width * 0.65, height: frame.height - 90)
+            try await app.waitForBlue(in: content, atLeast: 20)
+
+            open("com.apple.Keyboard-Settings.extension")
+            try await app.waitForBlue(in: content, atMost: 0)
+
+            open("com.apple.Sound-Settings.extension")
+            try await app.waitForBlue(in: content, atLeast: 20)
         }
     }
 

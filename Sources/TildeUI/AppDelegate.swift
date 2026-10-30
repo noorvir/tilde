@@ -18,7 +18,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = SessionStore()
     private let browser = BrowserController()
     private lazy var controller = AnnotationController(store: store, browser: browser)
-    private lazy var mcp = MCPServer(store: store)
+    private lazy var mcp = MCPServer(
+        store: store, clientsFile: SessionArchive.defaultRoot.deletingLastPathComponent().appendingPathComponent("mcp-clients.json")
+    )
     private var server: HTTPServer?
     private var serverState = ServerState(port: 7311)
     private var menu: StatusMenu?
@@ -65,6 +67,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         CursorDebug.install()
+        MainThreadWatch.start()
+        // The note box is for typing: no accent popup, whose input method can hold up a key.
+        UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
         let port = UInt16(ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "") ?? 7311
         serverState = ServerState(port: port)
         let bridge = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/tilde-mcp").path

@@ -129,8 +129,14 @@ final class ElementPicker {
     /// The windows on screen that the user sees and can annotate, front to back: other apps'
     /// windows and Tilde's browser, not Tilde's overlays, HUD or the menu bar.
     func windowStack() -> [WindowInfo] {
+        Self.windowStack(
+            browserWindow: browser.windowNumber, screenFrames: NSScreen.screens.map(\.frame.flipped), overlayLevel: OverlayWindow.overlayLevel.rawValue
+        )
+    }
+
+    /// The same, for a background queue: the window list can take a while to read.
+    nonisolated static func windowStack(browserWindow: Int?, screenFrames: [CGRect], overlayLevel: Int) -> [WindowInfo] {
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        let screenFrames = NSScreen.screens.map(\.frame.flipped)
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 
         return list.compactMap { info in
@@ -145,8 +151,8 @@ final class ElementPicker {
                 return nil
             }
             // Windows above the overlay never receive its clicks; Window Server owns the menu bar.
-            guard alpha > 0.01, layer < OverlayWindow.overlayLevel.rawValue, app != "Window Server",
-                  pid != ownPID || number == browser.windowNumber
+            guard alpha > 0.01, layer < overlayLevel, app != "Window Server",
+                  pid != ownPID || number == browserWindow
             else {
                 return nil
             }
@@ -176,8 +182,19 @@ final class ElementPicker {
         AXUIElementSetMessagingTimeout(app, 0.3)
 
         var hit: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success,
-              let element = hit,
+        guard AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit) == .success else {
+            return nil
+        }
+        // Chromium answers with the whole page at first and finds the element meanwhile, so a
+        // click with no hover before it would note the whole page.
+        for _ in 0..<4 {
+            guard let found = hit, let role: String = attribute(found, kAXRoleAttribute), ["AXScrollArea", "AXWebArea"].contains(role) else {
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.06)
+            AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit)
+        }
+        guard let element = hit,
               let frame = frame(of: element),
               frame.width >= 1, frame.height >= 1
         else {

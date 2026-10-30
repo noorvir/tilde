@@ -1,5 +1,6 @@
-// A plain window whose whole content is one colour, read from a file: a stand-in for an app
-// that changes page, for the UX specs. usage: tilde-ux-fixture <file>
+// A plain white window of small text rows, read from a file: a stand-in for an app that changes
+// page with the same layout, such as a feed or the iOS Simulator. Rows keep their views, as
+// reused elements do. usage: tilde-ux-fixture <file>
 import AppKit
 
 let file = CommandLine.arguments[1]
@@ -12,14 +13,30 @@ let window = NSWindow(
 )
 window.title = "Fixture"
 window.level = .floating
+window.backgroundColor = .white
+
+let wordsA = ["Starlink outages disrupt drone operations", "Users campaign to save the old model", "Developer ditches tool over security", "Notaries in Europe face new rules", "Live news is hosting a broadcast now", "Today in the markets stocks were flat", "A new phone was announced this week", "Scientists find water on a far moon", "Trains are late again across the north", "The final match ends in a tie after all"]
+let wordsB = ["Mountain weather turns cold for skiers", "Garden tips for planting in the autumn", "Cooking with fewer pans saves an hour", "Museum opens wing for modern painters", "River levels rise after a week of rain", "Chess champion wins with a bold attack", "Library extends its hours for students", "Bakery on the corner sells out by noon", "Hikers rescued from ridge in thick fog", "Orchestra plays a free concert in town"]
+
+var rows: [NSTextField] = []
+for index in 0..<10 {
+    let row = NSTextField(labelWithString: wordsA[index])
+    row.font = .systemFont(ofSize: 14)
+    row.textColor = .black
+    row.frame = NSRect(x: 24, y: 340 - index * 34, width: 440, height: 22)
+    window.contentView?.addSubview(row)
+    rows.append(row)
+}
 window.orderFrontRegardless()
 let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-    let page = (try? String(contentsOfFile: file, encoding: .utf8)) ?? "red"
-    switch page {
-    case "green": window.backgroundColor = NSColor(red: 0.1, green: 0.8, blue: 0.2, alpha: 1)
-    // Close to red, as a page with a small change is close to how it was.
-    case "almost": window.backgroundColor = NSColor(red: 0.9, green: 0.22, blue: 0.1, alpha: 1)
-    default: window.backgroundColor = NSColor(red: 0.9, green: 0.1, blue: 0.1, alpha: 1)
+    let page = (try? String(contentsOfFile: file, encoding: .utf8)) ?? "a"
+    var words = page.hasPrefix("b") ? wordsB : wordsA
+    // Nearly the same page: one row far from the top changed.
+    if page.hasPrefix("almost") {
+        words[9] = "The final match ends in a win after all"
+    }
+    for (row, text) in zip(rows, words) where row.stringValue != text {
+        row.stringValue = text
     }
 }
 withExtendedLifetime(timer) {

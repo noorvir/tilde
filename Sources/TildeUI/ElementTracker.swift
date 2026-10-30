@@ -33,9 +33,9 @@ enum ElementTracker {
     /// Reads a tracked element's frame now; returns it with the element, which may be a new
     /// one found again. Call off the main thread: Accessibility waits for the other app.
     /// `isGone`: the element no longer exists, as opposed to being scrolled out of view.
-    static func locate(_ tracked: TrackedElement, lastFrame: CGRect) -> (frame: CGRect?, tracked: TrackedElement, isGone: Bool) {
+    static func locate(_ tracked: TrackedElement, lastFrame: CGRect, findsAgain: Bool = false) -> (frame: CGRect?, tracked: TrackedElement, isGone: Bool) {
         var tracked = tracked
-        if !isAlive(tracked.element), let found = refind(tracked, near: lastFrame) {
+        if findsAgain || !isAlive(tracked.element), let found = refind(tracked, near: lastFrame) {
             tracked = TrackedElement(element: found, pid: tracked.pid, identity: tracked.identity)
         }
         guard isAlive(tracked.element), let frame = frame(of: tracked.element) else {
@@ -99,9 +99,14 @@ enum ElementTracker {
         return nil
     }
 
+    /// Whether the element is still in its window. An element of a page that left can go on
+    /// answering for its role, with no size and no parent.
     private static func isAlive(_ element: AXUIElement) -> Bool {
-        var role: CFTypeRef?
-        return AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success
+        guard let frame = frame(of: element), frame.width > 0, frame.height > 0 else {
+            return false
+        }
+        let parent: AXUIElement? = attribute(element, kAXParentAttribute)
+        return parent != nil
     }
 
     /// Frames of the scroll areas and the window around the element.

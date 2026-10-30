@@ -276,6 +276,38 @@ private final class Locked<Value>: @unchecked Sendable {
     }
 }
 
+@MainActor @Suite struct ClientNameAfterRestartTests {
+    private func request(_ message: [String: Any], session: String? = nil, userAgent: String? = nil) throws -> HTTPRequest {
+        var headers = ["host": "127.0.0.1:1", "accept": "application/json"]
+        headers["mcp-session-id"] = session
+        headers["user-agent"] = userAgent
+        return HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: try JSONSerialization.data(withJSONObject: message))
+    }
+
+    private func start(on server: MCPServer, session: String?, userAgent: String? = nil) async throws {
+        let call: [String: Any] = ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "start_annotation", "arguments": [:] as [String: Any]]]
+        _ = await server.handle(try request(call, session: session, userAgent: userAgent))
+    }
+
+    @Test func aSessionKeepsItsClientNameWhenTildeRestarts() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-clients-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let first = MCPServer(store: SessionStore(), clientsFile: file)
+        let hello: [String: Any] = ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["clientInfo": ["name": "claude-code"]]]
+        let session = try #require(await first.handle(try request(hello)).headers["Mcp-Session-Id"])
+
+        let store = SessionStore()
+        try await start(on: MCPServer(store: store, clientsFile: file), session: session)
+        #expect(store.active?.client == "Claude Code")
+    }
+
+    @Test func anUnknownSessionIsNamedByItsUserAgent() async throws {
+        let store = SessionStore()
+        try await start(on: MCPServer(store: store), session: "gone", userAgent: "claude-code/2.1 (cli)")
+        #expect(store.active?.client == "Claude Code")
+    }
+}
+
 @Suite struct ClientNameTests {
     @Test func clientNamesMapToTheirHarness() {
         let cases = [

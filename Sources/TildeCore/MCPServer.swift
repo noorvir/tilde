@@ -12,14 +12,36 @@ public final class MCPServer {
     private let inbox: URL
     /// Display names of connected harnesses, keyed by `Mcp-Session-Id`.
     private var clients: [String: String] = [:]
+    /// Keeps those names, oldest first, as a harness keeps its session when Tilde restarts.
+    private let clientsFile: URL?
+    private static let keptClients = 200
     private let log = Logger(subsystem: "dev.tilde.app", category: "mcp")
 
     private let supportedVersions = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
     private let defaultWaitSeconds = 45.0
     private let maxWaitSeconds = 600.0
-    public init(store: SessionStore, inbox: URL = inboxRoot) {
+    public init(store: SessionStore, inbox: URL = inboxRoot, clientsFile: URL? = nil) {
         self.store = store
         self.inbox = inbox
+        self.clientsFile = clientsFile
+        if let clientsFile, let data = try? Data(contentsOf: clientsFile), let saved = try? JSONDecoder().decode([SavedClient].self, from: data) {
+            savedClients = saved
+            clients = Dictionary(saved.map { ($0.id, $0.name) }, uniquingKeysWith: { $1 })
+        }
+    }
+
+    private struct SavedClient: Codable {
+        let id: String
+        let name: String
+    }
+    private var savedClients: [SavedClient] = []
+
+    private func saveClients() {
+        guard let clientsFile, let data = try? JSONEncoder().encode(savedClients) else {
+            return
+        }
+        try? FileManager.default.createDirectory(at: clientsFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: clientsFile, options: .atomic)
     }
 
     public func handle(_ request: HTTPRequest) async -> HTTPResponse {
@@ -36,6 +58,8 @@ public final class MCPServer {
         case "DELETE":
             if let sessionID = request.headers["mcp-session-id"] {
                 clients.removeValue(forKey: sessionID)
+                savedClients.removeAll { $0.id == sessionID }
+                saveClients()
             }
             return HTTPResponse(status: 200)
         default:
@@ -61,7 +85,7 @@ public final class MCPServer {
         case "tools/list":
             return json(result(id: id, ["tools": tools]))
         case "tools/call":
-            let client = clientName(for: sessionID)
+            let client = clientName(for: sessionID, userAgent: request.headers["user-agent"])
             let accept = request.headers["accept"] ?? ""
             if let token = (params["_meta"] as? [String: Any])?["progressToken"], accept.contains("text/event-stream"), waitsForUser(params) {
                 return progressStream(id: id, params: params, client: client, progressToken: token)
@@ -94,6 +118,9 @@ public final class MCPServer {
         // Lets new harness names be added to the list.
         log.notice("MCP client \(name, privacy: .public) shows as \(display, privacy: .public)")
         clients[sessionID] = display
+        savedClients.append(SavedClient(id: sessionID, name: display))
+        savedClients.removeFirst(max(0, savedClients.count - Self.keptClients))
+        saveClients()
 
         let body = result(id: id, [
             "protocolVersion": version,
@@ -352,11 +379,13 @@ public final class MCPServer {
 
     // MARK: - Helpers
 
-    private func clientName(for sessionID: String?) -> String {
-        guard let sessionID, let name = clients[sessionID] else {
-            return "Agent"
+    private func clientName(for sessionID: String?, userAgent: String?) -> String {
+        if let sessionID, let name = clients[sessionID] {
+            return name
         }
-        return name
+        // An unknown session: the request may still say who sent it.
+        log.notice("MCP session unknown, user agent \(userAgent ?? "-", privacy: .public)")
+        return userAgent.flatMap(Self.knownName(forClient:)) ?? "Agent"
     }
 
     /// The app name for an MCP `clientInfo.name`. The HUD shows it with that app's icon, so
@@ -364,6 +393,10 @@ public final class MCPServer {
     /// The harness's display name for an MCP clientInfo name, such as "Codex" for
     /// "codex-mcp-client" or "rmcp" (the Rust MCP library that Codex uses).
     nonisolated static func displayName(forClient name: String) -> String {
+        knownName(forClient: name) ?? name
+    }
+
+    nonisolated static func knownName(forClient name: String) -> String? {
         let lowercased = name.lowercased()
         let known: [(match: String, name: String)] = [
             ("claude-code", "Claude Code"),
@@ -379,10 +412,7 @@ public final class MCPServer {
             ("vscode", "VS Code"),
             ("copilot", "VS Code"),
         ]
-        if let match = known.first(where: { lowercased.contains($0.match) }) {
-            return match.name
-        }
-        return name
+        return known.first { lowercased.contains($0.match) }?.name
     }
 
     /// Rejects DNS-rebinding and browser cross-origin requests; the listener is loopback-only.

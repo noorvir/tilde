@@ -46,6 +46,8 @@ enum Key: Int {
     case w = 13
     case a = 0
     case z = 6
+    case leftBracket = 33
+    case rightBracket = 30
 }
 
 /// The built app in a throwaway environment, driven from outside: real input and the
@@ -334,6 +336,7 @@ final class TildeApp {
             try await Task.sleep(for: .milliseconds(300))
         }
         Issue.record("\(last) blue pixels, expected \(atLeast)...\(atMost)", sourceLocation: sourceLocation)
+        await saveScreenshot(named: "blue-\(sourceLocation.line)")
     }
 
     // MARK: - Window pictures
@@ -451,7 +454,7 @@ final class ChangingWindow {
     private let process = Process()
 
     init() throws {
-        try "red".write(to: file, atomically: true, encoding: .utf8)
+        try "a".write(to: file, atomically: true, encoding: .utf8)
         process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["TILDE_UX_FIXTURE"] ?? "")
         process.arguments = [file.path]
         try process.run()
@@ -465,6 +468,122 @@ final class ChangingWindow {
     func close() {
         process.terminate()
         waitForExit(process)
+    }
+}
+
+/// Two pages of plain text with the same layout, in Safari: a real browser, not Tilde's.
+final class WebPages {
+    enum Browser: String, CaseIterable, Sendable {
+        case safari = "Safari"
+        case chrome = "Google Chrome"
+    }
+
+    let first: String
+    let second: String
+    let singlePage: String
+    let browser: Browser
+    private let server = Process()
+    private let folder: URL
+
+    /// Where the buttons of the single page app are, from the top left of the page.
+    static let forward = CGPoint(x: 50, y: 22)
+    static let back = CGPoint(x: 150, y: 22)
+    static let load = CGPoint(x: 250, y: 22)
+
+    init(browser: Browser, port: Int = 7398) throws {
+        self.browser = browser
+        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-web-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        func page(_ rows: [String], script: String = "") -> String {
+            let list = rows.map { "<p style=\"margin:0;line-height:30px\">\($0)</p>" }.joined()
+            let bar = "<div style=\"position:fixed;top:0;left:0;height:44px\"><button id=f style=\"width:90px;height:44px\">Next</button><button id=b style=\"width:90px;height:44px;margin-left:10px\">Back</button><button onclick=\"location.href='second.html'\" style=\"width:90px;height:44px;margin-left:10px\">Load</button></div>"
+            return "<!doctype html><meta charset=utf-8><title>T</title><body style=\"font:16px sans-serif;margin:60px 40px 0;color:#111\">\(bar)\(list)\(script)</body>"
+        }
+        // A new address each run: browsers keep pages of earlier runs.
+        let run = UUID().uuidString
+        let pagesFolder = folder.appendingPathComponent(run, isDirectory: true)
+        try FileManager.default.createDirectory(at: pagesFolder, withIntermediateDirectories: true)
+        let rows = (1...12).map { "Starlink outages disrupt drone operations \($0)" }
+        try page(rows).write(to: pagesFolder.appendingPathComponent("first.html"), atomically: true, encoding: .utf8)
+        // The same layout and the same first rows: only the address and the last row differ.
+        try page(Array(rows.dropLast()) + ["Museum opens wing for modern painters"])
+            .write(to: pagesFolder.appendingPathComponent("second.html"), atomically: true, encoding: .utf8)
+        // Identical on both routes, so that only the address tells them apart.
+        let routes = "<script>f.onclick=()=>history.pushState({},\"\",\"?route=b\");b.onclick=()=>history.back()</script>"
+        try page(rows, script: routes).write(to: pagesFolder.appendingPathComponent("spa.html"), atomically: true, encoding: .utf8)
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        server.arguments = ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]
+        server.standardOutput = FileHandle.nullDevice
+        server.standardError = FileHandle.nullDevice
+        try server.run()
+        first = "http://127.0.0.1:\(port)/\(run)/first.html"
+        second = "http://127.0.0.1:\(port)/\(run)/second.html"
+        singlePage = "http://127.0.0.1:\(port)/\(run)/spa.html"
+        // The first page must not fail to load because the server is not listening yet.
+        for _ in 0..<50 {
+            let check = Process()
+            check.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+            check.arguments = ["-z", "127.0.0.1", String(port)]
+            try check.run()
+            waitForExit(check)
+            if check.terminationStatus == 0 {
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+    }
+
+    /// Goes to a page in the front window of the browser. Chrome runs with its own empty
+    /// profile the first time.
+    func go(to url: String) {
+        let script = Process()
+        switch browser {
+        case .safari:
+            script.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            script.arguments = ["-a", "Safari", url]
+            try? script.run()
+            waitForExit(script)
+        case .chrome:
+            // Run again with the same profile, Chrome opens the address in its running copy.
+            let profile = folder.appendingPathComponent("chrome-profile").path
+            script.executableURL = URL(fileURLWithPath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            script.arguments = ["--user-data-dir=\(profile)", "--no-first-run", "--no-default-browser-check", "--window-position=200,100", "--window-size=1000,700", url]
+            script.standardOutput = FileHandle.nullDevice
+            script.standardError = FileHandle.nullDevice
+            try? script.run()
+        }
+    }
+
+    /// Waits for the window of the browser, which is slow to open the first time.
+    func waitForPage() async throws {
+        for _ in 0..<60 where pageArea == nil {
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        try await Task.sleep(for: .seconds(3))
+    }
+
+    /// Where the page is, without the toolbar of the browser.
+    var pageArea: CGRect? {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        for window in list where window[kCGWindowOwnerName as String] as? String == browser.rawValue && window[kCGWindowLayer as String] as? Int == 0 {
+            if let bounds = window[kCGWindowBounds as String] as? NSDictionary, let frame = CGRect(dictionaryRepresentation: bounds), frame.height > 200 {
+                return CGRect(x: frame.minX, y: frame.minY + 90, width: frame.width, height: frame.height - 90)
+            }
+        }
+        return nil
+    }
+
+    func quitBrowser() {
+        let quit = Process()
+        quit.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        quit.arguments = [browser.rawValue]
+        try? quit.run()
+        waitForExit(quit)
+    }
+
+    func stop() {
+        server.terminate()
+        waitForExit(server)
     }
 }
 
@@ -496,5 +615,40 @@ final class TestPage {
     func stop() {
         server.terminate()
         waitForExit(server)
+    }
+}
+
+/// The real iOS Simulator with a small app of two screens with the same layout.
+final class SimulatorScreens {
+    private static let device = "iPhone 17e"
+
+    init() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let source = root.appendingPathComponent("scripts/ux-sim-app").path
+        let app = FileManager.default.temporaryDirectory.appendingPathComponent("TwoScreens.app").path
+        try Self.run("rm -rf \"\(app)\"; mkdir -p \"\(app)\"; cp \"\(source)/Info.plist\" \"\(app)/\"; xcrun -sdk iphonesimulator swiftc -parse-as-library -target arm64-apple-ios17.0-simulator \"\(source)/App.swift\" -o \"\(app)/TwoScreens\" && codesign -s - \"\(app)\"")
+        try Self.run("xcrun simctl boot \"\(Self.device)\" 2>/dev/null; xcrun simctl bootstatus \"\(Self.device)\" >/dev/null; open \"$(xcode-select -p)/Applications/Simulator.app\"; xcrun simctl install \"\(Self.device)\" \"\(app)\"; xcrun simctl launch \"\(Self.device)\" dev.tilde.ux.twoscreens")
+    }
+
+    func show(_ screen: String) throws {
+        try Self.run("xcrun simctl openurl \"\(Self.device)\" tildeux://\(screen)")
+    }
+
+    var window: CGRect? {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let bounds = list.first { $0[kCGWindowOwnerName as String] as? String == "Simulator" && $0[kCGWindowLayer as String] as? Int == 0 }?[kCGWindowBounds as String] as? NSDictionary
+        return bounds.flatMap { CGRect(dictionaryRepresentation: $0) }
+    }
+
+    func stop() {
+        try? Self.run("xcrun simctl shutdown \"\(Self.device)\"; killall Simulator")
+    }
+
+    private static func run(_ command: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+        try process.run()
+        waitForExit(process)
     }
 }

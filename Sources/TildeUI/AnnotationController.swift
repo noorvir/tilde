@@ -17,6 +17,10 @@ struct Draft: Identifiable {
     var sourceWindow: Int?
     /// What its area looked like when it was made, to hide it when that content goes.
     var fingerprint: Task<NoteFingerprint?, Never>?
+    /// The page it was made on.
+    var page: Task<PageIdentity?, Never>?
+    /// The app of its window.
+    var sourcePID: pid_t?
 
     var id: UUID { annotation.id }
 }
@@ -56,6 +60,8 @@ struct Pending {
     var tracked: TrackedElement?
     var sourceWindow: Int?
     var fingerprint: Task<NoteFingerprint?, Never>?
+    var page: Task<PageIdentity?, Never>?
+    var sourcePID: pid_t?
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -274,6 +280,7 @@ final class AnnotationController: ObservableObject {
         confirmation = nil
         setScope(nil)
         phase = .annotating
+        PageIdentity.askAppsToDescribeWebContent()
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
 
         sessionStarted = Date()
@@ -674,7 +681,27 @@ final class AnnotationController: ObservableObject {
         guard !windows.isEmpty else {
             return
         }
-        let stack = picker.windowStack().map { StackWindow(number: $0.number, frame: $0.frame) }
+        guard !isReadingWindows else {
+            return
+        }
+        isReadingWindows = true
+        let browserWindow = browser.windowNumber
+        let screenFrames = NSScreen.screens.map(\.frame.flipped)
+        let overlayLevel = OverlayWindow.overlayLevel.rawValue
+        trackingQueue.async { [weak self] in
+            let stack = ElementPicker.windowStack(browserWindow: browserWindow, screenFrames: screenFrames, overlayLevel: overlayLevel)
+                .map { StackWindow(number: $0.number, frame: $0.frame) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.applyOcclusion(stack, windows: windows)
+                }
+            }
+        }
+    }
+
+    private func applyOcclusion(_ stack: [StackWindow], windows: Set<Int>) {
+        isReadingWindows = false
+        windowFrames = Dictionary(stack.map { ($0.number, $0.frame) }, uniquingKeysWith: { first, _ in first })
         let result = Self.covers(of: windows, in: stack)
         windowDepth = Dictionary(uniqueKeysWithValues: stack.enumerated().filter { windows.contains($0.element.number) }.map { ($0.element.number, $0.offset) })
         if result.covers != windowCovers {
@@ -718,6 +745,10 @@ final class AnnotationController: ObservableObject {
             isHoldPaused = true
             PlainClickTap.start(removing: key.flag)
             applyPause()
+            // With the browser in front, its page takes the first click only when it is key.
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), browser.window?.isVisible == true {
+                browser.window?.makeKey()
+            }
         case .ended:
             guard isHoldPaused else {
                 return
@@ -736,13 +767,40 @@ final class AnnotationController: ObservableObject {
     private var visibilities: [Draft.ID: NoteVisibility] = [:]
     private var contentTimer: Timer?
     private var isCheckingContent = false
+    private var isReadingWindows = false
+    /// Where the windows are, from the last time the window list was read.
+    private var windowFrames: [Int: CGRect] = [:]
 
-    /// Compares each note's area with its fingerprint three times a second.
+    private struct ContentCheck: Sendable {
+        let id: Draft.ID
+        let window: Int
+        let windowFrame: CGRect?
+        let pid: pid_t?
+        let frame: CGRect
+        let fingerprint: Task<NoteFingerprint?, Never>
+        let page: Task<PageIdentity?, Never>?
+    }
+
+    /// How much a note's content is on screen: the page's identity decides when it can, and
+    /// the picture of the note's area otherwise. Nil when neither can be read.
+    nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> Double? {
+        if let original = await check.page?.value, let isSame = now?.isSamePage(as: original) {
+            return isSame ? 1 : 0
+        }
+        guard let original = await check.fingerprint.value,
+              let now = await NoteFingerprint.capture(window: CGWindowID(check.window), area: check.frame, windowFrame: check.windowFrame)
+        else {
+            return nil
+        }
+        return now.similarity(to: original)
+    }
+
+    /// Checks twice a second whether each note's content is on screen.
     private func startContentChecks() {
         guard contentTimer == nil else {
             return
         }
-        contentTimer = Timer.scheduledTimer(withTimeInterval: 0.33, repeats: true) { [weak self] _ in
+        contentTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.checkContent()
             }
@@ -760,42 +818,49 @@ final class AnnotationController: ObservableObject {
         guard !isCheckingContent, phase == .annotating else {
             return
         }
-        let checks = drafts.compactMap { draft -> (Draft.ID, Int, CGRect, Task<NoteFingerprint?, Never>)? in
-            guard let window = draft.sourceWindow, let fingerprint = draft.fingerprint, !hiddenNotes.contains(draft.id), !hiddenWindows.contains(window) else {
+        let checks = drafts.compactMap { draft -> ContentCheck? in
+            guard let window = draft.sourceWindow, let fingerprint = draft.fingerprint, !hiddenWindows.contains(window) else {
                 return nil
             }
-            return (draft.id, window, trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint)
+            return ContentCheck(
+                id: draft.id, window: window, windowFrame: windowFrames[window], pid: draft.sourcePID,
+                frame: trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint: fingerprint, page: draft.page
+            )
         }
         guard !checks.isEmpty else {
             return
         }
         isCheckingContent = true
         Task { [weak self] in
-            var differences: [Draft.ID: Double] = [:]
-            for (id, window, frame, fingerprint) in checks {
-                guard let original = await fingerprint.value, let now = await NoteFingerprint.capture(window: CGWindowID(window), area: frame) else {
-                    continue
+            var similarities: [Draft.ID: Double] = [:]
+            // One read per window, however many notes it has.
+            var pages: [Int: PageIdentity] = [:]
+            for check in checks {
+                if pages[check.window] == nil, let pid = check.pid, let frame = check.windowFrame {
+                    pages[check.window] = await Task.detached { PageIdentity.read(pid: pid, windowFrame: frame) }.value
                 }
-                differences[id] = now.difference(from: original)
-                if contentGoneNotes.contains(id) {
-                    Logger(subsystem: "dev.tilde.app", category: "annotate").notice("hidden note differs by \(differences[id] ?? 0, format: .fixed(precision: 3))")
-                }
+                similarities[check.id] = await Self.similarity(of: check, page: pages[check.window])
             }
-            self?.applyContentChecks(differences)
+            self?.applyContentChecks(similarities)
         }
     }
 
-    private func applyContentChecks(_ differences: [Draft.ID: Double]) {
+    private func applyContentChecks(_ similarities: [Draft.ID: Double]) {
         isCheckingContent = false
         var gone = contentGoneNotes
-        for (id, difference) in differences {
+        for (id, similarity) in similarities {
             var visibility = visibilities[id] ?? NoteVisibility()
-            if visibility.update(difference: difference) {
-                gone.remove(id)
+            if visibility.update(similarity: similarity) {
+                // Back on its page: its element may be a new one, or in a tab that left.
+                if gone.remove(id) != nil {
+                    elementsToFindAgain.insert(id)
+                }
             } else {
                 gone.insert(id)
             }
             visibilities[id] = visibility
+            // To tune the thresholds from a real session.
+            log.notice("note content similarity \(similarity, format: .fixed(precision: 3)), shows \(visibility.isVisible)")
         }
         if gone != contentGoneNotes {
             contentGoneNotes = gone
@@ -833,6 +898,8 @@ final class AnnotationController: ObservableObject {
         refreshTracking()
     }
 
+    private var elementsToFindAgain: Set<Draft.ID> = []
+
     private func stopTracking() {
         trackingTimer?.invalidate()
         trackingTimer = nil
@@ -849,11 +916,15 @@ final class AnnotationController: ObservableObject {
             return
         }
         isTracking = true
-        let work = trackedElements.map { id, tracked in
-            (id, tracked, trackedFrames[id] ?? drafts.first { $0.id == id }?.annotation.frame ?? .zero)
+        // A note off its page stays with its page: another page's look-alike is not its element.
+        let work = trackedElements.filter { !contentGoneNotes.contains($0.key) }.map { id, tracked in
+            let original = drafts.first { $0.id == id }?.annotation.frame ?? .zero
+            let findsAgain = elementsToFindAgain.contains(id)
+            return (id, tracked, findsAgain ? original : trackedFrames[id] ?? original, findsAgain)
         }
+        elementsToFindAgain = []
         trackingQueue.async { [weak self] in
-            let results = work.map { id, tracked, last in (id, ElementTracker.locate(tracked, lastFrame: last)) }
+            let results = work.map { id, tracked, last, findsAgain in (id, ElementTracker.locate(tracked, lastFrame: last, findsAgain: findsAgain)) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self?.applyTracking(results)
@@ -1602,15 +1673,15 @@ final class AnnotationController: ObservableObject {
         let browser = self.browser
         let capturesContext = session?.capturesContext ?? false
         let isInBrowserPage = window != nil && window?.number == browser.windowNumber
-        let page = browser.pageFrame?.flipped
+        let pageFrame = browser.pageFrame?.flipped
         let capture = Task {
             // Tilde's browser draws its page itself, with no Screen Recording; the visible part
             // of the page is the context, like a whole window elsewhere.
             if isInBrowserPage || !ScreenCapture.isAllowed {
                 let image = await browser.snapshot(of: closeUpRect, outline: outline)
                 var contextImage: Data?
-                if isInBrowserPage, capturesContext, let page {
-                    contextImage = await browser.snapshot(of: page, outline: frame, maxSide: 1024)
+                if isInBrowserPage, capturesContext, let pageFrame {
+                    contextImage = await browser.snapshot(of: pageFrame, outline: frame, maxSide: 1024)
                 }
                 return Captures(image: image, contextImage: contextImage)
             }
@@ -1623,13 +1694,15 @@ final class AnnotationController: ObservableObject {
         hover = nil
         // Pages in Tilde's browser report their elements; other windows are compared by picture.
         var fingerprint: Task<NoteFingerprint?, Never>?
+        var page: Task<PageIdentity?, Never>?
         if anchor == nil, let window {
             let windowID = CGWindowID(window.number)
             fingerprint = Task { await NoteFingerprint.capture(window: windowID, area: frame) }
+            page = Task.detached { PageIdentity.read(pid: window.pid, windowFrame: window.frame) }
         }
         composer = .new(Pending(
             target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked,
-            sourceWindow: window?.number, fingerprint: fingerprint
+            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid
         ))
         log.notice("comment opened for \(chip, privacy: .public)")
         commentText = ""
@@ -1711,7 +1784,7 @@ final class AnnotationController: ObservableObject {
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
             drafts.append(Draft(
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture, anchor: pending.anchor,
-                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint
+                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID
             ))
             startOcclusion()
             startContentChecks()

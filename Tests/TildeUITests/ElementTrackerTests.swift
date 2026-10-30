@@ -70,24 +70,61 @@ struct NoteVisibilityTests {
     @Test func aNoteHidesAndComesBackWithoutFlicker() {
         var note = NoteVisibility()
         // One odd reading changes nothing.
-        #expect(note.update(difference: 0.5) == true)
-        #expect(note.update(difference: 0.01) == true)
+        #expect(note.update(similarity: 0.2) == true)
+        #expect(note.update(similarity: 0.99) == true)
         // Two in a row hide it.
-        #expect(note.update(difference: 0.5) == true)
-        #expect(note.update(difference: 0.5) == false)
+        #expect(note.update(similarity: 0.2) == true)
+        #expect(note.update(similarity: 0.2) == false)
         // Between the thresholds it stays as it is.
-        #expect(note.update(difference: 0.11) == false)
-        #expect(note.update(difference: 0.11) == false)
+        #expect(note.update(similarity: 0.8) == false)
+        #expect(note.update(similarity: 0.8) == false)
         // Two matching readings bring it back.
-        #expect(note.update(difference: 0.01) == false)
-        #expect(note.update(difference: 0.01) == true)
+        #expect(note.update(similarity: 0.95) == false)
+        #expect(note.update(similarity: 0.95) == true)
     }
 
-    @Test func fingerprintDifferenceIsZeroToOne() {
-        let black = NoteFingerprint(levels: [UInt8](repeating: 0, count: 256))
-        let white = NoteFingerprint(levels: [UInt8](repeating: 255, count: 256))
-        #expect(black.difference(from: black) == 0)
-        #expect(black.difference(from: white) == 1)
+    private func picture(_ level: (Int, Int) -> UInt8) -> NoteFingerprint {
+        NoteFingerprint(levels: (0..<48).flatMap { y in (0..<48).map { x in level(x, y) } })
+    }
+
+    @Test func differentContentWithTheSameBrightnessIsNotAlike() {
+        // Like two pages of text: the same amount of dark on white, in other places.
+        let page = picture { x, y in (x / 3 + y / 3).isMultiple(of: 2) ? 255 : 40 }
+        let other = picture { x, y in (x / 3 + y / 3).isMultiple(of: 2) ? 40 : 255 }
+        #expect(page.similarity(to: page) > 0.99)
+        #expect(page.similarity(to: other) < 0.2)
+    }
+
+    @Test func plainAreasCompareByBrightness() {
+        let white = picture { _, _ in 255 }
+        let red = picture { _, _ in 90 }
+        let text = picture { x, _ in x.isMultiple(of: 4) ? 0 : 255 }
+        #expect(white.similarity(to: white) == 1)
+        #expect(white.similarity(to: red) == 0)
+        #expect(white.similarity(to: text) == 0)
+    }
+}
+
+struct PageIdentityTests {
+    @Test func addressesAndTitlesTellPagesApart() {
+        let feed = PageIdentity(url: "https://x.com/home", title: "Home / X")
+        #expect(feed.isSamePage(as: PageIdentity(url: "https://x.com/home", title: "(1) Home / X")) == true)
+        #expect(feed.isSamePage(as: PageIdentity(url: "https://x.com/explore", title: "Home / X")) == false)
+        // One failed read of the address does not hide the note.
+        #expect(feed.isSamePage(as: PageIdentity(url: nil, title: "Home / X")) == nil)
+
+        let folder = PageIdentity(url: nil, title: "Downloads")
+        #expect(folder.isSamePage(as: PageIdentity(url: nil, title: "Desktop")) == false)
+
+        // The Simulator: the title stays the same, so the picture must decide.
+        let simulator = PageIdentity(url: nil, title: "iPhone 16")
+        #expect(simulator.isSamePage(as: simulator) == nil)
+        #expect(PageIdentity(url: nil, title: nil).isSamePage(as: simulator) == nil)
+    }
+
+    @Test func aFragmentIsTheSamePage() {
+        #expect(PageIdentity.withoutFragment("https://a.test/docs#intro") == "https://a.test/docs")
+        #expect(PageIdentity.withoutFragment("https://a.test/#/inbox") == "https://a.test/#/inbox")
     }
 }
 
