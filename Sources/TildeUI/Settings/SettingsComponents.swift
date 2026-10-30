@@ -236,3 +236,28 @@ func revealInFinder(_ url: URL) {
         NSWorkspace.shared.open(url.deletingLastPathComponent())
     }
 }
+
+/// A switch whose state reads at a glance, also when its window is not in front: Tilde blue
+/// when on, grey when off, with a white knob and a shadow.
+struct TildeSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        // Rows show their own labels.
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(configuration.isOn ? Color.tildeBlue : Color.primary.opacity(0.18))
+                .frame(width: 38, height: 22)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(Color.white)
+                        .shadow(color: .black.opacity(0.3), radius: 1, y: 0.5)
+                        .padding(2)
+                }
+                .contentShape(Capsule())
+                .onTapGesture { configuration.isOn.toggle() }
+                .accessibilityElement()
+                .accessibilityLabel(configuration.label)
+                .accessibilityValue(configuration.isOn ? "On" : "Off")
+                .accessibilityAddTraits(.isButton)
+        }
+    }
+}
