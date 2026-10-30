@@ -652,6 +652,47 @@ struct UXSpecs {
 
     // MARK: - Writing a comment
 
+    @Test func aCommentIsNeverLostByAClickAwayAndEscAsksFirst() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            let frame = ChangingWindow.frame
+
+            // Clicking away keeps the note.
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            try await app.waitToSee("add")
+            try await app.type("Keep me")
+            try await app.waitToSee("Keep me", timeout: 3)
+            try await app.click(at: CGPoint(x: frame.maxX + 100, y: frame.maxY + 100))
+            try await app.waitToSeeText(containing: "1 note")
+
+            // Clicking away from an empty box adds nothing.
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 123))
+            try await app.waitToSee("add")
+            try await app.click(at: CGPoint(x: frame.maxX + 100, y: frame.maxY + 100))
+            try await app.waitNotToSee("add")
+            try await app.waitToSeeText(containing: "1 note")
+
+            // Esc on text asks; Esc again keeps writing; Return discards.
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 123))
+            try await app.waitToSee("add")
+            try await app.type("Maybe")
+            try await app.waitToSee("Maybe", timeout: 3)
+            try await app.key(.escape)
+            try await app.waitToSee("Discard comment?")
+            try await app.key(.escape)
+            try await app.waitNotToSee("Discard comment?")
+            try await app.waitToSee("Maybe")
+            try await app.key(.escape)
+            try await app.waitToSee("Discard comment?")
+            try await app.key(.enter)
+            try await app.waitNotToSee("Maybe")
+            try await app.waitToSeeText(containing: "1 note")
+        }
+    }
+
     @Test func shiftReturnAddsALineInTheCommentBoxAndInThePreviewAndEscClosesThePreview() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
