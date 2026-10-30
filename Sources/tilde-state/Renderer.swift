@@ -19,7 +19,7 @@ enum Renderer {
 
     static func render(_ view: NSView, size: CGSize, windowOrigin: NSPoint = .zero, appearance: NSAppearance.Name = .darkAqua) async throws -> CGImage {
         _ = fixesScrollerStyle
-        let window = NSWindow(contentRect: NSRect(origin: windowOrigin, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        let window = ActiveWindow(contentRect: NSRect(origin: windowOrigin, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: appearance)
         window.contentView = view
         window.setFrameOrigin(windowOrigin)
@@ -54,6 +54,12 @@ enum Renderer {
         )
     }
 
+}
+
+/// Draws as the window in front does, with active controls and placeholders.
+private final class ActiveWindow: NSWindow {
+    override var isKeyWindow: Bool { true }
+    override var isMainWindow: Bool { true }
 }
 
 private extension NSScroller {
