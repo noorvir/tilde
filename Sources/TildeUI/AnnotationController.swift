@@ -376,6 +376,7 @@ final class AnnotationController: ObservableObject {
 
     /// Sends all drafts, including the comment that is still open.
     func send() {
+        saveTypedComments()
         if composer != nil {
             submitComment(thenSend: true)
             return
@@ -755,6 +756,8 @@ final class AnnotationController: ObservableObject {
     private var visibilities: [Draft.ID: NoteVisibility] = [:]
     private var contentTimer: Timer?
     private var isCheckingContent = false
+    private var typedComments: [Draft.ID: String] = [:]
+    private var typedCommentsTask: Task<Void, Never>?
     private var isReadingWindows = false
     /// Where the windows are, from the last time the window list was read.
     private var windowFrames: [Int: CGRect] = [:]
@@ -1948,10 +1951,33 @@ final class AnnotationController: ObservableObject {
     }
 
     func closePreview() {
+        saveTypedComments()
         previewID = nil
         expandedPreviewImage = nil
         previewPanel.close()
         makeOverlayKey()
+    }
+
+    /// Keeps what was typed and saves it after a short pause: every change to the drafts redraws
+    /// the HUD and the overlay, which must not happen on each key.
+    func updateCommentSoon(_ id: Draft.ID, _ comment: String) {
+        typedComments[id] = comment
+        typedCommentsTask?.cancel()
+        typedCommentsTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            if !Task.isCancelled {
+                self?.saveTypedComments()
+            }
+        }
+    }
+
+    private func saveTypedComments() {
+        typedCommentsTask?.cancel()
+        let typed = typedComments
+        typedComments = [:]
+        for (id, comment) in typed {
+            updateComment(id, comment)
+        }
     }
 
     func updateComment(_ id: Draft.ID, _ comment: String) {

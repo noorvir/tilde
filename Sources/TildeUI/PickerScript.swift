@@ -141,6 +141,17 @@ let pickerScript = #"""
       right = Math.min(right, clip.right);
       bottom = Math.min(bottom, clip.bottom);
     }
+    // Below a sticky header or a fixed bar that covers the top of it.
+    if (right > left && bottom > top) {
+      const cover = document.elementFromPoint((left + right) / 2, top + 1);
+      for (let node = cover; node && node !== document.body; node = node.parentElement) {
+        const position = getComputedStyle(node).position;
+        if (position === 'fixed' || position === 'sticky') {
+          if (!element || !node.contains(element)) top = Math.max(top, node.getBoundingClientRect().bottom);
+          break;
+        }
+      }
+    }
     return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
   }
 

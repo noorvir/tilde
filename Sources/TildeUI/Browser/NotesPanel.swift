@@ -160,7 +160,7 @@ private struct NoteCard: View {
                 .lineLimit(1...6)
                 .onSubmit { controller.updateComment(draft.id, comment) }
                 .onChange(of: comment) { _, text in
-                    controller.updateComment(draft.id, text)
+                    controller.updateCommentSoon(draft.id, text)
                 }
 
             if let status {

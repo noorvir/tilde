@@ -284,7 +284,7 @@ private struct CommentEditor: View {
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.1)))
             .onChange(of: text) {
-                controller.updateComment(id, text)
+                controller.updateCommentSoon(id, text)
             }
     }
 }
