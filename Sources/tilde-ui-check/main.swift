@@ -7,7 +7,8 @@ let started = Date()
 let limit = 60.0
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let contract = root.appendingPathComponent("Tests/Contract")
-let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+let os = ProcessInfo.processInfo.operatingSystemVersion
+let major = "\(os.majorVersion).\(os.minorVersion)"
 let pictures = contract.appendingPathComponent("pictures/macos-\(major)")
 let out = root.appendingPathComponent(".build/ui-check")
 let bin = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
@@ -56,8 +57,31 @@ func pixels(_ url: URL) -> (width: Int, height: Int, bytes: [UInt8])? {
 }
 
 var failures: [String] = []
+// Pictures count only on the macOS they were made on.
+let hasPictures = FileManager.default.fileExists(atPath: pictures.path)
+if !hasPictures, !isRecording {
+    print("SKIP pictures: none for macOS \(major). Drawing was checked, pictures were not compared.")
+}
+// Pictures depend on the exact macOS and on the SDK the drawing tool was built against.
+func toolSDK() -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/vtool")
+    process.arguments = ["-show-build", bin.appendingPathComponent("tilde-state").path]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    try? process.run()
+    let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    process.waitUntilExit()
+    return text.split(separator: "\n").first { $0.contains("sdk") }?.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "  ", with: "") ?? "sdk unknown"
+}
+let version = ProcessInfo.processInfo.operatingSystemVersion
+let setup = "macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion), \(toolSDK())\n"
+let setupFile = pictures.appendingPathComponent("recorded-on.txt")
 if isRecording {
     try FileManager.default.createDirectory(at: pictures, withIntermediateDirectories: true)
+    try setup.write(to: setupFile, atomically: true, encoding: .utf8)
+} else if let recorded = try? String(contentsOf: setupFile, encoding: .utf8), recorded != setup {
+    print("WARNING pictures were recorded on \(recorded.dropLast()), this is \(setup.dropLast())")
 }
 for name in names {
     let base = String(name.dropLast(5))
@@ -70,6 +94,9 @@ for name in names {
     }
     guard let now = pixels(actual) else {
         failures.append("\(base): not drawn")
+        continue
+    }
+    guard hasPictures else {
         continue
     }
     guard let then = pixels(reference) else {

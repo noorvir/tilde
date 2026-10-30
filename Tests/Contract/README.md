@@ -16,6 +16,6 @@ Run it on every commit.
 - **New UI state:** add a state file, run `scripts/ui-check.sh --record <name>`, look at the picture, commit it. A picture records what you approve, bugs too.
 - **New rule:** add a row. A key left out of `expect` is not checked.
 
-Pictures belong to one macOS version, as text renders differently on others.
+Pictures belong to one macOS version and one SDK: `pictures/macos-<major.minor>/`, with the exact setup in `recorded-on.txt`. On another version the check says that it skips them, and it warns when the SDK or patch version differs. Record only on the macOS they are for.
 
 Clicks, keys and real apps are not tested here: `scripts/e2e-release.sh` does that before a release, in at most 3 minutes.
