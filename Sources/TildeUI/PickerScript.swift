@@ -90,7 +90,11 @@ let pickerScript = #"""
   addEventListener('resize', notify);
   addEventListener('popstate', notify);
   // Back to a page kept in memory: nothing else fires.
-  addEventListener('pageshow', notify);
+  addEventListener('pageshow', () => {
+    // A frame asked for just before the page left never came.
+    notifyQueued = false;
+    notify();
+  });
   addEventListener('hashchange', notify);
   for (const name of ['pushState', 'replaceState']) {
     const original = history[name];

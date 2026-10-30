@@ -1,4 +1,4 @@
 #!/bin/sh
-# The check before a release: notes in real Safari, Chrome, System Settings and the Simulator.
-# On a Mac in use, run it in the VM: it takes over the screen.
-exec env TILDE_UX_REAL_APPS=1 TILDE_UX_LIMIT=120 "$(dirname "$0")/ux.sh"
+# The check before a release, or to be sure: real clicks and keys, real Safari, Chrome and
+# Simulator. At most 3 minutes. It takes over the screen: on a Mac in use, run it in the VM.
+exec env TILDE_UX_RELEASE=1 "$(dirname "$0")/ux.sh"

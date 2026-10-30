@@ -1,9 +1,8 @@
-## Two suites
+## The release check
 
-| Suite | Command | Covers | When | Limit |
-|---|---|---|---|---|
-| UX | `scripts/ux.sh` | Tilde itself, its own browser and a test window, with picture comparison | Every commit | 30 s goal, fails above 60 s |
-| Release check | `scripts/e2e-release.sh` | Notes in real Safari, Chrome, System Settings and the Simulator | Before a release, or to be sure | Fails above 120 s |
+`scripts/e2e-release.sh` runs 5 flows with real input and real apps: an agent session with its report, a note in a real browser and back, a note in the Simulator, the hold key, and restore after a crash. It runs before a release or to be sure, and fails above 3 minutes. For every commit, use `scripts/ui-check.sh`: see Tests/Contract/README.md.
+
+The other specs here stay as a longer check, `scripts/ux.sh`, for when a change touches windows, focus or input.
 
 Both take over the screen: on a shared Mac, run them in the VM with `scripts/ux-vm.sh`.
 

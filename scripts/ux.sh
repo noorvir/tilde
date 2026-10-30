@@ -63,13 +63,13 @@ if [ "$real_running" = 1 ]; then
     sleep 1
 fi
 status=0
-# The real apps are the release check, scripts/e2e-release.sh: not in this suite.
-real_apps="aNoteInABrowser|aNoteInASinglePage|aNoteFollows|aNoteInTheReal|aNoteInANative"
-limit=${TILDE_UX_LIMIT:-60}
-if [ -n "${TILDE_UX_REAL_APPS:-}" ]; then
-    set -- --filter "$real_apps"
+# The flows that need real input and real apps; Tests/Contract covers the rest without them.
+release_flows="anAgentOpens|aNoteInABrowser|aNoteInTheReal|holdingTheKey|afterACrash"
+limit=${TILDE_UX_LIMIT:-180}
+if [ -n "${TILDE_UX_RELEASE:-}" ]; then
+    set -- --filter "$release_flows"
 else
-    set -- --filter "$filter" --skip "$real_apps"
+    set -- --filter "$filter"
 fi
 swift build --build-tests >/dev/null
 started=$(date +%s)

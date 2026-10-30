@@ -285,7 +285,7 @@ private final class Locked<Value>: @unchecked Sendable {
     }
 
     private func start(on server: MCPServer, session: String?, userAgent: String? = nil) async throws {
-        let call: [String: Any] = ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "start_annotation", "arguments": [:] as [String: Any]]]
+        let call: [String: Any] = ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "start_annotation", "arguments": ["wait_seconds": 0]]]
         _ = await server.handle(try request(call, session: session, userAgent: userAgent))
     }
 
