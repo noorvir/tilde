@@ -71,7 +71,7 @@ struct NoteFingerprint: Equatable, Sendable {
 /// thresholds and two readings in a row keep it from flickering.
 struct NoteVisibility: Equatable {
     static let hideAbove = 0.12
-    static let showBelow = 0.07
+    static let showBelow = 0.1
     static let readingsToChange = 2
 
     private(set) var isVisible = true

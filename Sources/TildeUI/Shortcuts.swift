@@ -173,10 +173,16 @@ final class ShortcutStore: ObservableObject {
     /// While a shortcut is being recorded, the hot keys are off so they do not fire.
     @Published var isRecording = false
 
+    /// The modifier to hold during a session to use the mouse as usual; nil is off.
+    @Published var holdKey: DoubleTapKey? {
+        didSet { defaults.set(holdKey?.rawValue ?? "off", forKey: "Shortcut.holdKey") }
+    }
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        holdKey = DoubleTapKey(rawValue: defaults.string(forKey: "Shortcut.holdKey") ?? DoubleTapKey.option.rawValue)
         for action in Action.allCases {
             shortcuts[action] = Self.load(action, from: defaults)
         }

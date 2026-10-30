@@ -64,6 +64,10 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
         key(CGKeyCode(body["code"] as? Int ?? 0), command: body["command"] as? Bool ?? false, shift: body["shift"] as? Bool ?? false, option: body["option"] as? Bool ?? false)
         return json(["ok": true])
 
+    case ("POST", "/modifier"):
+        modifier(body["key"] as? String ?? "", down: body["down"] as? Bool ?? false)
+        return json(["ok": true])
+
     case ("POST", "/tap"):
         await tap(body["key"] as? String ?? "")
         return json(["ok": true])
@@ -109,6 +113,18 @@ func windowPicture(pid: Int, title: String) -> String? {
     try? capture.run()
     capture.waitUntilExit()
     return (try? Data(contentsOf: file))?.base64EncodedString()
+}
+
+func modifier(_ name: String, down: Bool) {
+    let keys: [String: (CGKeyCode, CGEventFlags)] = [
+        "control": (59, .maskControl), "option": (58, .maskAlternate), "shift": (56, .maskShift),
+    ]
+    guard let (code, flag) = keys[name] else {
+        return
+    }
+    let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+    event?.flags = down ? flag : []
+    event?.post(tap: .cghidEventTap)
 }
 
 func tap(_ name: String) async {

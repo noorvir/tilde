@@ -13,6 +13,18 @@ struct ShortcutSettings: View {
                 }
                 ShortcutRow(shortcuts: shortcuts, action: action, recording: $recording)
             }
+            SettingsDivider()
+            SettingsRow(title: "Hold to use the app normally", subtitle: "While annotating only: hold the key to click and navigate") {
+                Picker("Hold key", selection: $shortcuts.holdKey) {
+                    ForEach([DoubleTapKey.control, .option, .shift]) { key in
+                        Text(key.holdTitle).tag(DoubleTapKey?.some(key))
+                    }
+                    Text("Off").tag(DoubleTapKey?.none)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
         }
         .onChange(of: recording, initial: true) { _, action in
             shortcuts.isRecording = action != nil

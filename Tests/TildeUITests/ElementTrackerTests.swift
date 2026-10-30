@@ -76,8 +76,8 @@ struct NoteVisibilityTests {
         #expect(note.update(difference: 0.5) == true)
         #expect(note.update(difference: 0.5) == false)
         // Between the thresholds it stays as it is.
-        #expect(note.update(difference: 0.09) == false)
-        #expect(note.update(difference: 0.09) == false)
+        #expect(note.update(difference: 0.11) == false)
+        #expect(note.update(difference: 0.11) == false)
         // Two matching readings bring it back.
         #expect(note.update(difference: 0.01) == false)
         #expect(note.update(difference: 0.01) == true)
@@ -88,5 +88,26 @@ struct NoteVisibilityTests {
         let white = NoteFingerprint(levels: [UInt8](repeating: 255, count: 256))
         #expect(black.difference(from: black) == 0)
         #expect(black.difference(from: white) == 1)
+    }
+}
+
+struct HoldGestureTests {
+    @Test func holdingAloneBeginsAndReleasingEnds() {
+        var gesture = HoldGesture()
+        #expect(gesture.flagsChanged(key: true, others: false, at: 0) == nil)
+        #expect(gesture.delayPassed(at: 0.15) == .began)
+        #expect(gesture.flagsChanged(key: false, others: false, at: 2) == .ended)
+    }
+
+    @Test func aTapOrAChordIsNoHold() {
+        var gesture = HoldGesture()
+        _ = gesture.flagsChanged(key: true, others: false, at: 0)
+        #expect(gesture.flagsChanged(key: false, others: false, at: 0.05) == nil)
+        #expect(gesture.delayPassed(at: 0.15) == nil)
+
+        _ = gesture.flagsChanged(key: true, others: false, at: 1)
+        gesture.otherInput()
+        #expect(gesture.delayPassed(at: 1.15) == nil)
+        #expect(gesture.flagsChanged(key: false, others: false, at: 1.2) == nil)
     }
 }

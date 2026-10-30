@@ -570,6 +570,9 @@ struct HUDView: View {
         if controller.isPaused {
             return .paused(shortcut: controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause))
         }
+        if controller.isHoldPaused, let key = controller.shortcuts.holdKey {
+            return .holding(key.symbol)
+        }
         if controller.isAutoPaused {
             return .waitingForWindow
         }
@@ -582,6 +585,8 @@ struct HUDView: View {
         case paused(shortcut: Shortcut?)
         /// Another app is in front of the window being annotated.
         case waitingForWindow
+        /// The hold key is down; its symbol.
+        case holding(String)
         case notice(String)
     }
 
@@ -606,6 +611,8 @@ struct HUDView: View {
         switch state {
         case .notice(let text):
             return [[SubtitlePart(text: text)]]
+        case .holding(let key):
+            return [[SubtitlePart(text: "Release \(key) to annotate")], [SubtitlePart(text: "Release \(key)")]]
         case .waitingForWindow:
             return [[SubtitlePart(text: "Click the window to continue")], [SubtitlePart(text: "Click the window")]]
         case .choosingWindow:

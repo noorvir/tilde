@@ -185,6 +185,11 @@ final class TildeApp {
         try await Task.sleep(for: .milliseconds(400))
     }
 
+    func hold(_ modifier: String, down: Bool) async throws {
+        try await drive("modifier", ["key": modifier, "down": down])
+        try await Task.sleep(for: .milliseconds(400))
+    }
+
     func click(at point: CGPoint) async throws {
         try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
         try await Task.sleep(for: .milliseconds(200))

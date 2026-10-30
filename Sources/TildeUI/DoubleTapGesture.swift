@@ -20,6 +20,17 @@ enum DoubleTapKey: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    /// The key's name in the hold key menu.
+    var holdTitle: String {
+        switch self {
+        case .control: "⌃ Control"
+        case .option: "⌥ Option"
+        case .shift: "⇧ Shift"
+        case .command: "⌘ Command"
+        case .function: "fn"
+        }
+    }
+
     var flag: NSEvent.ModifierFlags {
         switch self {
         case .control: .control
@@ -158,5 +169,158 @@ final class DoubleTapMonitor {
         if let key = detector.handle(isFlagsChanged: event.type == .flagsChanged, flags: event.modifierFlags, at: event.timestamp, watching: keys()) {
             onDoubleTap(key)
         }
+    }
+}
+
+/// Recognises a modifier held by itself for a moment, to use the mouse as usual while it is
+/// down. Another key or modifier first makes it a chord (⌃⌥A, ⌥2), which is no hold.
+struct HoldGesture {
+    enum Output: Equatable {
+        case began
+        case ended
+    }
+
+    /// How long the key stays down before it counts as held; shorter is a tap.
+    static let delay: TimeInterval = 0.15
+
+    private enum State {
+        case idle
+        case down(since: TimeInterval)
+        case holding
+        case chord
+    }
+
+    private var state = State.idle
+
+    mutating func flagsChanged(key: Bool, others: Bool, at time: TimeInterval) -> Output? {
+        if !key {
+            let wasHolding: Bool
+            if case .holding = state {
+                wasHolding = true
+            } else {
+                wasHolding = false
+            }
+            state = .idle
+            return wasHolding ? .ended : nil
+        }
+        if others {
+            otherInput()
+            return nil
+        }
+        if case .idle = state {
+            state = .down(since: time)
+        }
+        return nil
+    }
+
+    /// Another key, which makes a press in progress a chord; a hold goes on.
+    mutating func otherInput() {
+        if case .down = state {
+            state = .chord
+        }
+    }
+
+    mutating func delayPassed(at time: TimeInterval) -> Output? {
+        guard case .down(let since) = state, time - since >= Self.delay - 0.001 else {
+            return nil
+        }
+        state = .holding
+        return .began
+    }
+}
+
+/// Watches the hold key. It exists only while a session is on screen, so nothing is hooked up
+/// at any other time.
+@MainActor
+final class HoldMonitor {
+    private var gesture = HoldGesture()
+    private var monitors: [Any] = []
+    private var timer: Timer?
+    private let key: DoubleTapKey
+    private let onOutput: (HoldGesture.Output) -> Void
+
+    init(key: DoubleTapKey, onOutput: @escaping (HoldGesture.Output) -> Void) {
+        self.key = key
+        self.onOutput = onOutput
+        let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown]
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.handle(event) }
+        }) {
+            monitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated { self?.handle(event) }
+            return event
+        }) {
+            monitors.append(local)
+        }
+    }
+
+    func invalidate() {
+        for monitor in monitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitors = []
+        timer?.invalidate()
+    }
+
+    private func handle(_ event: NSEvent) {
+        guard event.type == .flagsChanged else {
+            gesture.otherInput()
+            return
+        }
+        let flags = event.modifierFlags.intersection([.control, .option, .shift, .command, .function])
+        let time = event.timestamp
+        if let output = gesture.flagsChanged(key: flags.contains(key.flag), others: !flags.subtracting(key.flag).isEmpty, at: time) {
+            onOutput(output)
+        }
+        if flags == key.flag {
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: HoldGesture.delay, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let output = self.gesture.delayPassed(at: time + HoldGesture.delay) else {
+                        return
+                    }
+                    self.onOutput(output)
+                }
+            }
+        }
+    }
+}
+
+/// While the hold key is down, left clicks lose its flag, so they stay plain clicks (a ⌃-click
+/// would be a right click). The tap exists only during a hold. Needs Accessibility.
+enum PlainClickTap {
+    nonisolated(unsafe) private static var port: CFMachPort?
+    nonisolated(unsafe) private static var source: CFRunLoopSource?
+    nonisolated(unsafe) private static var removed: CGEventFlags = []
+
+    static func start(removing flag: NSEvent.ModifierFlags) {
+        stop()
+        removed = CGEventFlags(rawValue: UInt64(flag.rawValue))
+        let types: [CGEventType] = [.leftMouseDown, .leftMouseUp, .leftMouseDragged]
+        let mask = types.reduce(CGEventMask(0)) { $0 | (1 << CGEventMask($1.rawValue)) }
+        let callback: CGEventTapCallBack = { _, _, event, _ in
+            event.flags.remove(PlainClickTap.removed)
+            return Unmanaged.passUnretained(event)
+        }
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask, callback: callback, userInfo: nil) else {
+            return
+        }
+        let loop = CFMachPortCreateRunLoopSource(nil, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), loop, .commonModes)
+        port = tap
+        source = loop
+    }
+
+    static func stop() {
+        if let source {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        if let port {
+            CGEvent.tapEnable(tap: port, enable: false)
+        }
+        port = nil
+        source = nil
     }
 }

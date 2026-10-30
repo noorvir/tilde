@@ -32,15 +32,16 @@ enum ElementTracker {
 
     /// Reads a tracked element's frame now; returns it with the element, which may be a new
     /// one found again. Call off the main thread: Accessibility waits for the other app.
-    static func locate(_ tracked: TrackedElement, lastFrame: CGRect) -> (frame: CGRect?, tracked: TrackedElement) {
+    /// `isGone`: the element no longer exists, as opposed to being scrolled out of view.
+    static func locate(_ tracked: TrackedElement, lastFrame: CGRect) -> (frame: CGRect?, tracked: TrackedElement, isGone: Bool) {
         var tracked = tracked
         if !isAlive(tracked.element), let found = refind(tracked, near: lastFrame) {
             tracked = TrackedElement(element: found, pid: tracked.pid, identity: tracked.identity)
         }
         guard isAlive(tracked.element), let frame = frame(of: tracked.element) else {
-            return (nil, tracked)
+            return (nil, tracked, true)
         }
-        return (visibleFrame(frame, clips: clips(of: tracked.element)), tracked)
+        return (visibleFrame(frame, clips: clips(of: tracked.element)), tracked, false)
     }
 
     // MARK: - Rules

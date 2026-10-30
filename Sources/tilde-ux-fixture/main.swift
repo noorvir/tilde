@@ -15,7 +15,12 @@ window.level = .floating
 window.orderFrontRegardless()
 let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     let page = (try? String(contentsOfFile: file, encoding: .utf8)) ?? "red"
-    window.backgroundColor = page.hasPrefix("green") ? NSColor(red: 0.1, green: 0.8, blue: 0.2, alpha: 1) : NSColor(red: 0.9, green: 0.1, blue: 0.1, alpha: 1)
+    switch page {
+    case "green": window.backgroundColor = NSColor(red: 0.1, green: 0.8, blue: 0.2, alpha: 1)
+    // Close to red, as a page with a small change is close to how it was.
+    case "almost": window.backgroundColor = NSColor(red: 0.9, green: 0.22, blue: 0.1, alpha: 1)
+    default: window.backgroundColor = NSColor(red: 0.9, green: 0.1, blue: 0.1, alpha: 1)
+    }
 }
 withExtendedLifetime(timer) {
     app.run()

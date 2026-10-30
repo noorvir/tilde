@@ -86,6 +86,9 @@ final class AnnotationController: ObservableObject {
     /// Paused because another app is in front of a session limited to one window; ends when
     /// the window's app (or Tilde) comes back to the front.
     @Published private(set) var isAutoPaused = false
+    /// Paused while the hold key is down, so the mouse and keyboard work as usual.
+    @Published private(set) var isHoldPaused = false
+    private var holdMonitor: HoldMonitor?
 
     /// Why annotating just paused, for the note below the HUD.
     enum PauseNotice: Equatable {
@@ -282,6 +285,7 @@ final class AnnotationController: ObservableObject {
             drafts = Self.drafts(from: record, archive: archive)
         }
         startCheckpoints()
+        startHoldMonitor()
         saveSession()
 
         if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
@@ -304,6 +308,7 @@ final class AnnotationController: ObservableObject {
 
     private func end() {
         stopCheckpoints()
+        stopHoldMonitor()
         stopOcclusion()
         stopContentChecks()
         pauseNotice = nil
@@ -476,7 +481,7 @@ final class AnnotationController: ObservableObject {
     }
 
     var isEffectivelyPaused: Bool {
-        isPaused || isAutoPaused
+        isPaused || isAutoPaused || isHoldPaused
     }
 
     func togglePause() {
@@ -680,6 +685,49 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    // MARK: - Holding a key to use the mouse
+
+    private func startHoldMonitor() {
+        holdMonitor?.invalidate()
+        holdMonitor = nil
+        guard let key = shortcuts.holdKey else {
+            return
+        }
+        holdMonitor = HoldMonitor(key: key) { [weak self] output in
+            self?.holdChanged(output, key: key)
+        }
+    }
+
+    private func stopHoldMonitor() {
+        holdMonitor?.invalidate()
+        holdMonitor = nil
+        PlainClickTap.stop()
+        isHoldPaused = false
+    }
+
+    private func holdChanged(_ output: HoldGesture.Output, key: DoubleTapKey) {
+        guard phase == .annotating else {
+            return
+        }
+        switch output {
+        case .began:
+            // Not while typing a comment, where these keys are for the text.
+            guard composer == nil, previewID == nil, !isPaused else {
+                return
+            }
+            isHoldPaused = true
+            PlainClickTap.start(removing: key.flag)
+            applyPause()
+        case .ended:
+            guard isHoldPaused else {
+                return
+            }
+            isHoldPaused = false
+            PlainClickTap.stop()
+            applyPause()
+        }
+    }
+
     // MARK: - Whether a note's content is on screen
 
     /// Notes whose content is gone from their window, such as after a page change. They stay
@@ -729,6 +777,9 @@ final class AnnotationController: ObservableObject {
                     continue
                 }
                 differences[id] = now.difference(from: original)
+                if contentGoneNotes.contains(id) {
+                    Logger(subsystem: "dev.tilde.app", category: "annotate").notice("hidden note differs by \(differences[id] ?? 0, format: .fixed(precision: 3))")
+                }
             }
             self?.applyContentChecks(differences)
         }
@@ -811,7 +862,7 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    private func applyTracking(_ results: [(Draft.ID, (frame: CGRect?, tracked: TrackedElement))]) {
+    private func applyTracking(_ results: [(Draft.ID, (frame: CGRect?, tracked: TrackedElement, isGone: Bool))]) {
         isTracking = false
         var frames = trackedFrames
         var hidden = hiddenNotes
@@ -819,6 +870,10 @@ final class AnnotationController: ObservableObject {
             trackedElements[id] = result.tracked
             if let frame = result.frame {
                 frames[id] = frame
+                hidden.remove(id)
+            } else if result.isGone, drafts.first(where: { $0.id == id })?.fingerprint != nil {
+                // Apps such as the Simulator rebuild elements on every page. The picture of
+                // the note's area decides, so the note comes back with its page.
                 hidden.remove(id)
             } else {
                 hidden.insert(id)

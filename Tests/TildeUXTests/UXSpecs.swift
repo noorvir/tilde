@@ -317,9 +317,38 @@ struct UXSpecs {
             try await app.waitForBlue(in: area, atMost: 0)
             try await app.waitToSeeText(containing: "1 note")
 
-            // Back: it shows again.
-            try window.show("red")
+            // Back: it shows again, also when the page is not quite the same as before.
+            try window.show("almost")
             try await app.waitForBlue(in: area, atLeast: 20)
+        }
+    }
+
+    // MARK: - Holding a key
+
+    @Test func holdingTheKeyLetsTheMouseThroughWhileAnnotatingAndOnlyThen() async throws {
+        try await withApp { app in
+            // Before a session it does nothing.
+            try await app.hold("option", down: true)
+            try await app.hold("option", down: false)
+            try await app.waitNotToSee("Paused", timeout: 1)
+
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+
+            try await app.hold("option", down: true)
+            try await app.waitToSee("Paused")
+            try await app.waitToSee("Release ⌥ to annotate")
+
+            try await app.hold("option", down: false)
+            try await app.waitToSee("Annotating")
+        }
+    }
+
+    @Test func theHoldKeyIsASetting() async throws {
+        try await withApp { app in
+            try await app.menu("Settings")
+            try await app.press("Shortcuts")
+            try await app.waitToSee("Hold to use the app normally")
         }
     }
 
