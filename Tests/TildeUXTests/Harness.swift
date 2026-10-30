@@ -199,6 +199,10 @@ final class TildeApp {
         try await Task.sleep(for: .milliseconds(40))
     }
 
+    func drag(from start: CGPoint, to end: CGPoint) async throws {
+        try await drive("mouse", ["type": "drag", "x": start.x, "y": start.y, "toX": end.x, "toY": end.y])
+    }
+
     func hover(over point: CGPoint) async throws {
         try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
     }
@@ -602,6 +606,13 @@ final class TestPage {
         <p><a href="other.html">Other page</a></p></body></html>
         """
         try html.write(to: folder.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+        let rows = (1...80).map { "<p style=\"margin:0;height:30px;width:300px\">Row \($0)</p>" }.joined()
+        func scrollPage(_ name: String, body: String, scroll: String) throws {
+            let html = "<!doctype html><meta charset=utf-8><title>\(name)</title>\(body)<button style=\"position:fixed;right:20px;top:10px\" onclick=\"\(scroll)\">Scroll</button>"
+            try html.write(to: folder.appendingPathComponent("\(name).html"), atomically: true, encoding: .utf8)
+        }
+        try scrollPage("panel", body: "<body style=\"margin:0;overflow:hidden\"><main id=panel style=\"height:100vh;overflow:auto\">\(rows)</main>", scroll: "panel.scrollTop=120")
+        try scrollPage("whole", body: "<body style=\"margin:0\">\(rows)", scroll: "window.scrollTo(0,120)")
         try "<!doctype html><title>Other</title><h1>Other page heading</h1>".write(to: folder.appendingPathComponent("other.html"), atomically: true, encoding: .utf8)
         server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         server.arguments = ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]

@@ -469,6 +469,49 @@ struct UXSpecs {
         }
     }
 
+    @Test(arguments: ["panel", "whole"])
+    func notesInTildesBrowserMoveWithThePageAsItScrolls(page name: String) async throws {
+        let page = try TestPage()
+        defer { page.stop() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
+            _ = try await agent.call("start_annotation", ["url": page.url + name + ".html", "wait_seconds": 0])
+            try await app.waitToSee("Paused")
+            let row = try await app.waitToSee("Row 8", timeout: 20)
+            try await annotate(app)
+            try await app.waitToSee("Annotating")
+
+            // A note on an element: its number is at the top right of its row.
+            try await addNote(app, on: "Row 8", comment: "On a row")
+            try await app.waitToSeeText(containing: "1 note")
+            func around(_ point: CGPoint) -> CGRect {
+                CGRect(x: point.x - 8, y: point.y - 8, width: 16, height: 16)
+            }
+            let elementMarker = CGPoint(x: row.frame.minX + 300, y: row.frame.minY)
+            try await app.waitForBlue(in: around(elementMarker), atLeast: 20)
+
+            // A note on a dragged region further down.
+            let start = CGPoint(x: row.frame.minX + 340, y: row.frame.minY + 200)
+            let end = CGPoint(x: start.x + 100, y: start.y + 60)
+            try await app.drag(from: start, to: end)
+            try await app.waitToSee("add")
+            try await app.type("On a region")
+            try await app.waitToSee("On a region", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "2 notes")
+            let regionMarker = CGPoint(x: end.x, y: start.y)
+            try await app.waitForBlue(in: around(regionMarker), atLeast: 20)
+
+            try await app.hold("option", down: true)
+            try await app.clickText("Scroll")
+            try await app.hold("option", down: false)
+
+            try await app.waitForBlue(in: around(CGPoint(x: elementMarker.x, y: elementMarker.y - 120)), atLeast: 20)
+            try await app.waitForBlue(in: around(CGPoint(x: regionMarker.x, y: regionMarker.y - 120)), atLeast: 20)
+            try await app.waitForBlue(in: around(regionMarker), atMost: 0)
+        }
+    }
+
     @Test func aNoteInTheRealSimulatorHidesOnAnotherScreenAndComesBack() async throws {
         let simulator = try SimulatorScreens()
         defer { simulator.stop() }

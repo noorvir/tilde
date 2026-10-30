@@ -1144,7 +1144,8 @@ final class AnnotationController: ObservableObject {
             return []
         }
         return drafts.enumerated().compactMap { index, draft in
-            guard let rect = browser.anchorRects[draft.id] else {
+            // No height: scrolled out of its panel.
+            guard let rect = browser.anchorRects[draft.id], rect.height > 0 else {
                 return nil
             }
             return PageNote(number: index + 1, draft: draft, frame: rect.offsetBy(dx: page.minX, dy: page.minY))

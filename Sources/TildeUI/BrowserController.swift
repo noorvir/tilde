@@ -333,7 +333,16 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
         let scroll = try? await webView.callAsyncJavaScript("return window.__tilde ? window.__tilde.scroll() : [0, 0]", arguments: [:], contentWorld: .page)
         let offsets = scroll as? [Double] ?? [0, 0]
         let documentRect = CGRect(x: viewRect.minX + offsets[0], y: top + offsets[1], width: viewRect.width, height: viewRect.height)
-        return PageAnchor(url: pageURL, selector: nil, text: nil, documentRect: documentRect)
+        var anchor = PageAnchor(url: pageURL, selector: nil, text: nil, documentRect: documentRect)
+        let panel = try? await webView.callAsyncJavaScript(
+            "return window.__tilde ? window.__tilde.scroller(x, y) : null", arguments: ["x": viewRect.midX, "y": top + viewRect.height / 2],
+            contentWorld: .page
+        ) as? [String: Any]
+        if let panel, let selector = panel["selector"] as? String, let x = panel["x"] as? Double, let y = panel["y"] as? Double {
+            anchor.scroller = selector
+            anchor.scrollerOffset = CGPoint(x: x, y: y)
+        }
+        return anchor
     }
 
     /// Selects a note and shows its element: scrolls to it on the open page, or opens its page
@@ -396,6 +405,9 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
             var entry: [String: Any] = ["id": id.uuidString, "rect": ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]]
             entry["selector"] = anchor.selector
             entry["text"] = anchor.text
+            entry["scroller"] = anchor.scroller
+            entry["scrollerX"] = anchor.scrollerOffset?.x
+            entry["scrollerY"] = anchor.scrollerOffset?.y
             return entry
         }
         Task {

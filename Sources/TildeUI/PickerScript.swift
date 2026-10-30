@@ -117,6 +117,27 @@ let pickerScript = #"""
     return best;
   }
 
+  const scrolls = (element) => {
+    const style = getComputedStyle(element);
+    return /(auto|scroll)/.test(style.overflowY + style.overflowX)
+      && (element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth);
+  };
+
+  // The rect cut to the scrolling panels around the element. Scrolled out of them it has no
+  // height: the element is still on the page, but out of view.
+  function visibleRect(r, element) {
+    let left = r.x, top = r.y, right = r.x + r.width, bottom = r.y + r.height;
+    for (let node = element; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      if (getComputedStyle(node).overflowY === 'visible' && getComputedStyle(node).overflowX === 'visible') continue;
+      const clip = node.getBoundingClientRect();
+      left = Math.max(left, clip.left);
+      top = Math.max(top, clip.top);
+      right = Math.min(right, clip.right);
+      bottom = Math.min(bottom, clip.bottom);
+    }
+    return { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
+  }
+
   window.__tilde = {
     /// Viewport rects for anchors: the selector first (if its text still matches), then the
     /// text, then a region's document rect. null when the element is not on the page.
@@ -130,11 +151,14 @@ let pickerScript = #"""
           if (!element && anchor.text) element = findByText(anchor.text);
         }
         if (element) {
-          const r = element.getBoundingClientRect();
-          result[anchor.id] = { x: r.x, y: r.y, width: r.width, height: r.height };
+          result[anchor.id] = visibleRect(element.getBoundingClientRect(), element.parentElement);
         } else if (!anchor.selector) {
           const r = anchor.rect;
-          result[anchor.id] = { x: r.x - scrollX, y: r.y - scrollY, width: r.width, height: r.height };
+          let panel = null;
+          try { panel = anchor.scroller ? document.querySelector(anchor.scroller) : null; } catch (error) { panel = null; }
+          const movedX = panel ? panel.scrollLeft - anchor.scrollerX : 0;
+          const movedY = panel ? panel.scrollTop - anchor.scrollerY : 0;
+          result[anchor.id] = visibleRect({ x: r.x - scrollX - movedX, y: r.y - scrollY - movedY, width: r.width, height: r.height }, panel);
         } else {
           result[anchor.id] = null;
         }
@@ -144,6 +168,16 @@ let pickerScript = #"""
 
     scroll() {
       return [scrollX, scrollY];
+    },
+
+    /// The scrolling panel at a point of the viewport, so a region can move with it.
+    scroller(x, y) {
+      let node = document.elementFromPoint(x, y);
+      while (node && node !== document.body && node !== document.documentElement) {
+        if (scrolls(node)) return { selector: selectorFor(node), x: node.scrollLeft, y: node.scrollTop };
+        node = node.parentElement;
+      }
+      return null;
     },
 
     inspect(x, y) {

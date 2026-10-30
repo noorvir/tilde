@@ -11,6 +11,10 @@ struct PageAnchor: Equatable, Sendable, Codable {
     let text: String?
     /// The element or region in document coordinates (CSS pixels from the top of the page).
     let documentRect: CGRect
+    /// The panel a dragged region scrolls with when that is not the whole page, and how far
+    /// the panel was scrolled when the region was made.
+    var scroller: String?
+    var scrollerOffset: CGPoint?
 
     var isRegion: Bool {
         selector == nil
