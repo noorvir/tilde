@@ -386,6 +386,8 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
 
     /// Finds the anchors of the current page in it again. Runs one lookup at a time; changes
     /// during a lookup run one more.
+    private var resolveNumber = 0
+
     func resolveAnchors() {
         guard !isResolving else {
             resolvesAgain = true
@@ -400,6 +402,16 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
         }
 
         isResolving = true
+        // A page coming back from memory can leave the question unanswered: ask again.
+        resolveNumber += 1
+        let number = resolveNumber
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            if let self, self.isResolving, self.resolveNumber == number {
+                self.isResolving = false
+                self.resolveAnchors()
+            }
+        }
         let list = onPage.map { id, anchor -> [String: Any] in
             let rect = anchor.documentRect
             var entry: [String: Any] = ["id": id.uuidString, "rect": ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height]]
@@ -577,3 +589,4 @@ extension BrowserController {
     }
 }
 #endif
+
