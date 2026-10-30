@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "surface": "toolbar",
+  "session": {
+    "client": "Codex"
+  },
+  "notes": 2,
+  "hudInBrowser": true
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "surface": "toast",
+  "size": [
+    560,
+    76
+  ],
+  "toast": {
+    "failed": 0,
+    "action": "removed",
+    "oneApp": true
+  }
+}

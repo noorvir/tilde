@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "surface": "preview",
+  "size": [
+    1000,
+    640
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "notes": 3,
+  "preview": 2,
+  "enlarged": "context"
+}

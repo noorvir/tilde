@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    760,
+    600
+  ],
+  "appearance": "dark",
+  "settings": {
+    "page": "agents"
+  }
+}

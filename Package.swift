@@ -26,6 +26,10 @@ let package = Package(
         // A window whose whole content changes, for the UX specs: stands in for an app that
         // does not describe its contents, such as the iOS Simulator.
         .executableTarget(name: "tilde-ux-fixture"),
+        // The contract tests: tilde-state draws a state file with the real views, and
+        // tilde-ui-check, which uses no code of Tilde, compares the pictures. See Tests/Contract.
+        .executableTarget(name: "tilde-state", dependencies: ["TildeCore", "TildeInstaller", "TildeUI"]),
+        .executableTarget(name: "tilde-ui-check"),
         .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill"]),
         .testTarget(name: "TildeInstallerTests", dependencies: ["TildeInstaller", "TildeSkill"]),
         // Snapshot and behaviour tests of the UI; they render offscreen and need a logged-in Mac.

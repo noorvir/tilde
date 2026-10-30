@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    760,
+    600
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "history",
+    "savedSessions": true
+  }
+}

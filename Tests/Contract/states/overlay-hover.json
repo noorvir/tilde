@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "surface": "overlay",
+  "size": [
+    520,
+    340
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "hover": true
+}
