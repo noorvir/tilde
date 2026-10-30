@@ -305,8 +305,10 @@ struct UXSpecs {
             try await app.key(.enter)
             try await app.waitToSeeText(containing: "1 note")
 
-            // Away from the note: its number is there, its box is not.
-            try await app.hover(over: CGPoint(x: frame.maxX + 150, y: frame.maxY + 100))
+            // Its number is there, its box is not.
+            // The pointer rests on the HUD, where nothing gets a hover highlight.
+            let hud = try await app.waitToSee("Annotating")
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
             let area = frame.insetBy(dx: -30, dy: -30)
             try await app.waitForBlue(in: area, atLeast: 20, atMost: 900)
 
