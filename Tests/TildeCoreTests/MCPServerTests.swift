@@ -275,3 +275,17 @@ private final class Locked<Value>: @unchecked Sendable {
         return old
     }
 }
+
+@Suite struct ClientNameTests {
+    @Test func clientNamesMapToTheirHarness() {
+        let cases = [
+            ("claude-code", "Claude Code"), ("Claude Code", "Claude Code"), ("claude-ai", "Claude"),
+            ("codex-mcp-client", "Codex"), ("rmcp", "Codex"), ("Cursor", "Cursor"),
+            ("Visual Studio Code", "VS Code"), ("gemini-cli-mcp-client", "Gemini CLI"),
+            ("windsurf-client", "Windsurf"), ("devin", "Windsurf"), ("SomethingNew", "SomethingNew"),
+        ]
+        for (name, display) in cases {
+            #expect(MCPServer.displayName(forClient: name) == display, "\(name)")
+        }
+    }
+}

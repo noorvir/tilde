@@ -90,7 +90,10 @@ public final class MCPServer {
         let info = params["clientInfo"] as? [String: Any] ?? [:]
         let name = info["title"] as? String ?? info["name"] as? String ?? "Agent"
         let sessionID = UUID().uuidString
-        clients[sessionID] = displayName(forClient: name)
+        let display = Self.displayName(forClient: name)
+        // Lets new harness names be added to the list.
+        log.notice("MCP client \(name, privacy: .public) shows as \(display, privacy: .public)")
+        clients[sessionID] = display
 
         let body = result(id: id, [
             "protocolVersion": version,
@@ -358,12 +361,16 @@ public final class MCPServer {
 
     /// The app name for an MCP `clientInfo.name`. The HUD shows it with that app's icon, so
     /// the names match the agent apps that Tilde installs into.
-    private func displayName(forClient name: String) -> String {
+    /// The harness's display name for an MCP clientInfo name, such as "Codex" for
+    /// "codex-mcp-client" or "rmcp" (the Rust MCP library that Codex uses).
+    nonisolated static func displayName(forClient name: String) -> String {
         let lowercased = name.lowercased()
         let known: [(match: String, name: String)] = [
             ("claude-code", "Claude Code"),
+            ("claude code", "Claude Code"),
             ("claude", "Claude"),
             ("codex", "Codex"),
+            ("rmcp", "Codex"),
             ("cursor", "Cursor"),
             ("windsurf", "Windsurf"),
             ("devin", "Windsurf"),
@@ -375,7 +382,6 @@ public final class MCPServer {
         if let match = known.first(where: { lowercased.contains($0.match) }) {
             return match.name
         }
-        log.notice("unknown MCP client \(name, privacy: .public)")
         return name
     }
 

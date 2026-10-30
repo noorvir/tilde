@@ -76,20 +76,17 @@ final class AgentSetup: ObservableObject {
         ]
     }
 
-    /// The icon of the agent app that the HUD names as the client, such as "Codex". Only apps
-    /// with a bundle on this Mac have one.
+    /// The icon of the agent that the HUD and History name as the client, such as "Codex":
+    /// the same as its row on the Agents page (Codex shows the ChatGPT app's icon).
     func icon(forClient name: String) -> NSImage? {
         let harnesses: [String: Harness] = [
             "Claude": .claudeDesktop, "Claude Code": .claudeCode, "Codex": .codex, "Cursor": .cursor,
             "VS Code": .vscode, "Gemini CLI": .gemini, "Windsurf": .windsurf,
         ]
-        guard let harness = harnesses[name] else {
+        guard let harness = harnesses[name], let row = Self.rows.first(where: { $0.harnesses.contains(harness) }) else {
             return nil
         }
-        if let placeholderIcon {
-            return placeholderIcon
-        }
-        return installer.appBundle(for: harness).map { NSWorkspace.shared.icon(forFile: $0.path) }
+        return icon(for: row)
     }
 
     func install(_ rows: [Row]) -> InstallResult {
