@@ -12,10 +12,6 @@ function live() {
   return api.getSceneElements().filter((element) => !element.isDeleted);
 }
 
-function pressKey(key, shiftKey) {
-  document.dispatchEvent(new KeyboardEvent("keydown", { key, code: "KeyZ", metaKey: true, shiftKey, bubbles: true }));
-}
-
 function changeElements(ids, change) {
   const wanted = new Set(ids);
   const elements = api.getSceneElementsIncludingDeleted().map((element) => {
@@ -46,8 +42,14 @@ window.tildeDraw = {
   setColor(color) {
     api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });
   },
-  undo: () => pressKey("z", false),
-  redo: () => pressKey("z", true),
+  // The element under the pointer, for snapping; nil clears it.
+  setSnapFrame(frame) {
+    snapFrame = frame;
+  },
+  shapesOf(ids) {
+    const wanted = new Set(ids);
+    return JSON.stringify(live().filter((element) => wanted.has(element.id)).map(describe));
+  },
   clear() {
     taken.clear();
     api.updateScene({ elements: [], captureUpdate: "NEVER" });
@@ -93,6 +95,102 @@ window.tildeDraw = {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") post("escape");
+}, true);
+
+// Snapping: to the corners, edge midpoints and centre of the element under the pointer.
+const snapDistance = 16;
+let snapFrame = null;
+let startSnap = null;
+let pointerAt = 0;
+const ring = document.createElement("div");
+ring.style.cssText = "position:fixed;width:12px;height:12px;margin:-8px 0 0 -8px;border:2px solid #2F76FF;border-radius:50%;background:rgba(47,118,255,.25);pointer-events:none;z-index:9999;display:none";
+document.addEventListener("DOMContentLoaded", () => document.body.appendChild(ring));
+
+function snapPoint(x, y, event) {
+  if (!snapFrame || event.metaKey) return null;
+  const [left, top, width, height] = snapFrame;
+  const xs = [left, left + width / 2, left + width];
+  const ys = [top, top + height / 2, top + height];
+  let best = null;
+  for (const px of xs) {
+    for (const py of ys) {
+      const distance = Math.hypot(px - x, py - y);
+      if (distance <= snapDistance && (!best || distance < best.distance)) best = { x: px, y: py, distance };
+    }
+  }
+  return best;
+}
+
+const drawingTools = new Set(["arrow", "rectangle", "ellipse"]);
+
+window.addEventListener("pointermove", (event) => {
+  const now = performance.now();
+  if (now - pointerAt > 50) {
+    pointerAt = now;
+    post(`pointer:${event.clientX},${event.clientY}`);
+  }
+  const tool = api?.getAppState().activeTool.type;
+  const point = drawingTools.has(tool) || tool === "selection" ? snapPoint(event.clientX, event.clientY, event) : null;
+  ring.style.display = point ? "block" : "none";
+  if (point) {
+    ring.style.left = `${point.x}px`;
+    ring.style.top = `${point.y}px`;
+  }
+}, true);
+
+window.addEventListener("pointerdown", (event) => {
+  startSnap = snapPoint(event.clientX, event.clientY, event);
+}, true);
+
+function linePoints(start, end) {
+  return { x: start.x, y: start.y, width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y), points: [[0, 0], [end.x - start.x, end.y - start.y]], lastCommittedPoint: null };
+}
+
+function snapNewShape(element, event) {
+  const end = snapPoint(event.clientX, event.clientY, event);
+  if (!startSnap && !end) return;
+  if (element.type === "arrow") {
+    const last = element.points[element.points.length - 1];
+    const from = startSnap ?? { x: element.x, y: element.y };
+    const to = end ?? { x: element.x + last[0], y: element.y + last[1] };
+    changeElements([element.id], () => linePoints(from, to));
+  } else if (element.type === "rectangle" || element.type === "ellipse") {
+    const firstX = startSnap?.x ?? element.x;
+    const firstY = startSnap?.y ?? element.y;
+    const lastX = end?.x ?? element.x + element.width;
+    const lastY = end?.y ?? element.y + element.height;
+    changeElements([element.id], () => ({
+      x: Math.min(firstX, lastX), y: Math.min(firstY, lastY), width: Math.abs(lastX - firstX), height: Math.abs(lastY - firstY),
+    }));
+  }
+}
+
+function snapSelectedArrow(event) {
+  const end = snapPoint(event.clientX, event.clientY, event);
+  const selected = Object.keys(api.getAppState().selectedElementIds);
+  if (!end || selected.length !== 1) return;
+  const element = live().find((candidate) => candidate.id === selected[0]);
+  if (element?.type !== "arrow") return;
+  const last = element.points[element.points.length - 1];
+  const start = { x: element.x, y: element.y };
+  const stop = { x: element.x + last[0], y: element.y + last[1] };
+  const nearStart = Math.hypot(start.x - end.x, start.y - end.y) < Math.hypot(stop.x - end.x, stop.y - end.y);
+  changeElements([element.id], () => (nearStart ? linePoints(end, stop) : linePoints(start, end)));
+}
+
+window.addEventListener("pointerup", (event) => {
+  ring.style.display = "none";
+  // After Excalidraw has finished the shape.
+  setTimeout(() => {
+    const fresh = live().filter((element) => !taken.has(element.id));
+    if (fresh.length) {
+      snapNewShape(fresh[fresh.length - 1], event);
+      post("shape");
+    } else if (api.getAppState().activeTool.type === "selection") {
+      snapSelectedArrow(event);
+      post("edited");
+    }
+  }, 0);
 }, true);
 
 const initialData = {

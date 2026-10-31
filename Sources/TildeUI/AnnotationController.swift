@@ -8,7 +8,7 @@ import os
 struct Draft: Identifiable {
     var annotation: Annotation
     /// Quartz point where the numbered marker sits.
-    let marker: CGPoint
+    var marker: CGPoint
     let chip: String
     let capture: Task<Captures, Never>
     /// Where the annotation is on its web page, for annotations in Tilde's browser.
@@ -307,6 +307,7 @@ final class AnnotationController: ObservableObject {
                 sessionStarted = record.created
             }
             drafts = Self.drafts(from: record, archive: archive)
+            drawSavedDrawings()
         }
         startCheckpoints()
         startHoldMonitor()
@@ -570,8 +571,12 @@ final class AnnotationController: ObservableObject {
     /// with the drawing on them. Nothing drawn: nothing happens.
     private func addDrawingNote() async {
         guard let drawing = await drawingPanel.takeNewShapes(), !drawing.ids.isEmpty else {
+            if isDrawing {
+                drawingPanel.resumeDrawing()
+            }
             return
         }
+        undoneDrawings = []
         let center = CGPoint(x: drawing.bounds.midX, y: drawing.bounds.midY)
         let window = scope ?? picker.window(at: center)
         let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
@@ -598,6 +603,70 @@ final class AnnotationController: ObservableObject {
     func setDrawingColor(_ color: String) {
         drawingColor = color
         drawingPanel.setColor(color)
+    }
+
+    /// A shape undone in draw mode goes with its note, and can come back.
+    private func undoLastDrawing() {
+        guard let index = drafts.lastIndex(where: { !$0.drawingIDs.isEmpty }) else {
+            return
+        }
+        drawingPanel.remove(drafts[index].drawingIDs)
+        undoneDrawings.append(drafts.remove(at: index))
+    }
+
+    private func redoLastDrawing() {
+        guard var draft = undoneDrawings.popLast(), case .drawing(let text) = draft.annotation.target else {
+            return
+        }
+        let shapes = DrawingShapes.decode(text)
+        Task {
+            draft.drawingIDs = await drawingPanel.add(shapes, at: DrawingShapes.bounds(of: shapes))
+            drafts.append(draft)
+        }
+    }
+
+    /// Shapes were moved or reshaped: their notes get the new shapes and pictures.
+    private func updateEditedDrawings() {
+        let notes = drafts.filter { !$0.drawingIDs.isEmpty }
+        let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
+        Task {
+            for note in notes {
+                let shapes = await drawingPanel.shapes(note.drawingIDs)
+                guard !shapes.isEmpty, case .drawing(let old) = note.annotation.target else {
+                    continue
+                }
+                let bounds = DrawingShapes.bounds(of: shapes)
+                let origin = (try? JSONSerialization.jsonObject(with: Data(old.utf8)) as? [String: Any])?["origin"] as? [Double] ?? [0, 0]
+                let text = DrawingShapes.encode(shapes, origin: CGPoint(x: origin[0], y: origin[1]))
+                guard text != old, let index = drafts.firstIndex(where: { $0.id == note.id }) else {
+                    continue
+                }
+                let center = CGPoint(x: bounds.midX, y: bounds.midY)
+                let area = note.sourceWindow.flatMap { windowFrames[$0] } ?? NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
+                async let image = ScreenCapture.png(of: area, outline: nil, keeping: keeping, maxSide: 1600)
+                async let context = ScreenCapture.png(of: NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? area, outline: nil, keeping: keeping, maxSide: 2048)
+                let current = drafts[index].annotation
+                drafts[index].annotation = await Annotation(
+                    id: current.id, comment: current.comment, target: .drawing(shapes: text), frame: bounds, image: image, contextImage: context
+                )
+                drafts[index].marker = CGPoint(x: bounds.maxX, y: bounds.minY)
+                trackedFrames[note.id] = bounds
+            }
+        }
+    }
+
+    /// The element under the pointer while drawing. It reuses the hover lookup, which leaves
+    /// out apps too slow to ask.
+    private func findSnapFrame(at point: CGPoint) {
+        guard !isFindingSnapFrame, UserDefaults.standard.object(forKey: "drawingSnaps") as? Bool ?? true else {
+            return
+        }
+        isFindingSnapFrame = true
+        Task {
+            let picked = await picker.pick(at: point, isMoving: true, in: scope)
+            isFindingSnapFrame = false
+            drawingPanel.setSnapFrame(picked?.chip == "window" ? nil : picked?.frame)
+        }
     }
 
     /// Saved drawings show again, as notes that no longer follow a window.
@@ -654,6 +723,9 @@ final class AnnotationController: ObservableObject {
         flow.holdPaused = isHoldPaused
         flow.drawing = isDrawing
         flow.commentOpen = composer != nil
+        if case .new(let pending) = composer {
+            flow.commentIsOnDrawing = !pending.drawingIDs.isEmpty
+        }
         flow.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         flow.previewOpen = previewID != nil
         flow.pickingWindow = isPickingWindow
@@ -667,7 +739,7 @@ final class AnnotationController: ObservableObject {
         return flow
     }
 
-    private func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = []) {
+    func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = []) {
         var next = flow
         let asked = confirmation
         let effects = next.handle(event)
@@ -693,16 +765,23 @@ final class AnnotationController: ObservableObject {
         case .closeComposer: closeComposer()
         case .showCanvas:
             hover = nil
-            drawingPanel.onEscape = { [weak self] in self?.finishDrawing() }
+            drawingPanel.onEscape = { [weak self] in self?.escapePressed() }
+            drawingPanel.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
+            drawingPanel.onEdited = { [weak self] in self?.updateEditedDrawings() }
+            drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
             let pointer = NSEvent.mouseLocation
             if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
                 drawingPanel.startDrawing(on: screen, tool: drawingTool)
             }
-        case .undoShape: drawingPanel.undo()
-        case .redoShape: drawingPanel.redo()
+        case .saveComment: submitComment(thenSend: false)
+        case .undoShape: undoLastDrawing()
+        case .redoShape: redoLastDrawing()
+        case .openShapeComment:
+            drawingPanel.letMouseThrough()
+            Task { await addDrawingNote() }
         case .keepDrawing:
             drawingPanel.stopDrawing()
-            Task { await addDrawingNote() }
+            drawingPanel.setSnapFrame(nil)
         case .closePreview: closePreview()
         case .cancelWindowPick: cancelWindowPick()
         case .keepKeyboard:
@@ -886,6 +965,8 @@ final class AnnotationController: ObservableObject {
     @Published private(set) var drawingTool = "arrow"
     @Published private(set) var drawingColor = "#2F76FF"
     private var drawingVisibility: [Draft.ID: Bool] = [:]
+    private var undoneDrawings: [Draft] = []
+    private var isFindingSnapFrame = false
     private var typedComments: [Draft.ID: String] = [:]
     private var typedCommentsTask: Task<Void, Never>?
     private var isReadingWindows = false
@@ -1997,6 +2078,10 @@ final class AnnotationController: ObservableObject {
     private func hideComposer() {
         composer = nil
         commentPanel.close()
+        if isDrawing {
+            drawingPanel.resumeDrawing()
+            return
+        }
         makeOverlayKey()
     }
 

@@ -765,16 +765,24 @@ struct UXSpecs {
         }
     }
 
-    private func finishDrawing(_ app: TildeApp, comment: String) async throws {
-        try await Task.sleep(for: .milliseconds(300))
-        try await app.press("Done, esc")
+    /// Draws one shape: its comment box opens at the mouse release.
+    private func draw(_ app: TildeApp, from start: CGPoint, to end: CGPoint, comment: String) async throws {
+        try await app.drag(from: start, to: end)
         try await app.waitToSee("add", timeout: 15)
         try await app.type(comment)
         try await app.waitToSee(comment, timeout: 3)
         try await app.key(.enter)
+        try await app.waitNotToSee("add")
     }
 
-    @Test func aDrawingBecomesANoteWithItsShapesAndPictures() async throws {
+    private func report(_ app: TildeApp, _ agent: MCPAgent, session: Substring) async throws -> String {
+        try await app.key(.escape)
+        try await app.waitToSee("Annotating")
+        try await app.press("Send to Claude Code  ⌘↩")
+        return try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
+    }
+
+    @Test func eachShapeBecomesANoteAtTheMouseReleaseWithItsColorAndUndo() async throws {
         try await withApp { app in
             let agent = try await MCPAgent(port: app.port, name: "Claude Code")
             let started = try await agent.call("start_annotation", ["wait_seconds": 0])
@@ -782,32 +790,61 @@ struct UXSpecs {
             let hud = try await app.waitToSee("Annotating")
             try await app.press("Draw on the screen")
             try await app.waitToSee("Done, esc")
-            // The canvas loads, then takes the drag.
-            try await Task.sleep(for: .seconds(4))
+            try await Task.sleep(for: .seconds(3))
             let start = CGPoint(x: hud.frame.midX, y: hud.frame.maxY + 200)
-            try await app.drag(from: start, to: CGPoint(x: start.x + 200, y: start.y + 120))
+            try await draw(app, from: start, to: CGPoint(x: start.x + 200, y: start.y + 120), comment: "An arrow")
+            try await app.waitToSee("Done, esc")
             try await app.press("Rectangle")
-            try await app.drag(from: CGPoint(x: start.x - 300, y: start.y), to: CGPoint(x: start.x - 100, y: start.y + 100))
+            try await draw(app, from: CGPoint(x: start.x - 300, y: start.y), to: CGPoint(x: start.x - 100, y: start.y + 100), comment: "A box")
             try await app.press("Circle")
             try await app.press("Red")
-            try await app.drag(from: CGPoint(x: start.x - 300, y: start.y + 150), to: CGPoint(x: start.x - 200, y: start.y + 250))
+            try await draw(app, from: CGPoint(x: start.x - 300, y: start.y + 150), to: CGPoint(x: start.x - 200, y: start.y + 250), comment: "A circle")
             try await app.press("Freehand")
-            try await app.drag(from: CGPoint(x: start.x, y: start.y + 200), to: CGPoint(x: start.x + 150, y: start.y + 260))
+            try await draw(app, from: CGPoint(x: start.x, y: start.y + 200), to: CGPoint(x: start.x + 150, y: start.y + 260), comment: "A line")
 
-            // Undo takes back the last one, redo brings it back, and undo again.
-            try await Task.sleep(for: .milliseconds(200))
+            // Undo takes back the last note, redo brings it back, and undo again.
             try await app.press("Undo")
             try await app.press("Redo")
             try await app.press("Undo")
-            try await finishDrawing(app, comment: "Look here")
-            try await app.waitToSeeText(containing: "1 note")
-            try await app.key(.enter, command: true)
-            let result = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
-            #expect(result.text.contains("arrow"))
-            #expect(result.text.contains("rectangle"))
-            #expect(result.text.contains("ellipse"))
-            #expect(result.text.contains("#FF3B30"))
-            #expect(!result.text.contains("freehand"))
+            try await Task.sleep(for: .milliseconds(300))
+            let text = try await report(app, agent, session: session)
+            #expect(text.contains("\"arrow\""))
+            #expect(text.contains("\"rectangle\""))
+            #expect(text.contains("\"ellipse\""))
+            #expect(text.contains("#FF3B30"))
+            #expect(!text.contains("freehand"))
+            #expect(!text.contains("A line"))
+        }
+    }
+
+    @Test func aShapeCanBeMovedAndAnArrowEndSnapsToAnElement() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
+            let started = try await agent.call("start_annotation", ["wait_seconds": 0])
+            let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
+            try await app.waitToSee("Annotating")
+            try await app.press("Draw on the screen")
+            try await app.waitToSee("Done, esc")
+            try await Task.sleep(for: .seconds(3))
+            let frame = ChangingWindow.frame
+
+            // The row of text ends 464 points into the window; the end lands near it.
+            try await app.hover(over: CGPoint(x: frame.minX + 458, y: frame.minY + 55))
+            try await Task.sleep(for: .milliseconds(400))
+            try await draw(app, from: CGPoint(x: frame.minX + 200, y: frame.minY + 300), to: CGPoint(x: frame.minX + 458, y: frame.minY + 55), comment: "Snapped")
+
+            // A rectangle, dragged by its border to another place.
+            try await app.press("Rectangle")
+            let corner = CGPoint(x: frame.minX + 60, y: frame.minY + 150)
+            try await draw(app, from: corner, to: CGPoint(x: corner.x + 100, y: corner.y + 60), comment: "Moved")
+            try await app.press("Select")
+            try await app.drag(from: CGPoint(x: corner.x + 50, y: corner.y), to: CGPoint(x: corner.x + 50, y: corner.y + 100))
+            try await Task.sleep(for: .milliseconds(800))
+            let text = try await report(app, agent, session: session)
+            #expect(text.contains("\"to\":[464"), "\(text)")
+            #expect(text.contains("\"rect\":[60,250,100,60]"), "\(text)")
         }
     }
 
@@ -820,13 +857,14 @@ struct UXSpecs {
         try await first.waitToSee("Annotating")
         try await first.press("Draw on the screen")
         try await first.waitToSee("Done, esc")
-        try await Task.sleep(for: .seconds(4))
+        try await Task.sleep(for: .seconds(3))
         let frame = ChangingWindow.frame
         let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
         let end = CGPoint(x: start.x + 200, y: start.y + 120)
         try await first.press("Rectangle")
-        try await first.drag(from: start, to: end)
-        try await finishDrawing(first, comment: "On the window")
+        try await draw(first, from: start, to: end, comment: "On the window")
+        try await first.key(.escape)
+        try await first.waitToSee("Annotating")
         try await first.waitToSeeText(containing: "1 note")
         let hud = try await first.waitToSee("Annotating")
         try await first.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
@@ -836,9 +874,7 @@ struct UXSpecs {
         try await first.waitForBlue(in: left(of: start), atLeast: 10)
 
         // The window moves, and the drawing with it.
-        try await first.hold("option", down: true)
-        try await first.drag(from: CGPoint(x: frame.midX, y: frame.minY + 12), to: CGPoint(x: frame.midX + 200, y: frame.minY + 12))
-        try await first.hold("option", down: false)
+        try window.show("moved")
         try await first.waitForBlue(in: left(of: start, offset: 200), atLeast: 10)
         try await first.waitForBlue(in: left(of: start), atMost: 0)
 

@@ -20,6 +20,10 @@ final class DrawingPanel {
     private var color = "#2F76FF"
     private var releaseTask: Task<Void, Never>?
     var onEscape: () -> Void = {}
+    var onShape: () -> Void = {}
+    var onEdited: () -> Void = {}
+    /// The pointer moved, in Quartz screen coordinates.
+    var onPointer: (CGPoint) -> Void = { _ in }
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
     var windowNumbers: [Int] {
@@ -39,6 +43,9 @@ final class DrawingPanel {
         let canvas = canvas(for: screen.frame)
         active = canvas
         canvas.onEscape = { [weak self] in self?.onEscape() }
+        canvas.onShape = { [weak self] in self?.onShape() }
+        canvas.onEdited = { [weak self] in self?.onEdited() }
+        canvas.onPointer = { [weak self] in self?.onPointer($0) }
         canvas.startDrawing(tool: tool, color: color)
     }
 
@@ -55,12 +62,29 @@ final class DrawingPanel {
         active?.setColor(color)
     }
 
-    func undo() {
-        active?.run("undo()")
+    /// The mouse goes through while the comment of a shape is open.
+    func letMouseThrough() {
+        active?.stopDrawing()
     }
 
-    func redo() {
-        active?.run("redo()")
+    func resumeDrawing() {
+        active?.resumeDrawing()
+    }
+
+    /// The element to snap to, in Quartz screen coordinates.
+    func setSnapFrame(_ frame: CGRect?) {
+        active?.setSnapFrame(frame)
+    }
+
+    /// The shapes with these ids, wherever they are.
+    func shapes(_ ids: [String]) async -> [[String: Any]] {
+        for canvas in canvases.values {
+            let shapes = await canvas.shapes(ids)
+            if !shapes.isEmpty {
+                return shapes
+            }
+        }
+        return []
     }
 
     func takeNewShapes() async -> Drawing? {
@@ -145,6 +169,9 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private var pendingColor: String?
     private var waiting: [CheckedContinuation<Void, Never>] = []
     var onEscape: () -> Void = {}
+    var onShape: () -> Void = {}
+    var onEdited: () -> Void = {}
+    var onPointer: (CGPoint) -> Void = { _ in }
 
     init(frame: CGRect) {
         self.frame = frame
@@ -194,6 +221,31 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel?.ignoresMouseEvents = true
     }
 
+    func resumeDrawing() {
+        panel?.ignoresMouseEvents = false
+        panel?.makeKey()
+    }
+
+    func setSnapFrame(_ frame: CGRect?) {
+        guard let frame else {
+            run("setSnapFrame(null)")
+            return
+        }
+        let origin = self.frame.flipped.origin
+        run("setSnapFrame([\(frame.minX - origin.x), \(frame.minY - origin.y), \(frame.width), \(frame.height)])")
+    }
+
+    func shapes(_ ids: [String]) async -> [[String: Any]] {
+        guard let webView, !ids.isEmpty,
+              let text = try? await webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.shapesOf(\(DrawingPanel.json(ids))) : \"\"") as? String,
+              let shapes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]]
+        else {
+            return []
+        }
+        let origin = frame.flipped.origin
+        return shapes.map { DrawingShapes.moved($0, by: CGVector(dx: origin.x, dy: origin.y)) }
+    }
+
     func reset() {
         panel?.orderOut(nil)
         panel?.ignoresMouseEvents = true
@@ -217,6 +269,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 
     func setColor(_ color: String) {
         pendingColor = color
+        panel?.makeKey()
         run("setColor(\"\(color)\")")
     }
 
@@ -269,6 +322,16 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             waiting = []
         case "escape":
             onEscape()
+        case "shape":
+            onShape()
+        case "edited":
+            onEdited()
+        case let text as String where text.hasPrefix("pointer:"):
+            let values = text.dropFirst(8).split(separator: ",").compactMap { Double($0) }
+            if values.count == 2 {
+                let origin = frame.flipped.origin
+                onPointer(CGPoint(x: origin.x + values[0], y: origin.y + values[1]))
+            }
         case let text as String where text.hasPrefix("error: "):
             log.error("drawing canvas \(text, privacy: .public)")
         default:

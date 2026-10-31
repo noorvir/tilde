@@ -686,5 +686,76 @@
   "expect": {
    "effects": []
   }
+ },
+ {
+  "name": "A finished shape opens its comment and draw mode stays",
+  "state": {
+   "drawing": true
+  },
+  "event": "shapeFinished",
+  "expect": {
+   "state": {
+    "drawing": true
+   },
+   "effects": [
+    "openShapeComment"
+   ]
+  }
+ },
+ {
+  "name": "No new comment while one is open",
+  "state": {
+   "drawing": true,
+   "commentOpen": true
+  },
+  "event": "shapeFinished",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "Clicking away from a shape with no words keeps the shape",
+  "state": {
+   "drawing": true,
+   "commentOpen": true,
+   "commentIsOnDrawing": true
+  },
+  "event": "clickAway",
+  "expect": {
+   "effects": [
+    "saveComment"
+   ]
+  }
+ },
+ {
+  "name": "Clicking away from a shape with words asks",
+  "state": {
+   "drawing": true,
+   "commentOpen": true,
+   "commentIsOnDrawing": true,
+   "commentHasText": true
+  },
+  "event": "clickAway",
+  "expect": {
+   "state": {
+    "confirmation": "discardComment"
+   }
+  }
+ },
+ {
+  "name": "Esc with a comment open is for the comment, draw mode stays",
+  "state": {
+   "drawing": true,
+   "commentOpen": true
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "drawing": true
+   },
+   "effects": [
+    "closeComposer"
+   ]
+  }
  }
 ]

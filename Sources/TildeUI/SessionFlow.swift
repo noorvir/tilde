@@ -5,11 +5,11 @@ import Foundation
 struct SessionFlow: Codable, Equatable {
     enum Event: String, Codable {
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
-        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway, startDrawing, finishDrawing, undoDrawing, redoDrawing
+        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway, startDrawing, finishDrawing, undoDrawing, redoDrawing, shapeFinished
     }
 
     enum Effect: String, Codable {
-        case applyPause, closeComposer, showCanvas, keepDrawing, undoShape, redoShape, closePreview, cancelWindowPick
+        case applyPause, closeComposer, saveComment, showCanvas, keepDrawing, undoShape, redoShape, openShapeComment, closePreview, cancelWindowPick
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case cancelSession, clearDrafts, restoreDrafts
@@ -26,13 +26,14 @@ struct SessionFlow: Codable, Equatable {
     var drawing = false
     var commentOpen = false
     var commentHasText = false
+    var commentIsOnDrawing = false
     var previewOpen = false
     var pickingWindow = false
     /// "clearAll", "cancelSession", "discardComment" or "restore".
     var confirmation: String?
 
     private enum CodingKeys: String, CodingKey {
-        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, drawing, commentOpen, commentHasText, previewOpen, pickingWindow, confirmation
+        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, drawing, commentOpen, commentHasText, commentIsOnDrawing, previewOpen, pickingWindow, confirmation
     }
 
     init() {}
@@ -48,6 +49,7 @@ struct SessionFlow: Codable, Equatable {
         drawing = try values.decodeIfPresent(Bool.self, forKey: .drawing) ?? false
         commentOpen = try values.decodeIfPresent(Bool.self, forKey: .commentOpen) ?? false
         commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
+        commentIsOnDrawing = try values.decodeIfPresent(Bool.self, forKey: .commentIsOnDrawing) ?? false
         previewOpen = try values.decodeIfPresent(Bool.self, forKey: .previewOpen) ?? false
         pickingWindow = try values.decodeIfPresent(Bool.self, forKey: .pickingWindow) ?? false
         confirmation = try values.decodeIfPresent(String.self, forKey: .confirmation)
@@ -73,11 +75,11 @@ struct SessionFlow: Codable, Equatable {
     mutating func handle(_ event: Event) -> [Effect] {
         switch event {
         case .escape:
-            if drawing {
-                return handle(.finishDrawing)
-            }
             if commentOpen {
                 return confirmation == "discardComment" ? keepWriting() : leaveComment()
+            }
+            if drawing {
+                return handle(.finishDrawing)
             }
             if previewOpen {
                 return [.closePreview]
@@ -190,6 +192,9 @@ struct SessionFlow: Codable, Equatable {
             drawing = true
             return effects + [.showCanvas]
 
+        case .shapeFinished:
+            return drawing && !commentOpen ? [.openShapeComment] : []
+
         case .undoDrawing:
             return drawing ? [.undoShape] : []
 
@@ -206,6 +211,10 @@ struct SessionFlow: Codable, Equatable {
         case .clickAway:
             guard commentOpen, confirmation != "discardComment" else {
                 return []
+            }
+            // A shape is worth keeping without words; words are not thrown away unasked.
+            if commentIsOnDrawing, !commentHasText {
+                return [.saveComment]
             }
             return leaveComment()
 

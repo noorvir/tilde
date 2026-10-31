@@ -35,6 +35,10 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     if page.hasPrefix("almost") {
         words[9] = "The final match ends in a win after all"
     }
+    // The window moved, by a program or by the user.
+    if page.hasPrefix("moved"), window.frame.minX < 400 {
+        window.setFrameOrigin(NSPoint(x: window.frame.minX + 200, y: window.frame.minY))
+    }
     for (row, text) in zip(rows, words) where row.stringValue != text {
         row.stringValue = text
     }
