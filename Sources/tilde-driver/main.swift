@@ -1,3 +1,5 @@
+import CoreMedia
+import CoreVideo
 // Test driver for running Tilde end to end on a real screen. It posts real mouse and
 // keyboard events and captures the screen, controlled over HTTP on 127.0.0.1:7320.
 // It needs Accessibility and Screen Recording, so it runs as its own app (TildeDriver.app)
@@ -82,6 +84,10 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
 
     case ("POST", "/frames"):
         return json(["heights": await windowHeights(pid: body["pid"] as? Int ?? 0, width: body["width"] as? Double ?? 0, seconds: body["seconds"] as? Double ?? 1)])
+
+    case ("POST", "/edges"):
+        let edges = await WindowEdges.record(pid: body["pid"] as? Int ?? 0, width: body["width"] as? Double ?? 0, seconds: body["seconds"] as? Double ?? 1)
+        return json(["edges": edges])
 
     case ("POST", "/press"):
         let pid = pid_t(body["pid"] as? Int ?? 0)
@@ -331,4 +337,71 @@ func windowHeights(pid: Int, width: Double, seconds: Double) async -> [Double] {
         try? await Task.sleep(for: .milliseconds(2))
     }
     return heights
+}
+
+/// Records, frame by frame, where the visible part of a window starts and ends, in points from
+/// its top. It sees what the screen sees, also when the window itself keeps its size.
+final class WindowEdges: NSObject, SCStreamOutput, @unchecked Sendable {
+    private let lock = NSLock()
+    private var edges: [[Double]] = []
+    private static let scale = 2
+
+    static func record(pid: Int, width: Double, seconds: Double) async -> [[Double]] {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+              let window = content.windows.first(where: { Int($0.owningApplication?.processID ?? 0) == pid && abs($0.frame.width - width) < 1 })
+        else {
+            return []
+        }
+        let recorder = WindowEdges()
+        let configuration = SCStreamConfiguration()
+        configuration.width = Int(width) * scale
+        configuration.height = 1000 * scale
+        configuration.scalesToFit = false
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 120)
+        configuration.showsCursor = false
+        let stream = SCStream(filter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration, delegate: nil)
+        let queue = DispatchQueue(label: "edges")
+        guard (try? stream.addStreamOutput(recorder, type: .screen, sampleHandlerQueue: queue)) != nil,
+              (try? await stream.startCapture()) != nil
+        else {
+            return []
+        }
+        try? await Task.sleep(for: .seconds(seconds))
+        try? await stream.stopCapture()
+        return recorder.lock.withLock { recorder.edges }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard let pixels = CMSampleBufferGetImageBuffer(buffer) else {
+            return
+        }
+        CVPixelBufferLockBaseAddress(pixels, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixels) else {
+            return
+        }
+        let row = CVPixelBufferGetBytesPerRow(pixels)
+        let height = CVPixelBufferGetHeight(pixels)
+        let column = CVPixelBufferGetWidth(pixels) / 2
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+        // The middle of the window, from the top: the first and last solid pixel.
+        var top = -1
+        var bottom = -1
+        for y in 0..<height where bytes[y * row + column * 4 + 3] > 200 {
+            if top < 0 {
+                top = y
+            }
+            bottom = y
+        }
+        guard top >= 0 else {
+            return
+        }
+        let edge = [Double(top) / Double(Self.scale), Double(bottom) / Double(Self.scale)]
+        lock.withLock {
+            if edges.last != edge {
+                edges.append(edge)
+            }
+        }
+    }
 }

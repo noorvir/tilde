@@ -213,6 +213,15 @@ final class TildeApp {
         return try await reply["heights"] as? [Double] ?? []
     }
 
+    /// Frame by frame, where the visible part of a window of this width starts and ends, while
+    /// `action` runs.
+    func edges(ofWindowWidth width: Double, seconds: Double, during action: () async throws -> Void) async throws -> [[Double]] {
+        async let reply = drive("edges", ["pid": pid, "width": width, "seconds": seconds])
+        try await Task.sleep(for: .milliseconds(300))
+        try await action()
+        return try await reply["edges"] as? [[Double]] ?? []
+    }
+
     func hover(over point: CGPoint) async throws {
         try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
     }

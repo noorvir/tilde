@@ -23,10 +23,13 @@ final class CommentPanel {
     /// right, kept inside the screen. Both are in Quartz coordinates.
     func show(chip: String, isEditing: Bool, near marker: CGPoint, below target: CGRect) {
         // A fresh hosting view resets focus and local state for each comment.
-        let hosting = FittingHostingView(rootView: CommentView(controller: controller, chip: chip, isEditing: isEditing) { [weak self] change in
+        let view = CommentView(controller: controller, chip: chip, isEditing: isEditing) { [weak self] change in
             self?.grow(by: change)
-        })
-        let size = hosting.fittingSize
+        }
+        let size = NSHostingView(rootView: view).fittingSize
+        // At the top of the window: when the window has grown and the content not yet, the
+        // content stays where it is. Centred, it would jump up for one frame.
+        let hosting = FittingHostingView(rootView: view.frame(maxHeight: .infinity, alignment: .top))
         let anchor = marker.flipped
         let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.screens[0]
         let visible = screen.visibleFrame

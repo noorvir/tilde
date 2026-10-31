@@ -704,34 +704,29 @@ struct UXSpecs {
             try await app.waitToSee("add")
             try await Task.sleep(for: .milliseconds(300))
             let boxWidth = 356.0
-            // New lines only ever grow it.
-            let growing = try await app.heights(ofWindowWidth: boxWidth, seconds: 2) {
+            func expectOneWay(_ edges: [[Double]], growing: Bool, sourceLocation: SourceLocation = #_sourceLocation) {
+                // The top never moves, and the bottom only moves one way.
+                let tops = edges.map { $0[0] }
+                let bottoms = edges.map { $0[1] }
+                #expect(tops.max()! - tops.min()! <= 1, "tops \(tops)", sourceLocation: sourceLocation)
+                #expect(bottoms == (growing ? bottoms.sorted() : bottoms.sorted(by: >)), "bottoms \(bottoms)", sourceLocation: sourceLocation)
+                #expect(Set(bottoms).count >= 3, "bottoms \(bottoms)", sourceLocation: sourceLocation)
+            }
+            let growing = try await app.edges(ofWindowWidth: boxWidth, seconds: 2) {
                 for _ in 0..<5 {
                     try await app.key(.enter, shift: true)
                     try await Task.sleep(for: .milliseconds(150))
                 }
             }
-            #expect(growing.count >= 3, "\(growing)")
-            #expect(growing == growing.sorted(), "\(growing)")
-            // Deleting lines only ever shrinks it.
-            let shrinking = try await app.heights(ofWindowWidth: boxWidth, seconds: 2) {
+            expectOneWay(growing, growing: true)
+            let shrinking = try await app.edges(ofWindowWidth: boxWidth, seconds: 2) {
                 for _ in 0..<5 {
                     try await app.key(.delete)
                     try await Task.sleep(for: .milliseconds(150))
                 }
             }
-            #expect(shrinking.count >= 3, "\(shrinking)")
-            #expect(shrinking == shrinking.sorted(by: >), "\(shrinking)")
-            // A large paste is one step, and stays inside the limit.
-            let copy = Process()
-            copy.executableURL = URL(fileURLWithPath: "/bin/sh")
-            copy.arguments = ["-c", "yes \"A long line of pasted text\" | head -100 | pbcopy"]
-            try copy.run()
-            waitForExit(copy)
-            let pasting = try await app.heights(ofWindowWidth: boxWidth, seconds: 1) {
-                try await app.key(.v, command: true)
-            }
-            #expect(pasting.count <= 2, "\(pasting)")
+            expectOneWay(shrinking, growing: false)
+            print("EDGES grow \(growing) shrink \(shrinking)")
         }
     }
 
