@@ -208,6 +208,11 @@ private struct CommentEditor: NSViewRepresentable {
 private final class FocusedTextView: NSTextView {
     var onClick: () -> Void = {}
 
+    // A click back in the box counts also when another app has the keyboard.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     override func mouseDown(with event: NSEvent) {
         onClick()
         super.mouseDown(with: event)
