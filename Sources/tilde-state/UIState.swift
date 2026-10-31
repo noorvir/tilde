@@ -38,6 +38,7 @@ struct UIState: Decodable {
     var hover: Bool?
     var editing: Bool?
     var drawing: Bool?
+    var drawingColor: String?
     var commentText: String?
     var preview: Int?
     var enlarged: String?

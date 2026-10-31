@@ -5,11 +5,11 @@ import Foundation
 struct SessionFlow: Codable, Equatable {
     enum Event: String, Codable {
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
-        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway, startDrawing, finishDrawing
+        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway, startDrawing, finishDrawing, undoDrawing, redoDrawing
     }
 
     enum Effect: String, Codable {
-        case applyPause, closeComposer, showCanvas, keepDrawing, closePreview, cancelWindowPick
+        case applyPause, closeComposer, showCanvas, keepDrawing, undoShape, redoShape, closePreview, cancelWindowPick
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case cancelSession, clearDrafts, restoreDrafts
@@ -189,6 +189,12 @@ struct SessionFlow: Codable, Equatable {
             }
             drawing = true
             return effects + [.showCanvas]
+
+        case .undoDrawing:
+            return drawing ? [.undoShape] : []
+
+        case .redoDrawing:
+            return drawing ? [.redoShape] : []
 
         case .finishDrawing:
             guard drawing else {

@@ -64,7 +64,7 @@ if [ "$real_running" = 1 ]; then
 fi
 status=0
 # The flows that need real input and real apps; Tests/Contract covers the rest without them.
-release_flows="aDrawingBecomes|theCommentBoxSteps|aCommentIsNeverLost|anAgentOpens|aNoteInABrowser|InTheRealSimulator|holdingTheKey|afterACrash"
+release_flows="aDrawingBecomes|aDrawingMoves|theCommentBoxSteps|aCommentIsNeverLost|anAgentOpens|aNoteInABrowser|InTheRealSimulator|holdingTheKey|afterACrash"
 limit=${TILDE_UX_LIMIT:-180}
 if [ -n "${TILDE_UX_RELEASE:-}" ]; then
     set -- --filter "$release_flows"

@@ -23,6 +23,10 @@ struct Draft: Identifiable {
     var sourcePID: pid_t?
     /// The part of its window that the picture check looks at, when that is not its frame.
     var pictureArea: CGRect?
+    /// The shapes on the canvas that are this note.
+    var drawingIDs: [String] = []
+    /// Where its window was when the shapes last moved with it.
+    var drawnWindowOrigin: CGPoint?
 
     var id: UUID { annotation.id }
 }
@@ -67,6 +71,8 @@ struct Pending {
     var page: Task<PageIdentity?, Never>?
     var sourcePID: pid_t?
     var pictureArea: CGRect?
+    var drawingIDs: [String] = []
+    var drawnWindowOrigin: CGPoint?
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -516,6 +522,7 @@ final class AnnotationController: ObservableObject {
     }
 
     func clearDrafts() {
+        drawingPanel.remove(drafts.flatMap(\.drawingIDs))
         drafts = []
         commentPanel.close()
         composer = nil
@@ -562,21 +569,74 @@ final class AnnotationController: ObservableObject {
     /// Makes a note of what was just drawn, with the window and the whole screen as they are
     /// with the drawing on them. Nothing drawn: nothing happens.
     private func addDrawingNote() async {
-        guard let drawing = await drawingPanel.takeNewShapes() else {
+        guard let drawing = await drawingPanel.takeNewShapes(), !drawing.ids.isEmpty else {
             return
         }
         let center = CGPoint(x: drawing.bounds.midX, y: drawing.bounds.midY)
         let window = scope ?? picker.window(at: center)
-        let keeping = Set(drawingPanel.windowNumber.map { [CGWindowID($0)] } ?? [])
+        let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
         let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped
         let area = window?.frame ?? screen ?? drawing.bounds
         async let image = ScreenCapture.png(of: area, outline: nil, keeping: keeping, maxSide: 1600)
         async let wholeScreen = ScreenCapture.png(of: screen ?? area, outline: nil, keeping: keeping, maxSide: 2048)
         let captures = await Captures(image: image, contextImage: wholeScreen)
         openComposer(
-            target: .drawing(shapes: drawing.shapes), frame: drawing.bounds, marker: CGPoint(x: drawing.bounds.maxX, y: drawing.bounds.minY),
-            chip: "Drawing", outline: nil, window: window, captures: captures
+            target: .drawing(shapes: DrawingShapes.encode(drawing.shapes, origin: area.origin)), frame: drawing.bounds,
+            marker: CGPoint(x: drawing.bounds.maxX, y: drawing.bounds.minY), chip: "Drawing", outline: nil, window: window, captures: captures,
+            drawingIDs: drawing.ids
         )
+    }
+
+    func undoDrawing() {
+        dispatch(.undoDrawing)
+    }
+
+    func redoDrawing() {
+        dispatch(.redoDrawing)
+    }
+
+    func setDrawingColor(_ color: String) {
+        drawingColor = color
+        drawingPanel.setColor(color)
+    }
+
+    /// Saved drawings show again, as notes that no longer follow a window.
+    private func drawSavedDrawings() {
+        for draft in drafts {
+            guard case .drawing(let text) = draft.annotation.target, draft.drawingIDs.isEmpty else {
+                continue
+            }
+            let shapes = DrawingShapes.decode(text)
+            Task {
+                let ids = await drawingPanel.add(shapes, at: DrawingShapes.bounds(of: shapes))
+                if let index = drafts.firstIndex(where: { $0.id == draft.id }) {
+                    drafts[index].drawingIDs = ids
+                }
+            }
+        }
+    }
+
+    /// Shapes move with their window and show only while their note does.
+    private func updateDrawings() {
+        for index in drafts.indices where !drafts[index].drawingIDs.isEmpty {
+            let draft = drafts[index]
+            guard let number = draft.sourceWindow else {
+                continue
+            }
+            if let origin = draft.drawnWindowOrigin, let frame = windowFrames[number], frame.origin != origin {
+                let offset = CGVector(dx: frame.minX - origin.x, dy: frame.minY - origin.y)
+                drawingPanel.move(draft.drawingIDs, by: offset)
+                drafts[index].drawnWindowOrigin = frame.origin
+                trackedFrames[draft.id] = (trackedFrames[draft.id] ?? draft.annotation.frame).offsetBy(dx: offset.dx, dy: offset.dy)
+            }
+            let frame = trackedFrames[draft.id] ?? draft.annotation.frame
+            let isCovered = windowCovers[number]?.contains { $0.intersects(frame) } ?? false
+            let isVisible = !hiddenWindows.contains(number) && !contentGoneNotes.contains(draft.id) && !isCovered
+            if drawingVisibility[draft.id] != isVisible {
+                drawingVisibility[draft.id] = isVisible
+                drawingPanel.setVisible(draft.drawingIDs, isVisible)
+            }
+        }
     }
 
     func escapePressed() {
@@ -638,6 +698,8 @@ final class AnnotationController: ObservableObject {
             if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
                 drawingPanel.startDrawing(on: screen, tool: drawingTool)
             }
+        case .undoShape: drawingPanel.undo()
+        case .redoShape: drawingPanel.redo()
         case .keepDrawing:
             drawingPanel.stopDrawing()
             Task { await addDrawingNote() }
@@ -775,6 +837,7 @@ final class AnnotationController: ObservableObject {
         if result.missing != hiddenWindows {
             hiddenWindows = result.missing
         }
+        updateDrawings()
     }
 
     // MARK: - Holding a key to use the mouse
@@ -821,6 +884,8 @@ final class AnnotationController: ObservableObject {
     let drawingPanel = DrawingPanel()
     @Published private(set) var isDrawing = false
     @Published private(set) var drawingTool = "arrow"
+    @Published private(set) var drawingColor = "#2F76FF"
+    private var drawingVisibility: [Draft.ID: Bool] = [:]
     private var typedComments: [Draft.ID: String] = [:]
     private var typedCommentsTask: Task<Void, Never>?
     private var isReadingWindows = false
@@ -921,6 +986,7 @@ final class AnnotationController: ObservableObject {
         if gone != contentGoneNotes {
             contentGoneNotes = gone
         }
+        updateDrawings()
     }
 
     // MARK: - Following elements in other apps
@@ -948,7 +1014,7 @@ final class AnnotationController: ObservableObject {
 
     /// Where a note's numbered marker is now, at its element's top-right corner.
     func noteMarker(_ draft: Draft) -> CGPoint? {
-        guard trackedElements[draft.id] != nil else {
+        guard trackedElements[draft.id] != nil || draft.drawnWindowOrigin != nil else {
             return draft.marker
         }
         return noteFrame(draft).map { CGPoint(x: $0.maxX, y: $0.minY) }
@@ -1165,7 +1231,9 @@ final class AnnotationController: ObservableObject {
     private func replaceDrafts(with record: SessionRecord) {
         markRestored(record)
         closeComposer()
+        drawingPanel.remove(drafts.flatMap(\.drawingIDs))
         drafts = Self.drafts(from: record, archive: archive)
+        drawSavedDrawings()
         if let page = record.pageURL.flatMap(URL.init(string:)), browser.pageURL != record.pageURL {
             openBrowser(at: page)
         }
@@ -1742,7 +1810,7 @@ final class AnnotationController: ObservableObject {
     /// from that window alone, so no other window, Tilde's included, can cover them.
     private func openComposer(
         target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor? = nil,
-        tracked: TrackedElement? = nil, pictureArea: CGRect? = nil, captures: Captures? = nil
+        tracked: TrackedElement? = nil, pictureArea: CGRect? = nil, captures: Captures? = nil, drawingIDs: [String] = []
     ) {
         let closeUpRect = Self.closeUpRect(frame: frame, outline: outline)
         let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
@@ -1782,7 +1850,8 @@ final class AnnotationController: ObservableObject {
         }
         composer = .new(Pending(
             target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked,
-            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid, pictureArea: pictureArea
+            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid, pictureArea: pictureArea,
+            drawingIDs: drawingIDs, drawnWindowOrigin: drawingIDs.isEmpty ? nil : window?.frame.origin
         ))
         log.notice("comment opened for \(chip, privacy: .public)")
         commentText = ""
@@ -1871,7 +1940,8 @@ final class AnnotationController: ObservableObject {
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
             drafts.append(Draft(
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture, anchor: pending.anchor,
-                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
+                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea,
+                drawingIDs: pending.drawingIDs, drawnWindowOrigin: pending.drawnWindowOrigin
             ))
             startOcclusion()
             startContentChecks()
@@ -1905,6 +1975,9 @@ final class AnnotationController: ObservableObject {
                 closePreview()
             }
         }
+        if let draft = drafts.first(where: { $0.id == id }) {
+            drawingPanel.remove(draft.drawingIDs)
+        }
         drafts.removeAll { $0.id == id }
         if case .edit(id) = composer {
             closeComposer()
@@ -1915,6 +1988,7 @@ final class AnnotationController: ObservableObject {
     func closeComposer() {
         if case .new(let pending) = composer {
             pending.capture.cancel()
+            drawingPanel.remove(pending.drawingIDs)
         }
         log.notice("comment discarded")
         hideComposer()

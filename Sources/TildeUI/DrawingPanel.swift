@@ -2,36 +2,159 @@ import AppKit
 import WebKit
 import os
 
-/// Drawing on the screen: a transparent canvas above the overlay. While the user draws it takes
-/// the mouse; afterwards it stays visible and lets everything through.
+/// Drawing on the screen: a transparent canvas above the overlay, one for each screen drawn on.
+/// While the user draws, the canvas takes the mouse; afterwards it stays visible and lets
+/// everything through.
 @MainActor
-final class DrawingPanel: NSObject, WKScriptMessageHandler {
+final class DrawingPanel {
     struct Drawing {
-        /// As JSON, for the report.
-        let shapes: String
+        /// In points from the top left of the screen of its canvas.
+        let shapes: [[String: Any]]
+        let ids: [String]
         /// In Quartz screen coordinates.
         let bounds: CGRect
     }
 
+    private var canvases: [CGRect: DrawingCanvas] = [:]
+    private var active: DrawingCanvas?
+    private var color = "#2F76FF"
+    private var releaseTask: Task<Void, Never>?
+    var onEscape: () -> Void = {}
+
+    /// Windows Tilde must keep in a screenshot of what was drawn.
+    var windowNumbers: [Int] {
+        canvases.values.compactMap(\.windowNumber)
+    }
+
+    /// Loads a canvas ahead of the first drawing, without taking time from the main thread.
+    /// It stays for the next sessions, and goes after some minutes with none.
+    func prepare() {
+        releaseTask?.cancel()
+        if let screen = NSScreen.main {
+            canvas(for: screen.frame).prepare()
+        }
+    }
+
+    func startDrawing(on screen: NSScreen, tool: String) {
+        let canvas = canvas(for: screen.frame)
+        active = canvas
+        canvas.onEscape = { [weak self] in self?.onEscape() }
+        canvas.startDrawing(tool: tool, color: color)
+    }
+
+    func stopDrawing() {
+        active?.stopDrawing()
+    }
+
+    func setTool(_ tool: String) {
+        active?.setTool(tool)
+    }
+
+    func setColor(_ color: String) {
+        self.color = color
+        active?.setColor(color)
+    }
+
+    func undo() {
+        active?.run("undo()")
+    }
+
+    func redo() {
+        active?.run("redo()")
+    }
+
+    func takeNewShapes() async -> Drawing? {
+        await active?.takeNewShapes()
+    }
+
+    func remove(_ ids: [String]) {
+        runOnAll("remove(\(Self.json(ids)))", ids: ids)
+    }
+
+    func move(_ ids: [String], by offset: CGVector) {
+        runOnAll("move(\(Self.json(ids)), \(offset.dx), \(offset.dy))", ids: ids)
+    }
+
+    func setVisible(_ ids: [String], _ isVisible: Bool) {
+        runOnAll("setVisible(\(Self.json(ids)), \(isVisible))", ids: ids)
+    }
+
+    /// Draws saved shapes (Quartz screen coordinates) again, and returns their new ids.
+    func add(_ shapes: [[String: Any]], at bounds: CGRect) async -> [String] {
+        let center = CGPoint(x: bounds.midX, y: bounds.midY).flipped
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main else {
+            return []
+        }
+        let canvas = canvas(for: screen.frame)
+        canvas.prepare()
+        return await canvas.add(shapes)
+    }
+
+    /// The session ended: its drawings go, and the canvases wait for the next one.
+    func endSession() {
+        active = nil
+        canvases.values.forEach { $0.reset() }
+        releaseTask?.cancel()
+        releaseTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(300))
+            if !Task.isCancelled {
+                self?.canvases.values.forEach { $0.close() }
+                self?.canvases = [:]
+            }
+        }
+    }
+
+    func clear() {
+        canvases.values.forEach { $0.run("clear()") }
+    }
+
+    private func runOnAll(_ call: String, ids: [String]) {
+        guard !ids.isEmpty else {
+            return
+        }
+        // An id means nothing to the other canvases.
+        canvases.values.forEach { $0.run(call) }
+    }
+
+    private func canvas(for frame: CGRect) -> DrawingCanvas {
+        if let canvas = canvases[frame] {
+            return canvas
+        }
+        let canvas = DrawingCanvas(frame: frame)
+        canvases[frame] = canvas
+        return canvas
+    }
+
+    nonisolated static func json(_ value: Any) -> String {
+        (try? JSONSerialization.data(withJSONObject: value)).map { String(decoding: $0, as: UTF8.self) } ?? "[]"
+    }
+}
+
+/// The canvas of one screen.
+@MainActor
+final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private let log = Logger(subsystem: "dev.tilde.app", category: "drawing")
+    private let frame: CGRect
     private var panel: FloatingPanel?
     private var webView: WKWebView?
     private var openedAt: Date?
     private var isReady = false
     private var isLoaded = false
     private var isPreparing = false
-    private var releaseTask: Task<Void, Never>?
     private var pendingTool = "arrow"
+    private var pendingColor: String?
+    private var waiting: [CheckedContinuation<Void, Never>] = []
     var onEscape: () -> Void = {}
+
+    init(frame: CGRect) {
+        self.frame = frame
+    }
 
     var windowNumber: Int? {
         panel?.windowNumber
     }
 
-    /// Loads the canvas ahead of the first drawing, without taking time from the main thread.
-    /// It stays for the next sessions, and goes after some minutes with none.
     func prepare() {
-        releaseTask?.cancel()
         guard panel == nil, !isPreparing else {
             return
         }
@@ -42,45 +165,39 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
                 return
             }
             self.isPreparing = false
-            if self.panel == nil, let page, let screen = NSScreen.main {
-                self.load(page, into: self.makePanel(on: screen))
+            if self.panel == nil, let page {
+                self.makePanel()
+                self.load(page)
             }
         }
     }
 
-    func startDrawing(on screen: NSScreen, tool: String) {
+    func startDrawing(tool: String, color: String) {
         pendingTool = tool
-        let panel = self.panel ?? makePanel(on: screen)
+        pendingColor = color
+        if panel == nil {
+            makePanel()
+        }
         if !isLoaded, let page = Self.page() {
-            load(page, into: panel)
+            load(page)
         }
-        if panel.frame != screen.frame {
-            panel.setFrame(screen.frame, display: false)
-        }
-        panel.ignoresMouseEvents = false
-        panel.orderFrontRegardless()
-        panel.makeKey()
+        panel?.ignoresMouseEvents = false
+        panel?.orderFrontRegardless()
+        panel?.makeKey()
         if isReady {
             setTool(tool)
-        }
-    }
-
-    /// The session ended: its drawings go, and the canvas waits for the next one.
-    func endSession() {
-        panel?.orderOut(nil)
-        panel?.ignoresMouseEvents = true
-        webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.clear()")
-        releaseTask?.cancel()
-        releaseTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(300))
-            if !Task.isCancelled {
-                self?.close()
-            }
+            setColor(color)
         }
     }
 
     func stopDrawing() {
         panel?.ignoresMouseEvents = true
+    }
+
+    func reset() {
+        panel?.orderOut(nil)
+        panel?.ignoresMouseEvents = true
+        run("clear()")
     }
 
     func close() {
@@ -95,30 +212,47 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
     func setTool(_ tool: String) {
         pendingTool = tool
         panel?.makeKey()
-        webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.setTool(\"\(tool)\")")
+        run("setTool(\"\(tool)\")")
     }
 
-    func undo() {
-        webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.undo()")
+    func setColor(_ color: String) {
+        pendingColor = color
+        run("setColor(\"\(color)\")")
     }
 
-    /// The shapes drawn since the last call, or nil when there are none.
-    func takeNewShapes() async -> Drawing? {
-        guard let webView, let panel,
+    func run(_ call: String) {
+        webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.\(call); 0")
+    }
+
+    func takeNewShapes() async -> DrawingPanel.Drawing? {
+        guard let webView,
               let text = try? await webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.takeNewShapes() : \"\"") as? String,
-              let data = text.data(using: .utf8),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let bounds = object["bounds"] as? [Double], bounds.count == 4,
-              let shapes = object["shapes"],
-              let shapesData = try? JSONSerialization.data(withJSONObject: shapes, options: [.sortedKeys])
+              let shapes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]]
         else {
             return nil
         }
-        let origin = panel.frame.flipped.origin
-        return Drawing(
-            shapes: String(decoding: shapesData, as: UTF8.self),
-            bounds: CGRect(x: origin.x + bounds[0], y: origin.y + bounds[1], width: bounds[2], height: bounds[3])
+        let origin = frame.flipped.origin
+        let moved = shapes.map { DrawingShapes.moved($0, by: CGVector(dx: origin.x, dy: origin.y)) }
+        return DrawingPanel.Drawing(
+            shapes: moved, ids: shapes.compactMap { $0["id"] as? String }, bounds: DrawingShapes.bounds(of: moved)
         )
+    }
+
+    func add(_ shapes: [[String: Any]]) async -> [String] {
+        await waitUntilReady()
+        panel?.ignoresMouseEvents = true
+        panel?.orderFrontRegardless()
+        let origin = frame.flipped.origin
+        let local = shapes.map { DrawingShapes.moved($0, by: CGVector(dx: -origin.x, dy: -origin.y)) }
+        let body = "return window.tildeDraw.add(\(DrawingPanel.json(local)))"
+        let ids = try? await webView?.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page) as? [String]
+        return ids ?? []
+    }
+
+    private func waitUntilReady() async {
+        if !isReady {
+            await withCheckedContinuation { waiting.append($0) }
+        }
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -128,6 +262,11 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
             let took = openedAt.map { Date().timeIntervalSince($0) } ?? 0
             log.notice("drawing canvas ready after \(Int(took * 1000), privacy: .public) ms")
             setTool(pendingTool)
+            if let pendingColor {
+                setColor(pendingColor)
+            }
+            waiting.forEach { $0.resume() }
+            waiting = []
         case "escape":
             onEscape()
         case let text as String where text.hasPrefix("error: "):
@@ -137,7 +276,7 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
         }
     }
 
-    private func load(_ page: String, into panel: FloatingPanel) {
+    private func load(_ page: String) {
         openedAt = Date()
         isLoaded = true
         // One document: scripts from files hide the text of their errors.
@@ -156,15 +295,16 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
             .replacingOccurrences(of: "<script src=\"draw.js\"></script>", with: "<script>\(script.replacingOccurrences(of: "</script", with: "<\\/script"))</script>")
     }
 
-    private func makePanel(on screen: NSScreen) -> FloatingPanel {
-        let panel = FloatingPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    private func makePanel() {
+        let panel = FloatingPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = NSWindow.Level(rawValue: OverlayWindow.overlayLevel.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
-        panel.setFrame(screen.frame, display: false)
+        panel.ignoresMouseEvents = true
+        panel.setFrame(frame, display: false)
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(self, name: "tilde")
@@ -174,7 +314,6 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
         panel.contentView = web
         self.panel = panel
         webView = web
-        return panel
     }
 }
 
@@ -182,5 +321,81 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
 private final class CanvasWebView: WKWebView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+}
+
+/// Shapes as data: what the report says, and what a restore draws again.
+enum DrawingShapes {
+    static func moved(_ shape: [String: Any], by offset: CGVector) -> [String: Any] {
+        var shape = shape
+        func point(_ value: Any?) -> [Double]? {
+            guard let values = value as? [NSNumber], values.count >= 2 else {
+                return nil
+            }
+            return [values[0].doubleValue + offset.dx, values[1].doubleValue + offset.dy]
+        }
+        if let rect = shape["rect"] as? [NSNumber], rect.count == 4 {
+            shape["rect"] = [rect[0].doubleValue + offset.dx, rect[1].doubleValue + offset.dy, rect[2].doubleValue, rect[3].doubleValue]
+        }
+        for key in ["from", "to"] {
+            if let moved = point(shape[key]) {
+                shape[key] = moved
+            }
+        }
+        if let points = shape["points"] as? [Any] {
+            shape["points"] = points.compactMap(point)
+        }
+        return shape
+    }
+
+    static func bounds(of shapes: [[String: Any]]) -> CGRect {
+        var points: [[Double]] = []
+        for shape in shapes {
+            if let rect = doubles(shape["rect"]), rect.count == 4 {
+                points += [[rect[0], rect[1]], [rect[0] + rect[2], rect[1] + rect[3]]]
+            }
+            for key in ["from", "to"] {
+                if let point = doubles(shape[key]) {
+                    points.append(point)
+                }
+            }
+            for point in (shape["points"] as? [Any]) ?? [] {
+                if let point = doubles(point) {
+                    points.append(point)
+                }
+            }
+        }
+        guard let minX = points.map({ $0[0] }).min(), let maxX = points.map({ $0[0] }).max(),
+              let minY = points.map({ $0[1] }).min(), let maxY = points.map({ $0[1] }).max()
+        else {
+            return .zero
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private static func doubles(_ value: Any?) -> [Double]? {
+        (value as? [NSNumber])?.map(\.doubleValue)
+    }
+
+    /// For the report and a restore: the shapes relative to `origin`, which is the top left of
+    /// their window, or of the screen.
+    static func encode(_ shapes: [[String: Any]], origin: CGPoint) -> String {
+        let relative = shapes.map { shape -> [String: Any] in
+            var moved = Self.moved(shape, by: CGVector(dx: -origin.x, dy: -origin.y))
+            moved["id"] = nil
+            return moved
+        }
+        return DrawingPanel.json(["origin": [origin.x, origin.y], "shapes": relative])
+    }
+
+    /// The shapes of `encode`, in Quartz screen coordinates.
+    static func decode(_ text: String) -> [[String: Any]] {
+        guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
+              let origin = object["origin"] as? [NSNumber], origin.count == 2,
+              let shapes = object["shapes"] as? [[String: Any]]
+        else {
+            return []
+        }
+        return shapes.map { moved($0, by: CGVector(dx: origin[0].doubleValue, dy: origin[1].doubleValue)) }
     }
 }

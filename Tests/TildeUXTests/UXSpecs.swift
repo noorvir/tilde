@@ -765,6 +765,15 @@ struct UXSpecs {
         }
     }
 
+    private func finishDrawing(_ app: TildeApp, comment: String) async throws {
+        try await Task.sleep(for: .milliseconds(300))
+        try await app.press("Done, esc")
+        try await app.waitToSee("add", timeout: 15)
+        try await app.type(comment)
+        try await app.waitToSee(comment, timeout: 3)
+        try await app.key(.enter)
+    }
+
     @Test func aDrawingBecomesANoteWithItsShapesAndPictures() async throws {
         try await withApp { app in
             let agent = try await MCPAgent(port: app.port, name: "Claude Code")
@@ -779,18 +788,73 @@ struct UXSpecs {
             try await app.drag(from: start, to: CGPoint(x: start.x + 200, y: start.y + 120))
             try await app.press("Rectangle")
             try await app.drag(from: CGPoint(x: start.x - 300, y: start.y), to: CGPoint(x: start.x - 100, y: start.y + 100))
-            try await Task.sleep(for: .milliseconds(300))
-            try await app.press("Done, esc")
-            try await app.waitToSee("add", timeout: 15)
-            try await app.type("Look here")
-            try await app.waitToSee("Look here", timeout: 3)
-            try await app.key(.enter)
+            try await app.press("Circle")
+            try await app.press("Red")
+            try await app.drag(from: CGPoint(x: start.x - 300, y: start.y + 150), to: CGPoint(x: start.x - 200, y: start.y + 250))
+            try await app.press("Freehand")
+            try await app.drag(from: CGPoint(x: start.x, y: start.y + 200), to: CGPoint(x: start.x + 150, y: start.y + 260))
+
+            // Undo takes back the last one, redo brings it back, and undo again.
+            try await Task.sleep(for: .milliseconds(200))
+            try await app.press("Undo")
+            try await app.press("Redo")
+            try await app.press("Undo")
+            try await finishDrawing(app, comment: "Look here")
             try await app.waitToSeeText(containing: "1 note")
             try await app.key(.enter, command: true)
             let result = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
             #expect(result.text.contains("arrow"))
             #expect(result.text.contains("rectangle"))
+            #expect(result.text.contains("ellipse"))
+            #expect(result.text.contains("#FF3B30"))
+            #expect(!result.text.contains("freehand"))
         }
+    }
+
+    @Test func aDrawingMovesWithItsWindowGoesWithItsNoteAndComesBackOnRestore() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        let first = try await TildeApp.launched()
+        defer { first.quit() }
+        try await first.doubleTap("control")
+        try await first.waitToSee("Annotating")
+        try await first.press("Draw on the screen")
+        try await first.waitToSee("Done, esc")
+        try await Task.sleep(for: .seconds(4))
+        let frame = ChangingWindow.frame
+        let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
+        let end = CGPoint(x: start.x + 200, y: start.y + 120)
+        try await first.press("Rectangle")
+        try await first.drag(from: start, to: end)
+        try await finishDrawing(first, comment: "On the window")
+        try await first.waitToSeeText(containing: "1 note")
+        let hud = try await first.waitToSee("Annotating")
+        try await first.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+        func left(of point: CGPoint, offset: CGFloat = 0) -> CGRect {
+            CGRect(x: point.x + offset - 10, y: point.y + 30, width: 20, height: 40)
+        }
+        try await first.waitForBlue(in: left(of: start), atLeast: 10)
+
+        // The window moves, and the drawing with it.
+        try await first.hold("option", down: true)
+        try await first.drag(from: CGPoint(x: frame.midX, y: frame.minY + 12), to: CGPoint(x: frame.midX + 200, y: frame.minY + 12))
+        try await first.hold("option", down: false)
+        try await first.waitForBlue(in: left(of: start, offset: 200), atLeast: 10)
+        try await first.waitForBlue(in: left(of: start), atMost: 0)
+
+        // Saved with the session: after a crash it comes back.
+        try await Task.sleep(for: .seconds(3))
+        first.kill()
+        let second = try await TildeApp.relaunched(after: first)
+        defer { second.quit() }
+        try await second.press("Restore")
+        try await second.waitToSeeText(containing: "1 note", timeout: 15)
+        try await second.waitForBlue(in: left(of: start, offset: 200), atLeast: 10, timeout: 15)
+
+        // Deleting the note removes it from the screen.
+        try await second.press("Clear all annotations and keep annotating")
+        try await second.key(.enter)
+        try await second.waitForBlue(in: left(of: start, offset: 200), atMost: 0)
     }
 
     @Test func shiftReturnAddsALineInTheCommentBoxAndInThePreviewAndEscClosesThePreview() async throws {

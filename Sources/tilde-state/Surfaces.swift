@@ -106,6 +106,9 @@ enum Surfaces {
         apply(state, drafts: Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true), to: controller)
         controller.showsList = state.list ?? false
         controller.setDrawingForTesting(state.drawing ?? false)
+        if let color = state.drawingColor {
+            controller.setDrawingColor(color)
+        }
         controller.expandedPreviewImage = state.enlarged == "closeUp" ? .closeUp : state.enlarged == "context" ? .context : nil
         return controller
     }

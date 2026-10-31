@@ -361,22 +361,38 @@ struct HUDView: View {
 
     @ViewBuilder
     private var drawingContent: some View {
-        Text("Draw")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.trailing, HUDMetrics.iconGap)
-            .frame(maxWidth: .infinity, alignment: .leading)
         ForEach(Self.drawingTools, id: \.tool) { entry in
             HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, help: entry.help) {
                 controller.setDrawingTool(entry.tool)
             }
         }
-        HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
-            controller.drawingPanel.undo()
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
+        ForEach(Self.drawingColors, id: \.hex) { entry in
+            Button {
+                controller.setDrawingColor(entry.hex)
+            } label: {
+                Circle()
+                    .fill(Color(hex: entry.hex))
+                    .frame(width: 12, height: 12)
+                    .overlay(Circle().strokeBorder(Color.white.opacity(controller.drawingColor == entry.hex ? 1 : 0.25), lineWidth: controller.drawingColor == entry.hex ? 2 : 1))
+                    .padding(1)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(entry.name)
         }
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
+        HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
+            controller.undoDrawing()
+        }
+        HUDButton(image: Image(systemName: "arrow.uturn.forward"), help: "Redo") {
+            controller.redoDrawing()
+        }
+        Spacer(minLength: 0)
         PillTextButton(title: "Done", key: "esc", isDestructive: false) {
             controller.finishDrawing()
         }
+        .fixedSize()
     }
 
     private static let drawingTools = [
@@ -384,6 +400,15 @@ struct HUDView: View {
         (tool: "rectangle", symbol: "rectangle", help: "Rectangle"),
         (tool: "ellipse", symbol: "circle", help: "Circle"),
         (tool: "freedraw", symbol: "scribble", help: "Freehand"),
+    ]
+
+    private static let drawingColors = [
+        (hex: "#2F76FF", name: "Blue"),
+        (hex: "#FF3B30", name: "Red"),
+        (hex: "#FFCC00", name: "Yellow"),
+        (hex: "#34C759", name: "Green"),
+        (hex: "#FFFFFF", name: "White"),
+        (hex: "#000000", name: "Black"),
     ]
 
     private var floatingPill: some View {
@@ -1015,5 +1040,13 @@ private struct RowDeleteButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+    }
+}
+
+private extension Color {
+    /// From "#RRGGBB".
+    init(hex: String) {
+        let value = Int(hex.dropFirst(), radix: 16) ?? 0
+        self.init(red: Double(value >> 16 & 255) / 255, green: Double(value >> 8 & 255) / 255, blue: Double(value & 255) / 255)
     }
 }

@@ -654,5 +654,37 @@
    },
    "effects": []
   }
+ },
+ {
+  "name": "Undo while drawing takes back a shape",
+  "state": {
+   "drawing": true
+  },
+  "event": "undoDrawing",
+  "expect": {
+   "effects": [
+    "undoShape"
+   ]
+  }
+ },
+ {
+  "name": "Redo while drawing brings it back",
+  "state": {
+   "drawing": true
+  },
+  "event": "redoDrawing",
+  "expect": {
+   "effects": [
+    "redoShape"
+   ]
+  }
+ },
+ {
+  "name": "Undo when not drawing does nothing",
+  "state": {},
+  "event": "undoDrawing",
+  "expect": {
+   "effects": []
+  }
  }
 ]

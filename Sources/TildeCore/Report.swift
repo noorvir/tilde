@@ -91,7 +91,7 @@ private func details(for target: Target) -> [String] {
         return []
 
     case .drawing(let shapes):
-        return ["- Shapes, in points from the top left of the screen: `\(shapes)`"]
+        return ["- Shapes, in points from the `origin` (the top left of the window, or of the screen, in screen points): `\(shapes)`"]
 
     case .element(.web(let element)):
         var lines = [
