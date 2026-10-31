@@ -7,6 +7,8 @@ import os
 /// `capture` finishes; sending waits for every capture.
 struct Draft: Identifiable {
     var annotation: Annotation
+    /// From a saved session, with no window or page to confirm where it belongs.
+    var isRestored = false
     /// Quartz point where the numbered marker sits.
     var marker: CGPoint
     let chip: String
@@ -1128,6 +1130,10 @@ final class AnnotationController: ObservableObject {
         if hiddenNotes.contains(draft.id) || contentGoneNotes.contains(draft.id) {
             return nil
         }
+        // Nothing can confirm that its element is on screen; it stays in the list of notes.
+        if draft.isRestored, draft.anchor == nil {
+            return nil
+        }
         return trackedFrames[draft.id] ?? draft.annotation.frame
     }
 
@@ -1146,10 +1152,10 @@ final class AnnotationController: ObservableObject {
 
     /// Where a note's numbered marker is now, at its element's top-right corner.
     func noteMarker(_ draft: Draft) -> CGPoint? {
-        guard trackedElements[draft.id] != nil else {
-            return draft.marker
+        guard let frame = noteFrame(draft) else {
+            return nil
         }
-        return noteFrame(draft).map { CGPoint(x: $0.maxX, y: $0.minY) }
+        return trackedElements[draft.id] != nil ? CGPoint(x: frame.maxX, y: frame.minY) : draft.marker
     }
 
     /// Reads tracked elements five times a second, besides after scrolls and window moves.
@@ -1332,7 +1338,9 @@ final class AnnotationController: ObservableObject {
             let annotation = Annotation(
                 id: note.id, comment: note.comment, target: note.target, frame: note.frame, image: images.image, contextImage: images.contextImage
             )
-            return Draft(annotation: annotation, marker: note.marker, chip: note.chip, capture: Task { captures }, anchor: note.anchor)
+            var draft = Draft(annotation: annotation, marker: note.marker, chip: note.chip, capture: Task { captures }, anchor: note.anchor)
+            draft.isRestored = true
+            return draft
         }
     }
 

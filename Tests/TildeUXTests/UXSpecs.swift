@@ -1046,6 +1046,8 @@ struct UXSpecs {
         defer { second.quit() }
         try await second.press("Restore")
         try await second.waitToSeeText(containing: "1 note", timeout: 15)
+        // Nothing can confirm where its label belongs, so only the list has the note.
+        try await second.waitForBlue(in: beside, atMost: 0)
         try await second.waitForBlue(in: left(of: start, offset: 200), atMost: 0)
     }
 
