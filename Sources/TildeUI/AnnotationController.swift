@@ -538,6 +538,44 @@ final class AnnotationController: ObservableObject {
 
     /// Esc while Tilde has the keyboard: closes the comment box or preview, ends choosing a
     /// window, dismisses a question; else pauses, and when paused asks to discard the session.
+    func startDrawing() {
+        dispatch(.startDrawing)
+    }
+
+    func finishDrawing() {
+        dispatch(.finishDrawing)
+    }
+
+    func setDrawingTool(_ tool: String) {
+        drawingTool = tool
+        drawingPanel.setTool(tool)
+    }
+
+    /// For the contract: the HUD while drawing.
+    func setDrawingForTesting(_ isDrawing: Bool) {
+        self.isDrawing = isDrawing
+    }
+
+    /// Makes a note of what was just drawn, with the window and the whole screen as they are
+    /// with the drawing on them. Nothing drawn: nothing happens.
+    private func addDrawingNote() async {
+        guard let drawing = await drawingPanel.takeNewShapes() else {
+            return
+        }
+        let center = CGPoint(x: drawing.bounds.midX, y: drawing.bounds.midY)
+        let window = scope ?? picker.window(at: center)
+        let keeping = Set(drawingPanel.windowNumber.map { [CGWindowID($0)] } ?? [])
+        let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped
+        let area = window?.frame ?? screen ?? drawing.bounds
+        async let image = ScreenCapture.png(of: area, outline: nil, keeping: keeping, maxSide: 1600)
+        async let wholeScreen = ScreenCapture.png(of: screen ?? area, outline: nil, keeping: keeping, maxSide: 2048)
+        let captures = await Captures(image: image, contextImage: wholeScreen)
+        openComposer(
+            target: .drawing(shapes: drawing.shapes), frame: drawing.bounds, marker: CGPoint(x: drawing.bounds.maxX, y: drawing.bounds.minY),
+            chip: "Drawing", outline: nil, window: window, captures: captures
+        )
+    }
+
     func escapePressed() {
         dispatch(.escape)
     }
@@ -551,6 +589,7 @@ final class AnnotationController: ObservableObject {
         flow.paused = isPaused
         flow.autoPaused = isAutoPaused
         flow.holdPaused = isHoldPaused
+        flow.drawing = isDrawing
         flow.commentOpen = composer != nil
         flow.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         flow.previewOpen = previewID != nil
@@ -572,6 +611,7 @@ final class AnnotationController: ObservableObject {
         isPaused = next.paused
         isAutoPaused = next.autoPaused
         isHoldPaused = next.holdPaused
+        isDrawing = next.drawing
         switch next.confirmation {
         case "clearAll": confirmation = .clearAll
         case "cancelSession": confirmation = .cancelSession
@@ -588,6 +628,16 @@ final class AnnotationController: ObservableObject {
         switch effect {
         case .applyPause: applyPause()
         case .closeComposer: closeComposer()
+        case .showCanvas:
+            hover = nil
+            drawingPanel.onEscape = { [weak self] in self?.finishDrawing() }
+            let pointer = NSEvent.mouseLocation
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
+                drawingPanel.startDrawing(on: screen, tool: drawingTool)
+            }
+        case .keepDrawing:
+            drawingPanel.stopDrawing()
+            Task { await addDrawingNote() }
         case .saveComment: submitComment(thenSend: false)
         case .closePreview: closePreview()
         case .cancelWindowPick: cancelWindowPick()
@@ -766,6 +816,9 @@ final class AnnotationController: ObservableObject {
     private var visibilities: [Draft.ID: NoteVisibility] = [:]
     private var contentTimer: Timer?
     private var isCheckingContent = false
+    let drawingPanel = DrawingPanel()
+    @Published private(set) var isDrawing = false
+    @Published private(set) var drawingTool = "arrow"
     private var typedComments: [Draft.ID: String] = [:]
     private var typedCommentsTask: Task<Void, Never>?
     private var isReadingWindows = false
@@ -1686,7 +1739,7 @@ final class AnnotationController: ObservableObject {
     /// from that window alone, so no other window, Tilde's included, can cover them.
     private func openComposer(
         target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor? = nil,
-        tracked: TrackedElement? = nil, pictureArea: CGRect? = nil
+        tracked: TrackedElement? = nil, pictureArea: CGRect? = nil, captures: Captures? = nil
     ) {
         let closeUpRect = Self.closeUpRect(frame: frame, outline: outline)
         let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
@@ -1695,6 +1748,9 @@ final class AnnotationController: ObservableObject {
         let isInBrowserPage = window != nil && window?.number == browser.windowNumber
         let pageFrame = browser.pageFrame?.flipped
         let capture = Task {
+            if let captures {
+                return captures
+            }
             // Tilde's browser draws its page itself, with no Screen Recording; the visible part
             // of the page is the context, like a whole window elsewhere.
             if isInBrowserPage || !ScreenCapture.isAllowed {

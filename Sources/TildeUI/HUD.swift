@@ -343,6 +343,11 @@ struct HUDView: View {
                             confirmContent(confirmation)
                         }
                         .transition(.opacity)
+                    } else if controller.isDrawing {
+                        HStack(spacing: 4) {
+                            drawingContent
+                        }
+                        .transition(.opacity)
                     } else {
                         HStack(spacing: 4) {
                             annotatingContent
@@ -353,6 +358,33 @@ struct HUDView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var drawingContent: some View {
+        Text("Draw")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.trailing, HUDMetrics.iconGap)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        ForEach(Self.drawingTools, id: \.tool) { entry in
+            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, help: entry.help) {
+                controller.setDrawingTool(entry.tool)
+            }
+        }
+        HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
+            controller.drawingPanel.undo()
+        }
+        PillTextButton(title: "Done", key: "esc", isDestructive: false) {
+            controller.finishDrawing()
+        }
+    }
+
+    private static let drawingTools = [
+        (tool: "arrow", symbol: "arrow.up.right", help: "Arrow"),
+        (tool: "rectangle", symbol: "rectangle", help: "Rectangle"),
+        (tool: "ellipse", symbol: "circle", help: "Circle"),
+        (tool: "freedraw", symbol: "scribble", help: "Freehand"),
+    ]
 
     private var floatingPill: some View {
         pillContent
@@ -408,6 +440,10 @@ struct HUDView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
 
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
+
+        HUDButton(image: Image(systemName: "pencil.tip"), help: "Draw on the screen") {
+            controller.startDrawing()
+        }
 
         HUDButton(image: Image(systemName: "macwindow"), isOn: controller.scope != nil || controller.isPickingWindow, help: windowHelp) {
             controller.toggleWindowScope()

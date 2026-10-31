@@ -195,6 +195,8 @@ struct PreviewView: View {
 
     private func summary(of annotation: Annotation) -> String {
         switch annotation.target {
+        case .drawing:
+            return "Drawing"
         case .region:
             return "Region \(Int(annotation.frame.width))×\(Int(annotation.frame.height))"
         case .element(.web(let element)):

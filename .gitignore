@@ -2,3 +2,4 @@
 build/
 .agent/current.md
 .DS_Store
+tools/drawing/node_modules/

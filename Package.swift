@@ -13,6 +13,7 @@ let package = Package(
         .target(
             name: "TildeUI",
             dependencies: ["TildeCore", "TildeInstaller"],
+            exclude: ["DrawingWeb"],
             swiftSettings: [.unsafeFlags(["-enable-testing"], .when(configuration: .debug))]
         ),
         .executableTarget(name: "Tilde", dependencies: ["TildeUI"]),

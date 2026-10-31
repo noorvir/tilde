@@ -719,6 +719,34 @@ struct UXSpecs {
         }
     }
 
+    @Test func aDrawingBecomesANoteWithItsShapesAndPictures() async throws {
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
+            let started = try await agent.call("start_annotation", ["wait_seconds": 0])
+            let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
+            let hud = try await app.waitToSee("Annotating")
+            try await app.press("Draw on the screen")
+            try await app.waitToSee("Done")
+            // The canvas loads, then takes the drag.
+            try await Task.sleep(for: .seconds(4))
+            let start = CGPoint(x: hud.frame.midX, y: hud.frame.maxY + 200)
+            try await app.drag(from: start, to: CGPoint(x: start.x + 200, y: start.y + 120))
+            try await app.press("Rectangle")
+            try await app.drag(from: CGPoint(x: start.x - 300, y: start.y), to: CGPoint(x: start.x - 100, y: start.y + 100))
+            try await Task.sleep(for: .milliseconds(300))
+            try await app.press("Done")
+            try await app.waitToSee("add", timeout: 15)
+            try await app.type("Look here")
+            try await app.waitToSee("Look here", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+            try await app.key(.enter, command: true)
+            let result = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
+            #expect(result.text.contains("arrow"))
+            #expect(result.text.contains("rectangle"))
+        }
+    }
+
     @Test func shiftReturnAddsALineInTheCommentBoxAndInThePreviewAndEscClosesThePreview() async throws {
         let window = try ChangingWindow()
         defer { window.close() }

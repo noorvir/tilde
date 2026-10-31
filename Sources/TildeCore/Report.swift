@@ -73,6 +73,8 @@ private func heading(for target: Target) -> String {
     switch target {
     case .region:
         return "Screen region"
+    case .drawing:
+        return "Drawing on the screen"
     case .element(.web(let element)):
         return "Web element on \(element.url)"
     case .element(.native(let element)):
@@ -87,6 +89,9 @@ private func details(for target: Target) -> [String] {
     switch target {
     case .region:
         return []
+
+    case .drawing(let shapes):
+        return ["- Shapes, in points from the top left of the screen: `\(shapes)`"]
 
     case .element(.web(let element)):
         var lines = [

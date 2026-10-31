@@ -5,11 +5,11 @@ import Foundation
 struct SessionFlow: Codable, Equatable {
     enum Event: String, Codable {
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
-        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway
+        case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway, startDrawing, finishDrawing
     }
 
     enum Effect: String, Codable {
-        case applyPause, closeComposer, saveComment, closePreview, cancelWindowPick
+        case applyPause, closeComposer, saveComment, showCanvas, keepDrawing, closePreview, cancelWindowPick
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case cancelSession, clearDrafts, restoreDrafts
@@ -23,6 +23,7 @@ struct SessionFlow: Codable, Equatable {
     var paused = false
     var autoPaused = false
     var holdPaused = false
+    var drawing = false
     var commentOpen = false
     var commentHasText = false
     var previewOpen = false
@@ -31,7 +32,7 @@ struct SessionFlow: Codable, Equatable {
     var confirmation: String?
 
     private enum CodingKeys: String, CodingKey {
-        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, commentOpen, commentHasText, previewOpen, pickingWindow, confirmation
+        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, drawing, commentOpen, commentHasText, previewOpen, pickingWindow, confirmation
     }
 
     init() {}
@@ -44,6 +45,7 @@ struct SessionFlow: Codable, Equatable {
         paused = try values.decodeIfPresent(Bool.self, forKey: .paused) ?? false
         autoPaused = try values.decodeIfPresent(Bool.self, forKey: .autoPaused) ?? false
         holdPaused = try values.decodeIfPresent(Bool.self, forKey: .holdPaused) ?? false
+        drawing = try values.decodeIfPresent(Bool.self, forKey: .drawing) ?? false
         commentOpen = try values.decodeIfPresent(Bool.self, forKey: .commentOpen) ?? false
         commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
         previewOpen = try values.decodeIfPresent(Bool.self, forKey: .previewOpen) ?? false
@@ -54,6 +56,9 @@ struct SessionFlow: Codable, Equatable {
     mutating func handle(_ event: Event) -> [Effect] {
         switch event {
         case .escape:
+            if drawing {
+                return handle(.finishDrawing)
+            }
             if commentOpen {
                 // Esc on a comment with text asks first, and Esc again keeps writing.
                 if confirmation == "discardComment" {
@@ -153,6 +158,25 @@ struct SessionFlow: Codable, Equatable {
             }
             holdPaused = false
             return [.plainClicksOff, .applyPause]
+
+        case .startDrawing:
+            guard isAnnotating, !drawing else {
+                return []
+            }
+            // Open things are finished first, and nothing written is lost.
+            var effects: [Effect] = commentOpen ? (commentHasText ? [.saveComment] : [.closeComposer]) : []
+            if previewOpen {
+                effects.append(.closePreview)
+            }
+            drawing = true
+            return effects + [.showCanvas]
+
+        case .finishDrawing:
+            guard drawing else {
+                return []
+            }
+            drawing = false
+            return [.keepDrawing]
 
         case .clickAway:
             // What was written is never lost by a click; an empty note is not worth keeping.

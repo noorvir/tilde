@@ -511,5 +511,80 @@
     "closeComposer"
    ]
   }
+ },
+ {
+  "name": "Draw opens the canvas",
+  "state": {},
+  "event": "startDrawing",
+  "expect": {
+   "state": {
+    "drawing": true
+   },
+   "effects": [
+    "showCanvas"
+   ]
+  }
+ },
+ {
+  "name": "Draw saves a comment being written first",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true
+  },
+  "event": "startDrawing",
+  "expect": {
+   "state": {
+    "drawing": true
+   },
+   "effects": [
+    "saveComment",
+    "showCanvas"
+   ]
+  }
+ },
+ {
+  "name": "Draw does nothing with no session",
+  "state": {
+   "isAnnotating": false,
+   "hasSession": false
+  },
+  "event": "startDrawing",
+  "expect": {
+   "state": {
+    "drawing": false
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Done keeps the drawing",
+  "state": {
+   "drawing": true
+  },
+  "event": "finishDrawing",
+  "expect": {
+   "state": {
+    "drawing": false
+   },
+   "effects": [
+    "keepDrawing"
+   ]
+  }
+ },
+ {
+  "name": "Esc while drawing keeps the drawing and does not pause",
+  "state": {
+   "drawing": true
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "drawing": false,
+    "paused": false
+   },
+   "effects": [
+    "keepDrawing"
+   ]
+  }
  }
 ]

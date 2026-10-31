@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "esbuild": "0.25.0"
+  }
+}

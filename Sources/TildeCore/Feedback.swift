@@ -35,6 +35,8 @@ public struct Annotation: Sendable, Identifiable {
 public enum Target: Sendable, Codable {
     case region
     case element(Element)
+    /// Shapes the user drew on the screen, as JSON.
+    case drawing(shapes: String)
 }
 
 public enum Element: Sendable, Codable {
