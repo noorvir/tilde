@@ -1,10 +1,10 @@
 import AppKit
+import TildeCore
 import WebKit
 import os
 
 /// Drawing on the screen: a transparent canvas above the overlay, one for each screen drawn on.
-/// While the user draws, the canvas takes the mouse; afterwards it stays visible and lets
-/// everything through.
+/// A shape is on it only while its comment is open; the note that remains is a label on an element.
 @MainActor
 final class DrawingPanel {
     struct Drawing {
@@ -99,26 +99,12 @@ final class DrawingPanel {
     }
 
     func remove(_ ids: [String]) {
-        runOnAll("remove(\(Self.json(ids)))", ids: ids)
+        active?.run("remove(\(Self.json(ids)))")
     }
 
-    func move(_ ids: [String], by offset: CGVector) {
-        runOnAll("move(\(Self.json(ids)), \(offset.dx), \(offset.dy))", ids: ids)
-    }
-
-    func setVisible(_ ids: [String], _ isVisible: Bool) {
-        runOnAll("setVisible(\(Self.json(ids)), \(isVisible))", ids: ids)
-    }
-
-    /// Draws saved shapes (Quartz screen coordinates) again, and returns their new ids.
-    func add(_ shapes: [[String: Any]], at bounds: CGRect) async -> [String] {
-        let center = CGPoint(x: bounds.midX, y: bounds.midY).flipped
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main else {
-            return []
-        }
-        let canvas = canvas(for: screen.frame)
-        canvas.prepare()
-        return await canvas.add(shapes)
+    /// Off the screen, nothing can take the mouse or a scroll from the apps below.
+    func hide() {
+        active?.hide()
     }
 
     /// The session ended: its drawings go, and the canvases wait for the next one.
@@ -137,14 +123,6 @@ final class DrawingPanel {
 
     func clear() {
         canvases.values.forEach { $0.run("clear()") }
-    }
-
-    private func runOnAll(_ call: String, ids: [String]) {
-        guard !ids.isEmpty else {
-            return
-        }
-        // An id means nothing to the other canvases.
-        canvases.values.forEach { $0.run(call) }
     }
 
     private func canvas(for frame: CGRect) -> DrawingCanvas {
@@ -174,7 +152,6 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private var isPreparing = false
     private var pendingTool = "arrow"
     private var pendingColor: String?
-    private var waiting: [CheckedContinuation<Void, Never>] = []
     var onEscape: () -> Void = {}
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
@@ -227,6 +204,11 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 
     func stopDrawing() {
         panel?.ignoresMouseEvents = true
+    }
+
+    func hide() {
+        panel?.ignoresMouseEvents = true
+        panel?.orderOut(nil)
     }
 
     func resumeDrawing() {
@@ -299,23 +281,6 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         )
     }
 
-    func add(_ shapes: [[String: Any]]) async -> [String] {
-        await waitUntilReady()
-        panel?.ignoresMouseEvents = true
-        panel?.orderFrontRegardless()
-        let origin = frame.flipped.origin
-        let local = shapes.map { DrawingShapes.moved($0, by: CGVector(dx: -origin.x, dy: -origin.y)) }
-        let body = "return window.tildeDraw.add(\(DrawingPanel.json(local)))"
-        let ids = try? await webView?.callAsyncJavaScript(body, arguments: [:], in: nil, contentWorld: .page) as? [String]
-        return ids ?? []
-    }
-
-    private func waitUntilReady() async {
-        if !isReady {
-            await withCheckedContinuation { waiting.append($0) }
-        }
-    }
-
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.body as? String {
         case "ready":
@@ -326,8 +291,6 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             if let pendingColor {
                 setColor(pendingColor)
             }
-            waiting.forEach { $0.resume() }
-            waiting = []
         case "escape":
             onEscape()
         case "shape":
@@ -453,6 +416,15 @@ enum DrawingShapes {
         return shape
     }
 
+    /// Where an arrow's tip is, or else the centre of the shapes: what they are linked to is there.
+    static func linkPoint(of shapes: [[String: Any]]) -> CGPoint {
+        if shapes.count == 1, let tip = doubles(shapes[0]["to"]), tip.count == 2 {
+            return CGPoint(x: tip[0], y: tip[1])
+        }
+        let bounds = bounds(of: shapes)
+        return CGPoint(x: bounds.midX, y: bounds.midY)
+    }
+
     /// The origin of `encode`.
     static func origin(of text: String) -> CGPoint {
         let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
@@ -491,25 +463,18 @@ enum DrawingShapes {
         (value as? [NSNumber])?.map(\.doubleValue)
     }
 
-    /// For the report and a restore: the shapes relative to `origin`, which is the top left of
-    /// their window, or of the screen.
-    static func encode(_ shapes: [[String: Any]], origin: CGPoint) -> String {
+    /// For the report: the shapes relative to `origin`, which is the top left of their window,
+    /// or of the screen, and the element they are linked to.
+    static func encode(_ shapes: [[String: Any]], origin: CGPoint, element: Element?) -> String {
         let relative = shapes.map { shape -> [String: Any] in
             var moved = Self.moved(shape, by: CGVector(dx: -origin.x, dy: -origin.y))
             moved["id"] = nil
             return moved
         }
-        return DrawingPanel.json(["origin": [origin.x, origin.y], "shapes": relative])
-    }
-
-    /// The shapes of `encode`, in Quartz screen coordinates.
-    static func decode(_ text: String) -> [[String: Any]] {
-        guard let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any],
-              let origin = object["origin"] as? [NSNumber], origin.count == 2,
-              let shapes = object["shapes"] as? [[String: Any]]
-        else {
-            return []
+        var report: [String: Any] = ["origin": [origin.x, origin.y], "shapes": relative]
+        if let data = try? JSONEncoder().encode(element), let object = try? JSONSerialization.jsonObject(with: data), element != nil {
+            report["element"] = object
         }
-        return shapes.map { moved($0, by: CGVector(dx: origin[0].doubleValue, dy: origin[1].doubleValue)) }
+        return DrawingPanel.json(report)
     }
 }

@@ -13,6 +13,14 @@ struct NoteFingerprint: Equatable, Sendable {
     /// Grey levels, row by row.
     let levels: [UInt8]
 
+    /// A plain area looks the same on any page, so it confirms nothing about an element.
+    var isPlain: Bool {
+        let count = Double(levels.count)
+        let mean = levels.reduce(0.0) { $0 + Double($1) } / count
+        let variance = levels.reduce(0.0) { $0 + (Double($1) - mean) * (Double($1) - mean) } / count
+        return variance.squareRoot() < 3
+    }
+
     /// How alike two pictures are in structure, from 0 to 1. It compares the pattern of light
     /// and dark, not overall brightness: different text on the same background has about the
     /// same brightness but another pattern. Plain areas have no pattern, so they compare by
@@ -106,17 +114,24 @@ struct NoteVisibility: Equatable, Codable {
     private(set) var isVisible = true
     private var readings = 0
 
-    /// What a page identity says about a note's content; nil when the picture decides. A drawing
-    /// is on what it was drawn over, which can change on the same address or title.
-    static func similarity(isSamePage: Bool, isDrawing: Bool) -> Double? {
+    /// What a page identity says about a note's content; nil when the picture decides. Only an
+    /// element that the app still reports is confirmed by its page: a page can change what it
+    /// shows on the same address.
+    static func similarity(isSamePage: Bool, isElementConfirmed: Bool) -> Double? {
         if !isSamePage {
             return 0
         }
-        return isDrawing ? nil : 1
+        return isElementConfirmed ? 1 : nil
     }
 
-    /// Takes a new similarity and returns whether the note shows.
+    /// Takes a new similarity and returns whether the note shows. Nothing alike at all hides it
+    /// at once: that is another page, not a small change.
     mutating func update(similarity: Double) -> Bool {
+        if similarity == 0 {
+            isVisible = false
+            readings = 0
+            return false
+        }
         let wantsChange = isVisible ? similarity < Self.hideBelow : similarity > Self.showAbove
         readings = wantsChange ? readings + 1 : 0
         if readings >= Self.readingsToChange {

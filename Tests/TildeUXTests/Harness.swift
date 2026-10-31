@@ -238,6 +238,12 @@ final class TildeApp {
         return try await reply["edges"] as? [[Double]] ?? []
     }
 
+    /// A real scroll wheel at a point; negative scrolls the page down.
+    func scroll(at point: CGPoint, by lines: Int) async throws {
+        try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
+        try await drive("mouse", ["type": "scroll", "x": point.x, "y": point.y, "lines": lines])
+    }
+
     func hover(over point: CGPoint) async throws {
         try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
     }
@@ -520,6 +526,7 @@ final class WebPages {
     let first: String
     let second: String
     let singlePage: String
+    let sameAddress: String
     let browser: Browser
     private let server = Process()
     private let folder: URL
@@ -550,6 +557,10 @@ final class WebPages {
         // Identical on both routes, so that only the address tells them apart.
         let routes = "<script>f.onclick=()=>history.pushState({},\"\",\"?route=b\");b.onclick=()=>history.back()</script>"
         try page(rows, script: routes).write(to: pagesFolder.appendingPathComponent("spa.html"), atomically: true, encoding: .utf8)
+        // Another screen on the same address and title, made of new elements, and long enough to scroll.
+        let swap = "<script>const swap=t=>document.querySelectorAll(\"p\").forEach((p,i)=>{const n=document.createElement(\"p\");n.style.cssText=p.style.cssText;n.textContent=t+\" \"+i;p.replaceWith(n)});f.onclick=()=>swap(\"Museum opens wing for modern painters\");b.onclick=()=>swap(\"Starlink outages disrupt drone operations\")</script>"
+        try page((0..<80).map { "Starlink outages disrupt drone operations \($0)" }, script: swap)
+            .write(to: pagesFolder.appendingPathComponent("same.html"), atomically: true, encoding: .utf8)
         server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         server.arguments = ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]
         server.standardOutput = FileHandle.nullDevice
@@ -558,6 +569,7 @@ final class WebPages {
         first = "http://127.0.0.1:\(port)/\(run)/first.html"
         second = "http://127.0.0.1:\(port)/\(run)/second.html"
         singlePage = "http://127.0.0.1:\(port)/\(run)/spa.html"
+        sameAddress = "http://127.0.0.1:\(port)/\(run)/same.html"
         // The first page must not fail to load because the server is not listening yet.
         for _ in 0..<50 {
             let check = Process()

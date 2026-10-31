@@ -19,6 +19,8 @@ enum ElementTracker {
         let role: String
         /// Title, label, value or identifier, whichever the element had.
         let name: String?
+        /// The first text inside an element with no name, which tells its content apart.
+        var text: String? = nil
     }
 
     struct Candidate: Equatable {
@@ -91,7 +93,8 @@ enum ElementTracker {
 
     static func identity(of element: AXUIElement) -> Identity {
         let role: String = attribute(element, kAXRoleAttribute) ?? "AXUnknown"
-        return Identity(role: role, name: name(of: element))
+        let name = name(of: element)
+        return Identity(role: role, name: name, text: name == nil ? firstText(in: element) : nil)
     }
 
     private static func name(of element: AXUIElement) -> String? {
@@ -103,7 +106,26 @@ enum ElementTracker {
         return nil
     }
 
+    private static func firstText(in element: AXUIElement) -> String? {
+        var queue = [element]
+        var visited = 0
+        while !queue.isEmpty, visited < 12 {
+            let current = queue.removeFirst()
+            visited += 1
+            let role: String? = attribute(current, kAXRoleAttribute)
+            if role == kAXStaticTextRole, let text = name(of: current) {
+                return text
+            }
+            let children: [AXUIElement] = attribute(current, kAXChildrenAttribute) ?? []
+            queue.append(contentsOf: children)
+        }
+        return nil
+    }
+
     private static func showsOtherText(_ tracked: TrackedElement) -> Bool {
+        if let original = tracked.identity.text {
+            return firstText(in: tracked.element) != original
+        }
         guard tracked.identity.role == kAXStaticTextRole, let original = tracked.identity.name else {
             return false
         }

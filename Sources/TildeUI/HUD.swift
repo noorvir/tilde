@@ -396,7 +396,6 @@ struct HUDView: View {
     }
 
     private static let drawingTools = [
-        (tool: "selection", symbol: "cursorarrow", help: "Select"),
         (tool: "arrow", symbol: "arrow.up.right", help: "Arrow"),
         (tool: "rectangle", symbol: "rectangle", help: "Rectangle"),
         (tool: "ellipse", symbol: "circle", help: "Circle"),

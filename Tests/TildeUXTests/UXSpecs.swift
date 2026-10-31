@@ -347,6 +347,47 @@ struct UXSpecs {
         }
     }
 
+    @Test func aLabelHidesWhenItsElementIsNotOnScreenAndComesBack() async throws {
+        let pages = try WebPages(browser: .safari)
+        defer {
+            pages.quitBrowser()
+            pages.stop()
+        }
+        pages.go(to: pages.sameAddress)
+        try await pages.waitForPage()
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await Task.sleep(for: .seconds(2))
+            let page = try #require(pages.pageArea)
+            let point = CGPoint(x: page.minX + 120, y: page.minY + 300)
+            try await addSmallNote(app, at: point)
+            let area = page.divided(atDistance: 200, from: .minYEdge).remainder
+            try await app.waitForBlue(in: area, atLeast: 20)
+            let hud = try await app.waitToSee("Annotating")
+
+            // Another screen on the same address and title.
+            func press(_ button: CGPoint) async throws {
+                try await app.hold("option", down: true)
+                try await app.click(at: CGPoint(x: page.minX + button.x, y: page.minY + button.y))
+                try await app.hold("option", down: false)
+                try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            }
+            try await press(WebPages.forward)
+            try await app.waitForBlue(in: area, atMost: 0)
+            try await press(WebPages.back)
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
+
+            // Its element scrolls off the screen, and back.
+            try await app.scroll(at: point, by: -30)
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            try await app.waitForBlue(in: area, atMost: 0)
+            try await app.scroll(at: point, by: 30)
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
+        }
+    }
+
     @Test(arguments: WebPages.Browser.allCases)
     func aNoteInABrowserHidesOnAnotherPageAndComesBack(browser: WebPages.Browser) async throws {
         let pages = try WebPages(browser: browser)
@@ -817,7 +858,7 @@ struct UXSpecs {
         }
     }
 
-    @Test func aShapeCanBeMovedAndAnArrowEndSnapsToAnElement() async throws {
+    @Test func anArrowEndSnapsToAnElement() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
@@ -840,20 +881,13 @@ struct UXSpecs {
             try await app.key(.enter)
             try await app.waitNotToSee("add")
 
-            // A rectangle, dragged by its border to another place.
-            try await app.press("Rectangle")
-            let corner = CGPoint(x: frame.minX + 60, y: frame.minY + 150)
-            try await draw(app, from: corner, to: CGPoint(x: corner.x + 100, y: corner.y + 60), comment: "Moved")
-            try await app.press("Select")
-            try await app.drag(from: CGPoint(x: corner.x + 50, y: corner.y), to: CGPoint(x: corner.x + 50, y: corner.y + 100))
             try await Task.sleep(for: .milliseconds(800))
             let text = try await report(app, agent, session: session)
             #expect(text.contains("\"to\":[463"), "\(text)")
-            #expect(text.contains("\"rect\":[60,278,100,60]"), "\(text)")
         }
     }
 
-    @Test func aShapeIsEditedWhileItsCommentIsOpenAndHidesOnAnotherPage() async throws {
+    @Test func aShapeIsEditedWhileItsCommentIsOpenAndOnlyItsLabelStays() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
@@ -899,17 +933,17 @@ struct UXSpecs {
             try await app.key(.enter)
             try await app.waitNotToSee("add")
 
-            // With draw mode over, another page with the same title hides it, and it comes back.
+            // The shapes went with their comments; the labels stay, and go with the page.
             try await app.key(.escape)
             try await app.waitToSeeText(containing: "2 notes")
             let hud = try await app.waitToSee("Annotating")
             try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
-            let area = CGRect(x: frame.minX + 150, y: frame.minY + 255, width: 60, height: 40)
-            try await app.waitForBlue(in: area, atLeast: 10)
+            try await app.waitForBlue(in: CGRect(x: frame.minX + 150, y: frame.minY + 255, width: 60, height: 20), atMost: 0)
+            try await app.waitForBlue(in: frame, atLeast: 20)
             try window.show("b")
-            try await app.waitForBlue(in: area, atMost: 0)
+            try await app.waitForBlue(in: frame, atMost: 0)
             try window.show("a")
-            try await app.waitForBlue(in: area, atLeast: 10)
+            try await app.waitForBlue(in: frame, atLeast: 20)
 
             try await app.key(.enter, command: true)
             let text = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
@@ -921,7 +955,60 @@ struct UXSpecs {
         }
     }
 
-    @Test func aDrawingMovesWithItsWindowGoesWithItsNoteAndComesBackOnRestore() async throws {
+    @Test func aDrawnArrowsLabelFollowsItsElementWhenThePageScrollsAndTheShapeIsGone() async throws {
+        let page = try TestPage()
+        defer { page.stop() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
+            let started = try await agent.call("start_annotation", ["url": page.url + "whole.html", "wait_seconds": 0])
+            let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
+            try await app.waitToSee("Paused")
+            let row = try await app.waitToSee("Row 8", timeout: 20)
+            try await annotate(app)
+            try await app.press("Draw on the screen")
+            try await app.waitToSee("Done, esc")
+            try await Task.sleep(for: .seconds(3))
+
+            // The tip lands on the row: that row is the arrow's element.
+            let tip = CGPoint(x: row.frame.minX + 100, y: row.frame.midY)
+            let start = CGPoint(x: tip.x + 240, y: tip.y + 150)
+            try await app.slowDrag(from: start, to: tip)
+            try await app.waitToSee("add", timeout: 15)
+            try await app.type("This row")
+            try await app.waitToSee("This row", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
+            try await app.key(.escape)
+            try await app.waitToSeeText(containing: "1 note")
+            let hud = try await app.waitToSee("Annotating")
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+
+            func around(_ point: CGPoint) -> CGRect {
+                CGRect(x: point.x - 8, y: point.y - 8, width: 16, height: 16)
+            }
+            let marker = CGPoint(x: row.frame.minX + 300, y: row.frame.minY)
+            let middle = CGPoint(x: (start.x + tip.x) / 2, y: (start.y + tip.y) / 2)
+            try await app.waitForBlue(in: around(marker), atLeast: 20)
+            try await app.waitForBlue(in: around(middle), atMost: 0)
+
+            // A real scroll moves the page, and the label with its row.
+            try await app.scroll(at: CGPoint(x: row.frame.midX, y: row.frame.midY + 100), by: -1)
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            try await Task.sleep(for: .seconds(1))
+            let moved = try await app.waitToSee("Row 8")
+            #expect(moved.frame.minY < row.frame.minY - 20, "The page did not scroll")
+            try await app.waitForBlue(in: around(CGPoint(x: marker.x, y: moved.frame.minY)), atLeast: 20)
+            try await app.waitForBlue(in: around(marker), atMost: 0)
+            try await app.waitForBlue(in: around(middle), atMost: 0)
+
+            try await app.key(.enter, command: true)
+            let text = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
+            #expect(text.contains("\"arrow\""), "\(text)")
+            #expect(text.contains("\"element\""), "\(text)")
+        }
+    }
+
+    @Test func aDrawingsLabelStaysWithItsWindowAndComesBackOnRestoreWithoutTheShape() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         let first = try await TildeApp.launched()
@@ -944,25 +1031,21 @@ struct UXSpecs {
         func left(of point: CGPoint, offset: CGFloat = 0) -> CGRect {
             CGRect(x: point.x + offset - 10, y: point.y + 30, width: 20, height: 40)
         }
-        try await first.waitForBlue(in: left(of: start), atLeast: 10)
-
-        // The window moves, and the drawing with it.
-        try window.show("moved")
-        try await first.waitForBlue(in: left(of: start, offset: 200), atLeast: 10)
         try await first.waitForBlue(in: left(of: start), atMost: 0)
+        try await first.waitForBlue(in: frame, atLeast: 20)
 
-        // Saved with the session: after a crash it comes back.
+        // The window moves, and the label with it. Its element's row ends past the old window.
+        try window.show("moved")
+        let beside = CGRect(x: frame.maxX + 5, y: frame.minY, width: 200, height: frame.height)
+        try await first.waitForBlue(in: beside, atLeast: 20)
+
+        // Saved with the session: after a crash the note comes back, without the shape.
         try await Task.sleep(for: .seconds(3))
         first.kill()
         let second = try await TildeApp.relaunched(after: first)
         defer { second.quit() }
         try await second.press("Restore")
         try await second.waitToSeeText(containing: "1 note", timeout: 15)
-        try await second.waitForBlue(in: left(of: start, offset: 200), atLeast: 10, timeout: 15)
-
-        // Deleting the note removes it from the screen.
-        try await second.press("Clear all annotations and keep annotating")
-        try await second.key(.enter)
         try await second.waitForBlue(in: left(of: start, offset: 200), atMost: 0)
     }
 

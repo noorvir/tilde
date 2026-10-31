@@ -170,8 +170,8 @@
   }
  },
  {
-  "name": "A drawing hides on another page",
-  "isDrawing": true,
+  "name": "Another page hides a label",
+  "isElementConfirmed": true,
   "original": {
    "url": "https://x.com/a",
    "title": "T"
@@ -187,8 +187,25 @@
   }
  },
  {
-  "name": "A drawing on the same address: the picture decides",
-  "isDrawing": true,
+  "name": "The same address with its element: the label stays",
+  "isElementConfirmed": true,
+  "original": {
+   "url": "https://x.com/a",
+   "title": "T"
+  },
+  "page": {
+   "url": "https://x.com/a",
+   "title": "T"
+  },
+  "expect": {
+   "samePage": true,
+   "hides": false,
+   "pictureDecides": false
+  }
+ },
+ {
+  "name": "The same address with its element gone: the picture decides",
+  "isElementConfirmed": false,
   "original": {
    "url": "https://x.com/a",
    "title": "T"
@@ -204,20 +221,52 @@
   }
  },
  {
-  "name": "A note on the same address stays",
-  "isDrawing": false,
-  "original": {
-   "url": "https://x.com/a",
-   "title": "T"
+  "name": "A picture with nothing alike hides at once",
+  "note": {
+   "isVisible": true,
+   "readings": 0
   },
-  "page": {
-   "url": "https://x.com/a",
-   "title": "T"
-  },
+  "similarity": 0,
   "expect": {
-   "samePage": true,
-   "hides": false,
-   "pictureDecides": false
+   "note": {
+    "isVisible": false
+   }
+  }
+ },
+ {
+  "name": "An element out of its window has no label",
+  "elementFrame": [
+   900,
+   100,
+   100,
+   20
+  ],
+  "windowFrame": [
+   0,
+   0,
+   500,
+   400
+  ],
+  "expect": {
+   "labelShows": false
+  }
+ },
+ {
+  "name": "An element in its window has its label",
+  "elementFrame": [
+   100,
+   100,
+   100,
+   20
+  ],
+  "windowFrame": [
+   0,
+   0,
+   500,
+   400
+  ],
+  "expect": {
+   "labelShows": true
   }
  }
 ]

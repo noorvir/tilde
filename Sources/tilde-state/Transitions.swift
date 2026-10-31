@@ -11,7 +11,9 @@ enum Transitions {
         var similarity: Double?
         var original: PageIdentity?
         var page: PageIdentity?
-        var isDrawing: Bool?
+        var isElementConfirmed: Bool?
+        var elementFrame: [CGFloat]?
+        var windowFrame: [CGFloat]?
     }
 
     struct Result: Encodable {
@@ -22,6 +24,7 @@ enum Transitions {
         var samePage: Bool?
         var hides: Bool?
         var pictureDecides: Bool?
+        var labelShows: Bool?
     }
 
     static func run(_ table: Data) throws -> Data {
@@ -35,11 +38,16 @@ enum Transitions {
             if let original = row.original, let page = row.page {
                 let isSamePage = page.isSamePage(as: original)
                 result.samePage = isSamePage
-                if let isSamePage, let isDrawing = row.isDrawing {
-                    let similarity = NoteVisibility.similarity(isSamePage: isSamePage, isDrawing: isDrawing)
+                if let isSamePage, let isElementConfirmed = row.isElementConfirmed {
+                    let similarity = NoteVisibility.similarity(isSamePage: isSamePage, isElementConfirmed: isElementConfirmed)
                     result.hides = similarity == 0
                     result.pictureDecides = similarity == nil
                 }
+            }
+            if let element = row.elementFrame, let window = row.windowFrame {
+                let frame = CGRect(x: element[0], y: element[1], width: element[2], height: element[3])
+                let clip = CGRect(x: window[0], y: window[1], width: window[2], height: window[3])
+                result.labelShows = ElementTracker.visibleFrame(frame, clips: [clip]) != nil
             }
             if var note = row.note, let similarity = row.similarity {
                 _ = note.update(similarity: similarity)

@@ -7,7 +7,7 @@ import CoreVideo
 //
 //   GET  /status                       {"accessibility": bool, "screenRecording": bool}
 //   GET  /screenshot                   PNG of the main display
-//   POST /mouse {"type": "move|click|down|up|drag", "x", "y", "toX"?, "toY"?}
+//   POST /mouse {"type": "move|click|down|up|drag|scroll", "lines"?, "x", "y", "toX"?, "toY"?}
 //   POST /type  {"text": "..."}
 //   POST /key   {"code": 36, "command": true}
 //   POST /tap   {"key": "control|option|shift|command|function"}  a modifier pressed and released
@@ -235,6 +235,9 @@ func mouse(_ body: [String: Any]) async {
         post(.mouseMoved, at: point)
     case "down":
         post(.leftMouseDown, at: point)
+    case "scroll":
+        let lines = Int32(body["lines"] as? Int ?? 0)
+        CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
     case "up":
         post(.leftMouseUp, at: point)
     case "dragged":

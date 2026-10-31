@@ -1,6 +1,6 @@
 // The drawing canvas: Excalidraw with its own interface hidden, driven from Tilde's HUD.
 // Build it with tools/drawing/build.sh.
-import { Excalidraw, convertToExcalidrawElements } from "@excalidraw/excalidraw";
+import { Excalidraw } from "@excalidraw/excalidraw";
 import "./node_modules/@excalidraw/excalidraw/dist/prod/index.css";
 import { createRoot } from "react-dom/client";
 
@@ -93,32 +93,13 @@ window.tildeDraw = {
   remove(ids) {
     changeElements(ids, () => ({ isDeleted: true }));
   },
-  move(ids, dx, dy) {
-    changeElements(ids, (element) => ({ x: element.x + dx, y: element.y + dy }));
-  },
-  setVisible(ids, isVisible) {
-    changeElements(ids, () => ({ opacity: isVisible ? 100 : 0 }));
-  },
-  // Draws saved shapes again, and returns their new ids.
-  add(shapes) {
-    const skeletons = shapes.map((shape) => {
-      const common = { strokeColor: shape.color, roughness: 0, strokeWidth: 2 };
-      if (shape.type === "arrow") {
-        return { ...common, type: "arrow", x: shape.from[0], y: shape.from[1], points: [[0, 0], [shape.to[0] - shape.from[0], shape.to[1] - shape.from[1]]] };
-      }
-      if (shape.type === "freehand") {
-        const [x, y] = shape.points[0];
-        return { ...common, type: "freedraw", x, y, points: shape.points.map((point) => [point[0] - x, point[1] - y]) };
-      }
-      const [x, y, width, height] = shape.rect;
-      return { ...common, type: shape.type, x, y, width, height };
-    });
-    const elements = convertToExcalidrawElements(skeletons, { regenerateIds: true });
-    elements.forEach((element) => taken.add(element.id));
-    api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
-    return elements.map((element) => element.id);
-  },
 };
+
+// A scroll would move the scene; the canvas has nothing to scroll.
+window.addEventListener("wheel", (event) => {
+  event.stopPropagation();
+  event.preventDefault();
+}, { capture: true, passive: false });
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") post("escape");
