@@ -70,7 +70,7 @@ enum Surfaces {
                 apply(state, drafts: controller.drafts, composer: .edit(draft.id), to: controller)
                 controller.commentText = draft.annotation.comment
             }
-            return try await hosted(CommentView(controller: controller, chip: "span", isEditing: isEditing), size: size)
+            return try await hosted(CommentView(controller: controller, chip: "span", isEditing: isEditing, discardStyle: state.discardStyle ?? "inline"), size: size)
 
         case "preview":
             let controller = try await controller(state)

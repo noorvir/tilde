@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "surface": "hud",
+  "surface": "comment",
   "size": [
-    520,
-    80
+    360,
+    150
   ],
   "session": {
     "client": "Codex"
   },
-  "notes": 1,
+  "commentText": "This note has text",
   "confirmation": "discardComment"
 }

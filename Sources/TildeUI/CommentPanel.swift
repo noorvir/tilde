@@ -201,6 +201,8 @@ struct CommentView: View {
     @ObservedObject var controller: AnnotationController
     let chip: String
     let isEditing: Bool
+    /// "inline" in the box, or "toast" under it: `defaults write dev.tilde.app commentDiscardStyle toast`.
+    var discardStyle = UserDefaults.standard.string(forKey: "commentDiscardStyle") ?? "inline"
     /// Called with the change in height just before the box changes size.
     var onHeightChange: (CGFloat) -> Void = { _ in }
     @State private var editorHeight = ceil(NSLayoutManager().defaultLineHeight(for: NSFont.systemFont(ofSize: 14)))
@@ -259,10 +261,14 @@ struct CommentView: View {
                 .help("Add  ↩")
             }
 
-            HStack(spacing: 12) {
-                hint("↩", "add")
-                hint("⌘↩", "send")
-                hint("esc", "cancel")
+            if isAskingToDiscard, discardStyle != "toast" {
+                discardQuestion
+            } else {
+                HStack(spacing: 12) {
+                    hint("↩", "add")
+                    hint("⌘↩", "send")
+                    hint("esc", "cancel")
+                }
             }
         }
         .background {
@@ -276,13 +282,50 @@ struct CommentView: View {
         .background(RoundedRectangle(cornerRadius: 16).fill(Color.tildeInk))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
         .shadow(color: .black.opacity(0.24), radius: 16, y: 6)
+        .overlay(alignment: .bottom) {
+            if isAskingToDiscard, discardStyle == "toast" {
+                discardQuestion
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .frame(width: 320)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.tildeInk))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1)))
+                    .offset(y: 44)
+            }
+        }
+        .padding(.bottom, isAskingToDiscard && discardStyle == "toast" ? 44 : 0)
         .padding(18)
         .environment(\.colorScheme, .dark)
         .onExitCommand { controller.escapePressed() }
         .onAppear { isEmpty = controller.commentDraft.text.isEmpty }
     }
 
-    private func hint(_ key: String, _ label: String) -> some View {
+    private var isAskingToDiscard: Bool {
+        controller.confirmation == .discardComment
+    }
+
+    /// In the size of the row of hints, so that the box does not move.
+    private var discardQuestion: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.red)
+            Text("Discard comment?")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.white)
+            Spacer(minLength: 4)
+            Button(action: controller.dismissConfirmation) {
+                hint("esc", "cancel")
+            }
+            .buttonStyle(.plain)
+            Button(action: controller.confirm) {
+                hint("↩", "discard", color: .red)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func hint(_ key: String, _ label: String, color: Color = .secondary) -> some View {
         HStack(spacing: 4) {
             Text(key)
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -292,6 +335,6 @@ struct CommentView: View {
             Text(label)
                 .font(.system(size: 10.5))
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(color)
     }
 }

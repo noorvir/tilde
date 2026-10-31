@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "surface": "comment",
+  "size": [
+    360,
+    200
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "commentText": "This note has text",
+  "confirmation": "discardComment",
+  "discardStyle": "toast"
+}

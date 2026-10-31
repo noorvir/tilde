@@ -338,7 +338,7 @@ struct HUDView: View {
             case .annotating, .idle:
                 // Stacked, so the crossfade between the two never lays them out side by side.
                 ZStack {
-                    if let confirmation = controller.confirmation {
+                    if let confirmation = controller.confirmation, confirmation != .discardComment {
                         HStack(spacing: 4) {
                             confirmContent(confirmation)
                         }
@@ -501,7 +501,8 @@ struct HUDView: View {
             case .cancelSession:
                 Text("Discard and close?")
             case .discardComment:
-                Text("Discard comment?")
+                // Asked on the comment box itself.
+                EmptyView()
             case .restore(let record):
                 Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(record.notes.count) saved?")
             }
@@ -528,10 +529,7 @@ struct HUDView: View {
             }
             .tildeTooltip("Discard \(all) and close")
         case .discardComment:
-            PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
-                controller.confirm()
-            }
-            .tildeTooltip("Discard the comment you are writing")
+            EmptyView()
         case .restore:
             PillTextButton(title: "Replace", key: "↩", isDestructive: true) {
                 controller.confirm()
