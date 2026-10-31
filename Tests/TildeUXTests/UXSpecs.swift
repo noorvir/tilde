@@ -831,8 +831,14 @@ struct UXSpecs {
             let hud = try await app.waitToSee("Annotating")
             try await app.press("Draw on the screen")
             try await app.waitToSee("Done, esc")
-            try await Task.sleep(for: .seconds(3))
+            try await app.waitToSee("Drawing canvas", timeout: 15)
             let start = CGPoint(x: hud.frame.midX, y: hud.frame.maxY + 200)
+
+            // A click without a drag draws nothing, and the next drag is a whole arrow.
+            try await app.click(at: CGPoint(x: start.x + 300, y: start.y))
+            try await Task.sleep(for: .milliseconds(800))
+            #expect(try await !app.seen().contains { $0.name == "add" })
+
             try await draw(app, from: start, to: CGPoint(x: start.x + 200, y: start.y + 120), comment: "An arrow")
             try await app.waitToSee("Done, esc")
             try await app.press("Rectangle")
@@ -868,7 +874,7 @@ struct UXSpecs {
             try await app.waitToSee("Annotating")
             try await app.press("Draw on the screen")
             try await app.waitToSee("Done, esc")
-            try await Task.sleep(for: .seconds(3))
+            try await app.waitToSee("Drawing canvas", timeout: 15)
             let frame = ChangingWindow.frame
 
             // The row of text ends 463 points into the window; the end lands near it.
@@ -897,7 +903,7 @@ struct UXSpecs {
             try await app.waitToSee("Annotating")
             try await app.press("Draw on the screen")
             try await app.waitToSee("Done, esc")
-            try await Task.sleep(for: .seconds(3))
+            try await app.waitToSee("Drawing canvas", timeout: 15)
             let frame = ChangingWindow.frame
             let start = CGPoint(x: frame.minX + 200, y: frame.minY + 200)
             let end = CGPoint(x: frame.minX + 300, y: frame.minY + 300)
@@ -968,7 +974,7 @@ struct UXSpecs {
             try await annotate(app)
             try await app.press("Draw on the screen")
             try await app.waitToSee("Done, esc")
-            try await Task.sleep(for: .seconds(3))
+            try await app.waitToSee("Drawing canvas", timeout: 15)
 
             // The tip lands on the row: that row is the arrow's element.
             let tip = CGPoint(x: row.frame.minX + 100, y: row.frame.midY)
@@ -1031,7 +1037,7 @@ struct UXSpecs {
         try await first.waitToSee("Annotating")
         try await first.press("Draw on the screen")
         try await first.waitToSee("Done, esc")
-        try await Task.sleep(for: .seconds(3))
+        try await first.waitToSee("Drawing canvas", timeout: 15)
         let frame = ChangingWindow.frame
         let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
         let end = CGPoint(x: start.x + 200, y: start.y + 120)

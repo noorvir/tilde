@@ -11,6 +11,7 @@ let drawingTool = "arrow";
 let editing = null;
 let isWaitingForEdit = false;
 let isPressOnShape = false;
+let pressAt = null;
 const post = (message) => window.webkit?.messageHandlers?.tilde?.postMessage(message);
 
 function live() {
@@ -175,6 +176,7 @@ function isOnEditedShape(x, y) {
 
 window.addEventListener("pointerdown", (event) => {
   startSnap = snapPoint(event.clientX, event.clientY, event);
+  pressAt = { x: event.clientX, y: event.clientY };
   isPressOnShape = true;
   if (isWaitingForEdit || (editing && !isOnEditedShape(event.clientX, event.clientY))) {
     isPressOnShape = false;
@@ -228,6 +230,12 @@ window.addEventListener("pointerup", (event) => {
   // After Excalidraw has finished the shape.
   setTimeout(() => {
     const fresh = live().filter((element) => !taken.has(element.id));
+    // A click without a drag draws nothing, and starts no arrow of several clicks.
+    if (fresh.length && Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) < 4) {
+      changeElements(fresh.map((element) => element.id), () => ({ isDeleted: true }));
+      api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
+      return;
+    }
     if (fresh.length) {
       snapNewShape(fresh[fresh.length - 1], event);
       isWaitingForEdit = true;

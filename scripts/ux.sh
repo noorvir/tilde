@@ -68,6 +68,9 @@ release_flows="aLabelHidesWhen|eachShapeBecomes|aShapeIsEdited|anArrowEndSnaps|a
 limit=${TILDE_UX_LIMIT:-180}
 if [ -n "${TILDE_UX_RELEASE:-}" ]; then
     set -- --filter "$release_flows"
+    # A device that is still booting takes minutes, and its screen keeps changing under a note.
+    xcrun simctl boot "iPhone 17e" 2>/dev/null || true
+    xcrun simctl bootstatus "iPhone 17e" >/dev/null
 else
     set -- --filter "$filter"
 fi

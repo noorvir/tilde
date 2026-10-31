@@ -503,7 +503,16 @@ final class ChangingWindow {
         process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["TILDE_UX_FIXTURE"] ?? "")
         process.arguments = [file.path]
         try process.run()
-        Thread.sleep(forTimeInterval: 1)
+        for _ in 0..<50 where !Self.isOnScreen(process.processIdentifier) {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        // Its first page draws just after the window shows.
+        Thread.sleep(forTimeInterval: 0.2)
+    }
+
+    private static func isOnScreen(_ pid: Int32) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        return list.contains { $0[kCGWindowOwnerPID as String] as? Int32 == pid }
     }
 
     func show(_ page: String) throws {
@@ -530,6 +539,7 @@ final class WebPages {
     let browser: Browser
     private let server = Process()
     private let folder: URL
+    private var requests: URL { folder.appendingPathComponent("requests.log") }
 
     /// Where the buttons of the single page app are, from the top left of the page.
     static let forward = CGPoint(x: 50, y: 22)
@@ -562,9 +572,11 @@ final class WebPages {
         try page((0..<80).map { "Starlink outages disrupt drone operations \($0)" }, script: swap)
             .write(to: pagesFolder.appendingPathComponent("same.html"), atomically: true, encoding: .utf8)
         server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        server.arguments = ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]
+        server.arguments = ["-u", "-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]
         server.standardOutput = FileHandle.nullDevice
-        server.standardError = FileHandle.nullDevice
+        let log = folder.appendingPathComponent("requests.log")
+        FileManager.default.createFile(atPath: log.path, contents: nil)
+        server.standardError = try FileHandle(forWritingTo: log)
         try server.run()
         first = "http://127.0.0.1:\(port)/\(run)/first.html"
         second = "http://127.0.0.1:\(port)/\(run)/second.html"
@@ -605,12 +617,17 @@ final class WebPages {
         }
     }
 
+    private var hasServedAPage: Bool {
+        (try? String(contentsOf: requests, encoding: .utf8))?.contains(".html") ?? false
+    }
+
     /// Waits for the window of the browser, which is slow to open the first time.
     func waitForPage() async throws {
-        for _ in 0..<60 where pageArea == nil {
-            try await Task.sleep(for: .milliseconds(500))
+        for _ in 0..<120 where pageArea == nil || !hasServedAPage {
+            try await Task.sleep(for: .milliseconds(250))
         }
-        try await Task.sleep(for: .seconds(3))
+        // The browser draws what the server sent.
+        try await Task.sleep(for: .seconds(1))
     }
 
     /// Where the page is, without the toolbar of the browser.

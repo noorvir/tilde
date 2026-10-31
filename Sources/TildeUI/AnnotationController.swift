@@ -626,7 +626,11 @@ final class AnnotationController: ObservableObject {
     /// app may also answer with one large group, as the phone in Device Hub.
     private static func isWholeWindow(_ picked: Picked) -> Bool {
         let isLargeGroup = picked.chip == "Group" && picked.frame.width >= 150 && picked.frame.height >= 150
-        return picked.chip == "window" || isLargeGroup
+        // A browser that has not described its page yet answers with the page itself.
+        let isAboutTheWindow = picked.window.map { window in
+            picked.frame.width * picked.frame.height >= 0.7 * window.frame.width * window.frame.height
+        } ?? false
+        return picked.chip == "window" || isLargeGroup || isAboutTheWindow
     }
 
     private static func pictureArea(around point: CGPoint) -> CGRect {
