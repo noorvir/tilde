@@ -726,7 +726,7 @@ struct UXSpecs {
             let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
             let hud = try await app.waitToSee("Annotating")
             try await app.press("Draw on the screen")
-            try await app.waitToSee("Done")
+            try await app.waitToSee("Done, esc")
             // The canvas loads, then takes the drag.
             try await Task.sleep(for: .seconds(4))
             let start = CGPoint(x: hud.frame.midX, y: hud.frame.maxY + 200)
@@ -734,7 +734,7 @@ struct UXSpecs {
             try await app.press("Rectangle")
             try await app.drag(from: CGPoint(x: start.x - 300, y: start.y), to: CGPoint(x: start.x - 100, y: start.y + 100))
             try await Task.sleep(for: .milliseconds(300))
-            try await app.press("Done")
+            try await app.press("Done, esc")
             try await app.waitToSee("add", timeout: 15)
             try await app.type("Look here")
             try await app.waitToSee("Look here", timeout: 3)

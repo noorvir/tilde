@@ -50,6 +50,7 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
 
     func setTool(_ tool: String) {
         pendingTool = tool
+        panel?.makeKey()
         webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.setTool(\"\(tool)\")")
     }
 
@@ -85,9 +86,23 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
             setTool(pendingTool)
         case "escape":
             onEscape()
+        case let text as String where text.hasPrefix("error: "):
+            log.error("drawing canvas \(text, privacy: .public)")
         default:
             break
         }
+    }
+
+    private static func page() -> String? {
+        func resource(_ name: String, _ type: String) -> String? {
+            Bundle.main.url(forResource: name, withExtension: type).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        }
+        guard let html = resource("draw", "html"), let script = resource("draw", "js"), let style = resource("draw", "css") else {
+            return nil
+        }
+        return html
+            .replacingOccurrences(of: "<link rel=\"stylesheet\" href=\"draw.css\">", with: "<style>\(style)</style>")
+            .replacingOccurrences(of: "<script src=\"draw.js\"></script>", with: "<script>\(script.replacingOccurrences(of: "</script", with: "<\\/script"))</script>")
     }
 
     private func makePanel(on screen: NSScreen) -> FloatingPanel {
@@ -102,18 +117,26 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(self, name: "tilde")
-        let web = WKWebView(frame: panel.contentLayoutRect, configuration: configuration)
+        let web = CanvasWebView(frame: panel.contentLayoutRect, configuration: configuration)
         web.setValue(false, forKey: "drawsBackground")
         web.autoresizingMask = [.width, .height]
         panel.contentView = web
-        if let page = Bundle.main.url(forResource: "draw", withExtension: "html") {
+        if let page = Self.page() {
             openedAt = Date()
-            web.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
+            // One document: scripts from files hide the text of their errors.
+            web.loadHTMLString(page, baseURL: URL(string: "https://drawing.tilde.invalid/"))
         } else {
             log.error("the drawing canvas is not in the app")
         }
         self.panel = panel
         webView = web
         return panel
+    }
+}
+
+/// The first drag after a click on the HUD draws, instead of only taking the keyboard back.
+private final class CanvasWebView: WKWebView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }

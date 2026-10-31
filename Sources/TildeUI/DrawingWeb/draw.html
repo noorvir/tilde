@@ -7,5 +7,11 @@ html, body, #root { margin: 0; height: 100%; background: transparent; overflow: 
 .excalidraw .layer-ui__wrapper, .excalidraw .welcome-screen-center { display: none !important; }
 </style>
 <div id="root"></div>
-<script>window.EXCALIDRAW_ASSET_PATH = "./";</script>
+<script>
+window.EXCALIDRAW_ASSET_PATH = "./";
+window.process = { env: {} };
+const report = (text) => window.webkit?.messageHandlers?.tilde?.postMessage("error: " + text);
+addEventListener("error", (event) => report(event.message + " " + event.filename + ":" + event.lineno));
+addEventListener("unhandledrejection", (event) => report(String(event.reason)));
+</script>
 <script src="draw.js"></script>

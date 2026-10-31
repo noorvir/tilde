@@ -4,4 +4,4 @@
 set -eu
 cd "$(dirname "$0")"
 npm install --silent
-npx esbuild draw.jsx --bundle --minify --loader:.woff2=dataurl --define:process.env.NODE_ENV=\"production\" --outfile=../../Sources/TildeUI/DrawingWeb/draw.js
+npx esbuild draw.jsx --bundle --jsx=automatic --minify --loader:.woff2=dataurl --define:process.env.NODE_ENV=\"production\" --outfile=../../Sources/TildeUI/DrawingWeb/draw.js
