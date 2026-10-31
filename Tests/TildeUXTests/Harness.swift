@@ -201,6 +201,22 @@ final class TildeApp {
         try await Task.sleep(for: .milliseconds(100))
     }
 
+    /// A drag that rests at its end before the release, as a hand does.
+    func slowDrag(from start: CGPoint, to end: CGPoint) async throws {
+        try await drive("mouse", ["type": "move", "x": start.x, "y": start.y])
+        try await Task.sleep(for: .milliseconds(50))
+        try await drive("mouse", ["type": "down", "x": start.x, "y": start.y])
+        for step in 1...8 {
+            let t = CGFloat(step) / 8
+            try await drive("mouse", ["type": "dragged", "x": start.x + (end.x - start.x) * t, "y": start.y + (end.y - start.y) * t])
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        try await Task.sleep(for: .milliseconds(400))
+        try await drive("mouse", ["type": "dragged", "x": end.x, "y": end.y])
+        try await Task.sleep(for: .milliseconds(60))
+        try await drive("mouse", ["type": "up", "x": end.x, "y": end.y])
+    }
+
     func drag(from start: CGPoint, to end: CGPoint) async throws {
         try await drive("mouse", ["type": "drag", "x": start.x, "y": start.y, "toX": end.x, "toY": end.y])
     }

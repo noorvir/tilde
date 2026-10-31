@@ -133,6 +133,7 @@ func modifier(_ name: String, down: Bool) {
     }
     let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
     event?.flags = down ? flag : []
+    currentHeldFlags = down ? flag : []
     event?.post(tap: .cghidEventTap)
 }
 
@@ -236,6 +237,8 @@ func mouse(_ body: [String: Any]) async {
         post(.leftMouseDown, at: point)
     case "up":
         post(.leftMouseUp, at: point)
+    case "dragged":
+        post(.leftMouseDragged, at: point)
     case "click":
         post(.mouseMoved, at: point)
         try? await Task.sleep(for: .milliseconds(70))
@@ -260,8 +263,14 @@ func mouse(_ body: [String: Any]) async {
 }
 
 func post(_ type: CGEventType, at point: CGPoint) {
-    CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
+    let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+    // Explicitly none: posted events otherwise keep the modifiers of the last shortcut.
+    event?.flags = currentHeldFlags
+    event?.post(tap: .cghidEventTap)
 }
+
+/// What `/modifier` holds down now: mouse events carry it, as real ones do.
+nonisolated(unsafe) var currentHeldFlags: CGEventFlags = []
 
 func type(_ text: String) async {
     for character in text {

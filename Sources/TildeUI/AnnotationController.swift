@@ -782,6 +782,8 @@ final class AnnotationController: ObservableObject {
         case .keepDrawing:
             drawingPanel.stopDrawing()
             drawingPanel.setSnapFrame(nil)
+            // The canvas has had the keyboard: Esc and ⌘↩ belong to the overlay again.
+            makeOverlayKey()
         case .closePreview: closePreview()
         case .cancelWindowPick: cancelWindowPick()
         case .keepKeyboard:

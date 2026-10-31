@@ -778,7 +778,7 @@ struct UXSpecs {
     private func report(_ app: TildeApp, _ agent: MCPAgent, session: Substring) async throws -> String {
         try await app.key(.escape)
         try await app.waitToSee("Annotating")
-        try await app.press("Send to Claude Code  ⌘↩")
+        try await app.key(.enter, command: true)
         return try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
     }
 
@@ -830,10 +830,15 @@ struct UXSpecs {
             try await Task.sleep(for: .seconds(3))
             let frame = ChangingWindow.frame
 
-            // The row of text ends 464 points into the window; the end lands near it.
+            // The row of text ends 463 points into the window; the end lands near it.
             try await app.hover(over: CGPoint(x: frame.minX + 458, y: frame.minY + 55))
             try await Task.sleep(for: .milliseconds(400))
-            try await draw(app, from: CGPoint(x: frame.minX + 200, y: frame.minY + 300), to: CGPoint(x: frame.minX + 458, y: frame.minY + 55), comment: "Snapped")
+            try await app.slowDrag(from: CGPoint(x: frame.minX + 200, y: frame.minY + 300), to: CGPoint(x: frame.minX + 458, y: frame.minY + 55))
+            try await app.waitToSee("add", timeout: 15)
+            try await app.type("Snapped")
+            try await app.waitToSee("Snapped", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
 
             // A rectangle, dragged by its border to another place.
             try await app.press("Rectangle")
@@ -843,8 +848,8 @@ struct UXSpecs {
             try await app.drag(from: CGPoint(x: corner.x + 50, y: corner.y), to: CGPoint(x: corner.x + 50, y: corner.y + 100))
             try await Task.sleep(for: .milliseconds(800))
             let text = try await report(app, agent, session: session)
-            #expect(text.contains("\"to\":[464"), "\(text)")
-            #expect(text.contains("\"rect\":[60,250,100,60]"), "\(text)")
+            #expect(text.contains("\"to\":[463"), "\(text)")
+            #expect(text.contains("\"rect\":[60,278,100,60]"), "\(text)")
         }
     }
 

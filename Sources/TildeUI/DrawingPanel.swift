@@ -50,6 +50,7 @@ final class DrawingPanel {
     }
 
     func stopDrawing() {
+        active?.run("deselect()")
         active?.stopDrawing()
     }
 

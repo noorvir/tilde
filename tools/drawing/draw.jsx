@@ -42,6 +42,9 @@ window.tildeDraw = {
   setColor(color) {
     api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });
   },
+  deselect() {
+    api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+  },
   // The element under the pointer, for snapping; nil clears it.
   setSnapFrame(frame) {
     snapFrame = frame;
