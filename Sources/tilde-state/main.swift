@@ -16,6 +16,9 @@ guard arguments.count >= 4, arguments[1] == "render" else {
 }
 
 Task { @MainActor in
+    // Before any view exists: the first state in a process would otherwise get other scrollers,
+    // and so another layout, depending only on the order in which states are drawn.
+    _ = Renderer.fixesScrollerStyle
     let out = URL(fileURLWithPath: arguments[2], isDirectory: true)
     var failed = false
     for path in arguments[3...] {

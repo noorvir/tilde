@@ -8,7 +8,7 @@ enum Renderer {
     /// Overlay scrollers whatever the Mac's scroll bar setting (it follows a connected mouse),
     /// so scroll views have the same width everywhere. SwiftUI reads the class property when
     /// it lays out, so setting the style on the views afterwards is too late.
-    private static let fixesScrollerStyle: Void = {
+    static let fixesScrollerStyle: Void = {
         guard let original = class_getClassMethod(NSScroller.self, #selector(getter: NSScroller.preferredScrollerStyle)),
               let fixed = class_getClassMethod(NSScroller.self, #selector(getter: NSScroller.tildeSnapshotScrollerStyle))
         else {
