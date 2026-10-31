@@ -19,6 +19,9 @@ Task { @MainActor in
     // Before any view exists: the first state in a process would otherwise get other scrollers,
     // and so another layout, depending only on the order in which states are drawn.
     _ = Renderer.fixesScrollerStyle
+    // A first drawing that counts for nothing: the first scroll view of a process lays out
+    // differently from the next ones.
+    _ = try? await Surfaces.warmUp()
     let out = URL(fileURLWithPath: arguments[2], isDirectory: true)
     var failed = false
     for path in arguments[3...] {

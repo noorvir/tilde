@@ -6,6 +6,11 @@ import SwiftUI
 /// Builds the real view of a state and draws it.
 @MainActor
 enum Surfaces {
+    static func warmUp() async throws -> CGImage {
+        let view = ScrollView { Text("Warm up").frame(width: 100, height: 400) }
+        return try await Renderer.render(NSHostingView(rootView: view), size: CGSize(width: 200, height: 200), appearance: .aqua)
+    }
+
     static func image(of state: UIState) async throws -> CGImage {
         let size = state.size.map { CGSize(width: $0[0], height: $0[1]) } ?? .zero
         let appearance: NSAppearance.Name = state.appearance == "light" ? .aqua : .darkAqua
