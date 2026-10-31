@@ -808,6 +808,17 @@ final class AnnotationController: ObservableObject {
                 }
             }
             drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
+            drawingPanel.onPress = { [weak self] point in
+                guard let self, let id = self.noteLabel(at: point) else {
+                    return false
+                }
+                self.preview(id)
+                return true
+            }
+            // Over Tilde's browser, the canvas would cover tools on its toolbar.
+            if isHUDInBrowser {
+                hud.show()
+            }
             let pointer = NSEvent.mouseLocation
             if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
                 drawingPanel.startDrawing(on: screen, tool: drawingTool)
@@ -824,6 +835,9 @@ final class AnnotationController: ObservableObject {
             hover = nil
             if composer == nil {
                 drawingPanel.hide()
+            }
+            if isHUDInBrowser {
+                hud.hide()
             }
             // The canvas has had the keyboard: Esc and ⌘↩ belong to the overlay again.
             makeOverlayKey()
@@ -1126,6 +1140,13 @@ final class AnnotationController: ObservableObject {
     // MARK: - Following elements in other apps
 
     /// Where a note's element is on screen now, or nil while it is out of view or gone.
+    /// The note whose numbered label is at this point.
+    func noteLabel(at point: CGPoint) -> Draft.ID? {
+        let labels = drafts.filter { $0.anchor == nil }.compactMap { draft in noteMarker(draft).map { (draft.id, $0) } }
+            + anchoredNotes.map { ($0.draft.id, $0.marker) }
+        return labels.last { hypot($0.1.x - point.x, $0.1.y - point.y) <= 13 }?.0
+    }
+
     func noteFrame(_ draft: Draft) -> CGRect? {
         if hiddenNotes.contains(draft.id) || contentGoneNotes.contains(draft.id) {
             return nil
@@ -1422,7 +1443,12 @@ final class AnnotationController: ObservableObject {
     /// Notes on the browser's open page, for the overlay to draw like other notes while the
     /// notes panel is hidden; with the panel open, the browser draws them with their cards.
     var pageNotes: [PageNote] {
-        guard !browser.showsNotes, let page = browser.pageFrame?.flipped else {
+        browser.showsNotes ? [] : anchoredNotes
+    }
+
+    /// Notes attached to the page in Tilde's browser, where they are now.
+    private var anchoredNotes: [PageNote] {
+        guard let page = browser.pageFrame?.flipped else {
             return []
         }
         return drafts.enumerated().compactMap { index, draft in
@@ -1889,15 +1915,6 @@ final class AnnotationController: ObservableObject {
             return
         }
         guard allows(point) else {
-            return
-        }
-        if let draft = drafts.last(where: { draft in
-            guard draft.anchor == nil, let marker = noteMarker(draft) else {
-                return false
-            }
-            return hypot(marker.x - point.x, marker.y - point.y) <= 13
-        }) {
-            edit(draft.id)
             return
         }
         if composer != nil {

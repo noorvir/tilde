@@ -667,7 +667,18 @@ final class TestPage {
         server.standardError = FileHandle.nullDevice
         try server.run()
         url = "http://127.0.0.1:\(port)/"
-        Thread.sleep(forTimeInterval: 0.8)
+        // The page must not fail to load because the server is not listening yet.
+        for _ in 0..<50 {
+            let check = Process()
+            check.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+            check.arguments = ["-z", "127.0.0.1", String(port)]
+            try check.run()
+            waitForExit(check)
+            if check.terminationStatus == 0 {
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
     }
 
     func stop() {

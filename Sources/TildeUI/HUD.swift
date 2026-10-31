@@ -265,7 +265,14 @@ struct HUDView: View {
 
     private var floating: some View {
         VStack(spacing: 8) {
-            pill
+            // In Tilde's browser the main bar is on the toolbar, below the canvas.
+            if !controller.isHUDInBrowser {
+                pill
+            }
+            if controller.isDrawing {
+                drawingBar
+                    .transition(.opacity)
+            }
             if controller.isHUDShown, let notice = controller.pauseNotice {
                 PauseToast(notice: notice, controller: controller)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -281,6 +288,7 @@ struct HUDView: View {
         .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: controller.showsList)
+        .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
         .animation(HUDPanel.motion, value: controller.phase)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
@@ -341,11 +349,6 @@ struct HUDView: View {
                     if let confirmation = controller.confirmation, confirmation != .discardComment {
                         HStack(spacing: 4) {
                             confirmContent(confirmation)
-                        }
-                        .transition(.opacity)
-                    } else if controller.isDrawing {
-                        HStack(spacing: 4) {
-                            drawingContent
                         }
                         .transition(.opacity)
                     } else {
@@ -412,14 +415,7 @@ struct HUDView: View {
     ]
 
     private var floatingPill: some View {
-        pillContent
-        .padding(.leading, HUDMetrics.leadingInset)
-        .padding(.trailing, HUDMetrics.trailingInset)
-        .frame(width: pillContentWidth, height: HUDMetrics.height)
-        .clipShape(Capsule())
-        .background(Capsule().fill(Color.tildeInk))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+        capsule(pillContent, width: pillContentWidth)
         // Opening and closing zoom the laid-out pill in and out of its centre. Under the
         // pointer it grows a little to show that it can be dragged; a drag that starts on a
         // button moves the HUD and does not press it.
@@ -432,6 +428,27 @@ struct HUDView: View {
                 .onChanged { _ in onDrag(false) }
                 .onEnded { _ in onDrag(true) }
         )
+    }
+
+    private var drawingBar: some View {
+        capsule(HStack(spacing: 4) { drawingContent }, width: HUDView.width)
+            .opacity(controller.isHUDShown ? 1 : 0)
+            .gesture(
+                DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                    .onChanged { _ in onDrag(false) }
+                    .onEnded { _ in onDrag(true) }
+            )
+    }
+
+    private func capsule(_ content: some View, width: CGFloat?) -> some View {
+        content
+            .padding(.leading, HUDMetrics.leadingInset)
+            .padding(.trailing, HUDMetrics.trailingInset)
+            .frame(width: width, height: HUDMetrics.height)
+            .clipShape(Capsule())
+            .background(Capsule().fill(Color.tildeInk))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
+            .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
     }
 
     @ViewBuilder
@@ -466,8 +483,12 @@ struct HUDView: View {
 
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
-        HUDButton(image: Image(systemName: "pencil.tip"), help: "Draw on the screen") {
-            controller.startDrawing()
+        HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, help: "Draw on the screen") {
+            if controller.isDrawing {
+                controller.finishDrawing()
+            } else {
+                controller.startDrawing()
+            }
         }
 
         HUDButton(image: Image(systemName: "macwindow"), isOn: controller.scope != nil || controller.isPickingWindow, help: windowHelp) {

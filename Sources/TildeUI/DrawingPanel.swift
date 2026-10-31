@@ -23,6 +23,8 @@ final class DrawingPanel {
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
     var onClickAway: () -> Void = {}
+    /// A press, in Quartz screen coordinates. True: it was for something else, such as a label.
+    var onPress: (CGPoint) -> Bool = { _ in false }
     /// The pointer moved, in Quartz screen coordinates.
     var onPointer: (CGPoint) -> Void = { _ in }
 
@@ -47,6 +49,7 @@ final class DrawingPanel {
         canvas.onShape = { [weak self] in self?.onShape() }
         canvas.onEdited = { [weak self] in self?.onEdited() }
         canvas.onClickAway = { [weak self] in self?.onClickAway() }
+        canvas.onPress = { [weak self] in self?.onPress($0) ?? false }
         canvas.onPointer = { [weak self] in self?.onPointer($0) }
         canvas.startDrawing(tool: tool, color: color)
     }
@@ -156,6 +159,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
     var onClickAway: () -> Void = {}
+    var onPress: (CGPoint) -> Bool = { _ in false }
     var onPointer: (CGPoint) -> Void = { _ in }
 
     init(frame: CGRect) {
@@ -341,6 +345,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel.isReleasedWhenClosed = false
         panel.ignoresMouseEvents = true
         panel.setFrame(frame, display: false)
+        panel.onPress = { [weak self] in self?.onPress($0) ?? false }
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(self, name: "tilde")
@@ -357,9 +362,19 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 /// keyboard, and reaches the page once the page has focus. The comment box gets the keyboard
 /// back when the press ends.
 private final class CanvasPanel: FloatingPanel {
+    var onPress: (CGPoint) -> Bool = { _ in false }
     private var heldEvents: [NSEvent]?
+    private var isPressTaken = false
 
     override func sendEvent(_ event: NSEvent) {
+        if isPressTaken {
+            isPressTaken = event.type != .leftMouseUp
+            return
+        }
+        if event.type == .leftMouseDown, onPress(NSEvent.mouseLocation.flipped) {
+            isPressTaken = true
+            return
+        }
         if heldEvents != nil {
             heldEvents?.append(event)
             return

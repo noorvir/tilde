@@ -92,6 +92,8 @@ final class OverlayView: NSView {
             cursor = nil
         } else if controller.isOverPanel(point) || controller.previewID != nil || !controller.allows(point) {
             cursor = .arrow
+        } else if controller.noteLabel(at: point) != nil {
+            cursor = .pointingHand
         } else {
             cursor = .crosshair
         }
@@ -124,9 +126,7 @@ final class OverlayView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let point = screenPoint(event)
         updateCursor(at: point, source: "mouseMoved")
-        let markers = controller.drafts.filter { $0.anchor == nil }.compactMap { draft in controller.noteMarker(draft).map { (draft.id, $0) } }
-            + controller.pageNotes.map { ($0.draft.id, $0.marker) }
-        let marker = markers.last { hypot($0.1.x - point.x, $0.1.y - point.y) <= 13 }?.0
+        let marker = controller.noteLabel(at: point)
         if marker != hoveredMarker {
             hoveredMarker = marker
             needsDisplay = true
@@ -174,6 +174,8 @@ final class OverlayView: NSView {
         let viewPoint = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
         if let rect = dragRect, rect.width >= 8, rect.height >= 8 {
             controller.dragEnded(with: rect)
+        } else if let id = controller.noteLabel(at: point) {
+            controller.preview(id)
         } else if let card = noteCards.last(where: { $0.rect.contains(viewPoint) }) {
             controller.showNoteInPanel(card.id)
         } else {

@@ -818,7 +818,7 @@ struct UXSpecs {
 
     private func report(_ app: TildeApp, _ agent: MCPAgent, session: Substring) async throws -> String {
         try await app.key(.escape)
-        try await app.waitToSee("Annotating")
+        try await app.waitNotToSee("Done, esc")
         try await app.key(.enter, command: true)
         return try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
     }
@@ -935,6 +935,7 @@ struct UXSpecs {
 
             // The shapes went with their comments; the labels stay, and go with the page.
             try await app.key(.escape)
+            try await app.waitNotToSee("Done, esc")
             try await app.waitToSeeText(containing: "2 notes")
             let hud = try await app.waitToSee("Annotating")
             try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
@@ -978,15 +979,28 @@ struct UXSpecs {
             try await app.waitToSee("This row", timeout: 3)
             try await app.key(.enter)
             try await app.waitNotToSee("add")
+            let marker = CGPoint(x: row.frame.minX + 300, y: row.frame.minY)
+
+            // A label opens its note in the preview, also in draw mode, which Esc then keeps.
+            try await app.click(at: marker)
+            try await app.waitToSee("1 of 1")
             try await app.key(.escape)
+            try await app.waitNotToSee("1 of 1")
+            try await app.waitToSee("Done, esc")
+
+            try await app.key(.escape)
+            try await app.waitNotToSee("Done, esc")
             try await app.waitToSeeText(containing: "1 note")
+            try await app.click(at: marker)
+            try await app.waitToSee("1 of 1")
+            try await app.key(.escape)
+            try await app.waitNotToSee("1 of 1")
             let hud = try await app.waitToSee("Annotating")
             try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
 
             func around(_ point: CGPoint) -> CGRect {
                 CGRect(x: point.x - 8, y: point.y - 8, width: 16, height: 16)
             }
-            let marker = CGPoint(x: row.frame.minX + 300, y: row.frame.minY)
             let middle = CGPoint(x: (start.x + tip.x) / 2, y: (start.y + tip.y) / 2)
             try await app.waitForBlue(in: around(marker), atLeast: 20)
             try await app.waitForBlue(in: around(middle), atMost: 0)
@@ -1024,7 +1038,7 @@ struct UXSpecs {
         try await first.press("Rectangle")
         try await draw(first, from: start, to: end, comment: "On the window")
         try await first.key(.escape)
-        try await first.waitToSee("Annotating")
+        try await first.waitNotToSee("Done, esc")
         try await first.waitToSeeText(containing: "1 note")
         let hud = try await first.waitToSee("Annotating")
         try await first.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
@@ -1036,7 +1050,8 @@ struct UXSpecs {
 
         // The window moves, and the label with it. Its element's row ends past the old window.
         try window.show("moved")
-        let beside = CGRect(x: frame.maxX + 5, y: frame.minY, width: 200, height: frame.height)
+        // Above the phone of Device Hub, which is blue too.
+        let beside = CGRect(x: frame.maxX + 5, y: frame.minY, width: 170, height: 170)
         try await first.waitForBlue(in: beside, atLeast: 20)
 
         // Saved with the session: after a crash the note comes back, without the shape.

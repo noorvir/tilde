@@ -774,5 +774,40 @@
    },
    "effects": []
   }
+ },
+ {
+  "name": "Esc closes a preview opened while drawing and draw mode stays",
+  "state": {
+   "drawing": true,
+   "previewOpen": true
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "drawing": true
+   },
+   "effects": [
+    "closePreview"
+   ]
+  }
+ },
+ {
+  "name": "A pause ends draw mode",
+  "state": {
+   "drawing": true
+  },
+  "event": "togglePause",
+  "expect": {
+   "state": {
+    "drawing": false,
+    "paused": true
+   },
+   "effects": [
+    "keepDrawing",
+    "applyPause",
+    "giveKeyboardBack",
+    "takeKeyboard"
+   ]
+  }
  }
 ]

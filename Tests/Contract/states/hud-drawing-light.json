@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    520,
+    130
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "drawing": true,
+  "appearance": "light"
+}

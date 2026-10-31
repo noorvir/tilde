@@ -78,11 +78,11 @@ struct SessionFlow: Codable, Equatable {
             if commentOpen {
                 return confirmation == "discardComment" ? keepWriting() : leaveComment()
             }
-            if drawing {
-                return handle(.finishDrawing)
-            }
             if previewOpen {
                 return [.closePreview]
+            }
+            if drawing {
+                return handle(.finishDrawing)
             }
             if pickingWindow {
                 return [.cancelWindowPick]
@@ -104,12 +104,14 @@ struct SessionFlow: Codable, Equatable {
             if confirmation == "discardComment" {
                 return keepWriting()
             }
+            // The canvas would keep the mouse from the screen that a pause gives back.
+            let finished: [Effect] = drawing ? handle(.finishDrawing) : []
             paused.toggle()
             if !paused {
                 // Annotate pressed on purpose resumes, whatever app was last in front.
                 autoPaused = false
             }
-            return paused ? [.applyPause, .giveKeyboardBack, .takeKeyboard] : [.applyPause, .takeKeyboard]
+            return finished + (paused ? [.applyPause, .giveKeyboardBack, .takeKeyboard] : [.applyPause, .takeKeyboard])
 
         case .resume:
             if paused {
