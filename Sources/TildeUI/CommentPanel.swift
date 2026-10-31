@@ -45,13 +45,6 @@ final class CommentPanel {
         // Attach the content once the panel is key, so the text field can take focus on appear.
         window.contentView = hosting
 
-        // The final size, once SwiftUI has laid out the content.
-        hosting.onSizeChange = { [weak self] size in
-            guard let self, self.window.frame.size != size else {
-                return
-            }
-            self.grow(by: size.height - self.window.frame.height)
-        }
     }
 
     /// Grows downward, keeping the top edge in place, and upward only when the screen ends.
@@ -64,7 +57,10 @@ final class CommentPanel {
         if let visible = (window.screen ?? NSScreen.main)?.visibleFrame, frame.minY < visible.minY {
             frame.origin.y = min(visible.minY, visible.maxY - frame.height)
         }
-        window.setFrame(frame, display: false)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        window.setFrame(frame, display: false, animate: false)
+        CATransaction.commit()
     }
 
     func close() {
@@ -127,12 +123,26 @@ private struct CommentEditor: NSViewRepresentable {
 
     func updateNSView(_ view: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        // The first layout knows the width, so the text of an edited note gets its height.
-        DispatchQueue.main.async {
-            if let text = view.documentView as? NSTextView {
-                context.coordinator.updateHeight(of: text)
-            }
+    }
+
+    /// The width of the text in the box, which never changes.
+    static let width: CGFloat = 320 - 28 - 26 - 8
+
+    /// The height of a text in the box, measured apart from the view on screen.
+    static func height(of text: String) -> CGFloat {
+        let storage = NSTextStorage(string: text.isEmpty ? " " : text, attributes: [.font: font])
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+        manager.ensureLayout(for: container)
+        let line = ceil(manager.defaultLineHeight(for: font))
+        var used = manager.usedRect(for: container).height
+        if text.hasSuffix("\n") {
+            used = max(used, manager.extraLineFragmentRect.maxY)
         }
+        return min(max(line, ceil(used)), maxHeight)
     }
 
     @MainActor
@@ -162,16 +172,14 @@ private struct CommentEditor: NSViewRepresentable {
         }
 
         func updateHeight(of text: NSTextView) {
-            guard let manager = text.layoutManager, let container = text.textContainer else {
-                return
-            }
-            manager.ensureLayout(for: container)
-            let line = ceil(manager.defaultLineHeight(for: CommentEditor.font))
-            let used = max(line, ceil(manager.usedRect(for: container).height))
-            let height = min(used, CommentEditor.maxHeight)
+            let height = CommentEditor.height(of: text.string)
             if parent.height != height {
                 parent.onHeightChange(height - parent.height)
-                parent.height = height
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    parent.height = height
+                }
             }
         }
 
@@ -202,11 +210,22 @@ struct CommentView: View {
     let chip: String
     let isEditing: Bool
     /// "inline" in the box, or "toast" under it: `defaults write dev.tilde.app commentDiscardStyle toast`.
-    var discardStyle = UserDefaults.standard.string(forKey: "commentDiscardStyle") ?? "inline"
+    let discardStyle: String
     /// Called with the change in height just before the box changes size.
-    var onHeightChange: (CGFloat) -> Void = { _ in }
-    @State private var editorHeight = ceil(NSLayoutManager().defaultLineHeight(for: NSFont.systemFont(ofSize: 14)))
-    @State private var isEmpty = true
+    let onHeightChange: (CGFloat) -> Void
+    @State private var editorHeight: CGFloat
+    @State private var isEmpty: Bool
+
+    init(controller: AnnotationController, chip: String, isEditing: Bool, discardStyle: String? = nil, onHeightChange: @escaping (CGFloat) -> Void = { _ in }) {
+        self.controller = controller
+        self.chip = chip
+        self.isEditing = isEditing
+        self.discardStyle = discardStyle ?? UserDefaults.standard.string(forKey: "commentDiscardStyle") ?? "inline"
+        self.onHeightChange = onHeightChange
+        // The right size from the start, so that nothing has to correct it after the first layout.
+        _editorHeight = State(initialValue: CommentEditor.height(of: controller.commentDraft.text))
+        _isEmpty = State(initialValue: controller.commentDraft.text.isEmpty)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -297,7 +316,11 @@ struct CommentView: View {
         .padding(18)
         .environment(\.colorScheme, .dark)
         .onExitCommand { controller.escapePressed() }
-        .onAppear { isEmpty = controller.commentDraft.text.isEmpty }
+        .onChange(of: isAskingToDiscard) { _, isAsking in
+            if discardStyle == "toast" {
+                onHeightChange(isAsking ? 44 : -44)
+            }
+        }
     }
 
     private var isAskingToDiscard: Bool {

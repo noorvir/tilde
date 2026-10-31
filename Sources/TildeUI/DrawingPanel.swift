@@ -18,6 +18,9 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
     private var webView: WKWebView?
     private var openedAt: Date?
     private var isReady = false
+    private var isLoaded = false
+    private var isPreparing = false
+    private var releaseTask: Task<Void, Never>?
     private var pendingTool = "arrow"
     var onEscape: () -> Void = {}
 
@@ -25,14 +28,54 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
         panel?.windowNumber
     }
 
+    /// Loads the canvas ahead of the first drawing, without taking time from the main thread.
+    /// It stays for the next sessions, and goes after some minutes with none.
+    func prepare() {
+        releaseTask?.cancel()
+        guard panel == nil, !isPreparing else {
+            return
+        }
+        isPreparing = true
+        Task { [weak self] in
+            let page = await Task.detached(priority: .utility) { Self.page() }.value
+            guard let self else {
+                return
+            }
+            self.isPreparing = false
+            if self.panel == nil, let page, let screen = NSScreen.main {
+                self.load(page, into: self.makePanel(on: screen))
+            }
+        }
+    }
+
     func startDrawing(on screen: NSScreen, tool: String) {
         pendingTool = tool
         let panel = self.panel ?? makePanel(on: screen)
+        if !isLoaded, let page = Self.page() {
+            load(page, into: panel)
+        }
+        if panel.frame != screen.frame {
+            panel.setFrame(screen.frame, display: false)
+        }
         panel.ignoresMouseEvents = false
         panel.orderFrontRegardless()
         panel.makeKey()
         if isReady {
             setTool(tool)
+        }
+    }
+
+    /// The session ended: its drawings go, and the canvas waits for the next one.
+    func endSession() {
+        panel?.orderOut(nil)
+        panel?.ignoresMouseEvents = true
+        webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.clear()")
+        releaseTask?.cancel()
+        releaseTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(300))
+            if !Task.isCancelled {
+                self?.close()
+            }
         }
     }
 
@@ -46,6 +89,7 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
         webView = nil
         isReady = false
+        isLoaded = false
     }
 
     func setTool(_ tool: String) {
@@ -93,7 +137,14 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
         }
     }
 
-    private static func page() -> String? {
+    private func load(_ page: String, into panel: FloatingPanel) {
+        openedAt = Date()
+        isLoaded = true
+        // One document: scripts from files hide the text of their errors.
+        webView?.loadHTMLString(page, baseURL: URL(string: "https://drawing.tilde.invalid/"))
+    }
+
+    nonisolated private static func page() -> String? {
         func resource(_ name: String, _ type: String) -> String? {
             Bundle.main.url(forResource: name, withExtension: type).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
         }
@@ -121,13 +172,6 @@ final class DrawingPanel: NSObject, WKScriptMessageHandler {
         web.setValue(false, forKey: "drawsBackground")
         web.autoresizingMask = [.width, .height]
         panel.contentView = web
-        if let page = Self.page() {
-            openedAt = Date()
-            // One document: scripts from files hide the text of their errors.
-            web.loadHTMLString(page, baseURL: URL(string: "https://drawing.tilde.invalid/"))
-        } else {
-            log.error("the drawing canvas is not in the app")
-        }
         self.panel = panel
         webView = web
         return panel

@@ -80,6 +80,9 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
     case ("POST", "/window"):
         return json(["png": windowPicture(pid: body["pid"] as? Int ?? 0, title: body["title"] as? String ?? "") as Any])
 
+    case ("POST", "/frames"):
+        return json(["heights": await windowHeights(pid: body["pid"] as? Int ?? 0, width: body["width"] as? Double ?? 0, seconds: body["seconds"] as? Double ?? 1)])
+
     case ("POST", "/press"):
         let pid = pid_t(body["pid"] as? Int ?? 0)
         let name = body["name"] as? String ?? ""
@@ -308,4 +311,24 @@ func screenshot() async -> Data? {
 func json(_ value: [String: Any]) -> HTTPResponse {
     let data = (try? JSONSerialization.data(withJSONObject: value)) ?? Data()
     return HTTPResponse(status: 200, headers: ["Content-Type": "application/json"], body: data)
+}
+
+/// Every height a window of this width and app has, in order, without repeats, read as fast as
+/// the window list allows.
+func windowHeights(pid: Int, width: Double, seconds: Double) async -> [Double] {
+    var heights: [Double] = []
+    let end = Date().addingTimeInterval(seconds)
+    while Date() < end {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        for window in list where window[kCGWindowOwnerPID as String] as? Int == pid {
+            guard let bounds = window[kCGWindowBounds as String] as? NSDictionary, let frame = CGRect(dictionaryRepresentation: bounds), abs(frame.width - width) < 1 else {
+                continue
+            }
+            if heights.last != frame.height {
+                heights.append(frame.height)
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(2))
+    }
+    return heights
 }

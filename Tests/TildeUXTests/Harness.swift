@@ -47,6 +47,7 @@ enum Key: Int {
     case a = 0
     case z = 6
     case v = 9
+    case delete = 51
     case leftBracket = 33
     case rightBracket = 30
 }
@@ -202,6 +203,14 @@ final class TildeApp {
 
     func drag(from start: CGPoint, to end: CGPoint) async throws {
         try await drive("mouse", ["type": "drag", "x": start.x, "y": start.y, "toX": end.x, "toY": end.y])
+    }
+
+    /// The heights a window of this width takes, in order, while `action` runs.
+    func heights(ofWindowWidth width: Double, seconds: Double, during action: () async throws -> Void) async throws -> [Double] {
+        async let reply = drive("frames", ["pid": pid, "width": width, "seconds": seconds])
+        try await Task.sleep(for: .milliseconds(100))
+        try await action()
+        return try await reply["heights"] as? [Double] ?? []
     }
 
     func hover(over point: CGPoint) async throws {

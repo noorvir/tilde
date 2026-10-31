@@ -693,6 +693,48 @@ struct UXSpecs {
         }
     }
 
+    @Test func theCommentBoxStepsToItsNewSizeWithoutFlashing() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            try await app.waitToSee("add")
+            try await Task.sleep(for: .milliseconds(300))
+            let boxWidth = 356.0
+            // New lines only ever grow it.
+            let growing = try await app.heights(ofWindowWidth: boxWidth, seconds: 2) {
+                for _ in 0..<5 {
+                    try await app.key(.enter, shift: true)
+                    try await Task.sleep(for: .milliseconds(150))
+                }
+            }
+            #expect(growing.count >= 3, "\(growing)")
+            #expect(growing == growing.sorted(), "\(growing)")
+            // Deleting lines only ever shrinks it.
+            let shrinking = try await app.heights(ofWindowWidth: boxWidth, seconds: 2) {
+                for _ in 0..<5 {
+                    try await app.key(.delete)
+                    try await Task.sleep(for: .milliseconds(150))
+                }
+            }
+            #expect(shrinking.count >= 3, "\(shrinking)")
+            #expect(shrinking == shrinking.sorted(by: >), "\(shrinking)")
+            // A large paste is one step, and stays inside the limit.
+            let copy = Process()
+            copy.executableURL = URL(fileURLWithPath: "/bin/sh")
+            copy.arguments = ["-c", "yes \"A long line of pasted text\" | head -100 | pbcopy"]
+            try copy.run()
+            waitForExit(copy)
+            let pasting = try await app.heights(ofWindowWidth: boxWidth, seconds: 1) {
+                try await app.key(.v, command: true)
+            }
+            #expect(pasting.count <= 2, "\(pasting)")
+        }
+    }
+
     @Test func pastingALongCommentKeepsTheTopOfTheBoxOnScreen() async throws {
         let window = try ChangingWindow()
         defer { window.close() }

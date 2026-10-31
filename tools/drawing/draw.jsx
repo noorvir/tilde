@@ -16,6 +16,11 @@ window.tildeDraw = {
   setTool(type) {
     api.setActiveTool({ type, locked: true });
   },
+  clear() {
+    api.updateScene({ elements: [] });
+    api.history.clear();
+    sent = 0;
+  },
   undo() {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "z", code: "KeyZ", metaKey: true, bubbles: true }));
   },

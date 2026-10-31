@@ -291,6 +291,7 @@ final class AnnotationController: ObservableObject {
         setScope(nil)
         phase = .annotating
         PageIdentity.askAppsToDescribeWebContent()
+        drawingPanel.prepare()
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
 
         sessionStarted = Date()
@@ -332,6 +333,8 @@ final class AnnotationController: ObservableObject {
         pauseNoticeTimer?.invalidate()
         stopTracking()
         confirmation = nil
+        isDrawing = false
+        drawingPanel.endSession()
         commentPanel.close()
         previewPanel.close()
         previewID = nil
