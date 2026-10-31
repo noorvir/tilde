@@ -37,7 +37,6 @@ struct UIState: Decodable {
     var hudInBrowser: Bool?
     var hover: Bool?
     var editing: Bool?
-    var discardStyle: String?
     var drawing: Bool?
     var commentText: String?
     var preview: Int?

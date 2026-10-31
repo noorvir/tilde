@@ -421,19 +421,6 @@
   }
  },
  {
-  "name": "Clicking away with text saves the note",
-  "state": {
-   "commentOpen": true,
-   "commentHasText": true
-  },
-  "event": "clickAway",
-  "expect": {
-   "effects": [
-    "saveComment"
-   ]
-  }
- },
- {
   "name": "Clicking away from an empty note drops it",
   "state": {
    "commentOpen": true
@@ -454,59 +441,12 @@
   }
  },
  {
-  "name": "Esc on a comment with text asks first",
-  "state": {
-   "commentOpen": true,
-   "commentHasText": true
-  },
-  "event": "escape",
-  "expect": {
-   "state": {
-    "confirmation": "discardComment"
-   },
-   "effects": []
-  }
- },
- {
   "name": "Esc on an empty comment closes it",
   "state": {
    "commentOpen": true
   },
   "event": "escape",
   "expect": {
-   "effects": [
-    "closeComposer"
-   ]
-  }
- },
- {
-  "name": "Esc again keeps writing",
-  "state": {
-   "commentOpen": true,
-   "commentHasText": true,
-   "confirmation": "discardComment"
-  },
-  "event": "escape",
-  "expect": {
-   "state": {
-    "confirmation": null,
-    "commentOpen": true
-   },
-   "effects": []
-  }
- },
- {
-  "name": "Return to the question discards the comment",
-  "state": {
-   "commentOpen": true,
-   "commentHasText": true,
-   "confirmation": "discardComment"
-  },
-  "event": "confirm",
-  "expect": {
-   "state": {
-    "confirmation": null
-   },
    "effects": [
     "closeComposer"
    ]
@@ -521,23 +461,6 @@
     "drawing": true
    },
    "effects": [
-    "showCanvas"
-   ]
-  }
- },
- {
-  "name": "Draw saves a comment being written first",
-  "state": {
-   "commentOpen": true,
-   "commentHasText": true
-  },
-  "event": "startDrawing",
-  "expect": {
-   "state": {
-    "drawing": true
-   },
-   "effects": [
-    "saveComment",
     "showCanvas"
    ]
   }
@@ -585,6 +508,151 @@
    "effects": [
     "keepDrawing"
    ]
+  }
+ },
+ {
+  "name": "Clicking away with text asks and pauses, and saves nothing",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true
+  },
+  "event": "clickAway",
+  "expect": {
+   "state": {
+    "confirmation": "discardComment",
+    "paused": true
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Esc on a comment with text asks and pauses",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": "discardComment",
+    "paused": true
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Draw with a comment with text asks first",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true
+  },
+  "event": "startDrawing",
+  "expect": {
+   "state": {
+    "confirmation": "discardComment",
+    "drawing": false
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Esc to the question keeps writing and resumes",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true,
+   "confirmation": "discardComment",
+   "paused": true
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": null,
+    "paused": false,
+    "commentOpen": true
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Cancel to the question keeps writing and resumes",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true,
+   "confirmation": "discardComment",
+   "paused": true
+  },
+  "event": "dismissConfirmation",
+  "expect": {
+   "state": {
+    "confirmation": null,
+    "paused": false
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Annotate during the question keeps writing and resumes",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true,
+   "confirmation": "discardComment",
+   "paused": true
+  },
+  "event": "togglePause",
+  "expect": {
+   "state": {
+    "confirmation": null,
+    "paused": false
+   },
+   "effects": [
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Return to the question discards and resumes",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true,
+   "confirmation": "discardComment",
+   "paused": true
+  },
+  "event": "confirm",
+  "expect": {
+   "state": {
+    "confirmation": null,
+    "paused": false
+   },
+   "effects": [
+    "closeComposer",
+    "applyPause"
+   ]
+  }
+ },
+ {
+  "name": "Another click during the question changes nothing",
+  "state": {
+   "commentOpen": true,
+   "commentHasText": true,
+   "confirmation": "discardComment",
+   "paused": true
+  },
+  "event": "clickAway",
+  "expect": {
+   "state": {
+    "confirmation": "discardComment"
+   },
+   "effects": []
   }
  }
 ]

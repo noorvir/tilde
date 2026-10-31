@@ -91,6 +91,7 @@ private struct CommentEditor: NSViewRepresentable {
     let onHeightChange: (CGFloat) -> Void
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    let onClick: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -120,6 +121,9 @@ private struct CommentEditor: NSViewRepresentable {
         text.isAutomaticDashSubstitutionEnabled = false
         text.string = draft.text
         text.delegate = context.coordinator
+        text.onClick = { [weak coordinator = context.coordinator] in
+            coordinator?.parent.onClick()
+        }
         scroll.documentView = text
         return scroll
     }
@@ -202,6 +206,13 @@ private struct CommentEditor: NSViewRepresentable {
 }
 
 private final class FocusedTextView: NSTextView {
+    var onClick: () -> Void = {}
+
+    override func mouseDown(with event: NSEvent) {
+        onClick()
+        super.mouseDown(with: event)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.makeFirstResponder(self)
@@ -212,18 +223,15 @@ struct CommentView: View {
     @ObservedObject var controller: AnnotationController
     let chip: String
     let isEditing: Bool
-    /// "inline" in the box, or "toast" under it: `defaults write dev.tilde.app commentDiscardStyle toast`.
-    let discardStyle: String
     /// Called with the change in height just before the box changes size.
     let onHeightChange: (CGFloat) -> Void
     @State private var editorHeight: CGFloat
     @State private var isEmpty: Bool
 
-    init(controller: AnnotationController, chip: String, isEditing: Bool, discardStyle: String? = nil, onHeightChange: @escaping (CGFloat) -> Void = { _ in }) {
+    init(controller: AnnotationController, chip: String, isEditing: Bool, onHeightChange: @escaping (CGFloat) -> Void = { _ in }) {
         self.controller = controller
         self.chip = chip
         self.isEditing = isEditing
-        self.discardStyle = discardStyle ?? UserDefaults.standard.string(forKey: "commentDiscardStyle") ?? "inline"
         self.onHeightChange = onHeightChange
         // The right size from the start, so that nothing has to correct it after the first layout.
         _editorHeight = State(initialValue: CommentEditor.height(of: controller.commentDraft.text))
@@ -258,6 +266,11 @@ struct CommentView: View {
                     controller.submitComment(thenSend: false)
                 } onCancel: {
                     controller.escapePressed()
+                } onClick: {
+                    // A click back in the box answers the question: keep writing.
+                    if isAskingToDiscard {
+                        controller.dismissConfirmation()
+                    }
                 }
                 .frame(height: editorHeight)
                 .overlay(alignment: .topLeading) {
@@ -283,7 +296,7 @@ struct CommentView: View {
                 .help("Add  ↩")
             }
 
-            if isAskingToDiscard, discardStyle != "toast" {
+            if isAskingToDiscard {
                 discardQuestion
             } else {
                 HStack(spacing: 12) {
@@ -304,26 +317,9 @@ struct CommentView: View {
         .background(RoundedRectangle(cornerRadius: 16).fill(Color.tildeInk))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
         .shadow(color: .black.opacity(0.24), radius: 16, y: 6)
-        .overlay(alignment: .bottom) {
-            if isAskingToDiscard, discardStyle == "toast" {
-                discardQuestion
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .frame(width: 320)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.tildeInk))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1)))
-                    .offset(y: 44)
-            }
-        }
-        .padding(.bottom, isAskingToDiscard && discardStyle == "toast" ? 44 : 0)
         .padding(18)
         .environment(\.colorScheme, .dark)
         .onExitCommand { controller.escapePressed() }
-        .onChange(of: isAskingToDiscard) { _, isAsking in
-            if discardStyle == "toast" {
-                onHeightChange(isAsking ? 44 : -44)
-            }
-        }
     }
 
     private var isAskingToDiscard: Bool {

@@ -641,7 +641,6 @@ final class AnnotationController: ObservableObject {
         case .keepDrawing:
             drawingPanel.stopDrawing()
             Task { await addDrawingNote() }
-        case .saveComment: submitComment(thenSend: false)
         case .closePreview: closePreview()
         case .cancelWindowPick: cancelWindowPick()
         case .keepKeyboard:
@@ -1727,6 +1726,7 @@ final class AnnotationController: ObservableObject {
         }
         if composer != nil {
             dispatch(.clickAway)
+            return
         }
         let marker = CGPoint(x: rect.maxX, y: rect.minY)
         let window = scope ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
@@ -1844,6 +1844,9 @@ final class AnnotationController: ObservableObject {
         // The comment being written stays, also when another note is opened.
         if composer != nil {
             dispatch(.clickAway)
+            if composer != nil {
+                return
+            }
         }
         hover = nil
         composer = .edit(id)
@@ -2005,6 +2008,9 @@ final class AnnotationController: ObservableObject {
         }
         if composer != nil {
             dispatch(.clickAway)
+            if composer != nil {
+                return
+            }
         }
         hover = nil
         previewID = id

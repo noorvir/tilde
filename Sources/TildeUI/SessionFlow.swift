@@ -9,7 +9,7 @@ struct SessionFlow: Codable, Equatable {
     }
 
     enum Effect: String, Codable {
-        case applyPause, closeComposer, saveComment, showCanvas, keepDrawing, closePreview, cancelWindowPick
+        case applyPause, closeComposer, showCanvas, keepDrawing, closePreview, cancelWindowPick
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case cancelSession, clearDrafts, restoreDrafts
@@ -53,6 +53,23 @@ struct SessionFlow: Codable, Equatable {
         confirmation = try values.decodeIfPresent(String.self, forKey: .confirmation)
     }
 
+    /// Leaving a comment with text asks first, and pauses, so that the screen can be used
+    /// meanwhile; the comment waits. An empty comment just goes.
+    private mutating func leaveComment() -> [Effect] {
+        guard commentHasText else {
+            return [.closeComposer]
+        }
+        confirmation = "discardComment"
+        paused = true
+        return [.applyPause]
+    }
+
+    private mutating func keepWriting() -> [Effect] {
+        confirmation = nil
+        paused = false
+        return [.applyPause]
+    }
+
     mutating func handle(_ event: Event) -> [Effect] {
         switch event {
         case .escape:
@@ -60,16 +77,7 @@ struct SessionFlow: Codable, Equatable {
                 return handle(.finishDrawing)
             }
             if commentOpen {
-                // Esc on a comment with text asks first, and Esc again keeps writing.
-                if confirmation == "discardComment" {
-                    confirmation = nil
-                    return []
-                }
-                if commentHasText {
-                    confirmation = "discardComment"
-                    return []
-                }
-                return [.closeComposer]
+                return confirmation == "discardComment" ? keepWriting() : leaveComment()
             }
             if previewOpen {
                 return [.closePreview]
@@ -90,6 +98,9 @@ struct SessionFlow: Codable, Equatable {
         case .togglePause:
             guard isAnnotating else {
                 return []
+            }
+            if confirmation == "discardComment" {
+                return keepWriting()
             }
             paused.toggle()
             if !paused {
@@ -136,11 +147,16 @@ struct SessionFlow: Codable, Equatable {
             switch asked {
             case "clearAll": return [.clearDrafts]
             case "cancelSession": return [.cancelSession]
-            case "discardComment": return [.closeComposer]
+            case "discardComment":
+                paused = false
+                return [.closeComposer, .applyPause]
             default: return [.restoreDrafts]
             }
 
         case .dismissConfirmation:
+            if confirmation == "discardComment" {
+                return keepWriting()
+            }
             confirmation = nil
             return []
 
@@ -163,8 +179,11 @@ struct SessionFlow: Codable, Equatable {
             guard isAnnotating, !drawing else {
                 return []
             }
-            // Open things are finished first, and nothing written is lost.
-            var effects: [Effect] = commentOpen ? (commentHasText ? [.saveComment] : [.closeComposer]) : []
+            // A comment with text asks first, like leaving it any other way.
+            if commentOpen, commentHasText {
+                return leaveComment()
+            }
+            var effects: [Effect] = commentOpen ? [.closeComposer] : []
             if previewOpen {
                 effects.append(.closePreview)
             }
@@ -179,11 +198,10 @@ struct SessionFlow: Codable, Equatable {
             return [.keepDrawing]
 
         case .clickAway:
-            // What was written is never lost by a click; an empty note is not worth keeping.
-            guard commentOpen else {
+            guard commentOpen, confirmation != "discardComment" else {
                 return []
             }
-            return commentHasText ? [.saveComment] : [.closeComposer]
+            return leaveComment()
 
         case .otherAppInFront:
             guard !autoPaused else {

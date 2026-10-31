@@ -660,36 +660,45 @@ struct UXSpecs {
             try await app.waitToSee("Annotating")
             let frame = ChangingWindow.frame
 
-            // Clicking away keeps the note.
+            // Clicking away with text asks, and pauses so that the screen can be used.
             try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
             try await app.waitToSee("add")
             try await app.type("Keep me")
             try await app.waitToSee("Keep me", timeout: 3)
             try await app.click(at: CGPoint(x: frame.maxX + 100, y: frame.maxY + 100))
-            try await app.waitToSeeText(containing: "1 note")
+            try await app.waitToSee("Discard comment?")
+            try await app.waitToSee("Paused")
+            try await app.waitNotToSee("1 note", timeout: 1)
 
-            // Clicking away from an empty box adds nothing.
-            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 123))
-            try await app.waitToSee("add")
-            try await app.click(at: CGPoint(x: frame.maxX + 100, y: frame.maxY + 100))
-            try await app.waitNotToSee("add")
-            try await app.waitToSeeText(containing: "1 note")
+            // A click back in the box keeps writing and annotating.
+            let box = try await app.waitToSee("Keep me")
+            try await app.click(at: CGPoint(x: box.frame.midX, y: box.frame.midY))
+            try await app.waitNotToSee("Discard comment?")
+            try await app.waitToSee("Annotating")
+            try await app.type(" too")
+            try await app.waitToSee("Keep me too", timeout: 3)
 
-            // Esc on text asks; Esc again keeps writing; Return discards.
-            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 123))
-            try await app.waitToSee("add")
-            try await app.type("Maybe")
-            try await app.waitToSee("Maybe", timeout: 3)
+            // So does Esc to the question.
             try await app.key(.escape)
             try await app.waitToSee("Discard comment?")
             try await app.key(.escape)
             try await app.waitNotToSee("Discard comment?")
-            try await app.waitToSee("Maybe")
+            try await app.waitToSee("Annotating")
+            try await app.waitToSee("Keep me too")
+
+            // Return to the question discards.
             try await app.key(.escape)
             try await app.waitToSee("Discard comment?")
             try await app.key(.enter)
-            try await app.waitNotToSee("Maybe")
-            try await app.waitToSeeText(containing: "1 note")
+            try await app.waitNotToSee("Keep me too")
+            try await app.waitToSee("Annotating")
+
+            // Clicking away from an empty box just closes it.
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 123))
+            try await app.waitToSee("add")
+            try await app.click(at: CGPoint(x: frame.maxX + 100, y: frame.maxY + 100))
+            try await app.waitNotToSee("add")
+            try await app.waitNotToSee("Discard comment?", timeout: 1)
         }
     }
 
