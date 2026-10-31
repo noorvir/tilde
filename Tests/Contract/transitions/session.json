@@ -757,5 +757,22 @@
     "closeComposer"
    ]
   }
+ },
+ {
+  "name": "No new shape while a comment is open",
+  "state": {
+   "drawing": true,
+   "commentOpen": true,
+   "commentIsOnDrawing": true
+  },
+  "event": "shapeFinished",
+  "expect": {
+   "state": {
+    "drawing": true,
+    "commentOpen": true,
+    "commentIsOnDrawing": true
+   },
+   "effects": []
+  }
  }
 ]

@@ -6,6 +6,11 @@ import { createRoot } from "react-dom/client";
 
 let api = null;
 const taken = new Set();
+let drawingTool = "arrow";
+// The shapes being edited while their comment is open; nothing else can change meanwhile.
+let editing = null;
+let isWaitingForEdit = false;
+let isPressOnShape = false;
 const post = (message) => window.webkit?.messageHandlers?.tilde?.postMessage(message);
 
 function live() {
@@ -37,7 +42,24 @@ function describe(element) {
 
 window.tildeDraw = {
   setTool(type) {
-    api.setActiveTool({ type, locked: true });
+    drawingTool = type;
+    if (!editing) api.setActiveTool({ type, locked: true });
+  },
+  // Only these shapes can change, with the handles of the selection tool, and no shape can be drawn.
+  editShapes(ids) {
+    isWaitingForEdit = false;
+    editing = new Set(ids);
+    changeElements(live().filter((element) => !editing.has(element.id)).map((element) => element.id), () => ({ locked: true }));
+    api.setActiveTool({ type: "selection" });
+    selectEdited();
+  },
+  endEditing() {
+    isWaitingForEdit = false;
+    if (!editing) return;
+    editing = null;
+    changeElements(live().map((element) => element.id), () => ({ locked: false }));
+    api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+    api.setActiveTool({ type: drawingTool, locked: true });
   },
   setColor(color) {
     api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });
@@ -54,6 +76,8 @@ window.tildeDraw = {
     return JSON.stringify(live().filter((element) => wanted.has(element.id)).map(describe));
   },
   clear() {
+    editing = null;
+    isWaitingForEdit = false;
     taken.clear();
     api.updateScene({ elements: [], captureUpdate: "NEVER" });
     api.history.clear();
@@ -141,8 +165,42 @@ window.addEventListener("pointermove", (event) => {
   }
 }, true);
 
+function selectEdited() {
+  const element = live().find((candidate) => editing.has(candidate.id));
+  const selectedLinearElement = element?.type === "arrow" ? new globalThis.TildeLinearElementEditor(element) : null;
+  const selectedElementIds = Object.fromEntries([...editing].map((id) => [id, true]));
+  api.updateScene({ appState: { selectedElementIds, selectedLinearElement }, captureUpdate: "NEVER" });
+}
+
+function distanceToSegment(x, y, [ax, ay], [bx, by]) {
+  const lengthSquared = (bx - ax) ** 2 + (by - ay) ** 2;
+  const along = lengthSquared ? Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / lengthSquared)) : 0;
+  return Math.hypot(x - ax - along * (bx - ax), y - ay - along * (by - ay));
+}
+
+// Whether a press at this point belongs to the shapes being edited, with room for their handles.
+function isOnEditedShape(x, y) {
+  const reach = 18;
+  return live().filter((element) => editing.has(element.id)).some((element) => {
+    if (element.type === "arrow") {
+      const points = element.points.map(([px, py]) => [element.x + px, element.y + py]);
+      return points.slice(1).some((point, index) => distanceToSegment(x, y, points[index], point) <= reach);
+    }
+    const xs = element.points?.map(([px]) => element.x + px) ?? [element.x, element.x + element.width];
+    const ys = element.points?.map(([, py]) => element.y + py) ?? [element.y, element.y + element.height];
+    return x >= Math.min(...xs) - reach && x <= Math.max(...xs) + reach && y >= Math.min(...ys) - reach && y <= Math.max(...ys) + reach;
+  });
+}
+
 window.addEventListener("pointerdown", (event) => {
   startSnap = snapPoint(event.clientX, event.clientY, event);
+  isPressOnShape = true;
+  if (isWaitingForEdit || (editing && !isOnEditedShape(event.clientX, event.clientY))) {
+    isPressOnShape = false;
+    event.stopPropagation();
+    event.preventDefault();
+    if (editing) post("clickAway");
+  }
 }, true);
 
 function linePoints(start, end) {
@@ -178,19 +236,25 @@ function snapSelectedArrow(event) {
   const start = { x: element.x, y: element.y };
   const stop = { x: element.x + last[0], y: element.y + last[1] };
   const nearStart = Math.hypot(start.x - end.x, start.y - end.y) < Math.hypot(stop.x - end.x, stop.y - end.y);
+  // A snap is for an end that was dragged, not for an arrow moved as a whole.
+  if (Math.min(Math.hypot(start.x - end.x, start.y - end.y), Math.hypot(stop.x - end.x, stop.y - end.y)) > snapDistance * 2) return;
   changeElements([element.id], () => (nearStart ? linePoints(end, stop) : linePoints(start, end)));
 }
 
 window.addEventListener("pointerup", (event) => {
+  if (!isPressOnShape) return;
   ring.style.display = "none";
   // After Excalidraw has finished the shape.
   setTimeout(() => {
     const fresh = live().filter((element) => !taken.has(element.id));
     if (fresh.length) {
       snapNewShape(fresh[fresh.length - 1], event);
+      isWaitingForEdit = true;
       post("shape");
     } else if (api.getAppState().activeTool.type === "selection") {
       snapSelectedArrow(event);
+      // A press beside the handles clears the selection; the shape stays in edit mode.
+      if (editing && !api.getAppState().selectedElementIds[[...editing][0]]) selectEdited();
       post("edited");
     }
   }, 0);

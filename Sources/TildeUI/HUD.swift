@@ -219,7 +219,7 @@ final class HUDPanel {
 }
 
 /// Borderless panel that can take keyboard focus without activating other windows.
-final class FloatingPanel: NSPanel {
+class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
     override func sendEvent(_ event: NSEvent) {

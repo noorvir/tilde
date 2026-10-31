@@ -59,9 +59,9 @@ enum Composer {
 }
 
 struct Pending {
-    let target: Target
-    let frame: CGRect
-    let marker: CGPoint
+    var target: Target
+    var frame: CGRect
+    var marker: CGPoint
     let chip: String
     let capture: Task<Captures, Never>
     var anchor: PageAnchor?
@@ -73,6 +73,8 @@ struct Pending {
     var pictureArea: CGRect?
     var drawingIDs: [String] = []
     var drawnWindowOrigin: CGPoint?
+    /// The shape changed after its picture was taken.
+    var isDrawingEdited = false
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -560,6 +562,9 @@ final class AnnotationController: ObservableObject {
     func setDrawingTool(_ tool: String) {
         drawingTool = tool
         drawingPanel.setTool(tool)
+        if composer != nil {
+            commentPanel.focus()
+        }
     }
 
     /// For the contract: the HUD while drawing.
@@ -571,6 +576,7 @@ final class AnnotationController: ObservableObject {
     /// with the drawing on them. Nothing drawn: nothing happens.
     private func addDrawingNote() async {
         guard let drawing = await drawingPanel.takeNewShapes(), !drawing.ids.isEmpty else {
+            drawingPanel.endEditing()
             if isDrawing {
                 drawingPanel.resumeDrawing()
             }
@@ -579,17 +585,44 @@ final class AnnotationController: ObservableObject {
         undoneDrawings = []
         let center = CGPoint(x: drawing.bounds.midX, y: drawing.bounds.midY)
         let window = scope ?? picker.window(at: center)
-        let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
         let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped
         let area = window?.frame ?? screen ?? drawing.bounds
-        async let image = ScreenCapture.png(of: area, outline: nil, keeping: keeping, maxSide: 1600)
-        async let wholeScreen = ScreenCapture.png(of: screen ?? area, outline: nil, keeping: keeping, maxSide: 2048)
-        let captures = await Captures(image: image, contextImage: wholeScreen)
+        let captures = await drawingCaptures(of: drawing.bounds, in: window?.frame)
         openComposer(
             target: .drawing(shapes: DrawingShapes.encode(drawing.shapes, origin: area.origin)), frame: drawing.bounds,
             marker: CGPoint(x: drawing.bounds.maxX, y: drawing.bounds.minY), chip: "Drawing", outline: nil, window: window, captures: captures,
             drawingIDs: drawing.ids
         )
+        drawingPanel.editShapes(drawing.ids)
+    }
+
+    /// The window (or else the screen) and the whole screen, with the drawings on them.
+    private func drawingCaptures(of bounds: CGRect, in windowFrame: CGRect?) async -> Captures {
+        let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
+        async let image = ScreenCapture.png(of: windowFrame ?? screen, outline: nil, keeping: keeping, maxSide: 1600)
+        async let wholeScreen = ScreenCapture.png(of: screen, outline: nil, keeping: keeping, maxSide: 2048)
+        return await Captures(image: image, contextImage: wholeScreen)
+    }
+
+    /// The shape of the open comment changed: the comment goes with it. Its picture waits for
+    /// the end of the edit, without the handles.
+    private func updatePendingDrawing(_ ids: [String]) async {
+        let shapes = await drawingPanel.shapes(ids)
+        guard !shapes.isEmpty, case .new(var pending) = composer, pending.drawingIDs == ids, case .drawing(let old) = pending.target else {
+            return
+        }
+        let bounds = DrawingShapes.bounds(of: shapes)
+        pending.target = .drawing(shapes: DrawingShapes.encode(shapes, origin: DrawingShapes.origin(of: old)))
+        pending.frame = bounds
+        pending.marker = CGPoint(x: bounds.maxX, y: bounds.minY)
+        pending.isDrawingEdited = true
+        if let window = pending.sourceWindow {
+            pending.fingerprint = Task { await NoteFingerprint.capture(window: CGWindowID(window), area: bounds) }
+        }
+        composer = .new(pending)
+        commentPanel.follow(near: pending.marker, below: bounds)
     }
 
     func undoDrawing() {
@@ -603,6 +636,9 @@ final class AnnotationController: ObservableObject {
     func setDrawingColor(_ color: String) {
         drawingColor = color
         drawingPanel.setColor(color)
+        if composer != nil {
+            commentPanel.focus()
+        }
     }
 
     /// A shape undone in draw mode goes with its note, and can come back.
@@ -627,8 +663,12 @@ final class AnnotationController: ObservableObject {
 
     /// Shapes were moved or reshaped: their notes get the new shapes and pictures.
     private func updateEditedDrawings() {
+        if case .new(let pending) = composer, !pending.drawingIDs.isEmpty {
+            Task { await updatePendingDrawing(pending.drawingIDs) }
+            return
+        }
+
         let notes = drafts.filter { !$0.drawingIDs.isEmpty }
-        let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
         Task {
             for note in notes {
                 let shapes = await drawingPanel.shapes(note.drawingIDs)
@@ -636,20 +676,22 @@ final class AnnotationController: ObservableObject {
                     continue
                 }
                 let bounds = DrawingShapes.bounds(of: shapes)
-                let origin = (try? JSONSerialization.jsonObject(with: Data(old.utf8)) as? [String: Any])?["origin"] as? [Double] ?? [0, 0]
-                let text = DrawingShapes.encode(shapes, origin: CGPoint(x: origin[0], y: origin[1]))
+                let text = DrawingShapes.encode(shapes, origin: DrawingShapes.origin(of: old))
                 guard text != old, let index = drafts.firstIndex(where: { $0.id == note.id }) else {
                     continue
                 }
-                let center = CGPoint(x: bounds.midX, y: bounds.midY)
-                let area = note.sourceWindow.flatMap { windowFrames[$0] } ?? NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
-                async let image = ScreenCapture.png(of: area, outline: nil, keeping: keeping, maxSide: 1600)
-                async let context = ScreenCapture.png(of: NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? area, outline: nil, keeping: keeping, maxSide: 2048)
+                let captures = await drawingCaptures(of: bounds, in: note.sourceWindow.flatMap { windowFrames[$0] })
                 let current = drafts[index].annotation
-                drafts[index].annotation = await Annotation(
-                    id: current.id, comment: current.comment, target: .drawing(shapes: text), frame: bounds, image: image, contextImage: context
+                drafts[index].annotation = Annotation(
+                    id: current.id, comment: current.comment, target: .drawing(shapes: text), frame: bounds,
+                    image: captures.image, contextImage: captures.contextImage
                 )
                 drafts[index].marker = CGPoint(x: bounds.maxX, y: bounds.minY)
+                // What it is compared with covers the new area.
+                if let window = note.sourceWindow {
+                    drafts[index].fingerprint = Task { await NoteFingerprint.capture(window: CGWindowID(window), area: bounds) }
+                    visibilities[note.id] = nil
+                }
                 trackedFrames[note.id] = bounds
             }
         }
@@ -768,6 +810,13 @@ final class AnnotationController: ObservableObject {
             drawingPanel.onEscape = { [weak self] in self?.escapePressed() }
             drawingPanel.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
             drawingPanel.onEdited = { [weak self] in self?.updateEditedDrawings() }
+            drawingPanel.onClickAway = { [weak self] in
+                self?.dispatch(.clickAway)
+                // The click gave the canvas the keyboard; a question in the comment box needs it.
+                if self?.composer != nil {
+                    self?.commentPanel.focus()
+                }
+            }
             drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
             let pointer = NSEvent.mouseLocation
             if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
@@ -777,9 +826,9 @@ final class AnnotationController: ObservableObject {
         case .undoShape: undoLastDrawing()
         case .redoShape: redoLastDrawing()
         case .openShapeComment:
-            drawingPanel.letMouseThrough()
             Task { await addDrawingNote() }
         case .keepDrawing:
+            drawingPanel.endEditing()
             drawingPanel.stopDrawing()
             drawingPanel.setSnapFrame(nil)
             // The canvas has had the keyboard: Esc and ⌘↩ belong to the overlay again.
@@ -983,14 +1032,18 @@ final class AnnotationController: ObservableObject {
         let frame: CGRect
         let fingerprint: Task<NoteFingerprint?, Never>
         let page: Task<PageIdentity?, Never>?
+        let isDrawing: Bool
     }
 
     /// How much a note's content is on screen: the page's identity decides when it can, and
     /// the picture of the note's area otherwise. Nil when neither can be read.
     nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> Double? {
-        if let original = await check.page?.value, let isSame = now?.isSamePage(as: original) {
-            return isSame ? 1 : 0
+        if let original = await check.page?.value, let isSame = now?.isSamePage(as: original),
+           let similarity = NoteVisibility.similarity(isSamePage: isSame, isDrawing: check.isDrawing)
+        {
+            return similarity
         }
+
         guard let original = await check.fingerprint.value,
               let now = await NoteFingerprint.capture(window: CGWindowID(check.window), area: check.frame, windowFrame: check.windowFrame)
         else {
@@ -1028,7 +1081,8 @@ final class AnnotationController: ObservableObject {
             }
             return ContentCheck(
                 id: draft.id, window: window, windowFrame: windowFrames[window], pid: draft.sourcePID,
-                frame: draft.pictureArea ?? trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint: fingerprint, page: draft.page
+                frame: draft.pictureArea ?? trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint: fingerprint, page: draft.page,
+                isDrawing: !draft.drawingIDs.isEmpty
             )
         }
         guard !checks.isEmpty else {
@@ -2021,8 +2075,17 @@ final class AnnotationController: ObservableObject {
 
         case .new(let pending):
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
+            var capture = pending.capture
+            if pending.isDrawingEdited {
+                let windowFrame = pending.sourceWindow.flatMap { windowFrames[$0] }
+                capture = Task {
+                    // The canvas has to paint without the handles first.
+                    try? await Task.sleep(for: .milliseconds(100))
+                    return await drawingCaptures(of: pending.frame, in: windowFrame)
+                }
+            }
             drafts.append(Draft(
-                annotation: annotation, marker: pending.marker, chip: pending.chip, capture: pending.capture, anchor: pending.anchor,
+                annotation: annotation, marker: pending.marker, chip: pending.chip, capture: capture, anchor: pending.anchor,
                 sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea,
                 drawingIDs: pending.drawingIDs, drawnWindowOrigin: pending.drawnWindowOrigin
             ))
@@ -2033,7 +2096,7 @@ final class AnnotationController: ObservableObject {
                 startTracking()
             }
             Task {
-                let captures = await pending.capture.value
+                let captures = await capture.value
                 guard let index = drafts.firstIndex(where: { $0.id == annotation.id }) else {
                     return
                 }
@@ -2080,6 +2143,7 @@ final class AnnotationController: ObservableObject {
     private func hideComposer() {
         composer = nil
         commentPanel.close()
+        drawingPanel.endEditing()
         if isDrawing {
             drawingPanel.resumeDrawing()
             return

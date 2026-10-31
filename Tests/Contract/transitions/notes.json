@@ -168,5 +168,56 @@
     "isVisible": true
    }
   }
+ },
+ {
+  "name": "A drawing hides on another page",
+  "isDrawing": true,
+  "original": {
+   "url": "https://x.com/a",
+   "title": "T"
+  },
+  "page": {
+   "url": "https://x.com/b",
+   "title": "T"
+  },
+  "expect": {
+   "samePage": false,
+   "hides": true,
+   "pictureDecides": false
+  }
+ },
+ {
+  "name": "A drawing on the same address: the picture decides",
+  "isDrawing": true,
+  "original": {
+   "url": "https://x.com/a",
+   "title": "T"
+  },
+  "page": {
+   "url": "https://x.com/a",
+   "title": "T"
+  },
+  "expect": {
+   "samePage": true,
+   "hides": false,
+   "pictureDecides": true
+  }
+ },
+ {
+  "name": "A note on the same address stays",
+  "isDrawing": false,
+  "original": {
+   "url": "https://x.com/a",
+   "title": "T"
+  },
+  "page": {
+   "url": "https://x.com/a",
+   "title": "T"
+  },
+  "expect": {
+   "samePage": true,
+   "hides": false,
+   "pictureDecides": false
+  }
  }
 ]

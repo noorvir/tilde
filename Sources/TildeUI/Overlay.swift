@@ -237,7 +237,9 @@ final class OverlayView: NSView {
             } else {
                 isRegion = false
             }
-            drawRect(rect, fill: blue.withAlphaComponent(0.08), stroke: blue, dashed: isRegion)
+            if pending.drawingIDs.isEmpty {
+                drawRect(rect, fill: blue.withAlphaComponent(0.08), stroke: blue, dashed: isRegion)
+            }
             drawMarker(controller.drafts.count + 1, at: pending.marker)
         }
 
@@ -294,7 +296,7 @@ final class OverlayView: NSView {
         noteCards = []
         for note in notes {
             // Once made, a note is only its number; its box shows on hover or selection.
-            if hoveredMarker == note.draft.id || controller.browser.selectedNote == note.draft.id {
+            if note.draft.drawingIDs.isEmpty, hoveredMarker == note.draft.id || controller.browser.selectedNote == note.draft.id {
                 drawNote(note.draft, frame: note.frame.offsetBy(dx: -origin.x, dy: -origin.y))
             }
             drawMarker(note.number, at: note.marker)

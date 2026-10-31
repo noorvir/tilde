@@ -22,6 +22,7 @@ final class DrawingPanel {
     var onEscape: () -> Void = {}
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
+    var onClickAway: () -> Void = {}
     /// The pointer moved, in Quartz screen coordinates.
     var onPointer: (CGPoint) -> Void = { _ in }
 
@@ -45,6 +46,7 @@ final class DrawingPanel {
         canvas.onEscape = { [weak self] in self?.onEscape() }
         canvas.onShape = { [weak self] in self?.onShape() }
         canvas.onEdited = { [weak self] in self?.onEdited() }
+        canvas.onClickAway = { [weak self] in self?.onClickAway() }
         canvas.onPointer = { [weak self] in self?.onPointer($0) }
         canvas.startDrawing(tool: tool, color: color)
     }
@@ -63,9 +65,13 @@ final class DrawingPanel {
         active?.setColor(color)
     }
 
-    /// The mouse goes through while the comment of a shape is open.
-    func letMouseThrough() {
-        active?.stopDrawing()
+    /// While the comment of a shape is open, the canvas edits that shape and draws nothing new.
+    func editShapes(_ ids: [String]) {
+        active?.run("editShapes(\(Self.json(ids)))")
+    }
+
+    func endEditing() {
+        active?.run("endEditing()")
     }
 
     func resumeDrawing() {
@@ -172,6 +178,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     var onEscape: () -> Void = {}
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
+    var onClickAway: () -> Void = {}
     var onPointer: (CGPoint) -> Void = { _ in }
 
     init(frame: CGRect) {
@@ -327,6 +334,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             onShape()
         case "edited":
             onEdited()
+        case "clickAway":
+            onClickAway()
         case let text as String where text.hasPrefix("pointer:"):
             let values = text.dropFirst(8).split(separator: ",").compactMap { Double($0) }
             if values.count == 2 {
@@ -360,7 +369,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     }
 
     private func makePanel() {
-        let panel = FloatingPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let panel = CanvasPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = NSWindow.Level(rawValue: OverlayWindow.overlayLevel.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         panel.backgroundColor = .clear
@@ -378,6 +387,38 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel.contentView = web
         self.panel = panel
         webView = web
+    }
+}
+
+/// Excalidraw ignores a press on a page without focus, so a press first gives the canvas the
+/// keyboard, and reaches the page once the page has focus. The comment box gets the keyboard
+/// back when the press ends.
+private final class CanvasPanel: FloatingPanel {
+    private var heldEvents: [NSEvent]?
+
+    override func sendEvent(_ event: NSEvent) {
+        if heldEvents != nil {
+            heldEvents?.append(event)
+            return
+        }
+        guard event.type == .leftMouseDown, !isKeyWindow else {
+            super.sendEvent(event)
+            return
+        }
+        makeKey()
+        heldEvents = [event]
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(60))
+            self?.sendHeldEvents()
+        }
+    }
+
+    private func sendHeldEvents() {
+        let events = heldEvents ?? []
+        heldEvents = nil
+        for event in events {
+            super.sendEvent(event)
+        }
     }
 }
 
@@ -410,6 +451,15 @@ enum DrawingShapes {
             shape["points"] = points.compactMap(point)
         }
         return shape
+    }
+
+    /// The origin of `encode`.
+    static func origin(of text: String) -> CGPoint {
+        let object = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any]
+        guard let origin = object?["origin"] as? [NSNumber], origin.count == 2 else {
+            return .zero
+        }
+        return CGPoint(x: origin[0].doubleValue, y: origin[1].doubleValue)
     }
 
     static func bounds(of shapes: [[String: Any]]) -> CGRect {

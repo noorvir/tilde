@@ -106,6 +106,15 @@ struct NoteVisibility: Equatable, Codable {
     private(set) var isVisible = true
     private var readings = 0
 
+    /// What a page identity says about a note's content; nil when the picture decides. A drawing
+    /// is on what it was drawn over, which can change on the same address or title.
+    static func similarity(isSamePage: Bool, isDrawing: Bool) -> Double? {
+        if !isSamePage {
+            return 0
+        }
+        return isDrawing ? nil : 1
+    }
+
     /// Takes a new similarity and returns whether the note shows.
     mutating func update(similarity: Double) -> Bool {
         let wantsChange = isVisible ? similarity < Self.hideBelow : similarity > Self.showAbove

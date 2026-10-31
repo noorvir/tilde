@@ -27,9 +27,29 @@ final class CommentPanel {
             self?.grow(by: change)
         }
         let size = NSHostingView(rootView: view).fittingSize
+        let origin = Self.origin(size: size, near: marker, below: target)
         // At the top of the window: when the window has grown and the content not yet, the
         // content stays where it is. Centred, it would jump up for one frame.
         let hosting = FittingHostingView(rootView: view.frame(maxHeight: .infinity, alignment: .top))
+
+        window.setFrame(NSRect(origin: origin, size: size), display: false)
+        window.makeKeyAndOrderFront(nil)
+        // Attach the content once the panel is key, so the text field can take focus on appear.
+        window.contentView = hosting
+
+    }
+
+    /// The open comment goes along with its target, and has the keyboard.
+    func follow(near marker: CGPoint, below target: CGRect) {
+        window.setFrameOrigin(Self.origin(size: window.frame.size, near: marker, below: target))
+        focus()
+    }
+
+    func focus() {
+        window.makeKey()
+    }
+
+    private static func origin(size: CGSize, near marker: CGPoint, below target: CGRect) -> NSPoint {
         let anchor = marker.flipped
         let screen = NSScreen.screens.first { $0.frame.contains(anchor) } ?? NSScreen.screens[0]
         let visible = screen.visibleFrame
@@ -42,12 +62,7 @@ final class CommentPanel {
         }
         origin.x = min(max(origin.x, visible.minX), visible.maxX - size.width)
         origin.y = min(max(origin.y, visible.minY), visible.maxY - size.height)
-
-        window.setFrame(NSRect(origin: origin, size: size), display: false)
-        window.makeKeyAndOrderFront(nil)
-        // Attach the content once the panel is key, so the text field can take focus on appear.
-        window.contentView = hosting
-
+        return origin
     }
 
     /// Grows downward, keeping the top edge in place, and upward only when the screen ends.

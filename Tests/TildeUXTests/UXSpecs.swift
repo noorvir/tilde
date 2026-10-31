@@ -853,6 +853,74 @@ struct UXSpecs {
         }
     }
 
+    @Test func aShapeIsEditedWhileItsCommentIsOpenAndHidesOnAnotherPage() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
+            let started = try await agent.call("start_annotation", ["wait_seconds": 0])
+            let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
+            try await app.waitToSee("Annotating")
+            try await app.press("Draw on the screen")
+            try await app.waitToSee("Done, esc")
+            try await Task.sleep(for: .seconds(3))
+            let frame = ChangingWindow.frame
+            let start = CGPoint(x: frame.minX + 200, y: frame.minY + 200)
+            let end = CGPoint(x: frame.minX + 300, y: frame.minY + 300)
+
+            // The comment opens on release, and the arrow's end can be dragged at once.
+            try await app.slowDrag(from: start, to: end)
+            try await app.waitToSee("add", timeout: 15)
+            try await Task.sleep(for: .milliseconds(500))
+            try await app.slowDrag(from: start, to: CGPoint(x: frame.minX + 120, y: frame.minY + 240))
+            try await Task.sleep(for: .milliseconds(500))
+
+            // The comment box still has the keyboard.
+            try await app.type("Edited")
+            try await app.waitToSee("Edited", timeout: 3)
+
+            // A drag elsewhere draws nothing: it is a click away, and words are not lost.
+            try await app.drag(from: CGPoint(x: frame.minX + 40, y: frame.minY + 40), to: CGPoint(x: frame.minX + 90, y: frame.minY + 90))
+            try await app.waitToSee("Discard comment?")
+            try await app.key(.escape)
+            try await app.waitToSee("Edited", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
+
+            // A rectangle is resized by a corner handle, with the comment open.
+            try await app.press("Rectangle")
+            try await app.slowDrag(from: CGPoint(x: frame.minX + 60, y: frame.minY + 320), to: CGPoint(x: frame.minX + 160, y: frame.minY + 380))
+            try await app.waitToSee("add", timeout: 15)
+            try await Task.sleep(for: .milliseconds(500))
+            try await app.slowDrag(from: CGPoint(x: frame.minX + 54, y: frame.minY + 386), to: CGPoint(x: frame.minX + 30, y: frame.minY + 386))
+            try await Task.sleep(for: .milliseconds(500))
+            try await app.type("Wider")
+            try await app.waitToSee("Wider", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
+
+            // With draw mode over, another page with the same title hides it, and it comes back.
+            try await app.key(.escape)
+            try await app.waitToSeeText(containing: "2 notes")
+            let hud = try await app.waitToSee("Annotating")
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            let area = CGRect(x: frame.minX + 150, y: frame.minY + 255, width: 60, height: 40)
+            try await app.waitForBlue(in: area, atLeast: 10)
+            try window.show("b")
+            try await app.waitForBlue(in: area, atMost: 0)
+            try window.show("a")
+            try await app.waitForBlue(in: area, atLeast: 10)
+
+            try await app.key(.enter, command: true)
+            let text = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
+            #expect(text.contains("\"from\":[120,"), "\(text)")
+            #expect(text.contains("\"to\":[300,"), "\(text)")
+            #expect(text.components(separatedBy: "\"type\":\"arrow\"").count == 2, "\(text)")
+            #expect(text.contains("\"type\":\"rectangle\""), "\(text)")
+            #expect(!text.contains(",100,60]"), "\(text)")
+        }
+    }
+
     @Test func aDrawingMovesWithItsWindowGoesWithItsNoteAndComesBackOnRestore() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
