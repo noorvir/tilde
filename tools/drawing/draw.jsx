@@ -12,6 +12,8 @@ let editing = null;
 let isWaitingForEdit = false;
 let isPressOnShape = false;
 let pressAt = null;
+const labelCursor = document.createElement("style");
+document.addEventListener("DOMContentLoaded", () => document.head.appendChild(labelCursor));
 const post = (message) => window.webkit?.messageHandlers?.tilde?.postMessage(message);
 
 function live() {
@@ -61,6 +63,9 @@ window.tildeDraw = {
     changeElements(live().map((element) => element.id), () => ({ locked: false }));
     api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
     api.setActiveTool({ type: drawingTool, locked: true });
+  },
+  setOverLabel(isOverLabel) {
+    labelCursor.textContent = isOverLabel ? "canvas { cursor: pointer !important; }" : "";
   },
   setColor(color) {
     api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });

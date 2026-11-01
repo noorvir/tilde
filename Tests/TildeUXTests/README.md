@@ -1,10 +1,10 @@
 ## Known issues
 
-`aNoteInTheRealSimulator...` is not reliable: it failed once in 2 runs on the same code (the note did not hide on the other screen), cause unknown. It stays in the release check.
+`notesInTheRealSimulator...` is not reliable: it failed once in 2 runs on the same code (the note did not hide on the other screen), cause unknown. It stays in the release check.
 
 ## The release check
 
-`scripts/e2e-release.sh` runs 5 flows with real input and real apps: an agent session with its report, a note in a real browser and back, a note in the Simulator, the hold key, and restore after a crash. It runs before a release or to be sure, and fails above 3 minutes. For every commit, use `scripts/ui-check.sh`: see Tests/Contract/README.md.
+`scripts/e2e-release.sh` runs 6 flows with real input and real apps: an agent session with its report; an arrow reshaped with its comment open, its label, preview and a real scroll; a rectangle, another page and a crash; a label hiding in Chrome and Safari; notes in the real Simulator; the hold key and a comment never lost. Each flow prints `STEP` times to its log.
 
 The other specs here stay as a longer check, `scripts/ux.sh`, for when a change touches windows, focus or input.
 

@@ -618,7 +618,7 @@ final class AnnotationController: ObservableObject {
             return NoteLink(frame: picked.frame, marker: marker, element: picked.element, window: picked.window, anchor: picked.anchor, tracked: picked.tracked, pictureArea: nil)
         }
 
-        return NoteLink(frame: fallback, marker: point, element: nil, window: picked.window, anchor: picked.anchor, tracked: nil, pictureArea: Self.pictureArea(around: point))
+        return NoteLink(frame: fallback, marker: point, element: nil, window: picked.window, anchor: nil, tracked: nil, pictureArea: Self.pictureArea(around: point))
     }
 
     /// A window that shows no elements, such as the iOS Simulator: a note stays where it was
@@ -718,6 +718,14 @@ final class AnnotationController: ObservableObject {
     /// The element under the pointer while drawing. It reuses the hover lookup, which leaves
     /// out apps too slow to ask.
     private func findSnapFrame(at point: CGPoint) {
+        let isOverLabel = noteLabel(at: point) != nil
+        drawingPanel.setOverLabel(isOverLabel)
+        if isOverLabel {
+            hover = nil
+            drawingPanel.setSnapFrame(nil)
+            return
+        }
+
         guard !isFindingSnapFrame, UserDefaults.standard.object(forKey: "drawingSnaps") as? Bool ?? true else {
             return
         }
@@ -725,6 +733,10 @@ final class AnnotationController: ObservableObject {
         Task {
             let picked = await picker.pick(at: point, isMoving: true, in: scope)
             isFindingSnapFrame = false
+            guard noteLabel(at: point) == nil else {
+                return
+            }
+
             drawingPanel.setSnapFrame(picked?.chip == "window" ? nil : picked?.frame)
             if isDrawing, isAimingAnArrow {
                 hover = picked
@@ -1148,7 +1160,12 @@ final class AnnotationController: ObservableObject {
     func noteLabel(at point: CGPoint) -> Draft.ID? {
         let labels = drafts.filter { $0.anchor == nil }.compactMap { draft in noteMarker(draft).map { (draft.id, $0) } }
             + anchoredNotes.map { ($0.draft.id, $0.marker) }
-        return labels.last { hypot($0.1.x - point.x, $0.1.y - point.y) <= 13 }?.0
+        return labels.last { Self.isOnLabel(distance: hypot($0.1.x - point.x, $0.1.y - point.y)) }?.0
+    }
+
+    /// A label's circle has a radius of 10 points; 8 more around it make it easy to hit.
+    nonisolated static func isOnLabel(distance: CGFloat) -> Bool {
+        distance <= 18
     }
 
     func noteFrame(_ draft: Draft) -> CGRect? {
@@ -1840,7 +1857,7 @@ final class AnnotationController: ObservableObject {
             log.notice("first pointer move on the overlay")
         }
         isPointerOverPanel = isOverPanel(point)
-        if isPointerOverPanel || !allows(point) {
+        if isPointerOverPanel || !allows(point) || noteLabel(at: point) != nil {
             latestHoverPoint = nil
             hover = nil
             return

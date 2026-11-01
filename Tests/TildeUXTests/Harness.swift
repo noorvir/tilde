@@ -1,3 +1,4 @@
+import os
 import AppKit
 import Foundation
 import Testing
@@ -492,6 +493,15 @@ final class MCPAgent {
 }
 
 /// A window of another app whose whole content changes, like a page change in the Simulator.
+/// Prints the time since the last step of a flow, for the log of a run.
+func step(_ name: String) {
+    let now = Date()
+    print("STEP \(String(format: "%.1f", now.timeIntervalSince(lastStep.withLock { $0 }))) s: \(name)")
+    lastStep.withLock { $0 = now }
+}
+
+private let lastStep = OSAllocatedUnfairLock(initialState: Date())
+
 final class ChangingWindow {
     /// The window on screen, in screen points from the top left.
     static let frame = CGRect(x: 300, y: 200, width: 500, height: 400)

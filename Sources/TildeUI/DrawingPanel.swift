@@ -19,6 +19,7 @@ final class DrawingPanel {
     private var active: DrawingCanvas?
     private var color = "#2F76FF"
     private var releaseTask: Task<Void, Never>?
+    private var isOverLabel = false
     var onEscape: () -> Void = {}
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
@@ -75,6 +76,15 @@ final class DrawingPanel {
 
     func endEditing() {
         active?.run("endEditing()")
+    }
+
+    /// The hand cursor over a note's label, which a press opens.
+    func setOverLabel(_ isOverLabel: Bool) {
+        guard isOverLabel != self.isOverLabel else {
+            return
+        }
+        self.isOverLabel = isOverLabel
+        active?.run("setOverLabel(\(isOverLabel))")
     }
 
     func resumeDrawing() {
@@ -433,8 +443,11 @@ enum DrawingShapes {
 
     /// Where an arrow's tip is, or else the centre of the shapes: what they are linked to is there.
     static func linkPoint(of shapes: [[String: Any]]) -> CGPoint {
-        if shapes.count == 1, let tip = doubles(shapes[0]["to"]), tip.count == 2 {
-            return CGPoint(x: tip[0], y: tip[1])
+        if shapes.count == 1, let tip = doubles(shapes[0]["to"]), tip.count == 2, let tail = doubles(shapes[0]["from"]), tail.count == 2 {
+            // A little back along the arrow: a tip snapped to an edge is on the element's border.
+            let length = max(hypot(tip[0] - tail[0], tip[1] - tail[1]), 1)
+            let back = min(2, length)
+            return CGPoint(x: tip[0] + (tail[0] - tip[0]) / length * back, y: tip[1] + (tail[1] - tip[1]) / length * back)
         }
         let bounds = bounds(of: shapes)
         return CGPoint(x: bounds.midX, y: bounds.midY)

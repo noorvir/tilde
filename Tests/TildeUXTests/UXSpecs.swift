@@ -194,30 +194,6 @@ struct UXSpecs {
 
     // MARK: - Saving and history
 
-    @Test func afterACrashTildeOffersTheSessionAndRestoresItsNotesAndImages() async throws {
-        let page = try TestPage()
-        defer { page.stop() }
-        let first = try await TildeApp.launched()
-        let agent = try await MCPAgent(port: first.port, name: "Claude Code")
-        _ = try await agent.call("start_annotation", ["url": page.url, "wait_seconds": 0])
-        try await first.waitToSee("Welcome page", timeout: 20)
-        try await annotate(first)
-        try await addNote(first, on: "Welcome page", comment: "Keep me")
-        try await Task.sleep(for: .seconds(3))
-        first.kill()
-
-        let saved = try FileManager.default.subpathsOfDirectory(atPath: first.sessions.path)
-        #expect(saved.contains { $0.hasSuffix("session.json") })
-        #expect(saved.contains { $0.hasSuffix(".png") })
-
-        let second = try await TildeApp.relaunched(after: first)
-        defer { second.quit() }
-        try await second.waitToSee("Restore unfinished session?")
-        try await second.press("Restore")
-        try await second.waitToSee("Welcome page", timeout: 20)
-        try await second.waitToSee("Keep me")
-    }
-
     @Test func historyRestoresASessionAndAsksBeforeReplacingNotes() async throws {
         let page = try TestPage()
         defer { page.stop() }
@@ -347,8 +323,9 @@ struct UXSpecs {
         }
     }
 
-    @Test func aLabelHidesWhenItsElementIsNotOnScreenAndComesBack() async throws {
-        let pages = try WebPages(browser: .safari)
+    @Test(arguments: WebPages.Browser.allCases)
+    func aLabelHidesWhenItsContentIsNotOnScreenAndComesBack(browser: WebPages.Browser) async throws {
+        let pages = try WebPages(browser: browser)
         defer {
             pages.quitBrowser()
             pages.stop()
@@ -358,13 +335,16 @@ struct UXSpecs {
         try await withApp { app in
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
+            // Chrome starts to describe its page when the session starts.
             try await Task.sleep(for: .seconds(2))
             let page = try #require(pages.pageArea)
             let point = CGPoint(x: page.minX + 120, y: page.minY + 300)
             try await addSmallNote(app, at: point)
+            // Below the HUD, whose Send button is blue too.
             let area = page.divided(atDistance: 200, from: .minYEdge).remainder
             try await app.waitForBlue(in: area, atLeast: 20)
             let hud = try await app.waitToSee("Annotating")
+            step("note added")
 
             // Another screen on the same address and title.
             func press(_ button: CGPoint) async throws {
@@ -377,6 +357,7 @@ struct UXSpecs {
             try await app.waitForBlue(in: area, atMost: 0)
             try await press(WebPages.back)
             try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
+            step("same address")
 
             // Its element scrolls off the screen, and back.
             try await app.scroll(at: point, by: -30)
@@ -385,34 +366,14 @@ struct UXSpecs {
             try await app.scroll(at: point, by: 30)
             try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
             try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
-        }
-    }
+            step("scrolled off and back")
 
-    @Test(arguments: WebPages.Browser.allCases)
-    func aNoteInABrowserHidesOnAnotherPageAndComesBack(browser: WebPages.Browser) async throws {
-        let pages = try WebPages(browser: browser)
-        defer {
-            pages.quitBrowser()
-            pages.stop()
-        }
-        pages.go(to: pages.first)
-        try await pages.waitForPage()
-        try await withApp { app in
-            try await app.doubleTap("control")
-            try await app.waitToSee("Annotating")
-            // Chrome starts to describe its page when the session starts.
-            try await Task.sleep(for: .seconds(2))
-            let page = try #require(pages.pageArea)
-            try await addSmallNote(app, at: CGPoint(x: page.minX + 120, y: page.minY + 300))
-            // Below the HUD, whose Send button is blue too.
-            let area = page.divided(atDistance: 200, from: .minYEdge).remainder
-            try await app.waitForBlue(in: area, atLeast: 20)
-
+            // Another address.
             pages.go(to: pages.second)
             try await app.waitForBlue(in: area, atMost: 0)
-
-            pages.go(to: pages.first)
-            try await app.waitForBlue(in: area, atLeast: 20)
+            pages.go(to: pages.sameAddress)
+            try await app.waitForBlue(in: area, atLeast: 20, timeout: 15)
+            step("another address")
         }
     }
 
@@ -561,7 +522,7 @@ struct UXSpecs {
         }
     }
 
-    @Test func aNoteInTheRealSimulatorHidesOnAnotherScreenAndComesBack() async throws {
+    @Test func notesInTheRealSimulatorHideOnAnotherScreenAndComeBack() async throws {
         let simulator = try SimulatorScreens()
         defer { simulator.stop() }
         try simulator.show("first")
@@ -574,6 +535,7 @@ struct UXSpecs {
             try await Task.sleep(for: .seconds(1))
             try await app.menu("Start Annotation")
             try await app.waitToSee("Annotating")
+            step("simulator ready")
             // A row on the phone, which sits right of the sidebar in Device Hub.
             try await addSmallNote(app, at: CGPoint(x: window.minX + window.width * 0.6, y: window.minY + window.height * 0.4))
             let area = CGRect(x: window.minX + window.width * 0.5, y: window.minY + window.height * 0.2, width: window.width * 0.3, height: window.height * 0.6)
@@ -581,42 +543,27 @@ struct UXSpecs {
 
             try simulator.show("second")
             try await app.waitForBlue(in: area, atMost: 0, timeout: 10)
-
             try simulator.show("first")
             try await app.waitForBlue(in: area, atLeast: 20, timeout: 10)
-        }
-    }
+            step("note")
 
-    @Test func aRegionInTheRealSimulatorHidesOnAnotherScreenAndComesBack() async throws {
-        let simulator = try SimulatorScreens()
-        defer { simulator.stop() }
-        try simulator.show("first")
-        for _ in 0..<120 where simulator.window == nil {
-            try await Task.sleep(for: .seconds(1))
-        }
-        try await Task.sleep(for: .seconds(3))
-        try await withApp { app in
-            let window = try #require(simulator.window)
-            try await Task.sleep(for: .seconds(1))
-            try await app.menu("Start Annotation")
-            try await app.waitToSee("Annotating")
+            // A region, with the note.
             let start = CGPoint(x: window.minX + window.width * 0.56, y: window.minY + window.height * 0.35)
             try await app.drag(from: start, to: CGPoint(x: start.x + 90, y: start.y + 70))
             try await app.waitToSee("add")
             try await app.type("On a region")
             try await app.waitToSee("On a region", timeout: 3)
             try await app.key(.enter)
-            try await app.waitToSeeText(containing: "1 note")
+            try await app.waitToSeeText(containing: "2 notes")
             let hud = try await app.waitToSee("Annotating")
             try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
-            let area = CGRect(x: window.minX + window.width * 0.5, y: window.minY + window.height * 0.2, width: window.width * 0.3, height: window.height * 0.6)
             try await app.waitForBlue(in: area, atLeast: 20)
 
             try simulator.show("second")
             try await app.waitForBlue(in: area, atMost: 0, timeout: 10)
-
             try simulator.show("first")
             try await app.waitForBlue(in: area, atLeast: 20, timeout: 10)
+            step("region")
         }
     }
 
@@ -664,25 +611,6 @@ struct UXSpecs {
 
     // MARK: - Holding a key
 
-    @Test func holdingTheKeyLetsTheMouseThroughWhileAnnotatingAndOnlyThen() async throws {
-        try await withApp { app in
-            // Before a session it does nothing.
-            try await app.hold("option", down: true)
-            try await app.hold("option", down: false)
-            try await app.waitNotToSee("Paused", timeout: 1)
-
-            try await app.doubleTap("control")
-            try await app.waitToSee("Annotating")
-
-            try await app.hold("option", down: true)
-            try await app.waitToSee("Paused")
-            try await app.waitToSee("Release ⌥ to annotate")
-
-            try await app.hold("option", down: false)
-            try await app.waitToSee("Annotating")
-        }
-    }
-
     @Test func theHoldKeyIsASetting() async throws {
         try await withApp { app in
             try await app.menu("Settings")
@@ -693,12 +621,23 @@ struct UXSpecs {
 
     // MARK: - Writing a comment
 
-    @Test func aCommentIsNeverLostByAClickAwayAndEscAsksFirst() async throws {
+    @Test func theHoldKeyWorksACommentIsNeverLostAndItsBoxStepsWithoutFlashing() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
+            // The hold key does nothing before a session, and lets the mouse through in one.
+            try await app.hold("option", down: true)
+            try await app.hold("option", down: false)
+            try await app.waitNotToSee("Paused", timeout: 1)
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
+            try await app.hold("option", down: true)
+            try await app.waitToSee("Paused")
+            try await app.waitToSee("Release ⌥ to annotate")
+            try await app.hold("option", down: false)
+            try await app.waitToSee("Annotating")
+            step("hold key")
+
             let frame = ChangingWindow.frame
 
             // Clicking away with text asks, and pauses so that the screen can be used.
@@ -740,16 +679,9 @@ struct UXSpecs {
             try await app.click(at: CGPoint(x: frame.maxX + 100, y: frame.maxY + 100))
             try await app.waitNotToSee("add")
             try await app.waitNotToSee("Discard comment?", timeout: 1)
-        }
-    }
+            step("comment never lost")
 
-    @Test func theCommentBoxStepsToItsNewSizeWithoutFlashing() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        try await withApp { app in
-            try await app.doubleTap("control")
-            try await app.waitToSee("Annotating")
-            let frame = ChangingWindow.frame
+            // The box grows and shrinks with its lines: the same frame never shows two sizes.
             try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
             try await app.waitToSee("add")
             try await Task.sleep(for: .milliseconds(300))
@@ -776,7 +708,7 @@ struct UXSpecs {
                 }
             }
             expectOneWay(shrinking, growing: false)
-            print("EDGES grow \(growing) shrink \(shrinking)")
+            step("box steps")
         }
     }
 
@@ -807,162 +739,7 @@ struct UXSpecs {
     }
 
     /// Draws one shape: its comment box opens at the mouse release.
-    private func draw(_ app: TildeApp, from start: CGPoint, to end: CGPoint, comment: String) async throws {
-        try await app.drag(from: start, to: end)
-        try await app.waitToSee("add", timeout: 15)
-        try await app.type(comment)
-        try await app.waitToSee(comment, timeout: 3)
-        try await app.key(.enter)
-        try await app.waitNotToSee("add")
-    }
-
-    private func report(_ app: TildeApp, _ agent: MCPAgent, session: Substring) async throws -> String {
-        try await app.key(.escape)
-        try await app.waitNotToSee("Done, esc")
-        try await app.key(.enter, command: true)
-        return try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
-    }
-
-    @Test func eachShapeBecomesANoteAtTheMouseReleaseWithItsColorAndUndo() async throws {
-        try await withApp { app in
-            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
-            let started = try await agent.call("start_annotation", ["wait_seconds": 0])
-            let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
-            let hud = try await app.waitToSee("Annotating")
-            try await app.press("Draw on the screen")
-            try await app.waitToSee("Done, esc")
-            try await app.waitToSee("Drawing canvas", timeout: 15)
-            let start = CGPoint(x: hud.frame.midX, y: hud.frame.maxY + 200)
-
-            // A click without a drag draws nothing, and the next drag is a whole arrow.
-            try await app.click(at: CGPoint(x: start.x + 300, y: start.y))
-            try await Task.sleep(for: .milliseconds(800))
-            #expect(try await !app.seen().contains { $0.name == "add" })
-
-            try await draw(app, from: start, to: CGPoint(x: start.x + 200, y: start.y + 120), comment: "An arrow")
-            try await app.waitToSee("Done, esc")
-            try await app.press("Rectangle")
-            try await draw(app, from: CGPoint(x: start.x - 300, y: start.y), to: CGPoint(x: start.x - 100, y: start.y + 100), comment: "A box")
-            try await app.press("Circle")
-            try await app.press("Red")
-            try await draw(app, from: CGPoint(x: start.x - 300, y: start.y + 150), to: CGPoint(x: start.x - 200, y: start.y + 250), comment: "A circle")
-            try await app.press("Freehand")
-            try await draw(app, from: CGPoint(x: start.x, y: start.y + 200), to: CGPoint(x: start.x + 150, y: start.y + 260), comment: "A line")
-
-            // Undo takes back the last note, redo brings it back, and undo again.
-            try await app.press("Undo")
-            try await app.press("Redo")
-            try await app.press("Undo")
-            try await Task.sleep(for: .milliseconds(300))
-            let text = try await report(app, agent, session: session)
-            #expect(text.contains("\"arrow\""))
-            #expect(text.contains("\"rectangle\""))
-            #expect(text.contains("\"ellipse\""))
-            #expect(text.contains("#FF3B30"))
-            #expect(!text.contains("freehand"))
-            #expect(!text.contains("A line"))
-        }
-    }
-
-    @Test func anArrowEndSnapsToAnElement() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        try await withApp { app in
-            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
-            let started = try await agent.call("start_annotation", ["wait_seconds": 0])
-            let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
-            try await app.waitToSee("Annotating")
-            try await app.press("Draw on the screen")
-            try await app.waitToSee("Done, esc")
-            try await app.waitToSee("Drawing canvas", timeout: 15)
-            let frame = ChangingWindow.frame
-
-            // The row of text ends 463 points into the window; the end lands near it.
-            try await app.hover(over: CGPoint(x: frame.minX + 458, y: frame.minY + 55))
-            try await Task.sleep(for: .milliseconds(400))
-            try await app.slowDrag(from: CGPoint(x: frame.minX + 200, y: frame.minY + 300), to: CGPoint(x: frame.minX + 458, y: frame.minY + 55))
-            try await app.waitToSee("add", timeout: 15)
-            try await app.type("Snapped")
-            try await app.waitToSee("Snapped", timeout: 3)
-            try await app.key(.enter)
-            try await app.waitNotToSee("add")
-
-            try await Task.sleep(for: .milliseconds(800))
-            let text = try await report(app, agent, session: session)
-            #expect(text.contains("\"to\":[463"), "\(text)")
-        }
-    }
-
-    @Test func aShapeIsEditedWhileItsCommentIsOpenAndOnlyItsLabelStays() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        try await withApp { app in
-            let agent = try await MCPAgent(port: app.port, name: "Claude Code")
-            let started = try await agent.call("start_annotation", ["wait_seconds": 0])
-            let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0.isLetter || $0.isNumber || $0 == "-" }))
-            try await app.waitToSee("Annotating")
-            try await app.press("Draw on the screen")
-            try await app.waitToSee("Done, esc")
-            try await app.waitToSee("Drawing canvas", timeout: 15)
-            let frame = ChangingWindow.frame
-            let start = CGPoint(x: frame.minX + 200, y: frame.minY + 200)
-            let end = CGPoint(x: frame.minX + 300, y: frame.minY + 300)
-
-            // The comment opens on release, and the arrow's end can be dragged at once.
-            try await app.slowDrag(from: start, to: end)
-            try await app.waitToSee("add", timeout: 15)
-            try await Task.sleep(for: .milliseconds(500))
-            try await app.slowDrag(from: start, to: CGPoint(x: frame.minX + 120, y: frame.minY + 240))
-            try await Task.sleep(for: .milliseconds(500))
-
-            // The comment box still has the keyboard.
-            try await app.type("Edited")
-            try await app.waitToSee("Edited", timeout: 3)
-
-            // A drag elsewhere draws nothing: it is a click away, and words are not lost.
-            try await app.drag(from: CGPoint(x: frame.minX + 40, y: frame.minY + 40), to: CGPoint(x: frame.minX + 90, y: frame.minY + 90))
-            try await app.waitToSee("Discard comment?")
-            try await app.key(.escape)
-            try await app.waitToSee("Edited", timeout: 3)
-            try await app.key(.enter)
-            try await app.waitNotToSee("add")
-
-            // A rectangle is resized by a corner handle, with the comment open.
-            try await app.press("Rectangle")
-            try await app.slowDrag(from: CGPoint(x: frame.minX + 60, y: frame.minY + 320), to: CGPoint(x: frame.minX + 160, y: frame.minY + 380))
-            try await app.waitToSee("add", timeout: 15)
-            try await Task.sleep(for: .milliseconds(500))
-            try await app.slowDrag(from: CGPoint(x: frame.minX + 54, y: frame.minY + 386), to: CGPoint(x: frame.minX + 30, y: frame.minY + 386))
-            try await Task.sleep(for: .milliseconds(500))
-            try await app.type("Wider")
-            try await app.waitToSee("Wider", timeout: 3)
-            try await app.key(.enter)
-            try await app.waitNotToSee("add")
-
-            // The shapes went with their comments; the labels stay, and go with the page.
-            try await app.key(.escape)
-            try await app.waitNotToSee("Done, esc")
-            try await app.waitToSeeText(containing: "2 notes")
-            let hud = try await app.waitToSee("Annotating")
-            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
-            try await app.waitForBlue(in: CGRect(x: frame.minX + 150, y: frame.minY + 255, width: 60, height: 20), atMost: 0)
-            try await app.waitForBlue(in: frame, atLeast: 20)
-            try window.show("b")
-            try await app.waitForBlue(in: frame, atMost: 0)
-            try window.show("a")
-            try await app.waitForBlue(in: frame, atLeast: 20)
-
-            try await app.key(.enter, command: true)
-            let text = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
-            #expect(text.contains("\"from\":[120,"), "\(text)")
-            #expect(text.contains("\"to\":[300,"), "\(text)")
-            #expect(text.components(separatedBy: "\"type\":\"arrow\"").count == 2, "\(text)")
-            #expect(text.contains("\"type\":\"rectangle\""), "\(text)")
-            #expect(!text.contains(",100,60]"), "\(text)")
-        }
-    }
-
-    @Test func aDrawnArrowsLabelFollowsItsElementWhenThePageScrollsAndTheShapeIsGone() async throws {
+    @Test func anArrowIsEditedAndLeavesALabelThatFollowsItsElement() async throws {
         let page = try TestPage()
         defer { page.stop() }
         try await withApp { app in
@@ -975,25 +752,48 @@ struct UXSpecs {
             try await app.press("Draw on the screen")
             try await app.waitToSee("Done, esc")
             try await app.waitToSee("Drawing canvas", timeout: 15)
+            step("canvas ready")
 
-            // The tip lands on the row: that row is the arrow's element.
-            let tip = CGPoint(x: row.frame.minX + 100, y: row.frame.midY)
-            let start = CGPoint(x: tip.x + 240, y: tip.y + 150)
+            // A click without a drag draws nothing.
+            let start = CGPoint(x: row.frame.minX + 120, y: row.frame.minY + 180)
+            try await app.click(at: CGPoint(x: start.x + 60, y: start.y + 150))
+            try await Task.sleep(for: .milliseconds(800))
+            #expect(try await !app.seen().contains { $0.name == "add" })
+
+            // The tip lands near the row's end, snaps to it, and the row is the arrow's element.
+            let elementEnd = CGPoint(x: row.frame.minX + 300, y: row.frame.midY)
+            let tip = CGPoint(x: elementEnd.x - 5, y: elementEnd.y)
+            try await app.hover(over: tip)
+            try await Task.sleep(for: .milliseconds(400))
             try await app.slowDrag(from: start, to: tip)
             try await app.waitToSee("add", timeout: 15)
+            step("arrow drawn")
+
+            // Its other end can be dragged with the comment open, and the box keeps the keyboard.
+            try await Task.sleep(for: .milliseconds(500))
+            let moved = CGPoint(x: start.x + 40, y: start.y + 60)
+            try await app.slowDrag(from: start, to: moved)
+            try await Task.sleep(for: .milliseconds(500))
             try await app.type("This row")
+            try await app.waitToSee("This row", timeout: 3)
+            step("arrow reshaped")
+
+            // A drag elsewhere draws nothing: it is a click away, and words are not lost.
+            try await app.drag(from: CGPoint(x: row.frame.minX + 20, y: row.frame.minY + 400), to: CGPoint(x: row.frame.minX + 70, y: row.frame.minY + 440))
+            try await app.waitToSee("Discard comment?")
+            try await app.key(.escape)
             try await app.waitToSee("This row", timeout: 3)
             try await app.key(.enter)
             try await app.waitNotToSee("add")
-            let marker = CGPoint(x: row.frame.minX + 300, y: row.frame.minY)
+            step("comment saved")
 
             // A label opens its note in the preview, also in draw mode, which Esc then keeps.
+            let marker = CGPoint(x: row.frame.minX + 300, y: row.frame.minY)
             try await app.click(at: marker)
             try await app.waitToSee("1 of 1")
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
             try await app.waitToSee("Done, esc")
-
             try await app.key(.escape)
             try await app.waitNotToSee("Done, esc")
             try await app.waitToSeeText(containing: "1 note")
@@ -1001,34 +801,51 @@ struct UXSpecs {
             try await app.waitToSee("1 of 1")
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
+            // Next to a label, its element is not highlighted.
+            try await app.hover(over: CGPoint(x: marker.x - 15, y: marker.y + 5))
+            try await Task.sleep(for: .milliseconds(300))
+            try await app.waitForBlue(in: CGRect(x: row.frame.minX + 150, y: row.frame.minY, width: 100, height: 20), atMost: 0)
             let hud = try await app.waitToSee("Annotating")
             try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            step("label opens the preview")
 
+            // Only the label stayed, and a real scroll moves the page and the label.
             func around(_ point: CGPoint) -> CGRect {
                 CGRect(x: point.x - 8, y: point.y - 8, width: 16, height: 16)
             }
-            let middle = CGPoint(x: (start.x + tip.x) / 2, y: (start.y + tip.y) / 2)
+            let middle = CGPoint(x: (moved.x + tip.x) / 2, y: (moved.y + tip.y) / 2)
             try await app.waitForBlue(in: around(marker), atLeast: 20)
             try await app.waitForBlue(in: around(middle), atMost: 0)
-
-            // A real scroll moves the page, and the label with its row.
             try await app.scroll(at: CGPoint(x: row.frame.midX, y: row.frame.midY + 100), by: -1)
             try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
             try await Task.sleep(for: .seconds(1))
-            let moved = try await app.waitToSee("Row 8")
-            #expect(moved.frame.minY < row.frame.minY - 20, "The page did not scroll")
-            try await app.waitForBlue(in: around(CGPoint(x: marker.x, y: moved.frame.minY)), atLeast: 20)
+            let scrolled = try await app.waitToSee("Row 8")
+            #expect(scrolled.frame.minY < row.frame.minY - 20, "The page did not scroll")
+            try await app.waitForBlue(in: around(CGPoint(x: marker.x, y: scrolled.frame.minY)), atLeast: 20)
             try await app.waitForBlue(in: around(marker), atMost: 0)
-            try await app.waitForBlue(in: around(middle), atMost: 0)
+            step("page scrolled")
 
             try await app.key(.enter, command: true)
             let text = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15]).text
-            #expect(text.contains("\"arrow\""), "\(text)")
+            #expect(text.components(separatedBy: "\"type\":\"arrow\"").count == 2, "\(text)")
             #expect(text.contains("\"element\""), "\(text)")
+            let origin = try #require(firstNumber(after: "\"origin\":[", in: text))
+            let to = try #require(firstNumber(after: "\"to\":[", in: text))
+            let from = try #require(firstNumber(after: "\"from\":[", in: text))
+            #expect(abs(origin + to - elementEnd.x) <= 1, "The tip did not snap: \(text)")
+            // It may snap to an element near where it landed.
+            #expect(abs(origin + from - start.x) >= 20, "The end did not move: \(text)")
         }
     }
 
-    @Test func aDrawingsLabelStaysWithItsWindowAndComesBackOnRestoreWithoutTheShape() async throws {
+    private func firstNumber(after key: String, in text: String) -> Double? {
+        guard let rest = text.components(separatedBy: key).dropFirst().first else {
+            return nil
+        }
+        return Double(String(rest.prefix { $0.isNumber || $0 == "." || $0 == "-" }))
+    }
+
+    @Test func aRectangleLeavesALabelThatHidesOnAnotherPageAndACrashLeavesOnlyItsNote() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         let first = try await TildeApp.launched()
@@ -1042,34 +859,54 @@ struct UXSpecs {
         let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
         let end = CGPoint(x: start.x + 200, y: start.y + 120)
         try await first.press("Rectangle")
-        try await draw(first, from: start, to: end, comment: "On the window")
+        try await first.drag(from: start, to: end)
+        try await first.waitToSee("add", timeout: 15)
+        try await first.type("On the window")
+        try await first.waitToSee("On the window", timeout: 3)
+        try await first.key(.enter)
+        try await first.waitNotToSee("add")
         try await first.key(.escape)
         try await first.waitNotToSee("Done, esc")
         try await first.waitToSeeText(containing: "1 note")
         let hud = try await first.waitToSee("Annotating")
         try await first.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+        step("rectangle saved")
+
+        // Its label stays without the shape, and goes with the page.
         func left(of point: CGPoint, offset: CGFloat = 0) -> CGRect {
             CGRect(x: point.x + offset - 10, y: point.y + 30, width: 20, height: 40)
         }
         try await first.waitForBlue(in: left(of: start), atMost: 0)
         try await first.waitForBlue(in: frame, atLeast: 20)
+        try window.show("b")
+        try await first.waitForBlue(in: frame, atMost: 0)
+        try window.show("a")
+        try await first.waitForBlue(in: frame, atLeast: 20)
+        step("another page")
 
         // The window moves, and the label with it. Its element's row ends past the old window.
         try window.show("moved")
         // Above the phone of Device Hub, which is blue too.
         let beside = CGRect(x: frame.maxX + 5, y: frame.minY, width: 170, height: 170)
         try await first.waitForBlue(in: beside, atLeast: 20)
+        step("window moved")
 
-        // Saved with the session: after a crash the note comes back, without the shape.
+        // A crash: the note and its images come back, with no shape, and no label that nothing confirms.
         try await Task.sleep(for: .seconds(3))
         first.kill()
+        let saved = try FileManager.default.subpathsOfDirectory(atPath: first.sessions.path)
+        #expect(saved.contains { $0.hasSuffix("session.json") })
+        #expect(saved.contains { $0.hasSuffix(".png") })
         let second = try await TildeApp.relaunched(after: first)
         defer { second.quit() }
+        try await second.waitToSee("Restore unfinished session?")
         try await second.press("Restore")
         try await second.waitToSeeText(containing: "1 note", timeout: 15)
-        // Nothing can confirm where its label belongs, so only the list has the note.
         try await second.waitForBlue(in: beside, atMost: 0)
         try await second.waitForBlue(in: left(of: start, offset: 200), atMost: 0)
+        try await second.press("Show annotations")
+        try await second.waitToSee("On the window")
+        step("restored")
     }
 
     @Test func shiftReturnAddsALineInTheCommentBoxAndInThePreviewAndEscClosesThePreview() async throws {

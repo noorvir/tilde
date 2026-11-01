@@ -14,6 +14,7 @@ enum Transitions {
         var isElementConfirmed: Bool?
         var elementFrame: [CGFloat]?
         var windowFrame: [CGFloat]?
+        var labelDistance: CGFloat?
     }
 
     struct Result: Encodable {
@@ -25,6 +26,7 @@ enum Transitions {
         var hides: Bool?
         var pictureDecides: Bool?
         var labelShows: Bool?
+        var isOnLabel: Bool?
     }
 
     static func run(_ table: Data) throws -> Data {
@@ -43,6 +45,9 @@ enum Transitions {
                     result.hides = similarity == 0
                     result.pictureDecides = similarity == nil
                 }
+            }
+            if let distance = row.labelDistance {
+                result.isOnLabel = AnnotationController.isOnLabel(distance: distance)
             }
             if let element = row.elementFrame, let window = row.windowFrame {
                 let frame = CGRect(x: element[0], y: element[1], width: element[2], height: element[3])

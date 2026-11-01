@@ -268,5 +268,19 @@
   "expect": {
    "labelShows": true
   }
+ },
+ {
+  "name": "Within 8 points of a label is on it, not on the element below",
+  "labelDistance": 17,
+  "expect": {
+   "isOnLabel": true
+  }
+ },
+ {
+  "name": "Further away is on the element",
+  "labelDistance": 19,
+  "expect": {
+   "isOnLabel": false
+  }
  }
 ]
