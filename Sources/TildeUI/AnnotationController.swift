@@ -99,6 +99,11 @@ final class AnnotationController: ObservableObject {
         }
     }
     @Published private(set) var hover: Picked?
+    /// How the confirmation after Send reads: a copy to a remote machine can be under way or fail.
+    enum SentStatus {
+        case done, working, failed
+    }
+    @Published var sentStatus = SentStatus.done
     @Published private(set) var composer: Composer?
     @Published private(set) var isPaused = false
     /// Paused because another app is in front of a session limited to one window; ends when
@@ -420,9 +425,7 @@ final class AnnotationController: ObservableObject {
 
             log.notice("session \(session.id, privacy: .public) sent with \(annotations.count) annotations")
             if session.isLocal {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(reportText(for: feedback, folder: folder), forType: .string)
-                phase = .sent(confirmation: "Copied to clipboard")
+                await copyReport(feedback, folder: folder)
             } else {
                 phase = .sent(confirmation: "Sent to \(session.client)")
             }
@@ -890,6 +893,45 @@ final class AnnotationController: ObservableObject {
         case .plainClicksOff:
             PlainClickTap.stop()
         }
+    }
+
+    /// Copies the report of a session without an agent, at once, then sends its folder to the
+    /// remote machines, so that one paste works on any of them.
+    private func copyReport(_ feedback: Feedback, folder: URL?) async {
+        let text = reportText(for: feedback, folder: folder, linkFolder: folder.flatMap { homeRelativePath($0) })
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        sentStatus = .done
+
+        let machines = RemotePush.machines(in: UserDefaults.standard.string(forKey: "remoteMachines") ?? "")
+        guard let folder, !machines.isEmpty else {
+            phase = .sent(confirmation: "Copied to clipboard")
+            return
+        }
+
+        sentStatus = .working
+        phase = .sent(confirmation: RemotePush.sending(to: machines))
+        let log = self.log
+        let failed = await withTaskGroup(of: String?.self) { group in
+            for machine in machines {
+                group.addTask {
+                    do {
+                        try RemotePush.push(folder, to: machine)
+                        return nil
+                    } catch {
+                        log.error("could not send feedback to \(machine, privacy: .public): \(String(describing: error), privacy: .public)")
+                        return machine
+                    }
+                }
+            }
+            return await group.reduce(into: [String]()) { failed, machine in
+                if let machine {
+                    failed.append(machine)
+                }
+            }
+        }
+        sentStatus = failed.isEmpty ? .done : .failed
+        phase = .sent(confirmation: RemotePush.confirmation(pushed: machines.filter { !failed.contains($0) }, failed: failed))
     }
 
     /// The start shortcut: starts a session, resumes a paused one, or shows the HUD.

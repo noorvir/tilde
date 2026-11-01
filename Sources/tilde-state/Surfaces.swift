@@ -111,6 +111,7 @@ enum Surfaces {
         apply(state, drafts: Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true), to: controller)
         controller.showsList = state.list ?? false
         controller.setDrawingForTesting(state.drawing ?? false)
+        controller.sentStatus = state.sentStatus == "working" ? .working : state.sentStatus == "failed" ? .failed : .done
         if let color = state.drawingColor {
             controller.setDrawingColor(color)
         }
@@ -163,6 +164,8 @@ enum Surfaces {
         }
         let model = try Fixtures.settingsModel(page: page, history: history)
         model.expandedAgents = Set(state.expandedAgents ?? [])
+        model.sshHosts = { ["mac-mini", "devbox"] }
+        UserDefaults.standard.set((state.machines ?? []).joined(separator: "\n"), forKey: "remoteMachines")
         if state.recording == true {
             model.recordingShortcut = .togglePause
         }

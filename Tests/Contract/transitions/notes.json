@@ -282,5 +282,53 @@
   "expect": {
    "isOnLabel": false
   }
+ },
+ {
+  "name": "A push to every machine says where the images are",
+  "pushed": [
+   "mac-mini",
+   "devbox"
+  ],
+  "failed": [],
+  "expect": {
+   "confirmation": "Copied, images on mac-mini, devbox"
+  }
+ },
+ {
+  "name": "A failed push names the machine",
+  "pushed": [
+   "devbox"
+  ],
+  "failed": [
+   "mac-mini"
+  ],
+  "expect": {
+   "confirmation": "Copied, mac-mini failed"
+  }
+ },
+ {
+  "name": "A host cannot be an ssh option",
+  "pushHost": "-oProxyCommand=x",
+  "expect": {
+   "hostIsValid": false
+  }
+ },
+ {
+  "name": "A host cannot hold a command",
+  "pushHost": "a;rm",
+  "expect": {
+   "hostIsValid": false
+  }
+ },
+ {
+  "name": "An ssh config gives its named hosts, not its patterns",
+  "sshConfig": "Host mac-mini mac-mini-ts\n  User alex\nHost *\n  ForwardAgent no\nhost devbox\n",
+  "expect": {
+   "hosts": [
+    "mac-mini",
+    "mac-mini-ts",
+    "devbox"
+   ]
+  }
  }
 ]

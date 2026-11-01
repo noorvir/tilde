@@ -895,6 +895,60 @@ struct UXSpecs {
         return Double(String(rest.prefix { $0.isNumber || $0 == "." || $0 == "-" }))
     }
 
+    @Test func aCopiedReportGoesToTheRemoteMachineWithItsImages() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            // This machine's own ssh is the remote machine; the setup of the VM has its key.
+            let set = Process()
+            set.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            set.arguments = ["write", "dev.tilde.ux", "remoteMachines", "localhost"]
+            try set.run()
+            waitForExit(set)
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            try await app.waitToSee("add")
+            try await app.type("For the remote")
+            try await app.waitToSee("For the remote", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+            try await app.key(.enter, command: true)
+            try await app.waitToSee("Copied, images on localhost", timeout: 20)
+            step("sent")
+
+            // Its folder is on the machine, under the same name as here.
+            let text = try #require(NSPasteboard.general.string(forType: .string))
+            let saved = try #require(text.components(separatedBy: "Saved to: ").last?.prefix { $0 != "\n" })
+            let name = URL(fileURLWithPath: String(saved)).lastPathComponent
+            let remote = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde/inbox/\(name)")
+            #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("annotation-1.png").path))
+            #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("feedback.md").path))
+
+            // A machine that cannot be reached: the report still copies, with local paths.
+            let unreachable = Process()
+            unreachable.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            unreachable.arguments = ["write", "dev.tilde.ux", "remoteMachines", "no-such-host.invalid"]
+            try unreachable.run()
+            waitForExit(unreachable)
+            try await app.waitNotToSee("Copied, images on localhost", timeout: 5)
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            try await app.waitToSee("add")
+            try await app.type("Stays local")
+            try await app.waitToSee("Stays local", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+            try await app.key(.enter, command: true)
+            try await app.waitToSee("Copied, no-such-host.invalid failed", timeout: 20)
+            let local = try #require(NSPasteboard.general.string(forType: .string))
+            #expect(local.contains("Stays local"), "\(local)")
+            step("unreachable machine")
+        }
+    }
+
     @Test func aRectangleLeavesALabelThatHidesOnAnotherPageAndACrashLeavesOnlyItsNote() async throws {
         let window = try ChangingWindow()
         defer { window.close() }

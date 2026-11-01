@@ -336,9 +336,19 @@ struct HUDView: View {
             switch controller.phase {
             case .sent(let confirmation):
                 HStack(spacing: HUDMetrics.iconGap) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.tildeBlue)
+                    switch controller.sentStatus {
+                    case .done:
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.tildeBlue)
+                    case .working:
+                        ProgressView()
+                            .controlSize(.small)
+                    case .failed:
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.yellow)
+                    }
                     Text(confirmation)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)

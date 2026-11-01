@@ -2,11 +2,14 @@ import Foundation
 
 /// Markdown report of a feedback batch. The same text goes to the agent and into
 /// `feedback.md`; screenshot links are relative to the inbox folder.
-public func reportText(for feedback: Feedback, folder: URL?) -> String {
+/// `linkFolder`: a folder that the image links start from, so that they work pasted anywhere:
+/// a home-relative one is the same on this Mac and on its remote machines.
+public func reportText(for feedback: Feedback, folder: URL?, linkFolder: String? = nil) -> String {
     var lines = ["# Visual feedback (\(feedback.annotations.count) annotations)", ""]
+    let imagePrefix = linkFolder.map { $0 + "/" } ?? ""
 
-    if let folder {
-        lines.append("Saved to: \(folder.path)")
+    if let place = linkFolder ?? folder?.path {
+        lines.append("Saved to: \(place)")
     }
     lines.append("Screenshots: each annotation has a close-up of the target (primary) and, when captured, a smaller context image of its surroundings with the target outlined in blue. Use the context image only when you need to know where the target sits. Frames are macOS screen points.")
 
@@ -31,12 +34,12 @@ public func reportText(for feedback: Feedback, folder: URL?) -> String {
         if let image = annotation.image {
             lines.append("")
             lines.append("\(closeUpLabel(number)), \(sizeText(image)):")
-            lines.append("![annotation \(number)](\(imageName(number)))")
+            lines.append("![annotation \(number)](\(imagePrefix)\(imageName(number)))")
         }
         if let contextImage = annotation.contextImage {
             lines.append("")
             lines.append("\(contextLabel(number)), \(sizeText(contextImage)):")
-            lines.append("![annotation \(number) in context](\(contextImageName(number)))")
+            lines.append("![annotation \(number) in context](\(imagePrefix)\(contextImageName(number)))")
         }
         if case .element(.web(let element)) = annotation.target, !element.html.isEmpty {
             lines.append("")
@@ -174,4 +177,10 @@ private func pageURL(of annotation: Annotation) -> String? {
         return element.url
     }
     return nil
+}
+
+/// The folder in the form that means the same place on any machine, when it is in the home folder.
+public func homeRelativePath(_ folder: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
+    let homePath = home.path.hasSuffix("/") ? home.path : home.path + "/"
+    return folder.path.hasPrefix(homePath) ? "~/" + folder.path.dropFirst(homePath.count) : nil
 }

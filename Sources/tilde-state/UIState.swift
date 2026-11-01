@@ -16,6 +16,7 @@ struct UIState: Decodable {
         var expandedAgents: [String]?
         var recording: Bool?
         var savedSessions: Bool?
+        var machines: [String]?
     }
 
     let version: Int
@@ -38,6 +39,7 @@ struct UIState: Decodable {
     var hover: Bool?
     var editing: Bool?
     var drawing: Bool?
+    var sentStatus: String?
     var drawingColor: String?
     var commentText: String?
     var preview: Int?

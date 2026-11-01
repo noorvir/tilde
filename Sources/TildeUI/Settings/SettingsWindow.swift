@@ -115,6 +115,7 @@ final class SettingsModel: ObservableObject {
     /// The Chromium profiles whose logins Tilde's browser can import.
     let browserProfiles: () -> [ChromiumProfile]
     /// Whether macOS allows Tilde to record the screen and to use Accessibility.
+    var sshHosts: () -> [String] = { RemotePush.sshHosts() }
     let permissions: () -> (screenRecording: Bool, accessibility: Bool)
 
     init(

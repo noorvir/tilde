@@ -1,3 +1,4 @@
+import TildeCore
 @testable import TildeUI
 import Foundation
 
@@ -15,6 +16,10 @@ enum Transitions {
         var elementFrame: [CGFloat]?
         var windowFrame: [CGFloat]?
         var labelDistance: CGFloat?
+        var pushHost: String?
+        var pushed: [String]?
+        var failed: [String]?
+        var sshConfig: String?
     }
 
     struct Result: Encodable {
@@ -27,6 +32,9 @@ enum Transitions {
         var pictureDecides: Bool?
         var labelShows: Bool?
         var isOnLabel: Bool?
+        var hostIsValid: Bool?
+        var confirmation: String?
+        var hosts: [String]?
     }
 
     static func run(_ table: Data) throws -> Data {
@@ -45,6 +53,15 @@ enum Transitions {
                     result.hides = similarity == 0
                     result.pictureDecides = similarity == nil
                 }
+            }
+            if let host = row.pushHost {
+                result.hostIsValid = RemotePush.isValid(host: host)
+            }
+            if let pushed = row.pushed, let failed = row.failed {
+                result.confirmation = RemotePush.confirmation(pushed: pushed, failed: failed)
+            }
+            if let config = row.sshConfig {
+                result.hosts = RemotePush.sshHosts(inConfig: config)
             }
             if let distance = row.labelDistance {
                 result.isOnLabel = AnnotationController.isOnLabel(distance: distance)
