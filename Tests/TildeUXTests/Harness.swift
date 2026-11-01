@@ -161,6 +161,31 @@ final class TildeApp {
         return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
 
+    /// Moves over these points until the system cursor is the hand.
+    func findHandCursor(over points: [CGPoint]) async throws -> Bool {
+        for point in points {
+            try await hover(over: point)
+            try await Task.sleep(for: .milliseconds(150))
+            let result = try await drive("cursor", [:])
+            if result["isHand"] as? Bool == true {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Waits for the system cursor to be the hand, or not.
+    func waitForHandCursor(_ isHand: Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        for _ in 0..<30 {
+            let result = try await drive("cursor", [:])
+            if result["isHand"] as? Bool == isHand {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        Issue.record("The hand cursor is not \(isHand ? "on" : "off")", sourceLocation: sourceLocation)
+    }
+
     /// Everything on screen from the app.
     func seen() async throws -> [Seen] {
         let result = try await drive("ax", ["pid": pid])

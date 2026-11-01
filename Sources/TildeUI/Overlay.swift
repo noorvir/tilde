@@ -51,6 +51,7 @@ final class OverlayView: NSView {
     private var dragStart: CGPoint?
     private var dragRect: CGRect?
     private var hoveredMarker: Draft.ID?
+    private var handCursorTimer: Timer?
     /// Where the comment cards of the browser's page notes are, in view coordinates, for clicks.
     private var noteCards: [(id: Draft.ID, rect: CGRect)] = []
 
@@ -102,8 +103,26 @@ final class OverlayView: NSView {
             let target = cursor.map(CursorDebug.name(of:)) ?? "none"
             CursorDebug.log.notice("overlay \(self.window?.windowNumber ?? 0, privacy: .public) \(source, privacy: .public) at \(Int(point.x), privacy: .public),\(Int(point.y), privacy: .public) wants \(target, privacy: .public)")
         }
+        if cursor == .pointingHand {
+            holdHandCursor()
+        } else {
+            handCursorTimer?.invalidate()
+            handCursorTimer = nil
+        }
         if let cursor, NSCursor.current != cursor {
             cursor.set()
+        }
+    }
+
+    /// The app in front can set its own cursor, and `NSCursor.current` does not tell: the hand
+    /// is set again for as long as the pointer is on a label.
+    private func holdHandCursor() {
+        NSCursor.pointingHand.set()
+        guard handCursorTimer == nil else {
+            return
+        }
+        handCursorTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            NSCursor.pointingHand.set()
         }
     }
 

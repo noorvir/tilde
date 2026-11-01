@@ -75,6 +75,8 @@ else
     set -- --filter "$filter"
 fi
 swift build --build-tests >/dev/null
+# A run that was killed leaves its page servers on their ports.
+pkill -f "http.server 739" 2>/dev/null || true
 started=$(date +%s)
 TILDE_UX=1 TILDE_UX_APP="$PWD/build/TildeUX.app" TILDE_UX_FIXTURE="$(swift build --show-bin-path)/tilde-ux-fixture" swift test --skip-build "$@" || status=$?
 took=$(($(date +%s) - started))

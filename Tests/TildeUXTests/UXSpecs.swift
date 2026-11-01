@@ -341,10 +341,20 @@ struct UXSpecs {
             let point = CGPoint(x: page.minX + 120, y: page.minY + 300)
             try await addSmallNote(app, at: point)
             // Below the HUD, whose Send button is blue too.
-            let area = page.divided(atDistance: 200, from: .minYEdge).remainder
+            // And above the bottom edge, where the Simulator's dock can show below the window.
+            let area = page.divided(atDistance: 200, from: .minYEdge).remainder.divided(atDistance: 40, from: .maxYEdge).remainder
             try await app.waitForBlue(in: area, atLeast: 20)
             let hud = try await app.waitToSee("Annotating")
             step("note added")
+
+            // With the browser in front, the hand shows over the label at the end of its row.
+            let places = stride(from: page.maxX - 10, to: page.maxX - 130, by: -25).flatMap { x in
+                [CGPoint(x: x, y: point.y - 20), CGPoint(x: x, y: point.y + 5)]
+            }
+            let foundHand = try await app.findHandCursor(over: places)
+            #expect(foundHand, "No hand cursor over the label in \(browser)")
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            step("hand over the label")
 
             // Another screen on the same address and title.
             func press(_ button: CGPoint) async throws {
@@ -681,6 +691,21 @@ struct UXSpecs {
             try await app.waitNotToSee("Discard comment?", timeout: 1)
             step("comment never lost")
 
+            // With another app in front, the hand shows over a label. Its row ends 464 points in.
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            try await app.waitToSee("add")
+            try await app.type("A label")
+            try await app.waitToSee("A label", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
+            try await app.hover(over: CGPoint(x: frame.minX + 200, y: frame.minY + 200))
+            try await app.waitForHandCursor(false)
+            try await app.hover(over: CGPoint(x: frame.minX + 464, y: frame.minY + 45))
+            try await app.waitForHandCursor(true)
+            try await app.hover(over: CGPoint(x: frame.minX + 200, y: frame.minY + 200))
+            try await app.waitForHandCursor(false)
+            step("hand over a label")
+
             // The box grows and shrinks with its lines: the same frame never shows two sizes.
             try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
             try await app.waitToSee("add")
@@ -754,11 +779,30 @@ struct UXSpecs {
             try await app.waitToSee("Drawing canvas", timeout: 15)
             step("canvas ready")
 
-            // A click without a drag draws nothing.
+            // A click starts an arrow, and Esc cancels it without leaving draw mode.
             let start = CGPoint(x: row.frame.minX + 120, y: row.frame.minY + 180)
-            try await app.click(at: CGPoint(x: start.x + 60, y: start.y + 150))
-            try await Task.sleep(for: .milliseconds(800))
+            let clicked = CGPoint(x: start.x + 60, y: start.y + 150)
+            try await app.click(at: clicked)
+            try await Task.sleep(for: .milliseconds(300))
+            try await app.key(.escape)
+            try await Task.sleep(for: .milliseconds(300))
+            try await app.waitToSee("Done, esc")
             #expect(try await !app.seen().contains { $0.name == "add" })
+
+            // A second click finishes one, and its comment opens. Undo takes it back.
+            try await app.click(at: clicked)
+            try await Task.sleep(for: .milliseconds(300))
+            #expect(try await !app.seen().contains { $0.name == "add" })
+            try await app.hover(over: CGPoint(x: clicked.x + 80, y: clicked.y + 30))
+            try await app.click(at: CGPoint(x: clicked.x + 120, y: clicked.y + 40))
+            try await app.waitToSee("add", timeout: 15)
+            try await app.type("Two clicks")
+            try await app.waitToSee("Two clicks", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
+            try await app.press("Undo")
+            try await app.waitNotToSee("Two clicks")
+            step("arrow by clicks")
 
             // The tip lands near the row's end, snaps to it, and the row is the arrow's element.
             let elementEnd = CGPoint(x: row.frame.minX + 300, y: row.frame.midY)
@@ -789,6 +833,8 @@ struct UXSpecs {
 
             // A label opens its note in the preview, also in draw mode, which Esc then keeps.
             let marker = CGPoint(x: row.frame.minX + 300, y: row.frame.minY)
+            try await app.hover(over: marker)
+            try await app.waitForHandCursor(true)
             try await app.click(at: marker)
             try await app.waitToSee("1 of 1")
             try await app.key(.escape)
@@ -797,6 +843,10 @@ struct UXSpecs {
             try await app.key(.escape)
             try await app.waitNotToSee("Done, esc")
             try await app.waitToSeeText(containing: "1 note")
+            try await app.hover(over: CGPoint(x: marker.x, y: marker.y + 100))
+            try await app.waitForHandCursor(false)
+            try await app.hover(over: marker)
+            try await app.waitForHandCursor(true)
             try await app.click(at: marker)
             try await app.waitToSee("1 of 1")
             try await app.key(.escape)

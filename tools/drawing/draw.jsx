@@ -12,6 +12,8 @@ let editing = null;
 let isWaitingForEdit = false;
 let isPressOnShape = false;
 let pressAt = null;
+// An arrow started by a click, whose end follows the pointer until the next click.
+let clickArrow = null;
 const labelCursor = document.createElement("style");
 document.addEventListener("DOMContentLoaded", () => document.head.appendChild(labelCursor));
 const post = (message) => window.webkit?.messageHandlers?.tilde?.postMessage(message);
@@ -43,8 +45,16 @@ function describe(element) {
   return shape;
 }
 
+function cancelClickArrow() {
+  if (!clickArrow) return;
+  clickArrow = null;
+  changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), () => ({ isDeleted: true }));
+  api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
+}
+
 window.tildeDraw = {
   setTool(type) {
+    cancelClickArrow();
     drawingTool = type;
     if (!editing) api.setActiveTool({ type, locked: true });
   },
@@ -71,6 +81,7 @@ window.tildeDraw = {
     api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });
   },
   deselect() {
+    cancelClickArrow();
     api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
   },
   // The element under the pointer, for snapping; nil clears it.
@@ -108,7 +119,13 @@ window.addEventListener("wheel", (event) => {
 }, { capture: true, passive: false });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") post("escape");
+  if (event.key !== "Escape") return;
+  if (clickArrow) {
+    event.stopPropagation();
+    cancelClickArrow();
+    return;
+  }
+  post("escape");
 }, true);
 
 // Snapping: to the corners, edge midpoints and centre of the element under the pointer.
@@ -229,14 +246,37 @@ function snapSelectedArrow(event) {
   changeElements([element.id], () => (nearStart ? linePoints(end, stop) : linePoints(start, end)));
 }
 
+function finishClickArrow(element, event) {
+  const from = clickArrow.start ?? { x: element.x, y: element.y };
+  const to = snapPoint(event.clientX, event.clientY, event) ?? { x: event.clientX, y: event.clientY };
+  if (Math.hypot(to.x - from.x, to.y - from.y) < 4) {
+    cancelClickArrow();
+    return;
+  }
+  clickArrow = null;
+  changeElements([element.id], () => linePoints(from, to));
+  api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
+  isWaitingForEdit = true;
+  post("shape");
+}
+
 window.addEventListener("pointerup", (event) => {
   if (!isPressOnShape) return;
   ring.style.display = "none";
   // After Excalidraw has finished the shape.
   setTimeout(() => {
     const fresh = live().filter((element) => !taken.has(element.id));
-    // A click without a drag draws nothing, and starts no arrow of several clicks.
-    if (fresh.length && Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) < 4) {
+    if (clickArrow && fresh.length) {
+      finishClickArrow(fresh[fresh.length - 1], event);
+      return;
+    }
+    const isClick = Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) < 4;
+    if (fresh.length && isClick && api.getAppState().activeTool.type === "arrow") {
+      clickArrow = { start: startSnap };
+      return;
+    }
+    // With the other tools, a click without a drag draws nothing.
+    if (fresh.length && isClick) {
       changeElements(fresh.map((element) => element.id), () => ({ isDeleted: true }));
       api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
       return;

@@ -8,6 +8,7 @@ import CoreVideo
 //   GET  /status                       {"accessibility": bool, "screenRecording": bool}
 //   GET  /screenshot                   PNG of the main display
 //   POST /mouse {"type": "move|click|down|up|drag|scroll", "lines"?, "x", "y", "toX"?, "toY"?}
+//   POST /cursor                       {"isHand": bool}
 //   POST /type  {"text": "..."}
 //   POST /key   {"code": 36, "command": true}
 //   POST /tap   {"key": "control|option|shift|command|function"}  a modifier pressed and released
@@ -53,6 +54,11 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
             return HTTPResponse(status: 500)
         }
         return HTTPResponse(status: 200, headers: ["Content-Type": "image/png"], body: png)
+
+    case ("POST", "/cursor"):
+        // The cursor on screen, whichever app set it.
+        let current = NSCursor.currentSystem
+        return json(["isHand": current?.hotSpot == NSCursor.pointingHand.hotSpot && current?.image.size == NSCursor.pointingHand.image.size])
 
     case ("POST", "/mouse"):
         await mouse(body)
