@@ -166,6 +166,7 @@ final class TildeApp {
     /// Tilde's list of remote machines, as if they were installed.
     func setNodes(_ hosts: [String]) throws {
         let list = hosts.map { ["host": $0, "token": "test"] }
+        try FileManager.default.createDirectory(at: nodes.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: list).write(to: nodes)
     }
 

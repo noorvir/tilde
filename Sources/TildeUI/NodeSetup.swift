@@ -8,7 +8,15 @@ import os
 @MainActor
 final class NodeSetup: ObservableObject {
     enum Status: Equatable {
-        case notInstalled, installing, linked, unreachable
+        case notInstalled, installing, removing, linked, unreachable
+
+        var isInstalled: Bool {
+            self == .linked || self == .unreachable || self == .removing
+        }
+
+        var isWorking: Bool {
+            self == .installing || self == .removing
+        }
 
         init(name: String) {
             switch name {
@@ -22,7 +30,7 @@ final class NodeSetup: ObservableObject {
         var text: String {
             switch self {
             case .notInstalled: "Not installed"
-            case .installing: "Working on it"
+            case .installing, .removing: "Working on it"
             case .linked: "Installed and linked"
             case .unreachable: "Installed, not reachable"
             }
@@ -44,6 +52,7 @@ final class NodeSetup: ObservableObject {
     private let remotePort: UInt16
     private var links: [String: Process] = [:]
     private var isLinking = false
+    private var isFixed = false
 
     /// `remotePort` is not Tilde's own port: the node may run a Tilde of its own.
     init(store: NodeStore = NodeStore(), nodePort: UInt16, remotePort: UInt16 = 7319) {
@@ -55,6 +64,7 @@ final class NodeSetup: ObservableObject {
     /// For the contract: rows with no machines behind them.
     func setRowsForTesting(_ rows: [Row]) {
         self.rows = rows
+        isFixed = true
     }
 
     /// Links the installed nodes, for as long as Tilde runs.
@@ -71,6 +81,10 @@ final class NodeSetup: ObservableObject {
 
     /// Reads the candidates again: installed nodes, running ssh connections and the ssh config.
     func refresh() {
+        guard !isFixed else {
+            return
+        }
+
         Task {
             let found = await Task.detached { NodeDiscovery.runningHosts() + RemotePush.sshHosts() }.value
             let installed = store.load().map(\.host)
@@ -115,7 +129,7 @@ final class NodeSetup: ObservableObject {
     }
 
     func uninstall(_ host: String) {
-        update(host, status: .installing, note: nil)
+        update(host, status: .removing, note: nil)
         links.removeValue(forKey: host)?.terminate()
         let url = "http://127.0.0.1:\(remotePort)/mcp"
         Task {

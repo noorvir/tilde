@@ -347,8 +347,9 @@ struct UXSpecs {
             let hud = try await app.waitToSee("Annotating")
             step("note added")
 
-            // With the browser in front, the hand shows over the label at the end of its row.
-            let places = stride(from: page.maxX - 10, to: page.maxX - 130, by: -25).flatMap { x in
+            // With the browser in front, the hand shows over the label: at the end of its row, or
+            // at the click when the browser had not described its page yet.
+            let places = [point] + stride(from: page.maxX - 10, to: page.maxX - 130, by: -25).flatMap { x in
                 [CGPoint(x: x, y: point.y - 20), CGPoint(x: x, y: point.y + 5)]
             }
             let foundHand = try await app.findHandCursor(over: places)
@@ -893,6 +894,48 @@ struct UXSpecs {
             return nil
         }
         return Double(String(rest.prefix { $0.isNumber || $0 == "." || $0 == "-" }))
+    }
+
+    /// This machine's own ssh is the node: the setup of the VM has `vmself` in its ssh config, and
+    /// `~/.claude` and `~/.codex` folders.
+    @Test func aNodeIsInstalledFromSettingsLinkedWithAToken() async throws {
+        try await withApp { app in
+            try await app.menu("Settings")
+            try await app.waitToSee("Launch at login")
+            try await Task.sleep(for: .seconds(1))
+            try await app.press("Agents")
+            try await app.waitToSee("Install vmself", timeout: 10)
+            try await app.press("Install vmself")
+            try await app.waitToSeeText(containing: "Installed and linked", timeout: 30)
+            step("installed")
+
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let config = try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
+            let token = try #require(config.components(separatedBy: "Bearer ").last?.prefix { $0 != "\"" })
+            #expect(try String(contentsOf: home.appendingPathComponent(".claude.json"), encoding: .utf8).contains("Bearer \(token)"))
+            #expect(FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/tilde/SKILL.md").path))
+
+            // Through the tunnel, a request needs the token.
+            func status(_ header: String?) async throws -> Int {
+                var request = URLRequest(url: URL(string: "http://127.0.0.1:7319/mcp")!)
+                request.httpMethod = "POST"
+                request.httpBody = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8)
+                request.setValue(header, forHTTPHeaderField: "Authorization")
+                let (_, response) = try await URLSession.shared.data(for: request)
+                return (response as? HTTPURLResponse)?.statusCode ?? 0
+            }
+            #expect(try await status(nil) == 401)
+            #expect(try await status("Bearer wrong") == 401)
+            #expect(try await status("Bearer \(token)") == 200)
+            step("token")
+
+            try await app.press("Remove vmself")
+            try await app.waitToSee("Install vmself", timeout: 30)
+            #expect(try !String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8).contains("Bearer"))
+            #expect(try !String(contentsOf: home.appendingPathComponent(".claude.json"), encoding: .utf8).contains("Bearer"))
+            #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/tilde").path))
+            step("removed")
+        }
     }
 
     @Test func aCopiedReportGoesToTheRemoteMachineWithItsImages() async throws {

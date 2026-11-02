@@ -198,7 +198,7 @@ private struct NodeRow: View {
     var body: some View {
         SettingsRow(title: row.host, subtitle: row.note.map { "\(row.status.text). \($0)" } ?? row.status.text) {
             Button {
-                if row.status == .notInstalled {
+                if !row.status.isInstalled {
                     nodes.install(row.host)
                 } else {
                     nodes.uninstall(row.host)
@@ -206,22 +206,18 @@ private struct NodeRow: View {
             } label: {
                 // While it works, the button keeps its width and its name.
                 ZStack {
-                    Text(isInstalled ? "Remove" : "Install")
-                        .opacity(row.status == .installing ? 0 : 1)
-                    if row.status == .installing {
+                    Text(row.status.isInstalled ? "Remove" : "Install")
+                        .opacity(row.status.isWorking ? 0 : 1)
+                    if row.status.isWorking {
                         ProgressView()
                             .controlSize(.small)
                     }
                 }
             }
             .buttonStyle(SettingsButtonStyle())
-            .disabled(row.status == .installing)
-            .accessibilityLabel("\(isInstalled ? "Remove" : "Install") \(row.host)")
+            .disabled(row.status.isWorking)
+            .accessibilityLabel("\(row.status.isInstalled ? "Remove" : "Install") \(row.host)")
         }
-    }
-
-    private var isInstalled: Bool {
-        row.status == .linked || row.status == .unreachable
     }
 }
 
