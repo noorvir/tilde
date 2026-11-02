@@ -80,6 +80,81 @@ public enum NodeDiscovery {
         return hosts
     }
 
+    /// Where an alias leads, from the output of `ssh -G`: aliases of one address are one machine.
+    public static func address(fromSSHSettings text: String) -> String? {
+        var values: [String: String] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let words = line.split(separator: " ", maxSplits: 1).map(String.init)
+            if words.count == 2 {
+                values[words[0].lowercased()] = words[1]
+            }
+        }
+        return values["hostname"].map { "\($0):\(values["port"] ?? "22")" }
+    }
+
+    /// What is known of each alias, best first: the machine's own name, or else where it leads.
+    public struct Alias: Equatable, Sendable {
+        public let host: String
+        public let machineName: String?
+        public let address: String?
+
+        public init(host: String, machineName: String?, address: String?) {
+            self.host = host
+            self.machineName = machineName
+            self.address = address
+        }
+    }
+
+    /// The aliases of each machine, in the order found. Two aliases are one machine when they
+    /// share an address, or report the same machine name. The name to show comes first: an
+    /// installed one, or else the first that is not a bare IP address.
+    public static func machines(_ aliases: [Alias], installed: [String] = []) -> [[String]] {
+        var groups: [[Alias]] = []
+        for alias in aliases {
+            let index = groups.firstIndex { group in
+                group.contains { other in
+                    (alias.address != nil && alias.address == other.address)
+                        || (alias.machineName != nil && alias.machineName == other.machineName)
+                }
+            }
+            if let index {
+                groups[index].append(alias)
+            } else {
+                groups.append([alias])
+            }
+        }
+
+        func isAddress(_ host: String) -> Bool {
+            host.allSatisfy { $0.isNumber || $0 == "." || $0 == ":" }
+        }
+        return groups.map { group in
+            let hosts = group.map(\.host)
+            let first = hosts.first(where: installed.contains) ?? hosts.first { !isAddress($0) } ?? hosts[0]
+            return [first] + hosts.filter { $0 != first }
+        }
+    }
+
+    public static func address(ofAlias host: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = ["-G", host]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else {
+            return nil
+        }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return address(fromSSHSettings: String(decoding: data, as: UTF8.self))
+    }
+
+    /// The machine's own name, when it answers quickly.
+    public static func machineName(of host: String) -> String? {
+        let name = try? RemotePush.runOnNode(host, command: "uname -n")
+        return name?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     public static func runningHosts() -> [String] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")

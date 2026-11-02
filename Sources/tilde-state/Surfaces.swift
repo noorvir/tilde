@@ -164,7 +164,7 @@ enum Surfaces {
         }
         let model = try Fixtures.settingsModel(page: page, history: history)
         model.expandedAgents = Set(state.expandedAgents ?? [])
-        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status)) })
+        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status), isReachable: $0.isReachable, hasFailed: $0.hasFailed ?? false) })
         if state.recording == true {
             model.recordingShortcut = .togglePause
         }

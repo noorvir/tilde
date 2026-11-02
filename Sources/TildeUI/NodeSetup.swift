@@ -32,7 +32,41 @@ final class NodeSetup: ObservableObject {
             case .notInstalled: "Not installed"
             case .installing, .removing: "Working on it"
             case .linked: "Installed and linked"
-            case .unreachable: "Installed, not reachable"
+            case .unreachable: "Installed, not linked"
+            }
+        }
+    }
+
+    enum Dot: Equatable {
+        case green, yellow, grey, red
+
+        init(status: Status, isReachable: Bool?, hasFailed: Bool) {
+            if status == .linked {
+                self = .green
+            } else if isReachable == false {
+                self = .grey
+            } else if hasFailed {
+                self = .red
+            } else {
+                self = .yellow
+            }
+        }
+
+        var name: String {
+            switch self {
+            case .green: "green"
+            case .yellow: "yellow"
+            case .grey: "grey"
+            case .red: "red"
+            }
+        }
+
+        var reason: String {
+            switch self {
+            case .green: "Tilde is installed here, and the link is up"
+            case .yellow: "Answers over ssh, but has no link yet"
+            case .grey: "Does not answer over ssh"
+            case .red: "Answers over ssh, but the install or the link failed"
             }
         }
     }
@@ -41,6 +75,18 @@ final class NodeSetup: ObservableObject {
         let host: String
         var status: Status
         var note: String?
+        /// The reason behind the note.
+        var detail: String?
+        /// The machine's other names in the ssh config.
+        var aliases: [String] = []
+        /// Whether it answered over ssh; nil before the first check.
+        var isReachable: Bool?
+        /// An install or a tunnel failed on a machine that answers.
+        var hasFailed = false
+
+        var dot: Dot {
+            Dot(status: status, isReachable: isReachable, hasFailed: hasFailed)
+        }
 
         var id: String { host }
     }
@@ -86,25 +132,39 @@ final class NodeSetup: ObservableObject {
         }
 
         Task {
-            let found = await Task.detached { NodeDiscovery.runningHosts() + RemotePush.sshHosts() }.value
             let installed = store.load().map(\.host)
-            var hosts = installed
-            for host in found where !hosts.contains(host) {
-                hosts.append(host)
-            }
-            rows = hosts.map { host in
-                if let row = rows.first(where: { $0.host == host }) {
-                    return row
+            let result = await Task.detached {
+                var hosts = installed
+                for host in NodeDiscovery.runningHosts() + RemotePush.sshHosts() where !hosts.contains(host) {
+                    hosts.append(host)
                 }
-                let isLinked = links[host] != nil
-                let status: Status = installed.contains(host) ? (isLinked ? .linked : .unreachable) : .notInstalled
-                return Row(host: host, status: status)
+                let aliases = await withTaskGroup(of: NodeDiscovery.Alias.self) { group in
+                    for host in hosts {
+                        group.addTask {
+                            NodeDiscovery.Alias(host: host, machineName: NodeDiscovery.machineName(of: host), address: NodeDiscovery.address(ofAlias: host))
+                        }
+                    }
+                    return await group.reduce(into: [NodeDiscovery.Alias]()) { $0.append($1) }
+                }
+                let found = hosts.compactMap { host in aliases.first { $0.host == host } }
+                return (NodeDiscovery.machines(found, installed: installed), found.filter { $0.machineName != nil }.map(\.host))
+            }.value
+            let (machines, reachable) = result
+            log.notice("machines: \(machines, privacy: .public)")
+
+            rows = machines.map { names in
+                let host = names[0]
+                var row = rows.first { $0.host == host } ?? Row(host: host, status: installed.contains(host) ? (links[host] != nil ? .linked : .unreachable) : .notInstalled)
+                row.aliases = Array(names.dropFirst())
+                row.isReachable = reachable.contains { names.contains($0) }
+                return row
             }
         }
     }
 
     func install(_ host: String) {
         update(host, status: .installing, note: nil)
+        setFailed(host, false)
         let token = UUID().uuidString + UUID().uuidString
         let url = "http://127.0.0.1:\(remotePort)/mcp"
         Task {
@@ -113,17 +173,18 @@ final class NodeSetup: ObservableObject {
             }.value
             switch result {
             case .success(let report) where report.changed.isEmpty && !report.skipped.isEmpty:
-                update(host, status: .notInstalled, note: report.skipped.joined(separator: ". "))
+                update(host, status: .notInstalled, note: report.skipped.joined(separator: ". "), detail: report.details.joined(separator: " "))
             case .success(let report):
                 var nodes = store.load().filter { $0.host != host }
                 nodes.append(Node(host: host, token: token))
                 try? store.save(nodes)
                 log.notice("installed on \(host, privacy: .public): \(report.changed, privacy: .public), skipped \(report.skipped, privacy: .public)")
-                update(host, status: .unreachable, note: report.skipped.isEmpty ? nil : report.skipped.joined(separator: ". "))
+                update(host, status: .unreachable, note: report.skipped.isEmpty ? nil : report.skipped.joined(separator: ". "), detail: report.details.joined(separator: " "))
                 link(host)
             case .failure(let error):
                 log.error("could not install on \(host, privacy: .public): \(String(describing: error), privacy: .public)")
-                update(host, status: .notInstalled, note: "Could not connect by ssh")
+                update(host, status: .notInstalled, note: "Install failed", detail: String(describing: error))
+                setFailed(host, true)
             }
         }
     }
@@ -154,12 +215,19 @@ final class NodeSetup: ObservableObject {
         }
     }
 
-    private func update(_ host: String, status: Status, note: String?) {
+    private func update(_ host: String, status: Status, note: String?, detail: String? = nil) {
         if let index = rows.firstIndex(where: { $0.host == host }) {
             rows[index].status = status
             rows[index].note = note
+            rows[index].detail = detail ?? (note == nil ? nil : rows[index].detail)
         } else {
-            rows.append(Row(host: host, status: status, note: note))
+            rows.append(Row(host: host, status: status, note: note, detail: detail))
+        }
+    }
+
+    private func setFailed(_ host: String, _ hasFailed: Bool) {
+        if let index = rows.firstIndex(where: { $0.host == host }) {
+            rows[index].hasFailed = hasFailed
         }
     }
 
@@ -194,6 +262,7 @@ final class NodeSetup: ObservableObject {
             try? await Task.sleep(for: .seconds(3))
             if links[host] === process, process.isRunning {
                 update(host, status: .linked, note: rows.first { $0.host == host }?.note)
+                setFailed(host, false)
             }
         }
     }
@@ -210,6 +279,7 @@ final class NodeSetup: ObservableObject {
         }
 
         let next = lived > 30 ? 0 : attempt + 1
+        setFailed(host, next >= 2)
         Task {
             try? await Task.sleep(for: .seconds(min(30, 2 * (next + 1))))
             link(host, attempt: next)

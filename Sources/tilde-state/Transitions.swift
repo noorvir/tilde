@@ -21,6 +21,17 @@ enum Transitions {
         var failed: [String]?
         var sshConfig: String?
         var processList: String?
+        var aliases: [AliasRow]?
+        var installed: [String]?
+        var nodeStatus: String?
+        var isReachable: Bool?
+        var hasFailed: Bool?
+    }
+
+    struct AliasRow: Decodable {
+        let host: String
+        var machineName: String?
+        var address: String?
     }
 
     struct Result: Encodable {
@@ -36,6 +47,8 @@ enum Transitions {
         var hostIsValid: Bool?
         var confirmation: String?
         var hosts: [String]?
+        var machines: [[String]]?
+        var dot: String?
     }
 
     static func run(_ table: Data) throws -> Data {
@@ -60,6 +73,13 @@ enum Transitions {
             }
             if let pushed = row.pushed, let failed = row.failed {
                 result.confirmation = RemotePush.confirmation(pushed: pushed, failed: failed)
+            }
+            if let status = row.nodeStatus {
+                result.dot = NodeSetup.Dot(status: NodeSetup.Status(name: status), isReachable: row.isReachable, hasFailed: row.hasFailed ?? false).name
+            }
+            if let aliases = row.aliases {
+                let found = aliases.map { NodeDiscovery.Alias(host: $0.host, machineName: $0.machineName, address: $0.address) }
+                result.machines = NodeDiscovery.machines(found, installed: row.installed ?? [])
             }
             if let list = row.processList {
                 result.hosts = NodeDiscovery.sshHosts(inProcessList: list)

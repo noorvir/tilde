@@ -340,5 +340,111 @@
     "devbox"
    ]
   }
+ },
+ {
+  "name": "Aliases of one address, or with one machine name, are one machine; an installed name shows",
+  "installed": [
+   "mac-mini-ts"
+  ],
+  "aliases": [
+   {
+    "host": "mac-mini",
+    "machineName": "alex",
+    "address": "100.64.0.10:22"
+   },
+   {
+    "host": "100.64.0.10",
+    "address": "100.64.0.10:22"
+   },
+   {
+    "host": "mac-mini-ts",
+    "machineName": "alex",
+    "address": "100.64.0.10:22"
+   },
+   {
+    "host": "mac-mini-lan",
+    "machineName": "alex",
+    "address": "192.168.1.20:22"
+   },
+   {
+    "host": "acroduck",
+    "address": "10.0.0.1:22"
+   }
+  ],
+  "expect": {
+   "machines": [
+    [
+     "mac-mini-ts",
+     "mac-mini",
+     "100.64.0.10",
+     "mac-mini-lan"
+    ],
+    [
+     "acroduck"
+    ]
+   ]
+  }
+ },
+ {
+  "name": "With no name, an address shows last",
+  "aliases": [
+   {
+    "host": "10.0.0.2",
+    "address": "10.0.0.2:22"
+   },
+   {
+    "host": "box",
+    "address": "10.0.0.2:22"
+   }
+  ],
+  "expect": {
+   "machines": [
+    [
+     "box",
+     "10.0.0.2"
+    ]
+   ]
+  }
+ },
+ {
+  "name": "A linked machine has a green dot",
+  "nodeStatus": "linked",
+  "isReachable": true,
+  "expect": {
+   "dot": "green"
+  }
+ },
+ {
+  "name": "A reachable machine with nothing installed is yellow",
+  "nodeStatus": "notInstalled",
+  "isReachable": true,
+  "expect": {
+   "dot": "yellow"
+  }
+ },
+ {
+  "name": "An installed machine whose link is not up yet is yellow",
+  "nodeStatus": "unreachable",
+  "isReachable": true,
+  "expect": {
+   "dot": "yellow"
+  }
+ },
+ {
+  "name": "A machine that does not answer is grey",
+  "nodeStatus": "unreachable",
+  "isReachable": false,
+  "expect": {
+   "dot": "grey"
+  }
+ },
+ {
+  "name": "A failed link on a reachable machine is red",
+  "nodeStatus": "unreachable",
+  "isReachable": true,
+  "hasFailed": true,
+  "expect": {
+   "dot": "red"
+  }
  }
 ]

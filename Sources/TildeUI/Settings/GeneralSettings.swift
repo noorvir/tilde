@@ -20,7 +20,8 @@ struct GeneralSettings: View {
             SettingsSection("Application") {
                 SettingsRow(title: "Launch at login", subtitle: launchError, subtitleIsError: launchError != nil) {
                     Toggle("Launch at login", isOn: $launchesAtLogin)
-                        .toggleStyle(TildeSwitchStyle())
+                        .toggleStyle(.switch)
+                        .tint(.accentColor)
                         .labelsHidden()
                         .onChange(of: launchesAtLogin) { _, isOn in
                             setLaunchAtLogin(isOn)
@@ -29,7 +30,8 @@ struct GeneralSettings: View {
                 SettingsDivider()
                 SettingsRow(title: "Snap drawings to elements", subtitle: "Hold ⌘ while drawing to draw freely") {
                     Toggle("Snap drawings to elements", isOn: $snapsDrawings)
-                        .toggleStyle(TildeSwitchStyle())
+                        .toggleStyle(.switch)
+                        .tint(.accentColor)
                         .labelsHidden()
                 }
                 SettingsDivider()

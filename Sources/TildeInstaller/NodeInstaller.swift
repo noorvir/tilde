@@ -19,7 +19,10 @@ public struct NodeInstaller {
     /// What was done and what was left out, for the user.
     public struct Report: Equatable, Sendable {
         public var changed: [String] = []
+        /// Short, for the row.
         public var skipped: [String] = []
+        /// The reasons, for its tooltip.
+        public var details: [String] = []
     }
 
     private enum Agent: CaseIterable {
@@ -31,6 +34,7 @@ public struct NodeInstaller {
         let found = try agents()
         guard !found.isEmpty else {
             report.skipped.append("No Claude Code or Codex there")
+            report.details.append("Tilde looks for ~/.claude, ~/.claude.json and ~/.codex on the machine.")
             return report
         }
 
@@ -39,7 +43,7 @@ public struct NodeInstaller {
             if try edit(config, { try format.installing(in: $0) }) {
                 report.changed.append(config)
             }
-            try writeSkill(skillFile(agent), report: &report)
+            try writeSkill(skillFile(agent), agent: agent, report: &report)
         }
         return report
     }
@@ -97,14 +101,16 @@ public struct NodeInstaller {
 
     /// A skills folder or a skill that links elsewhere belongs to something else, such as a
     /// config repository: Tilde does not write into it.
-    private func writeSkill(_ skill: String, report: inout Report) throws {
+    private func writeSkill(_ skill: String, agent: Agent, report: inout Report) throws {
         let folder = skillFolder(skill)
         let parts = folder.split(separator: "/").map(String.init)
         let chain = (2...parts.count).map { parts[0..<$0].joined(separator: "/") }
         let isLinked = chain.map { "[ -L \($0) ]" }.joined(separator: " || ")
         let answer = try shell("if \(isLinked); then echo linked; fi", nil)
         if answer.contains("linked") {
-            report.skipped.append("\(skill): its folder links elsewhere")
+            let name = agent == .claude ? "Claude" : "Codex"
+            report.skipped.append("\(name) skill skipped")
+            report.details.append("\(skill) is in a folder that links elsewhere, such as a config repository, so Tilde left it alone. \(name) still gets Tilde's tools.")
             return
         }
         if try edit(skill, { _ in nodeSkill }) {

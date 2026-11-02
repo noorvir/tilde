@@ -92,8 +92,8 @@ private struct AgentRow: View {
                 StatusDot(status: status)
                 Spacer(minLength: 16)
                 Toggle(row.name, isOn: installed(status))
-                    .toggleStyle(TildeSwitchStyle())
-                    .controlSize(.small)
+                    .toggleStyle(.switch)
+                    .tint(.accentColor)
                     .labelsHidden()
             }
             .padding(.horizontal, 16)
@@ -195,8 +195,49 @@ private struct NodeRow: View {
     let nodes: NodeSetup
     let row: NodeSetup.Row
 
+    private var dotColor: Color {
+        switch row.dot {
+        case .green: .green
+        case .yellow: .yellow
+        case .grey: .gray
+        case .red: .red
+        }
+    }
+
+    private var subtitle: String {
+        var parts = [row.status.text]
+        if let note = row.note {
+            parts.append(note)
+        }
+        if !row.aliases.isEmpty {
+            parts.append("Also \(row.aliases.joined(separator: ", "))")
+        }
+        return parts.joined(separator: ". ")
+    }
+
     var body: some View {
-        SettingsRow(title: row.host, subtitle: row.note.map { "\(row.status.text). \($0)" } ?? row.status.text) {
+        HStack(spacing: 12) {
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 18))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 8, height: 8)
+                        .offset(x: 3, y: -1)
+                }
+                .help(row.dot.reason)
+                .accessibilityLabel(row.dot.reason)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.host)
+                    .font(.system(size: 14))
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 16)
             Button {
                 if !row.status.isInstalled {
                     nodes.install(row.host)
@@ -218,6 +259,10 @@ private struct NodeRow: View {
             .disabled(row.status.isWorking)
             .accessibilityLabel("\(row.status.isInstalled ? "Remove" : "Install") \(row.host)")
         }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 50)
+        .padding(.vertical, 6)
+        .help(row.detail ?? "")
     }
 }
 

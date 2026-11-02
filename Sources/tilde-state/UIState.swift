@@ -14,6 +14,8 @@ struct UIState: Decodable {
     struct NodeState: Decodable {
         let host: String
         let status: String
+        var isReachable: Bool?
+        var hasFailed: Bool?
     }
 
     struct Settings: Decodable {

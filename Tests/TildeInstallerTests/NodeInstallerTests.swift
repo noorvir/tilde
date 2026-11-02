@@ -68,7 +68,8 @@ struct NodeInstallerTests {
         let installer = NodeInstaller(mcpURL: "http://127.0.0.1:7311/mcp", shell: shell(home: home))
 
         let report = try installer.install(token: "secret")
-        #expect(report.skipped.contains { $0.contains(".agents/skills/tilde") })
+        #expect(report.skipped == ["Codex skill skipped"])
+        #expect(report.details.contains { $0.contains(".agents/skills/tilde") })
         #expect(try FileManager.default.contentsOfDirectory(atPath: repo.path).isEmpty)
     }
 

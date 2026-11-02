@@ -162,6 +162,7 @@ struct SettingsView: View {
                     .padding(.top, 24)
                     .padding(.bottom, 32)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(OverlayScrollers())
             }
             .background(SettingsColors.content)
         }
@@ -244,3 +245,17 @@ private struct SidebarItem: View {
         return isHovered ? Color.primary.opacity(0.05) : .clear
     }
 }
+
+/// Makes the enclosing scroll view use the thin scrollers that fade, whatever the mouse attached.
+private struct OverlayScrollers: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            view.enclosingScrollView?.scrollerStyle = .overlay
+        }
+    }
+}
+
