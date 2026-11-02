@@ -330,5 +330,15 @@
     "devbox"
    ]
   }
+ },
+ {
+  "name": "Running ssh connections name their nodes",
+  "processList": "/usr/bin/ssh -o BatchMode=yes -p 22 alex@mac-mini ls\nssh devbox\nsshd: /usr/sbin/sshd\nvim x",
+  "expect": {
+   "hosts": [
+    "mac-mini",
+    "devbox"
+   ]
+  }
  }
 ]

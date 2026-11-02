@@ -900,11 +900,7 @@ struct UXSpecs {
         defer { window.close() }
         try await withApp { app in
             // This machine's own ssh is the remote machine; the setup of the VM has its key.
-            let set = Process()
-            set.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
-            set.arguments = ["write", "dev.tilde.ux", "remoteMachines", "localhost"]
-            try set.run()
-            waitForExit(set)
+            try app.setNodes(["localhost"])
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
             let frame = ChangingWindow.frame
@@ -927,11 +923,7 @@ struct UXSpecs {
             #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("feedback.md").path))
 
             // A machine that cannot be reached: the report still copies, with local paths.
-            let unreachable = Process()
-            unreachable.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
-            unreachable.arguments = ["write", "dev.tilde.ux", "remoteMachines", "no-such-host.invalid"]
-            try unreachable.run()
-            waitForExit(unreachable)
+            try app.setNodes(["no-such-host.invalid"])
             try await app.waitNotToSee("Copied, images on localhost", timeout: 5)
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")

@@ -23,7 +23,10 @@ final class AgentSetup: ObservableObject {
     /// Tests draw one placeholder instead of the apps' icons.
     private let placeholderIcon: NSImage?
 
-    init(installer: Installer, placeholderIcon: NSImage? = nil) {
+    let nodes: NodeSetup
+
+    init(installer: Installer, placeholderIcon: NSImage? = nil, nodes: NodeSetup? = nil) {
+        self.nodes = nodes ?? NodeSetup(nodePort: 7312)
         self.installer = installer
         self.placeholderIcon = placeholderIcon
     }

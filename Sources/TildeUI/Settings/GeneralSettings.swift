@@ -12,12 +12,6 @@ struct GeneralSettings: View {
     }
 
     @AppStorage("drawingSnaps") private var snapsDrawings = true
-    @AppStorage("remoteMachines") private var remoteMachines = ""
-    @State private var newMachine = ""
-
-    private func setMachines(_ machines: [String]) {
-        remoteMachines = machines.joined(separator: "\n")
-    }
 
     var body: some View {
         let permissions = model.permissions()
@@ -46,41 +40,6 @@ struct GeneralSettings: View {
                 SettingsDivider()
                 PermissionRow(title: "Accessibility", subtitle: "Element details in native apps", isAllowed: permissions.accessibility) {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-                }
-            }
-
-            SettingsSection("Remote machines") {
-                let machines = RemotePush.machines(in: remoteMachines)
-                ForEach(machines, id: \.self) { machine in
-                    SettingsRow(title: machine, subtitle: "Copied feedback goes here too, with its images") {
-                        Button("Remove") {
-                            setMachines(machines.filter { $0 != machine })
-                        }
-                        .buttonStyle(SettingsButtonStyle())
-                    }
-                    SettingsDivider()
-                }
-                ForEach(model.sshHosts().filter { !machines.contains($0) }, id: \.self) { host in
-                    SettingsRow(title: host, subtitle: "From your ssh config") {
-                        Button("Add") {
-                            setMachines(machines + [host])
-                        }
-                        .buttonStyle(SettingsButtonStyle())
-                        .accessibilityLabel("Add \(host)")
-                    }
-                    SettingsDivider()
-                }
-                SettingsRow(title: "Another machine", subtitle: "A name that ssh can reach") {
-                    TextField("host", text: $newMachine)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 160)
-                        .accessibilityLabel("Another machine")
-                        .onSubmit {
-                            if RemotePush.isValid(host: newMachine), !machines.contains(newMachine) {
-                                setMachines(machines + [newMachine])
-                                newMachine = ""
-                            }
-                        }
                 }
             }
 

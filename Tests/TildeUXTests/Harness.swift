@@ -58,6 +58,7 @@ enum Key: Int {
 final class TildeApp {
     let port: Int
     let sessions: URL
+    let nodes: URL
     let inbox: URL
     private static let driver = URL(string: "http://127.0.0.1:7320")!
     private static var nextPort = 7340
@@ -69,6 +70,7 @@ final class TildeApp {
         let root = other?.sessions.deletingLastPathComponent()
             ?? FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-\(UUID().uuidString)", isDirectory: true)
         sessions = root.appendingPathComponent("sessions", isDirectory: true)
+        nodes = root.appendingPathComponent("nodes.json")
         inbox = root.appendingPathComponent("inbox", isDirectory: true)
         try launch()
     }
@@ -80,7 +82,7 @@ final class TildeApp {
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         open.arguments = [
-            "-n", "--env", "TILDE_PORT=\(port)", "--env", "TILDE_SESSIONS=\(sessions.path)", "--env", "TILDE_INBOX=\(inbox.path)", bundle,
+            "-n", "--env", "TILDE_PORT=\(port)", "--env", "TILDE_SESSIONS=\(sessions.path)", "--env", "TILDE_NODES=\(nodes.path)", "--env", "TILDE_INBOX=\(inbox.path)", bundle,
         ]
         try open.run()
         waitForExit(open)
@@ -159,6 +161,12 @@ final class TildeApp {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, _) = try await URLSession.shared.data(for: request)
         return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
+
+    /// Tilde's list of remote machines, as if they were installed.
+    func setNodes(_ hosts: [String]) throws {
+        let list = hosts.map { ["host": $0, "token": "test"] }
+        try JSONSerialization.data(withJSONObject: list).write(to: nodes)
     }
 
     /// Moves over these points until the system cursor is the hand.

@@ -164,8 +164,9 @@ enum Surfaces {
         }
         let model = try Fixtures.settingsModel(page: page, history: history)
         model.expandedAgents = Set(state.expandedAgents ?? [])
-        model.sshHosts = { ["mac-mini", "devbox"] }
-        UserDefaults.standard.set((state.machines ?? []).joined(separator: "\n"), forKey: "remoteMachines")
+        if let nodes = state.nodes {
+            model.setup.nodes.setRowsForTesting(nodes.map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status)) })
+        }
         if state.recording == true {
             model.recordingShortcut = .togglePause
         }

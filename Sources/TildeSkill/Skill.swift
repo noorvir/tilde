@@ -22,3 +22,17 @@ public let tildeSkillBody = """
 Each annotation has a close-up (primary) and a context image (secondary); look at the context image only if the close-up is not enough. Feedback the user sent earlier is in the resource `tilde://feedback/latest`.
 
 """
+
+/// The skill on another machine: only the user starts it, and it says what to do when this Mac
+/// cannot be reached.
+public let nodeSkill = """
+---
+name: tilde
+description: Get visual feedback from the user with Tilde, on their Mac. Use for /tilde.
+disable-model-invocation: true
+---
+
+\(tildeSkillBody)
+If the `tilde` tools cannot be reached, say in one line that the user must open Tilde on their Mac.
+
+"""

@@ -16,11 +16,6 @@ public enum RemotePush {
         return host.allSatisfy { $0.isLetter || $0.isNumber || ".-_@:".contains($0) }
     }
 
-    /// The machines in the setting `remoteMachines`, one on each line.
-    public static func machines(in setting: String) -> [String] {
-        setting.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter(isValid(host:))
-    }
-
     /// The named hosts of an ssh config, without patterns such as `*`.
     public static func sshHosts(inConfig text: String) -> [String] {
         var hosts: [String] = []
@@ -65,12 +60,20 @@ public enum RemotePush {
         _ = try run(scp, options + files + ["\(host):.tilde/inbox/\(name)/"])
     }
 
+    /// Runs a command on the host, with `input` as its standard input. Waits for the network.
+    public static func runOnNode(_ host: String, command: String, input: String? = nil) throws -> String {
+        guard isValid(host: host) else {
+            throw Failure.invalidHost
+        }
+        return try run(ssh, options + [host, command], input: input)
+    }
+
     private static let ssh = "/usr/bin/ssh"
     private static let scp = "/usr/bin/scp"
     // Never waits for a password: there is nobody to type it.
     private static let options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 
-    private static func run(_ tool: String, _ arguments: [String]) throws -> String {
+    private static func run(_ tool: String, _ arguments: [String], input: String? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -78,7 +81,13 @@ public enum RemotePush {
         let errors = Pipe()
         process.standardOutput = output
         process.standardError = errors
+        let inputPipe = Pipe()
+        process.standardInput = input == nil ? FileHandle.nullDevice : inputPipe
         try process.run()
+        if let input {
+            inputPipe.fileHandleForWriting.write(Data(input.utf8))
+            try inputPipe.fileHandleForWriting.close()
+        }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         let message = errors.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()

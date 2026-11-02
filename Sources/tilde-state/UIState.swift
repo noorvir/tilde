@@ -11,12 +11,17 @@ struct UIState: Decodable {
         let action: String
         let oneApp: Bool
     }
+    struct NodeState: Decodable {
+        let host: String
+        let status: String
+    }
+
     struct Settings: Decodable {
         let page: String
         var expandedAgents: [String]?
         var recording: Bool?
         var savedSessions: Bool?
-        var machines: [String]?
+        var nodes: [NodeState]?
     }
 
     let version: Int

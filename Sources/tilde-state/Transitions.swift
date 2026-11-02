@@ -20,6 +20,7 @@ enum Transitions {
         var pushed: [String]?
         var failed: [String]?
         var sshConfig: String?
+        var processList: String?
     }
 
     struct Result: Encodable {
@@ -59,6 +60,9 @@ enum Transitions {
             }
             if let pushed = row.pushed, let failed = row.failed {
                 result.confirmation = RemotePush.confirmation(pushed: pushed, failed: failed)
+            }
+            if let list = row.processList {
+                result.hosts = NodeDiscovery.sshHosts(inProcessList: list)
             }
             if let config = row.sshConfig {
                 result.hosts = RemotePush.sshHosts(inConfig: config)

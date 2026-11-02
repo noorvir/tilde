@@ -903,7 +903,7 @@ final class AnnotationController: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
         sentStatus = .done
 
-        let machines = RemotePush.machines(in: UserDefaults.standard.string(forKey: "remoteMachines") ?? "")
+        let machines = NodeStore().load().map(\.host)
         guard let folder, !machines.isEmpty else {
             phase = .sent(confirmation: "Copied to clipboard")
             return

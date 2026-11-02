@@ -22,6 +22,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         store: store, clientsFile: SessionArchive.defaultRoot.deletingLastPathComponent().appendingPathComponent("mcp-clients.json")
     )
     private var server: HTTPServer?
+    private var nodeServer: HTTPServer?
+    private var nodes: NodeSetup?
     private var serverState = ServerState(port: 7311)
     private var menu: StatusMenu?
     private var settings: SettingsWindow?
@@ -35,6 +37,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        nodes?.stopLinks()
         controller.saveBeforeQuitting()
     }
 
@@ -74,7 +77,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         serverState = ServerState(port: port)
         let bridge = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/tilde-mcp").path
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let setup = AgentSetup(installer: Installer(environment: .standard(home: home, port: String(port), bridgePath: bridge)))
+        let setup = AgentSetup(
+            installer: Installer(environment: .standard(home: home, port: String(port), bridgePath: bridge)),
+            nodes: NodeSetup(nodePort: port + 1)
+        )
+        setup.nodes.startLinks()
+        self.nodes = setup.nodes
         let shortcuts = controller.shortcuts
         let version = SettingsModel.bundleVersion
         let toast = InstallToast { [weak self] in
@@ -143,6 +151,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             self.server = server
+
+            // The door for tunnels from other machines: every request needs a node's token.
+            let store = NodeStore()
+            let nodeServer = try HTTPServer(port: state.port + 1) { request in
+                await mcp.handleFromNode(request, store: store)
+            }
+            nodeServer.start { _ in }
+            self.nodeServer = nodeServer
         } catch {
             state.status = .failed(error.localizedDescription)
         }

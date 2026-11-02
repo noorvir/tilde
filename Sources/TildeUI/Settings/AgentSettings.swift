@@ -30,6 +30,8 @@ struct AgentSettings: View {
                 .disabled(rows.isEmpty)
             }
 
+            NodesSection(nodes: setup.nodes)
+
             SettingsSection("Other agents") {
                 SettingsRow(title: "Copy setup", subtitle: "For agents not listed or on another machine") {
                     Menu {
@@ -164,3 +166,62 @@ private struct AgentRow: View {
         }
     }
 }
+
+/// The machines that an agent can use Tilde from, over ssh.
+private struct NodesSection: View {
+    @ObservedObject var nodes: NodeSetup
+
+    var body: some View {
+        SettingsSection("Remote machines") {
+            if nodes.rows.isEmpty {
+                SettingsRow(title: "No machines found", subtitle: "Machines in your ssh config show here") {
+                    EmptyView()
+                }
+            }
+            ForEach(Array(nodes.rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 {
+                    SettingsDivider()
+                }
+                NodeRow(nodes: nodes, row: row)
+            }
+        }
+        .task {
+            nodes.refresh()
+        }
+    }
+}
+
+private struct NodeRow: View {
+    let nodes: NodeSetup
+    let row: NodeSetup.Row
+
+    var body: some View {
+        SettingsRow(title: row.host, subtitle: row.note.map { "\(row.status.text). \($0)" } ?? row.status.text) {
+            Button {
+                if row.status == .notInstalled {
+                    nodes.install(row.host)
+                } else {
+                    nodes.uninstall(row.host)
+                }
+            } label: {
+                // While it works, the button keeps its width and its name.
+                ZStack {
+                    Text(isInstalled ? "Remove" : "Install")
+                        .opacity(row.status == .installing ? 0 : 1)
+                    if row.status == .installing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .buttonStyle(SettingsButtonStyle())
+            .disabled(row.status == .installing)
+            .accessibilityLabel("\(isInstalled ? "Remove" : "Install") \(row.host)")
+        }
+    }
+
+    private var isInstalled: Bool {
+        row.status == .linked || row.status == .unreachable
+    }
+}
+

@@ -44,7 +44,15 @@ public final class MCPServer {
         try? data.write(to: clientsFile, options: .atomic)
     }
 
-    public func handle(_ request: HTTPRequest) async -> HTTPResponse {
+    /// A request from a node's tunnel: only with that node's token.
+    public func handleFromNode(_ request: HTTPRequest, store: NodeStore) async -> HTTPResponse {
+        guard let node = store.node(forAuthorization: request.headers["authorization"]) else {
+            return HTTPResponse(status: 401)
+        }
+        return await handle(request, node: node.host)
+    }
+
+    public func handle(_ request: HTTPRequest, node: String? = nil) async -> HTTPResponse {
         guard isLocalRequest(request) else {
             return HTTPResponse(status: 403)
         }
@@ -79,7 +87,7 @@ public final class MCPServer {
 
         switch method {
         case "initialize":
-            return initialize(id: id, params: params)
+            return initialize(id: id, params: params, node: node)
         case "ping":
             return json(result(id: id, [:]))
         case "tools/list":
@@ -107,14 +115,14 @@ public final class MCPServer {
 
     // MARK: - Methods
 
-    private func initialize(id: Any, params: [String: Any]) -> HTTPResponse {
+    private func initialize(id: Any, params: [String: Any], node: String?) -> HTTPResponse {
         let requested = params["protocolVersion"] as? String ?? ""
         let version = supportedVersions.contains(requested) ? requested : supportedVersions.last!
 
         let info = params["clientInfo"] as? [String: Any] ?? [:]
         let name = info["title"] as? String ?? info["name"] as? String ?? "Agent"
         let sessionID = UUID().uuidString
-        let display = Self.displayName(forClient: name)
+        let display = Self.displayName(forClient: name) + (node.map { " on \($0)" } ?? "")
         // Lets new harness names be added to the list.
         log.notice("MCP client \(name, privacy: .public) shows as \(display, privacy: .public)")
         clients[sessionID] = display
@@ -294,7 +302,7 @@ public final class MCPServer {
             [
                 "name": "start_annotation",
                 "annotations": ["title": "Ask the user for visual feedback", "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false],
-                "description": "Opens Tilde for the user. Call first, no preamble. Returns the feedback (a report, and per annotation a close-up and a context screenshot), or a session_id that is still in progress.",
+                "description": "Opens Tilde for the user. Only when the user asks for it. Call first, no preamble. Returns the feedback (a report, and per annotation a close-up and a context screenshot), or a session_id that is still in progress.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
