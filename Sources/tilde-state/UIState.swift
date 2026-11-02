@@ -16,6 +16,9 @@ struct UIState: Decodable {
         let status: String
         var isReachable: Bool?
         var hasFailed: Bool?
+        var agents: [String]?
+        var agentsOff: [String]?
+        var agentsAbsent: [String]?
     }
 
     struct Settings: Decodable {

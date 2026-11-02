@@ -43,6 +43,10 @@ public struct InstallEnvironment: Sendable {
     public var mcpURL: String
     /// The `tilde-mcp` stdio bridge, for apps that only start stdio servers.
     public var bridgePath: String
+    /// The `Authorization` header of the MCP entries, on a machine that reaches Tilde by a tunnel.
+    public var authorization: String?
+    /// Variables that move an app's folder, such as `CODEX_HOME`.
+    public var variables: [String: String] = [:]
 
     public init(home: URL, applications: [URL], binaries: [URL], mcpURL: String, bridgePath: String) {
         self.home = home
@@ -148,13 +152,43 @@ public struct FileChange: Sendable {
 
 /// Adds Tilde's MCP server entry and skill to agent apps, and removes them again.
 /// Each config keeps everything that is not Tilde's; a changed file gets a timestamped backup.
-public struct Installer {
+public struct Installer: Sendable {
     public let environment: InstallEnvironment
+    public let files: InstallFiles
     /// Reports what would change without writing.
     public var dryRun = false
 
-    public init(environment: InstallEnvironment) {
+    public init(environment: InstallEnvironment, files: InstallFiles = LocalFiles()) {
         self.environment = environment
+        self.files = files
+    }
+
+    /// The installer of another machine, reached by a shell and a tunnel to `mcpURL`. Its folders
+    /// come from its login shell.
+    public static func remote(mcpURL: String, authorization: String, run: @escaping ShellFiles.Run) throws -> Installer {
+        let names = ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME"]
+        let printed = names.map { "\"$\($0)\"" }.joined(separator: " ")
+        let output = try run("${SHELL:-/bin/sh} -lc 'printf \"%s\\n\" \(printed)' | tail -n \(names.count)", nil)
+        let values = output.components(separatedBy: "\n")
+        guard values.count >= names.count, values[0].hasPrefix("/") else {
+            throw InstallerError.noHome
+        }
+
+        var environment = InstallEnvironment.standard(home: URL(fileURLWithPath: values[0]), port: "0", bridgePath: "", isolated: true)
+        environment.applications.insert(URL(fileURLWithPath: "/Applications"), at: 0)
+        environment.binaries += values[1].split(separator: ":").map { URL(fileURLWithPath: String($0)) }
+        environment.mcpURL = mcpURL
+        environment.authorization = authorization
+        for (name, value) in zip(names, values).dropFirst(2) where !value.isEmpty {
+            environment.variables[name] = value
+        }
+        return Installer(environment: environment, files: ShellFiles(run: run))
+    }
+
+    /// The apps that can be set up on this machine. The Claude app starts a local bridge program,
+    /// which another machine does not have.
+    public var harnesses: [Harness] {
+        environment.authorization == nil ? Harness.allCases : Harness.allCases.filter { $0 != .claudeDesktop }
     }
 
     public func status(of harness: Harness) -> InstallStatus {
@@ -162,7 +196,7 @@ public struct Installer {
             return .notFound
         }
         let target = target(for: harness)
-        let text = (try? String(contentsOf: target.config, encoding: .utf8)) ?? ""
+        let text = (try? files.read(target.config)) ?? ""
         do {
             return try target.format.entry(in: text) ? .installed : .notInstalled
         } catch {
@@ -190,11 +224,10 @@ public struct Installer {
 
     public func isPresent(_ harness: Harness) -> Bool {
         let target = target(for: harness)
-        let fileManager = FileManager.default
-        let paths = target.detect.paths.map { environment.home.appendingPathComponent($0) }
+        let paths = target.detect.paths.map { environment.home.appendingPathComponent($0) } + target.detect.files
         let apps = environment.applications.flatMap { folder in target.detect.apps.map { folder.appendingPathComponent($0) } }
         let tools = environment.binaries.flatMap { folder in target.detect.binaries.map { folder.appendingPathComponent($0) } }
-        return (paths + apps + tools).contains { fileManager.fileExists(atPath: $0.path) }
+        return (paths + apps + tools).contains { files.exists($0) }
     }
 
     /// The MCP config file that Tilde writes for the app.
@@ -212,7 +245,7 @@ public struct Installer {
         let config = target(for: harness).config.resolvingSymlinksInPath()
         let folder = config.deletingLastPathComponent()
         let prefix = "\(config.lastPathComponent).tilde-backup-"
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        let names = files.names(in: folder)
         // Timestamps sort as text; a "-2" suffix sorts after the backup it follows.
         return names.filter { $0.hasPrefix(prefix) }.max().map { folder.appendingPathComponent($0) }
     }
@@ -236,12 +269,12 @@ public struct Installer {
     public func uninstall(_ harness: Harness) -> InstallReport {
         let target = target(for: harness)
         var report = InstallReport(harness: harness, dryRun: dryRun)
-        if FileManager.default.fileExists(atPath: target.config.path) {
+        if files.exists(target.config) {
             report.changes.append(edit(target.config) { try target.format.removing(from: $0) })
         }
         // A skill folder can be shared by several apps; it goes when the last of them is uninstalled.
         let sharing = Harness.allCases.filter { $0 != harness && self.target(for: $0).skills == target.skills && status(of: $0) == .installed }
-        if sharing.isEmpty, let text = try? String(contentsOf: target.skillFile, encoding: .utf8), text == tildeSkill {
+        if sharing.isEmpty, let text = try? files.read(target.skillFile), text == tildeSkill {
             report.changes.append(remove(target.skillFile))
         }
         return report
@@ -252,12 +285,10 @@ public struct Installer {
     /// Rewrites `file` with `change`, which gets the current text ("" for a missing file).
     /// Writes through symbolic links, such as a skills folder that links into a dotfiles repository.
     private func edit(_ file: URL, _ change: (String) throws -> String) -> FileChange {
-        let fileManager = FileManager.default
-        let real = file.resolvingSymlinksInPath()
-        let exists = fileManager.fileExists(atPath: real.path)
+        let exists = files.exists(file)
 
         do {
-            let old = exists ? try String(contentsOf: real, encoding: .utf8) : ""
+            let old = exists ? try files.read(file) : ""
             let new = try change(old)
             guard new != old || !exists else {
                 return FileChange(file: file, action: .unchanged, backup: nil)
@@ -268,11 +299,10 @@ public struct Installer {
 
             var backup: URL?
             if exists {
-                backup = backupURL(for: real)
-                try fileManager.copyItem(at: real, to: backup!)
+                backup = backupURL(for: file)
+                try files.copy(file, to: backup!)
             }
-            try fileManager.createDirectory(at: real.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try Data(new.utf8).write(to: real, options: .atomic)
+            try files.write(new, to: file)
             return FileChange(file: file, action: exists ? .updated : .created, backup: backup)
         } catch {
             return FileChange(file: file, action: .failed(String(describing: error)), backup: nil)
@@ -285,14 +315,9 @@ public struct Installer {
             return FileChange(file: file, action: .removed, backup: nil)
         }
 
-        let fileManager = FileManager.default
-        let real = file.resolvingSymlinksInPath()
         do {
-            try fileManager.removeItem(at: real)
-            let folder = real.deletingLastPathComponent()
-            if (try? fileManager.contentsOfDirectory(atPath: folder.path))?.isEmpty == true {
-                try fileManager.removeItem(at: folder)
-            }
+            try files.remove(file)
+            files.removeFolderIfEmpty(file.deletingLastPathComponent())
             return FileChange(file: file, action: .removed, backup: nil)
         } catch {
             return FileChange(file: file, action: .failed(String(describing: error)), backup: nil)
@@ -304,15 +329,20 @@ public struct Installer {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let base = "\(file.lastPathComponent).tilde-backup-\(formatter.string(from: Date()))"
+        let taken = files.names(in: file.deletingLastPathComponent())
 
-        var url = file.deletingLastPathComponent().appendingPathComponent(base)
+        var name = base
         var number = 2
-        while FileManager.default.fileExists(atPath: url.path) {
-            url = file.deletingLastPathComponent().appendingPathComponent("\(base)-\(number)")
+        while taken.contains(name) {
+            name = "\(base)-\(number)"
             number += 1
         }
-        return url
+        return file.deletingLastPathComponent().appendingPathComponent(name)
     }
+}
+
+public enum InstallerError: Error {
+    case noHome
 }
 
 // MARK: - Targets
@@ -321,6 +351,8 @@ public struct Installer {
 struct Target {
     struct Detection {
         var paths: [String] = []
+        /// Folders that a variable moved.
+        var files: [URL] = []
         var apps: [String] = []
         var binaries: [String] = []
     }
@@ -386,18 +418,25 @@ extension Installer {
     func target(for harness: Harness) -> Target {
         let home = environment.home
         let url = JSONValue.string(environment.mcpURL)
+        // Added to an entry on a machine that reaches Tilde by a tunnel.
+        let headers: [JSONValue.Member] = environment.authorization.map { authorization in
+            [.init(key: "headers", value: .object([.init(key: "Authorization", value: .string(authorization))]))]
+        } ?? []
+        let claudeFolder = environment.variables["CLAUDE_CONFIG_DIR"].map { URL(fileURLWithPath: $0) }
+        let codexFolder = environment.variables["CODEX_HOME"].map { URL(fileURLWithPath: $0) }
+        let configFolder = environment.variables["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".config")
         // Claude reads only its own folder. The other apps all read ~/.agents/skills; Cursor and
         // VS Code also read ~/.claude/skills, so they get one skill folder in common with Claude.
-        let claudeSkills = home.appendingPathComponent(".claude/skills")
+        let claudeSkills = claudeFolder?.appendingPathComponent("skills") ?? home.appendingPathComponent(".claude/skills")
         let agentSkills = home.appendingPathComponent(".agents/skills")
 
         switch harness {
         case .claudeCode:
             return Target(
-                config: home.appendingPathComponent(".claude.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "type", value: .string("http")), .init(key: "url", value: url)])),
+                config: (claudeFolder ?? home).appendingPathComponent(".claude.json"),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "type", value: .string("http")), .init(key: "url", value: url)] + headers)),
                 skills: claudeSkills,
-                detect: Target.Detection(paths: [".claude.json"], binaries: ["claude"]),
+                detect: Target.Detection(paths: [".claude.json"], files: claudeFolder.map { [$0] } ?? [], binaries: ["claude"]),
                 iconApps: ["Claude.app"]
             )
         case .claudeDesktop:
@@ -409,44 +448,45 @@ extension Installer {
             )
         case .codex:
             return Target(
-                config: home.appendingPathComponent(".codex/config.toml"),
+                config: (codexFolder ?? home.appendingPathComponent(".codex")).appendingPathComponent("config.toml"),
                 format: .toml(table: "mcp_servers.tilde", lines: [
                     "[mcp_servers.tilde]",
                     "url = \"\(environment.mcpURL)\"",
+                ] + (environment.authorization.map { ["http_headers = { Authorization = \"\($0)\" }"] } ?? []) + [
                     "default_tools_approval_mode = \"approve\"",
                 ]),
                 skills: agentSkills,
-                detect: Target.Detection(paths: [".codex"], apps: ["Codex.app"], binaries: ["codex"]),
+                detect: Target.Detection(paths: [".codex"], files: codexFolder.map { [$0] } ?? [], apps: ["Codex.app"], binaries: ["codex"]),
                 iconApps: ["ChatGPT.app"]
             )
         case .cursor:
             return Target(
                 config: home.appendingPathComponent(".cursor/mcp.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "url", value: url)])),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "url", value: url)] + headers)),
                 skills: agentSkills,
                 detect: Target.Detection(paths: [".cursor"], apps: ["Cursor.app"])
             )
         case .vscode:
             return Target(
                 config: home.appendingPathComponent("Library/Application Support/Code/User/mcp.json"),
-                format: .json(path: ["servers", "tilde"], entry: .object([.init(key: "type", value: .string("http")), .init(key: "url", value: url)])),
+                format: .json(path: ["servers", "tilde"], entry: .object([.init(key: "type", value: .string("http")), .init(key: "url", value: url)] + headers)),
                 skills: agentSkills,
                 detect: Target.Detection(paths: ["Library/Application Support/Code/User"], apps: ["Visual Studio Code.app"], binaries: ["code"])
             )
         case .gemini:
             return Target(
                 config: home.appendingPathComponent(".gemini/settings.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "httpUrl", value: url)])),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "httpUrl", value: url)] + headers)),
                 skills: agentSkills,
                 detect: Target.Detection(paths: [".gemini/settings.json"], binaries: ["gemini"])
             )
         case .windsurf:
             return Target(
                 // Windsurf is now Devin Desktop; it moved its config from ~/.codeium/windsurf.
-                config: home.appendingPathComponent(".config/devin/mcp_config.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "serverUrl", value: url)])),
+                config: configFolder.appendingPathComponent("devin/mcp_config.json"),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "serverUrl", value: url)] + headers)),
                 skills: agentSkills,
-                detect: Target.Detection(paths: [".config/devin", ".codeium/windsurf"], apps: ["Devin.app", "Windsurf.app"])
+                detect: Target.Detection(paths: [".codeium/windsurf"], files: [configFolder.appendingPathComponent("devin")], apps: ["Devin.app", "Windsurf.app"])
             )
         }
     }

@@ -12,7 +12,17 @@
       {
         "host": "mac-mini",
         "status": "linked",
-        "isReachable": true
+        "isReachable": true,
+        "agents": [
+          "claude-code",
+          "codex"
+        ],
+        "agentsOff": [
+          "gemini"
+        ],
+        "agentsAbsent": [
+          "cursor"
+        ]
       },
       {
         "host": "studio",
@@ -35,6 +45,9 @@
         "status": "notInstalled",
         "isReachable": true
       }
+    ],
+    "expandedAgents": [
+      "mac-mini"
     ]
   }
 }

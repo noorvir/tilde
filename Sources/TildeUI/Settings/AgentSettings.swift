@@ -30,7 +30,7 @@ struct AgentSettings: View {
                 .disabled(rows.isEmpty)
             }
 
-            NodesSection(nodes: setup.nodes)
+            NodesSection(nodes: setup.nodes, setup: setup, expanded: $expanded)
 
             SettingsSection("Other agents") {
                 SettingsRow(title: "Copy setup", subtitle: "For agents not listed or on another machine") {
@@ -170,6 +170,8 @@ private struct AgentRow: View {
 /// The machines that an agent can use Tilde from, over ssh.
 private struct NodesSection: View {
     @ObservedObject var nodes: NodeSetup
+    let setup: AgentSetup
+    @Binding var expanded: Set<String>
 
     var body: some View {
         SettingsSection("Remote machines") {
@@ -182,7 +184,15 @@ private struct NodesSection: View {
                 if index > 0 {
                     SettingsDivider()
                 }
-                NodeRow(nodes: nodes, row: row)
+                NodeRow(nodes: nodes, setup: setup, row: row, isExpanded: Binding {
+                    expanded.contains(row.id)
+                } set: { isOpen in
+                    if isOpen {
+                        expanded.insert(row.id)
+                    } else {
+                        expanded.remove(row.id)
+                    }
+                })
             }
         }
         .task {
@@ -193,7 +203,9 @@ private struct NodesSection: View {
 
 private struct NodeRow: View {
     let nodes: NodeSetup
+    let setup: AgentSetup
     let row: NodeSetup.Row
+    @Binding var isExpanded: Bool
 
     private var dotColor: Color {
         switch row.dot {
@@ -216,7 +228,52 @@ private struct NodeRow: View {
     }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            machine
+            if isExpanded {
+                ForEach(row.agents) { agent in
+                    SettingsDivider()
+                    agentRow(agent)
+                }
+            }
+        }
+    }
+
+    private func agentRow(_ agent: NodeSetup.Agent) -> some View {
+        HStack(spacing: 10) {
+            Text(agent.harness.name)
+                .font(.system(size: 14))
+            if agent.isOnMachine {
+                StatusDot(status: agent.status)
+            } else {
+                Text("Not on this machine")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 16)
+            Toggle(agent.harness.name, isOn: Binding {
+                row.status.isInstalled ? agent.status == .installed : agent.isChosen
+            } set: { isOn in
+                nodes.setInstalled(agent.harness, isOn, on: row.host)
+            })
+            .toggleStyle(.switch)
+            .tint(.accentColor)
+            .labelsHidden()
+            .disabled(!agent.isOnMachine || row.status.isWorking)
+        }
+        .padding(.leading, 16 + 12 + 10)
+        .padding(.trailing, 16)
+        .frame(height: 44)
+    }
+
+    private var machine: some View {
         HStack(spacing: 12) {
+            // A disclosure on the left that turns down, as for the apps above.
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(row.agents.isEmpty ? .tertiary : .secondary)
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                .frame(width: 12)
             Image(systemName: "laptopcomputer")
                 .font(.system(size: 18))
                 .foregroundStyle(.secondary)
@@ -262,6 +319,12 @@ private struct NodeRow: View {
         .padding(.horizontal, 16)
         .frame(minHeight: 50)
         .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isExpanded.toggle()
+            }
+        }
         .help(row.detail ?? "")
     }
 }

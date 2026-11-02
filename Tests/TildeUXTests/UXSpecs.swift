@@ -897,7 +897,7 @@ struct UXSpecs {
     }
 
     /// This machine's own ssh is the node: the setup of the VM has `vmself` in its ssh config, and
-    /// `~/.claude` and `~/.codex` folders.
+    /// a `~/.claude.json` file and a `~/.codex` folder.
     @Test func aNodeIsInstalledFromSettingsLinkedWithAToken() async throws {
         try await withApp { app in
             try await app.menu("Settings")

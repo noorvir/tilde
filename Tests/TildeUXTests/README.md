@@ -4,7 +4,7 @@
 
 ## The release check
 
-`scripts/e2e-release.sh` runs 8 flows with real input and real apps: an agent session with its report; an arrow reshaped with its comment open, its label, preview and a real scroll; a rectangle, another page and a crash; a label hiding in Chrome and Safari; notes in the real Simulator; the hold key and a comment never lost; a remote machine installed from Settings, and a copied report sent to it. The VM needs `vmself` in its ssh config, its own key in `authorized_keys`, and `~/.claude` and `~/.codex` folders. Each flow prints `STEP` times to its log.
+`scripts/e2e-release.sh` runs 8 flows with real input and real apps: an agent session with its report; an arrow reshaped with its comment open, its label, preview and a real scroll; a rectangle, another page and a crash; a label hiding in Chrome and Safari; notes in the real Simulator; the hold key and a comment never lost; a remote machine installed from Settings, and a copied report sent to it. The VM needs `vmself` in its ssh config, its own key in `authorized_keys`, a `~/.claude.json` file and a `~/.codex` folder. Each flow prints `STEP` times to its log.
 
 The other specs here stay as a longer check, `scripts/ux.sh`, for when a change touches windows, focus or input.
 

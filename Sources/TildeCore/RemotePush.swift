@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Copies a saved report to another machine, so that an agent there can open its images. The
 /// host is a name for `ssh`, such as an alias from `~/.ssh/config`.
@@ -65,22 +66,57 @@ public enum RemotePush {
         guard isValid(host: host) else {
             throw Failure.invalidHost
         }
+        try FileManager.default.createDirectory(at: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde"), withIntermediateDirectories: true)
+        shareConnection(to: host)
         return try run(ssh, options + [host, command], input: input)
     }
 
     private static let ssh = "/usr/bin/ssh"
     private static let scp = "/usr/bin/scp"
     // Never waits for a password: there is nobody to type it.
-    private static let options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
+    private static let options = [
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ControlMaster=no", "-o", "ControlPath=~/.tilde/ssh-%C",
+    ]
+    private static let lastShared = OSAllocatedUnfairLock(initialState: [String: Date]())
+
+    /// Opens a connection that the many small commands of an install share, when none is recent.
+    /// It stays in the background, so it gets none of the pipes that a command is read through.
+    private static func shareConnection(to host: String) {
+        let isRecent = lastShared.withLock { times in
+            if let time = times[host], Date().timeIntervalSince(time) < 20 {
+                return true
+            }
+            times[host] = Date()
+            return false
+        }
+        guard !isRecent else {
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ssh)
+        process.arguments = [
+            "-f", "-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ControlMaster=auto",
+            "-o", "ControlPath=~/.tilde/ssh-%C", "-o", "ControlPersist=30", host,
+        ]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        if (try? process.run()) != nil {
+            process.waitUntilExit()
+        }
+    }
 
     private static func run(_ tool: String, _ arguments: [String], input: String? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
         let output = Pipe()
-        let errors = Pipe()
+        let errorsFile = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ssh-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: errorsFile.path, contents: nil)
+        defer { try? FileManager.default.removeItem(at: errorsFile) }
         process.standardOutput = output
-        process.standardError = errors
+        process.standardError = try FileHandle(forWritingTo: errorsFile)
         let inputPipe = Pipe()
         process.standardInput = input == nil ? FileHandle.nullDevice : inputPipe
         try process.run()
@@ -89,10 +125,9 @@ public enum RemotePush {
             try inputPipe.fileHandleForWriting.close()
         }
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        let message = errors.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
-            throw Failure.failed(String(decoding: message, as: UTF8.self))
+            throw Failure.failed((try? String(contentsOf: errorsFile, encoding: .utf8)) ?? "")
         }
         return String(decoding: data, as: UTF8.self)
     }

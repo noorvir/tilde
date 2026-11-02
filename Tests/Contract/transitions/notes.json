@@ -446,5 +446,40 @@
   "expect": {
    "dot": "red"
   }
+ },
+ {
+  "name": "Agents on this Mac are chosen on a machine that has them; others found stay off; absent ones are marked",
+  "foundOnMachine": [
+   "claude-code",
+   "codex",
+   "gemini"
+  ],
+  "onThisMac": [
+   "claude-code",
+   "codex",
+   "cursor"
+  ],
+  "expect": {
+   "chosen": [
+    "claude-code",
+    "codex"
+   ],
+   "absent": [
+    "cursor"
+   ]
+  }
+ },
+ {
+  "name": "With no agent on this Mac, all those found are chosen",
+  "foundOnMachine": [
+   "codex"
+  ],
+  "onThisMac": [],
+  "expect": {
+   "chosen": [
+    "codex"
+   ],
+   "absent": []
+  }
  }
 ]
