@@ -142,8 +142,7 @@ final class HUDPanel {
         isSnappedHome = isNearHome
 
         // The outline matches the pill: below the 16 pt content padding, at the pill's width.
-        let pillWidth = HUDView.pillWidth(for: controller)
-        let outline = NSRect(x: home.x - pillWidth / 2, y: home.y - 16 - HUDMetrics.height, width: pillWidth, height: HUDMetrics.height)
+        let outline = NSRect(x: home.x - HUDView.width / 2, y: home.y - 16 - HUDMetrics.height, width: HUDView.width, height: HUDMetrics.height)
         homeOutline.show(outline, isSnapped: isNearHome, below: window.windowNumber)
         guard ended else {
             return
@@ -309,28 +308,14 @@ struct HUDView: View {
         return isPillHovered ? 1.015 : 1
     }
 
-    /// The pill keeps one width while annotating, so it never jumps between states. After
-    /// Send it shrinks to fit the confirmation.
-    private var pillContentWidth: CGFloat? {
+    /// While annotating the pill is at least `width`, and wider only when its title needs it,
+    /// up to `maxWidth`: the extra goes to the title column, and the buttons keep their sizes.
+    /// After Send it shrinks to fit the confirmation.
+    private var pillContentWidth: ClosedRange<CGFloat>? {
         if case .sent = controller.phase {
             return nil
         }
-        return Self.pillWidth(for: controller)
-    }
-
-    /// Wide enough for the session's whole subtitle, up to `maxWidth`: the extra goes to the
-    /// title column, and the buttons keep their places. It depends only on the session, so
-    /// it stays the same while annotating.
-    static func pillWidth(for controller: AnnotationController) -> CGFloat {
-        guard let session = controller.session, !session.isLocal else {
-            return width
-        }
-        let candidates = subtitleCandidates(
-            client: session.client, clientIcon: controller.clientIcon(session.client), node: session.node,
-            scopeName: nil, scopeIcon: nil, notes: 2, state: .annotating
-        )
-        let subtitle = candidates.first.map(self.width(of:)) ?? 0
-        return min(width + max(subtitle - subtitleWidth, 0), maxWidth)
+        return Self.width...Self.maxWidth
     }
 
     /// The pill's content width, the same in every state; embedded, the same without the
@@ -460,7 +445,7 @@ struct HUDView: View {
     }
 
     private var drawingBar: some View {
-        capsule(HStack(spacing: 4) { drawingContent }, width: Self.pillWidth(for: controller))
+        capsule(HStack(spacing: 4) { drawingContent }, width: HUDView.width...HUDView.width)
             .opacity(controller.isHUDShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -469,11 +454,12 @@ struct HUDView: View {
             )
     }
 
-    private func capsule(_ content: some View, width: CGFloat?) -> some View {
+    private func capsule(_ content: some View, width: ClosedRange<CGFloat>?) -> some View {
         content
             .padding(.leading, HUDMetrics.leadingInset)
             .padding(.trailing, HUDMetrics.trailingInset)
-            .frame(width: width, height: HUDMetrics.height)
+            .frame(minWidth: width?.lowerBound, maxWidth: width?.upperBound)
+            .frame(height: HUDMetrics.height)
             .clipShape(Capsule())
             .background(Capsule().fill(Color.tildeInk))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
