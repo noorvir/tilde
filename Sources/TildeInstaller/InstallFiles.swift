@@ -6,7 +6,6 @@ public protocol InstallFiles: Sendable {
     func read(_ file: URL) throws -> String
     /// Writes through symbolic links, creating the folders on the way.
     func write(_ text: String, to file: URL) throws
-    func copy(_ file: URL, to destination: URL) throws
     func remove(_ file: URL) throws
     /// The names in a folder; none if it is not there.
     func names(in folder: URL) -> [String]
@@ -30,9 +29,6 @@ public struct LocalFiles: InstallFiles {
         try Data(text.utf8).write(to: real, options: .atomic)
     }
 
-    public func copy(_ file: URL, to destination: URL) throws {
-        try FileManager.default.copyItem(at: file.resolvingSymlinksInPath(), to: destination)
-    }
 
     public func remove(_ file: URL) throws {
         try FileManager.default.removeItem(at: file.resolvingSymlinksInPath())
@@ -80,9 +76,6 @@ public struct ShellFiles: InstallFiles {
         _ = try run("mkdir -p \(folder) && if [ -L \(path) ]; then cat > \(path); else cat > \(temporary) && mv \(temporary) \(path); fi", text)
     }
 
-    public func copy(_ file: URL, to destination: URL) throws {
-        _ = try run("cp \(quoted(file)) \(quoted(destination))", nil)
-    }
 
     public func remove(_ file: URL) throws {
         _ = try run("rm \(quoted(file))", nil)

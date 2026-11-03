@@ -98,7 +98,7 @@ public struct InstallReport: Sendable {
 
     /// One line per file, then what to restart. Paths inside `home` start with `~`.
     public func summary(home: URL) -> [String] {
-        // Backups name the home through /private/tmp or /tmp, as the file system gives it.
+        // Paths can name the home through /private/tmp or /tmp, as the file system gives it.
         let homes = Set([home.path, home.standardizedFileURL.path, home.resolvingSymlinksInPath().path])
         func short(_ url: URL) -> String {
             let path = url.path
@@ -114,8 +114,7 @@ public struct InstallReport: Sendable {
             case .created:
                 return dryRun ? "Would create \(file)" : "Created \(file)"
             case .updated:
-                let backup = change.backup.map { " (backup: \(short($0)))" } ?? ""
-                return dryRun ? "Would update \(file)" : "Updated \(file)\(backup)"
+                return dryRun ? "Would update \(file)" : "Updated \(file)"
             case .removed:
                 return dryRun ? "Would remove \(file)" : "Removed \(file)"
             case .unchanged:
@@ -146,12 +145,11 @@ public struct FileChange: Sendable {
 
     public let file: URL
     public let action: Action
-    /// The copy of the file from before the change.
-    public let backup: URL?
 }
 
 /// Adds Tilde's MCP server entry and skill to agent apps, and removes them again.
-/// Each config keeps everything that is not Tilde's; a changed file gets a timestamped backup.
+/// Each config keeps everything that is not Tilde's, as it was: only Tilde's entry changes, and
+/// the file is replaced in one step.
 public struct Installer: Sendable {
     public let environment: InstallEnvironment
     public let files: InstallFiles
@@ -245,17 +243,6 @@ public struct Installer: Sendable {
         target(for: harness).skillFile
     }
 
-    /// The newest backup that Tilde made of the app's config file.
-    public func latestBackup(for harness: Harness) -> URL? {
-        let config = target(for: harness).config.resolvingSymlinksInPath()
-        let folder = config.deletingLastPathComponent()
-        let prefix = "\(config.lastPathComponent).tilde-backup-"
-        let names = files.names(in: folder)
-        // Timestamps sort as text; a "-2" suffix sorts after the backup it follows.
-        return names.filter { $0.hasPrefix(prefix) }.max().map { folder.appendingPathComponent($0) }
-    }
-
-    /// The app's bundle on this Mac, for its icon. A command-line tool gives its maker's app.
     public func appBundle(for harness: Harness) -> URL? {
         let target = target(for: harness)
         return (target.detect.apps + target.iconApps).lazy
@@ -296,53 +283,32 @@ public struct Installer: Sendable {
             let old = exists ? try files.read(file) : ""
             let new = try change(old)
             guard new != old || !exists else {
-                return FileChange(file: file, action: .unchanged, backup: nil)
+                return FileChange(file: file, action: .unchanged)
             }
             if dryRun {
-                return FileChange(file: file, action: exists ? .updated : .created, backup: nil)
+                return FileChange(file: file, action: exists ? .updated : .created)
             }
 
-            var backup: URL?
-            if exists {
-                backup = backupURL(for: file)
-                try files.copy(file, to: backup!)
-            }
             try files.write(new, to: file)
-            return FileChange(file: file, action: exists ? .updated : .created, backup: backup)
+            return FileChange(file: file, action: exists ? .updated : .created)
         } catch {
-            return FileChange(file: file, action: .failed(String(describing: error)), backup: nil)
+            return FileChange(file: file, action: .failed(String(describing: error)))
         }
     }
 
     /// Removes a skill file Tilde wrote, and its folder when nothing else is in it.
     private func remove(_ file: URL) -> FileChange {
         if dryRun {
-            return FileChange(file: file, action: .removed, backup: nil)
+            return FileChange(file: file, action: .removed)
         }
 
         do {
             try files.remove(file)
             files.removeFolderIfEmpty(file.deletingLastPathComponent())
-            return FileChange(file: file, action: .removed, backup: nil)
+            return FileChange(file: file, action: .removed)
         } catch {
-            return FileChange(file: file, action: .failed(String(describing: error)), backup: nil)
+            return FileChange(file: file, action: .failed(String(describing: error)))
         }
-    }
-
-    private func backupURL(for file: URL) -> URL {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
-        let base = "\(file.lastPathComponent).tilde-backup-\(formatter.string(from: Date()))"
-        let taken = files.names(in: file.deletingLastPathComponent())
-
-        var name = base
-        var number = 2
-        while taken.contains(name) {
-            name = "\(base)-\(number)"
-            number += 1
-        }
-        return file.deletingLastPathComponent().appendingPathComponent(name)
     }
 }
 

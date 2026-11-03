@@ -137,16 +137,14 @@ enum Fixtures {
     }
 
     /// Agent apps in a temporary home: Claude partly installed (Claude Code only), Codex not
-    /// installed with an old backup, Cursor with an invalid config, and Windsurf installed.
-    /// VS Code and Gemini are not there. The files are written directly, so no backup names
-    /// carry today's time.
+    /// installed, Cursor with an invalid config, and Windsurf installed.
+    /// VS Code and Gemini are not there.
     static func agentSetup() throws -> AgentSetup {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ui-\(UUID().uuidString)")
         let files = [
             ".claude.json": #"{ "mcpServers": { "tilde": { "type": "http", "url": "http://127.0.0.1:7311/mcp" } } }"#,
             "Library/Application Support/Claude/claude_desktop_config.json": "{}",
             ".codex/config.toml": "",
-            ".codex/config.toml.tilde-backup-20261028-120000": "",
             ".cursor/mcp.json": "{ not json",
             ".config/devin/mcp_config.json": #"{ "mcpServers": { "tilde": { "serverUrl": "http://127.0.0.1:7311/mcp" } } }"#,
         ]

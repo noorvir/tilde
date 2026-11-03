@@ -5,11 +5,13 @@ struct AgentSettings: View {
     @ObservedObject var setup: AgentSetup
     @Binding var expanded: Set<String>
     var onResult: (InstallResult) -> Void = { _ in }
+    /// Opens a machine's page.
+    var open: (String) -> Void = { _ in }
 
     var body: some View {
         let rows = setup.foundRows
 
-        Form {
+        VStack(alignment: .leading, spacing: 28) {
             SettingsSection("Apps on this Mac") {
                 if rows.isEmpty {
                     SettingsRow(title: "No agent apps found", subtitle: "Use Copy setup below for other agents") {
@@ -17,6 +19,9 @@ struct AgentSettings: View {
                     }
                 }
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 {
+                        SettingsDivider()
+                    }
                     AgentRow(setup: setup, row: row, isExpanded: expandedBinding(row), onResult: onResult)
                 }
             } accessory: {
@@ -26,7 +31,7 @@ struct AgentSettings: View {
                 .disabled(rows.isEmpty)
             }
 
-            NodesSection(nodes: setup.nodes)
+            NodesSection(nodes: setup.nodes, open: open)
 
             SettingsSection("Other agents") {
                 SettingsRow(title: "Copy setup", subtitle: "For agents not listed or on another machine") {
@@ -46,7 +51,6 @@ struct AgentSettings: View {
                 }
             }
         }
-        .settingsForm()
     }
 
     private func expandedBinding(_ row: AgentSetup.Row) -> Binding<Bool> {
@@ -89,8 +93,12 @@ struct AgentRow: View {
                 Spacer(minLength: 16)
                 Toggle(row.name, isOn: installed(status))
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .tint(Color.tildeBlue)
                     .labelsHidden()
             }
+            .padding(.horizontal, 16)
+            .frame(height: 50)
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -102,8 +110,9 @@ struct AgentRow: View {
 
             if isExpanded {
                 files
-                    .padding(.leading, 12 + 10 + 24 + 10)
-                    .padding(.top, 6)
+                    .padding(.leading, 16 + 12 + 10 + 24 + 10)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 14)
             }
         }
         .contextMenu {
@@ -132,10 +141,10 @@ struct AgentRow: View {
     private var files: some View {
         let installer = setup.installer
         let home = installer.environment.home
-        // MCP configs, then skills, then backups. Apps that share a skill folder list it once;
+        // MCP configs, then skills. Apps that share a skill folder list it once;
         // a path listed twice would also share its hover underline.
         let harnesses = setup.present(row)
-        let ordered = harnesses.map(installer.configFile(for:)) + harnesses.map(installer.skillFile(for:)) + harnesses.compactMap(installer.latestBackup(for:))
+        let ordered = harnesses.map(installer.configFile(for:)) + harnesses.map(installer.skillFile(for:))
         var urls: [URL] = []
         for url in ordered where !urls.contains(url) {
             urls.append(url)
@@ -172,6 +181,7 @@ struct AgentRow: View {
 /// The machines that an agent can use Tilde from, over ssh: each opens its own page.
 private struct NodesSection: View {
     @ObservedObject var nodes: NodeSetup
+    let open: (String) -> Void
 
     var body: some View {
         SettingsSection("Remote machines") {
@@ -180,10 +190,25 @@ private struct NodesSection: View {
                     EmptyView()
                 }
             }
-            ForEach(nodes.rows) { row in
-                NavigationLink(value: row.host) {
-                    MachineLabel(row: row)
+            ForEach(Array(nodes.rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 {
+                    SettingsDivider()
                 }
+                Button {
+                    open(row.host)
+                } label: {
+                    HStack {
+                        MachineLabel(row: row)
+                        Spacer(minLength: 16)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 58)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 .accessibilityLabel(row.host)
                 .accessibilityValue("\(row.status.text). \(row.dot.reason)")
             }
@@ -214,7 +239,9 @@ struct MachineLabel: View {
                 .accessibilityLabel(row.dot.reason)
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.host)
+                    .font(.system(size: 14))
                 Text(subtitle)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
         }
@@ -248,12 +275,24 @@ struct MachineSettings: View {
     @ObservedObject var nodes: NodeSetup
     let host: String
     @Binding var expanded: Set<String>
+    let back: () -> Void
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 28) {
+            HStack(spacing: 10) {
+                Button(action: back) {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Back to Agents")
+                .accessibilityLabel("Back")
+                Text(host)
+                    .font(.system(size: 20, weight: .semibold))
+            }
             if let row = nodes.rows.first(where: { $0.host == host }) {
-                Section {
-                    LabeledContent {
+                SettingsSection("Machine") {
+                    HStack {
+                        MachineLabel(row: row)
+                        Spacer(minLength: 16)
                         Button {
                             if row.status.isInstalled {
                                 nodes.uninstall(host)
@@ -273,16 +312,13 @@ struct MachineSettings: View {
                         }
                         .disabled(row.status.isWorking)
                         .accessibilityLabel("\(row.status.isInstalled ? "Remove" : "Install") \(host)")
-                    } label: {
-                        MachineLabel(row: row)
                     }
-                    .listRowBackground(SettingsColors.card)
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 58)
                 }
             }
             MachineAgents(nodes: nodes, host: host, expanded: $expanded)
         }
-        .settingsForm()
-        .navigationTitle(host)
         .task {
             await nodes.loadSetup(host)
         }
@@ -320,7 +356,10 @@ private struct MachineAgentRows: View {
                 EmptyView()
             }
         }
-        ForEach(rows) { row in
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+            if index > 0 {
+                SettingsDivider()
+            }
             AgentRow(setup: setup, row: row, isExpanded: Binding {
                 expanded.contains("\(host)/\(row.id)")
             } set: { isOpen in

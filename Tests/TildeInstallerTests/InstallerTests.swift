@@ -120,9 +120,7 @@ struct InstallerTests {
         }
 
         """)
-        let backup = try #require(report.changes.first?.backup)
-        #expect(backup.lastPathComponent.hasPrefix(".claude.json.tilde-backup-"))
-        #expect(try String(contentsOf: backup, encoding: .utf8) == original)
+        #expect(try !FileManager.default.contentsOfDirectory(atPath: home.path).contains { $0.contains("tilde-backup") })
     }
 
     @Test func installAddsTheServersObjectToVSCodeJSONC() throws {
@@ -171,8 +169,42 @@ struct InstallerTests {
         #expect(second.changes.map(\.action) == [.unchanged, .unchanged])
         #expect(!second.hasChanges)
         #expect(try read(".gemini/settings.json") == settings)
-        let backups = try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".gemini").path).filter { $0.contains("tilde-backup") }
-        #expect(backups.count == 1)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".gemini").path) == ["settings.json"])
+    }
+
+    /// Everything that is not Tilde's stays as it was, to the byte, through an install and an
+    /// uninstall.
+    @Test func installAndUninstallLeaveTheRestOfAConfigByteForByte() throws {
+        let json = """
+        {
+          "numStartups": 3,
+          "mcpServers": {
+            "github": { "type": "http", "url": "https://api.example.com/mcp" }
+          },
+          "theme": "dark"
+        }
+
+        """
+        let toml = """
+        model = "gpt-5"   # the default
+
+        [mcp_servers.github]
+        url = "https://api.example.com/mcp"
+
+        """
+        try write(".claude.json", json)
+        try write(".codex/config.toml", toml)
+
+        _ = installer.install(.claudeCode)
+        _ = installer.install(.codex)
+        #expect(try read(".claude.json").contains("\"github\": { \"type\": \"http\", \"url\": \"https://api.example.com/mcp\" }"))
+        #expect(try read(".codex/config.toml").hasPrefix(toml))
+
+        _ = installer.uninstall(.claudeCode)
+        _ = installer.uninstall(.codex)
+        #expect(try read(".claude.json") == json)
+        #expect(try read(".codex/config.toml") == toml)
+        #expect(try !FileManager.default.contentsOfDirectory(atPath: home.path).contains { $0.contains("tilde-backup") })
     }
 
     @Test func uninstallRemovesOnlyTilde() throws {

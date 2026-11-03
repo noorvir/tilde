@@ -65,7 +65,7 @@ struct HistorySettings: View {
     @State private var confirmsClear = false
 
     var body: some View {
-        Form {
+        VStack(alignment: .leading, spacing: 28) {
             SettingsSection("Sessions") {
                 if history.records.isEmpty {
                     SettingsRow(title: "No sessions yet", subtitle: "Sessions are saved while you annotate") {
@@ -73,6 +73,9 @@ struct HistorySettings: View {
                     }
                 }
                 ForEach(Array(history.records.enumerated()), id: \.element.id) { index, record in
+                    if index > 0 {
+                        SettingsDivider()
+                    }
                     HistoryRow(history: history, record: record, isExpanded: expandedBinding(record))
                 }
             }
@@ -86,7 +89,6 @@ struct HistorySettings: View {
                 }
             }
         }
-        .settingsForm()
         .onAppear(perform: history.reload)
         .confirmationDialog("Delete all saved sessions?", isPresented: $confirmsClear) {
             Button("Clear History", role: .destructive, action: history.clear)
@@ -144,7 +146,8 @@ private struct HistoryRow: View {
                     }
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -155,8 +158,9 @@ private struct HistoryRow: View {
 
             if isExpanded {
                 details
-                    .padding(.leading, 12 + 10 + 24 + 10)
-                    .padding(.top, 6)
+                    .padding(.leading, 16 + 12 + 10 + 24 + 10)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 14)
             }
         }
         .contextMenu {

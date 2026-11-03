@@ -16,25 +16,32 @@ struct GeneralSettings: View {
     var body: some View {
         let permissions = model.permissions()
 
-        Form {
+        VStack(alignment: .leading, spacing: 28) {
             SettingsSection("Application") {
                 SettingsRow(title: "Launch at login", subtitle: launchError, subtitleIsError: launchError != nil) {
                     Toggle("Launch at login", isOn: $launchesAtLogin)
                         .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .tint(Color.tildeBlue)
                         .labelsHidden()
                         .onChange(of: launchesAtLogin) { _, isOn in
                             setLaunchAtLogin(isOn)
                         }
                 }
+                SettingsDivider()
                 SettingsRow(title: "Snap drawings to elements", subtitle: "Hold ⌘ while drawing to draw freely") {
                     Toggle("Snap drawings to elements", isOn: $snapsDrawings)
                         .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .tint(Color.tildeBlue)
                         .labelsHidden()
                 }
+                SettingsDivider()
                 PermissionRow(title: "Screen Recording", subtitle: "Screenshots of any app", isAllowed: permissions.screenRecording) {
                     CGRequestScreenCaptureAccess()
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
                 }
+                SettingsDivider()
                 PermissionRow(title: "Accessibility", subtitle: "Element details in native apps", isAllowed: permissions.accessibility) {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
                 }
@@ -47,6 +54,7 @@ struct GeneralSettings: View {
                         NSPasteboard.general.setString(address, forType: .string)
                     }
                 }
+                SettingsDivider()
                 SettingsRow(title: "Feedback inbox", subtitle: tildePath(inboxRoot)) {
                     Button("Show in Finder") {
                         try? FileManager.default.createDirectory(at: inboxRoot, withIntermediateDirectories: true)
@@ -63,7 +71,6 @@ struct GeneralSettings: View {
                 }
             }
         }
-        .settingsForm()
     }
 
     private var statusText: String {
@@ -145,6 +152,7 @@ private struct BrowserSettings: View {
                     .accessibilityLabel("Import")
                 }
             }
+            SettingsDivider()
             SettingsRow(title: "Browser data", subtitle: "Cookies, logins and cache of Tilde's browser") {
                 Button("Clear") {
                     asksToClear = true

@@ -85,10 +85,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         window.contentMinSize = NSSize(width: 700, height: 460)
         window.isReleasedWhenClosed = false
         window.delegate = self
-        let hosting = NSHostingView(rootView: SettingsView(model: model))
-        // The toolbar shows the page's title and, on a machine's page, the back button.
-        hosting.sceneBridgingOptions = [.toolbars, .title]
-        window.contentView = hosting
+        window.contentView = NSHostingView(rootView: SettingsView(model: model))
         window.center()
         // The user's own size and place from last time; on a smaller screen, what fits.
         window.setFrameAutosaveName("TildeSettings")
@@ -161,41 +158,22 @@ struct SettingsView: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: Binding { Optional(model.page) } set: { model.page = $0 ?? model.page }) {
-                ForEach(SettingsWindow.Page.allCases) { page in
-                    Label {
-                        Text(page.title)
-                    } icon: {
-                        Image(systemName: page.symbol)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 20, height: 20)
-                            .background(RoundedRectangle(cornerRadius: 5).fill(page.tint.gradient))
-                    }
-                    .tag(page)
-                }
-            }
-            .safeAreaInset(edge: .bottom) {
-                Text("Tilde \(model.version)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 12)
-            }
-            .scrollContentBackground(.hidden)
-            .background(SettingsColors.sidebar)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
-        } detail: {
-            NavigationStack(path: $model.machinePath) {
+        HStack(spacing: 0) {
+            SettingsSidebar(model: model)
+                .frame(width: 185)
+            Rectangle()
+                .fill(Color.primary.opacity(0.1))
+                .frame(width: 1)
+            ScrollView {
                 page
-                    .navigationTitle(model.page.title)
-                    .navigationDestination(for: String.self) { host in
-                        MachineSettings(nodes: model.setup.nodes, host: host, expanded: $model.expandedAgents)
-                    }
+                    .padding(.horizontal, 32)
+                    .padding(.top, 24)
+                    .padding(.bottom, 32)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .background(SettingsColors.content)
         }
-        // Switches, the selection and the main buttons in Tilde's blue.
-        .tint(Color.tildeBlue)
+        .ignoresSafeArea()
     }
 
     @ViewBuilder
@@ -204,7 +182,15 @@ struct SettingsView: View {
         case .general:
             GeneralSettings(model: model)
         case .agents:
-            AgentSettings(setup: model.setup, expanded: $model.expandedAgents, onResult: model.onResult)
+            if let host = model.machinePath.last {
+                MachineSettings(nodes: model.setup.nodes, host: host, expanded: $model.expandedAgents) {
+                    model.machinePath.removeLast()
+                }
+            } else {
+                AgentSettings(setup: model.setup, expanded: $model.expandedAgents, onResult: model.onResult) { host in
+                    model.machinePath.append(host)
+                }
+            }
         case .shortcuts:
             ShortcutSettings(shortcuts: model.shortcuts, recording: $model.recordingShortcut)
         case .history:
@@ -212,3 +198,65 @@ struct SettingsView: View {
         }
     }
 }
+
+private struct SettingsSidebar: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(SettingsWindow.Page.allCases) { page in
+                SidebarItem(page: page, isSelected: model.page == page) {
+                    model.page = page
+                }
+            }
+            Spacer()
+            Text("Tilde \(model.version)")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.top, 52)
+        .padding(.horizontal, 6)
+        .padding(.bottom, 16)
+        .frame(maxHeight: .infinity)
+        .background(SettingsColors.sidebar)
+    }
+}
+
+/// A coloured tile with a white symbol, and the page name; the selected row sits on a card.
+private struct SidebarItem: View {
+    let page: SettingsWindow.Page
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: page.symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(page.tint.gradient))
+                Text(page.title)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 35)
+            .background(RoundedRectangle(cornerRadius: 10).fill(background))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+
+    private var background: Color {
+        if isSelected {
+            return SettingsColors.selection
+        }
+        return isHovered ? Color.primary.opacity(0.05) : .clear
+    }
+}
+

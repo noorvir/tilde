@@ -75,7 +75,7 @@ struct RemoteInstallerTests {
         #expect(try text(home, ".cursor/mcp.json").contains("Bearer secret"))
         #expect(try text(home, ".claude/skills/tilde/SKILL.md") == tildeSkill)
         #expect(try text(home, ".agents/skills/tilde/SKILL.md") == tildeSkill)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: home.path).contains { $0.hasPrefix(".claude.json.tilde-backup-") })
+        #expect(try !FileManager.default.contentsOfDirectory(atPath: home.path).contains { $0.contains("tilde-backup") })
 
         for harness in [Harness.claudeCode, .codex, .cursor] {
             _ = installer.uninstall(harness)
