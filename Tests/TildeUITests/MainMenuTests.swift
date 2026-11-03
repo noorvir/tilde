@@ -7,7 +7,7 @@ import Testing
 struct MainMenuTests {
     @Test func browserAndEditingShortcutsAreInTheMenu() throws {
         let browser = BrowserController()
-        let menu = MainMenu.make(browser: browser, settings: SettingsWindow(model: try Fixtures.settingsModel(page: .general)))
+        let menu = MainMenu.make(browser: browser, settings: SettingsWindow(model: try Fixtures.settingsModel(page: .home)))
         let items = menu.items.flatMap { $0.submenu?.items ?? [] }
         func item(_ key: String) -> NSMenuItem? {
             items.first { $0.keyEquivalent == key && $0.keyEquivalentModifierMask == .command }

@@ -71,6 +71,45 @@ final class NodeSetup: ObservableObject {
         }
     }
 
+    struct Diagnosis: Equatable {
+        enum Fix: Equatable {
+            case install, reconnect, checkAgain
+
+            var title: String {
+                switch self {
+                case .install: "Try Again"
+                case .reconnect: "Reconnect"
+                case .checkAgain: "Check Again"
+                }
+            }
+        }
+
+        let reason: String
+        var fix: Fix?
+    }
+
+    /// Why a machine is not green, and what fixes it.
+    nonisolated static func diagnosis(of row: Row) -> Diagnosis? {
+        switch row.dot {
+        case .green:
+            return nil
+        case .grey:
+            return Diagnosis(reason: "It does not answer over ssh. Check that \"ssh \(row.host)\" works in Terminal", fix: .checkAgain)
+        case .red:
+            return Diagnosis(reason: row.detail ?? row.note ?? "The install or the link failed", fix: row.status.isInstalled ? .reconnect : .install)
+        case .yellow where row.status.isInstalled:
+            return Diagnosis(reason: "Installed, but the link to this Mac is not up yet. Tilde tries again every few seconds", fix: .reconnect)
+        case .yellow:
+            return Diagnosis(reason: "It answers over ssh. Install Tilde here to use it from this machine's agents", fix: nil)
+        }
+    }
+
+    /// Starts the link to a machine again.
+    func reconnect(_ host: String) {
+        links.removeValue(forKey: host)?.terminate()
+        link(host)
+    }
+
     /// The apps that a machine's Install sets up: those on this Mac, or all when none are.
     nonisolated static func chosen(found: [Harness], onThisMac: [Harness]) -> [Harness] {
         onThisMac.isEmpty ? found : found.filter(onThisMac.contains)

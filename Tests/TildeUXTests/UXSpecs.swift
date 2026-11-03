@@ -166,12 +166,12 @@ struct UXSpecs {
     @Test func settingsHasItsFourPages() async throws {
         try await withApp { app in
             try await app.menu("Settings")
+            try await app.waitToSee("Apps on this Mac")
+
+            try await app.press("Configuration")
             try await app.waitToSee("Launch at login")
             try await app.waitToSee("Import logins")
             try await app.waitToSee("MCP server")
-
-            try await app.press("Agents")
-            try await app.waitToSee("Apps on this Mac")
 
             try await app.press("Shortcuts")
             try await app.waitToSee("Start or resume annotating")
@@ -901,10 +901,8 @@ struct UXSpecs {
     @Test func aNodeIsInstalledFromSettingsLinkedWithAToken() async throws {
         try await withApp { app in
             try await app.menu("Settings")
-            try await app.waitToSee("Launch at login")
+            try await app.waitToSee("Apps on this Mac")
             try await Task.sleep(for: .seconds(1))
-            try await app.press("Agents")
-            // The form draws only the rows on screen: the machines are below the apps.
             let apps = try await app.waitToSee("Apps on this Mac")
             try await app.scroll(at: CGPoint(x: apps.frame.midX, y: apps.frame.maxY + 200), by: -10)
             try await app.waitToSee("vmself", timeout: 15)

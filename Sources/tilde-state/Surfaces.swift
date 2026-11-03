@@ -158,10 +158,10 @@ enum Surfaces {
             history?.expanded = ["s1"]
         }
         let page: SettingsWindow.Page = switch state.page {
-        case "agents": .agents
+        case "agents", "home": .home
         case "shortcuts": .shortcuts
         case "history": .history
-        default: .general
+        default: .configuration
         }
         let model = try Fixtures.settingsModel(page: page, history: history)
         model.expandedAgents = Set(state.expandedAgents ?? [])

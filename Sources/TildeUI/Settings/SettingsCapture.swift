@@ -12,7 +12,7 @@ enum SettingsCapture {
     static func run(_ settings: SettingsWindow, model: SettingsModel, browser: BrowserController, to folder: URL) async {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let states: [(name: String, page: SettingsWindow.Page, expanded: Set<String>)] = [
-            ("general", .general, []), ("agents", .agents, []), ("agents-open", .agents, ["Claude", "Codex"]), ("shortcuts", .shortcuts, []),
+            ("configuration", .configuration, []), ("home", .home, []), ("home-open", .home, ["Claude", "Codex"]), ("shortcuts", .shortcuts, []),
         ]
 
         for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {

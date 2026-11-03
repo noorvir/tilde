@@ -169,6 +169,43 @@ extension AgentSetup {
     }
 }
 
+/// Why a row is not green, and what fixes it.
+struct Diagnosis: Equatable {
+    enum Fix: Equatable {
+        /// Install in the apps of the row that lack Tilde.
+        case setUp
+        /// Show the config that cannot be read.
+        case showFile
+    }
+
+    let reason: String
+    var fix: Fix?
+
+    /// From the status of each app of a row that is there, by its name.
+    static func of(_ apps: [(name: String, status: InstallStatus)], isRemote: Bool) -> Diagnosis? {
+        if let failed = apps.first(where: { if case .failed = $0.status { true } else { false } }) {
+            return Diagnosis(reason: "\(failed.name)'s config cannot be read, so Tilde cannot add itself", fix: isRemote ? nil : .showFile)
+        }
+        let missing = apps.filter { $0.status == .notInstalled }.map(\.name)
+        if missing.isEmpty {
+            return nil
+        }
+        if missing.count == apps.count {
+            return Diagnosis(reason: "Tilde is not set up here. Its agent cannot ask you for feedback", fix: .setUp)
+        }
+        return Diagnosis(reason: "Not set up in \(missing.joined(separator: " and ")) yet", fix: .setUp)
+    }
+}
+
+extension AgentSetup {
+    func diagnosis(of row: Row) -> Diagnosis? {
+        let apps = present(row).map { harness in
+            (name: harness.name, status: status(of: Row(name: harness.name, harnesses: [harness])))
+        }
+        return Diagnosis.of(apps, isRemote: isRemote)
+    }
+}
+
 /// What one install or uninstall did, for the toast.
 struct InstallResult {
     enum Action {

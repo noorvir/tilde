@@ -212,7 +212,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     @objc private func openAgentSettings() {
-        settings.show(.agents)
+        settings.show(.home)
     }
 
     // MARK: - Permissions
@@ -243,7 +243,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     // MARK: - Actions
 
     @objc private func openSettings() {
-        settings.show(.general)
+        settings.show(.home)
     }
 
     @objc private func startAnnotation() {

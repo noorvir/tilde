@@ -157,6 +157,21 @@ struct AgentRow: View {
         }
 
         return VStack(alignment: .leading, spacing: 4) {
+            if let diagnosis = setup.diagnosis(of: row) {
+                DiagnosisLine(diagnosis: diagnosis) {
+                    switch diagnosis.fix {
+                    case .setUp:
+                        onResult(setup.install([row]))
+                    case .showFile:
+                        if let harness = setup.present(row).first {
+                            revealInFinder(setup.installer.configFile(for: harness))
+                        }
+                    case nil:
+                        break
+                    }
+                }
+                .padding(.bottom, 4)
+            }
             ForEach(urls, id: \.self) { url in
                 if setup.isRemote {
                     Text(tildePath(url, home: home))
@@ -173,6 +188,42 @@ struct AgentRow: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(.red)
                     .lineLimit(2)
+            }
+        }
+    }
+}
+
+/// Why something is not green, and a button that fixes it.
+struct DiagnosisLine: View {
+    let reason: String
+    let fixTitle: String?
+    let fix: () -> Void
+
+    init(diagnosis: Diagnosis, fix: @escaping () -> Void) {
+        reason = diagnosis.reason
+        fixTitle = switch diagnosis.fix {
+        case .setUp: "Set Up"
+        case .showFile: "Show File"
+        case nil: nil
+        }
+        self.fix = fix
+    }
+
+    init(reason: String, fixTitle: String?, fix: @escaping () -> Void) {
+        self.reason = reason
+        self.fixTitle = fixTitle
+        self.fix = fix
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(reason)
+                .font(.system(size: 12))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let fixTitle {
+                Button(fixTitle, action: fix)
+                    .controlSize(.small)
             }
         }
     }
@@ -315,6 +366,24 @@ struct MachineSettings: View {
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 58)
+                    if let diagnosis = NodeSetup.diagnosis(of: row) {
+                        SettingsDivider()
+                        DiagnosisLine(reason: diagnosis.reason, fixTitle: diagnosis.fix?.title) {
+                            switch diagnosis.fix {
+                            case .install:
+                                nodes.install(host)
+                            case .reconnect:
+                                nodes.reconnect(host)
+                            case .checkAgain:
+                                nodes.refresh()
+                            case nil:
+                                break
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                    }
                 }
             }
             MachineAgents(nodes: nodes, host: host, expanded: $expanded)

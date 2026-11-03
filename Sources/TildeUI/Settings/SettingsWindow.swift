@@ -7,8 +7,8 @@ import SwiftUI
 @MainActor
 final class SettingsWindow: NSObject, NSWindowDelegate {
     enum Page: String, CaseIterable, Identifiable {
-        case general
-        case agents
+        case home
+        case configuration
         case shortcuts
         case history
 
@@ -16,8 +16,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
         var title: String {
             switch self {
-            case .general: "General"
-            case .agents: "Agents"
+            case .home: "Home"
+            case .configuration: "Configuration"
             case .shortcuts: "Shortcuts"
             case .history: "History"
             }
@@ -25,8 +25,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
         var symbol: String {
             switch self {
-            case .general: "gearshape.fill"
-            case .agents: "point.3.connected.trianglepath.dotted"
+            case .home: "house.fill"
+            case .configuration: "gearshape.fill"
             case .shortcuts: "keyboard.fill"
             case .history: "clock.fill"
             }
@@ -34,10 +34,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
         var tint: Color {
             switch self {
-            case .general: Color(white: 0.55)
-            case .agents: .tildeBlue
+            case .home: .orange
+            case .configuration: Color(white: 0.55)
             case .shortcuts: Color(white: 0.3)
-            case .history: .orange
+            case .history: .purple
             }
         }
     }
@@ -50,7 +50,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     }
 
     @objc func showGeneral(_ sender: Any?) {
-        show(.general)
+        show(.home)
     }
 
     func show(_ page: Page) {
@@ -100,7 +100,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 @MainActor
 final class SettingsModel: ObservableObject {
     /// Leaving a page stops a shortcut recording.
-    @Published var page: SettingsWindow.Page = .general {
+    @Published var page: SettingsWindow.Page = .home {
         didSet {
             recordingShortcut = nil
             machinePath = []
@@ -179,9 +179,9 @@ struct SettingsView: View {
     @ViewBuilder
     private var page: some View {
         switch model.page {
-        case .general:
+        case .configuration:
             GeneralSettings(model: model)
-        case .agents:
+        case .home:
             if let host = model.machinePath.last {
                 MachineSettings(nodes: model.setup.nodes, host: host, expanded: $model.expandedAgents) {
                     model.machinePath.removeLast()

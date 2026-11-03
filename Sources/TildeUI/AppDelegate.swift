@@ -86,7 +86,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let shortcuts = controller.shortcuts
         let version = SettingsModel.bundleVersion
         let toast = InstallToast { [weak self] in
-            self?.settings?.show(.agents)
+            self?.settings?.show(.home)
         }
         let controller = self.controller
         let history = HistoryModel(archive: controller.archive) {

@@ -411,7 +411,9 @@
   "nodeStatus": "linked",
   "isReachable": true,
   "expect": {
-   "dot": "green"
+   "dot": "green",
+   "reason": "",
+   "fix": ""
   }
  },
  {
@@ -419,7 +421,8 @@
   "nodeStatus": "notInstalled",
   "isReachable": true,
   "expect": {
-   "dot": "yellow"
+   "dot": "yellow",
+   "fix": ""
   }
  },
  {
@@ -427,7 +430,8 @@
   "nodeStatus": "unreachable",
   "isReachable": true,
   "expect": {
-   "dot": "yellow"
+   "dot": "yellow",
+   "fix": "reconnect"
   }
  },
  {
@@ -435,7 +439,8 @@
   "nodeStatus": "unreachable",
   "isReachable": false,
   "expect": {
-   "dot": "grey"
+   "dot": "grey",
+   "fix": "checkAgain"
   }
  },
  {
@@ -444,7 +449,8 @@
   "isReachable": true,
   "hasFailed": true,
   "expect": {
-   "dot": "red"
+   "dot": "red",
+   "fix": "reconnect"
   }
  },
  {
@@ -476,6 +482,48 @@
    "chosen": [
     "codex"
    ]
+  }
+ },
+ {
+  "name": "An app row with every app set up has nothing to say",
+  "appStatuses": {
+   "Claude Code": "installed",
+   "Claude app": "installed"
+  },
+  "expect": {
+   "reason": "",
+   "fix": ""
+  }
+ },
+ {
+  "name": "Claude set up in Claude Code only says which app lacks it, and offers to set it up",
+  "appStatuses": {
+   "Claude Code": "installed",
+   "Claude app": "notInstalled"
+  },
+  "expect": {
+   "reason": "Not set up in Claude app yet",
+   "fix": "setUp"
+  }
+ },
+ {
+  "name": "An app with no Tilde says so and offers to set it up",
+  "appStatuses": {
+   "Codex": "notInstalled"
+  },
+  "expect": {
+   "reason": "Tilde is not set up here. Its agent cannot ask you for feedback",
+   "fix": "setUp"
+  }
+ },
+ {
+  "name": "A config that cannot be read says so and shows the file",
+  "appStatuses": {
+   "Cursor": "failed"
+  },
+  "expect": {
+   "reason": "Cursor's config cannot be read, so Tilde cannot add itself",
+   "fix": "showFile"
   }
  }
 ]
