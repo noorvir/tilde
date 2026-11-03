@@ -130,7 +130,7 @@ enum Surfaces {
         }
         let notice: AnnotationController.PauseNotice? = state.pauseNotice == "escape" ? .escape : state.pauseNotice == "otherApp" ? .otherApp : nil
         controller.setStateForTesting(
-            session: state.session.map { Fixtures.session(client: $0.client, isLocal: $0.isLocal ?? false) },
+            session: state.session.map { Fixtures.session(client: $0.client, node: $0.node, isLocal: $0.isLocal ?? false) },
             drafts: drafts,
             phase: state.sent.map { .sent(confirmation: $0) } ?? .annotating,
             hover: state.hover == true ? Fixtures.hover() : nil,

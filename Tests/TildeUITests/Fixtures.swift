@@ -38,8 +38,8 @@ enum Fixtures {
     }
 
     /// A session from a store the controller does not watch, so no window opens.
-    static func session(client: String = "Codex", isLocal: Bool = false) -> SessionStore.Session {
-        SessionStore().start(client: client, url: nil, isLocal: isLocal)
+    static func session(client: String = "Codex", node: String? = nil, isLocal: Bool = false) -> SessionStore.Session {
+        SessionStore().start(client: client, node: node, url: nil, isLocal: isLocal)
     }
 
     static func id(_ number: Int) -> UUID {

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    720,
+    80
+  ],
+  "session": {
+    "client": "Claude Code",
+    "node": "build-runner-eu-west-1.internal.example.com"
+  },
+  "clientWithIcon": "Claude Code",
+  "notes": 1,
+  "paused": true
+}

@@ -32,6 +32,8 @@ struct SessionRecord: Codable, Equatable, Identifiable {
     var updated: Date
     /// The agent that asked, or "You".
     let client: String
+    /// The machine the agent runs on; nil on this Mac.
+    var node: String?
     let isLocal: Bool
     var state: State
     /// The page open in Tilde's browser, for a session there.
@@ -50,7 +52,10 @@ struct SessionRecord: Codable, Equatable, Identifiable {
         if let scopeApp {
             return scopeApp
         }
-        return isLocal ? "Session" : "Session for \(client)"
+        if isLocal {
+            return "Session"
+        }
+        return node.map { "Session for \(client) on \($0)" } ?? "Session for \(client)"
     }
 }
 

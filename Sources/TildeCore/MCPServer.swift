@@ -10,9 +10,9 @@ import TildeSkill
 public final class MCPServer {
     private let store: SessionStore
     private let inbox: URL
-    /// Display names of connected harnesses, keyed by `Mcp-Session-Id`.
-    private var clients: [String: String] = [:]
-    /// Keeps those names, oldest first, as a harness keeps its session when Tilde restarts.
+    /// Connected harnesses, keyed by `Mcp-Session-Id`.
+    private var clients: [String: Client] = [:]
+    /// Keeps those, oldest first, as a harness keeps its session when Tilde restarts.
     private let clientsFile: URL?
     private static let keptClients = 200
     private let log = Logger(subsystem: "dev.tilde.app", category: "mcp")
@@ -26,13 +26,21 @@ public final class MCPServer {
         self.clientsFile = clientsFile
         if let clientsFile, let data = try? Data(contentsOf: clientsFile), let saved = try? JSONDecoder().decode([SavedClient].self, from: data) {
             savedClients = saved
-            clients = Dictionary(saved.map { ($0.id, $0.name) }, uniquingKeysWith: { $1 })
+            clients = Dictionary(saved.map { ($0.id, Client(name: $0.name, node: $0.node)) }, uniquingKeysWith: { $1 })
         }
+    }
+
+    /// Who asked: the harness's display name, such as "Codex", and the machine it runs on
+    /// when it came through a node's tunnel.
+    private struct Client {
+        let name: String
+        let node: String?
     }
 
     private struct SavedClient: Codable {
         let id: String
         let name: String
+        var node: String?
     }
     private var savedClients: [SavedClient] = []
 
@@ -93,7 +101,7 @@ public final class MCPServer {
         case "tools/list":
             return json(result(id: id, ["tools": tools]))
         case "tools/call":
-            let client = clientName(for: sessionID, userAgent: request.headers["user-agent"])
+            let client = client(for: sessionID, userAgent: request.headers["user-agent"], node: node)
             let accept = request.headers["accept"] ?? ""
             if let token = (params["_meta"] as? [String: Any])?["progressToken"], accept.contains("text/event-stream"), waitsForUser(params) {
                 return progressStream(id: id, params: params, client: client, progressToken: token)
@@ -122,11 +130,11 @@ public final class MCPServer {
         let info = params["clientInfo"] as? [String: Any] ?? [:]
         let name = info["title"] as? String ?? info["name"] as? String ?? "Agent"
         let sessionID = UUID().uuidString
-        let display = Self.displayName(forClient: name) + (node.map { " on \($0)" } ?? "")
+        let display = Self.displayName(forClient: name)
         // Lets new harness names be added to the list.
         log.notice("MCP client \(name, privacy: .public) shows as \(display, privacy: .public)")
-        clients[sessionID] = display
-        savedClients.append(SavedClient(id: sessionID, name: display))
+        clients[sessionID] = Client(name: display, node: node)
+        savedClients.append(SavedClient(id: sessionID, name: display, node: node))
         savedClients.removeFirst(max(0, savedClients.count - Self.keptClients))
         saveClients()
 
@@ -150,7 +158,7 @@ public final class MCPServer {
     }
 
     /// Runs the tool call and streams a progress notification every 2 s until it returns.
-    private func progressStream(id: Any, params: [String: Any], client: String, progressToken: Any) -> HTTPResponse {
+    private func progressStream(id: Any, params: [String: Any], client: Client, progressToken: Any) -> HTTPResponse {
         let (stream, continuation) = AsyncStream<Data>.makeStream()
         let waitedSession = (params["arguments"] as? [String: Any])?["session_id"] as? String
 
@@ -332,7 +340,7 @@ public final class MCPServer {
         ]
     }
 
-    private func callTool(params: [String: Any], client: String) async -> [String: Any] {
+    private func callTool(params: [String: Any], client: Client) async -> [String: Any] {
         let name = params["name"] as? String ?? ""
         let arguments = params["arguments"] as? [String: Any] ?? [:]
         let waitSeconds = min(max(arguments["wait_seconds"] as? Double ?? defaultWaitSeconds, 0), maxWaitSeconds)
@@ -352,7 +360,7 @@ public final class MCPServer {
                 return toolError("Invalid context: \(context). Use \"window\" or \"none\".")
             }
 
-            let session = store.start(client: client, url: url, capturesContext: context == "window")
+            let session = store.start(client: client.name, node: client.node, url: url, capturesContext: context == "window")
             let state = await store.wait(for: session.id, seconds: waitSeconds)
             return toolResult(sessionID: session.id, state: state)
 
@@ -387,13 +395,13 @@ public final class MCPServer {
 
     // MARK: - Helpers
 
-    private func clientName(for sessionID: String?, userAgent: String?) -> String {
-        if let sessionID, let name = clients[sessionID] {
-            return name
+    private func client(for sessionID: String?, userAgent: String?, node: String?) -> Client {
+        if let sessionID, let client = clients[sessionID] {
+            return client
         }
         // An unknown session: the request may still say who sent it.
         log.notice("MCP session unknown, user agent \(userAgent ?? "-", privacy: .public)")
-        return userAgent.flatMap(Self.knownName(forClient:)) ?? "Agent"
+        return Client(name: userAgent.flatMap(Self.knownName(forClient:)) ?? "Agent", node: node)
     }
 
     /// The app name for an MCP `clientInfo.name`. The HUD shows it with that app's icon, so

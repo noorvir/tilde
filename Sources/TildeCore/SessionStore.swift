@@ -8,6 +8,8 @@ public final class SessionStore: ObservableObject {
         public let id: String
         /// Display name of the agent harness that asked, such as "Codex".
         public let client: String
+        /// The machine the agent runs on, reached over ssh; nil on this Mac.
+        public let node: String?
         public let url: URL?
         /// Started by the user from Tilde itself; no agent waits for the result.
         public let isLocal: Bool
@@ -59,10 +61,10 @@ public final class SessionStore: ObservableObject {
     }
 
     /// `id`: a session's own id when it starts again after Tilde restarted.
-    public func start(id: String? = nil, client: String, url: URL?, isLocal: Bool = false, capturesContext: Bool = true) -> Session {
+    public func start(id: String? = nil, client: String, node: String? = nil, url: URL?, isLocal: Bool = false, capturesContext: Bool = true) -> Session {
         let state: State = active == nil ? .annotating : .queued
         let session = Session(
-            id: id ?? Self.newID(), client: client, url: url,
+            id: id ?? Self.newID(), client: client, node: node, url: url,
             isLocal: isLocal, capturesContext: capturesContext, state: state
         )
         sessions.append(session)

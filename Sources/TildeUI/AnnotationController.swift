@@ -1411,7 +1411,7 @@ final class AnnotationController: ObservableObject {
             )
         }
         return SessionRecord(
-            id: session.id, created: sessionStarted, updated: Date(), client: session.client, isLocal: session.isLocal, state: state,
+            id: session.id, created: sessionStarted, updated: Date(), client: session.client, node: session.node, isLocal: session.isLocal, state: state,
             pageURL: isInBrowser ? browser.pageURL : nil, scopeApp: scopeName, notes: notes, reportFolder: reportFolder?.path
         )
     }
@@ -1480,7 +1480,7 @@ final class AnnotationController: ObservableObject {
             return false
         }
         pendingRestore = record
-        _ = store.start(id: record.id, client: record.client, url: record.pageURL.flatMap(URL.init(string:)))
+        _ = store.start(id: record.id, client: record.client, node: record.node, url: record.pageURL.flatMap(URL.init(string:)))
         return true
     }
 

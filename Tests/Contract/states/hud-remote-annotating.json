@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    720,
+    80
+  ],
+  "session": {
+    "client": "Claude Code",
+    "node": "mac-mini-ts"
+  },
+  "clientWithIcon": "Claude Code"
+}

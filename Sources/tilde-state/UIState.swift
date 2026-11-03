@@ -4,6 +4,7 @@ import Foundation
 struct UIState: Decodable {
     struct Session: Decodable {
         let client: String
+        var node: String?
         var isLocal: Bool?
     }
     struct Toast: Decodable {

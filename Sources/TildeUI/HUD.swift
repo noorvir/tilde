@@ -29,7 +29,8 @@ final class HUDPanel {
     private var contentFrame: CGRect = .zero
     private var clickMonitor: Any?
 
-    private static let width: CGFloat = 560
+    /// The widest pill, with room around it for its shadow and the list below it.
+    private static let width: CGFloat = HUDView.maxWidth + 98
     private static let positionsKey = "HUDPositions"
 
     init(controller: AnnotationController) {
@@ -141,7 +142,8 @@ final class HUDPanel {
         isSnappedHome = isNearHome
 
         // The outline matches the pill: below the 16 pt content padding, at the pill's width.
-        let outline = NSRect(x: home.x - HUDView.width / 2, y: home.y - 16 - HUDMetrics.height, width: HUDView.width, height: HUDMetrics.height)
+        let pillWidth = HUDView.pillWidth(for: controller)
+        let outline = NSRect(x: home.x - pillWidth / 2, y: home.y - 16 - HUDMetrics.height, width: pillWidth, height: HUDMetrics.height)
         homeOutline.show(outline, isSnapped: isNearHome, below: window.windowNumber)
         guard ended else {
             return
@@ -169,9 +171,9 @@ final class HUDPanel {
         hypot(top.x - home.x, top.y - home.y) < snapDistance
     }
 
-    /// Keeps the pill's top centre inside the screen's visible area.
+    /// Keeps the pill's top centre inside the screen's visible area, at any width.
     static func clamped(_ top: NSPoint, in visible: NSRect) -> NSPoint {
-        let halfWidth = HUDView.width / 2 + 16
+        let halfWidth = HUDView.maxWidth / 2 + 16
         let x = min(max(top.x, visible.minX + halfWidth), visible.maxX - halfWidth)
         let y = min(max(top.y, visible.minY + HUDMetrics.height + 32), visible.maxY + 4)
         return NSPoint(x: x, y: y)
@@ -243,7 +245,9 @@ func insertNewlineOnShiftReturn(_ event: NSEvent, in window: NSWindow) -> Bool {
 
 struct HUDView: View {
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
+    /// The usual width of the pill, and the most it grows for a long subtitle.
     static let width: CGFloat = 462
+    static let maxWidth = width * 1.4
 
     @ObservedObject var controller: AnnotationController
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -311,7 +315,22 @@ struct HUDView: View {
         if case .sent = controller.phase {
             return nil
         }
-        return HUDView.width
+        return Self.pillWidth(for: controller)
+    }
+
+    /// Wide enough for the session's whole subtitle, up to `maxWidth`: the extra goes to the
+    /// title column, and the buttons keep their places. It depends only on the session, so
+    /// it stays the same while annotating.
+    static func pillWidth(for controller: AnnotationController) -> CGFloat {
+        guard let session = controller.session, !session.isLocal else {
+            return width
+        }
+        let candidates = subtitleCandidates(
+            client: session.client, clientIcon: controller.clientIcon(session.client), node: session.node,
+            scopeName: nil, scopeIcon: nil, notes: 2, state: .annotating
+        )
+        let subtitle = candidates.first.map(self.width(of:)) ?? 0
+        return min(width + max(subtitle - subtitleWidth, 0), maxWidth)
     }
 
     /// The pill's content width, the same in every state; embedded, the same without the
@@ -441,7 +460,7 @@ struct HUDView: View {
     }
 
     private var drawingBar: some View {
-        capsule(HStack(spacing: 4) { drawingContent }, width: HUDView.width)
+        capsule(HStack(spacing: 4) { drawingContent }, width: Self.pillWidth(for: controller))
             .opacity(controller.isHUDShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -610,7 +629,8 @@ struct HUDView: View {
         if session.isLocal {
             return "Copy to clipboard  ⌘↩"
         }
-        return "Send to \(session.client)  ⌘↩"
+        let agent = session.node.map { "\(session.client) on \($0)" } ?? session.client
+        return "Send to \(agent)  ⌘↩"
     }
 
     private var windowHelp: String {
@@ -641,13 +661,14 @@ struct HUDView: View {
         return controller.isPickingWindow ? "Choose a window" : "Annotating"
     }
 
-    /// The subtitle: the first candidate that fits the fixed pill, so words drop out and the
-    /// text never ends in "…".
+    /// The subtitle: the first candidate that fits the pill, so words drop out and the text
+    /// ends in "…" only when even the shortest is too long, such as for a long machine name.
     private var subtitle: some View {
         let candidates = Self.subtitleCandidates(
             // A local session's report goes to the clipboard, like an agent's goes to the agent.
             client: controller.session.map { $0.isLocal ? "Clipboard" : $0.client },
             clientIcon: controller.session.flatMap { $0.isLocal ? Self.clipboardIcon : controller.clientIcon($0.client) },
+            node: controller.session?.node,
             // The browser's own toolbar needs no "in Tilde Browser".
             scopeName: isEmbedded ? nil : controller.scopeName,
             scopeIcon: controller.scopeIcon,
@@ -658,6 +679,7 @@ struct HUDView: View {
             ForEach(Array(candidates.enumerated()), id: \.offset) { _, parts in
                 SubtitleLine(parts: parts)
             }
+            SubtitleLine(parts: candidates.last ?? [], truncates: true)
         }
     }
 
@@ -688,23 +710,27 @@ struct HUDView: View {
         case notice(String)
     }
 
-    /// One piece of the subtitle: an optional word, an optional app icon, and a name or text.
+    /// One piece of the subtitle: an optional word, an optional icon, and a name or text.
     struct SubtitlePart: Equatable {
         var prefix: String?
         var icon: NSImage?
         var text: String?
+        /// The icon does not say the name, such as the machine's: the name stays when words drop.
+        var keepsName = false
     }
 
     /// The width the title column has in the fixed pill, for the narrowest layout (the paused
     /// state with its badge). Every subtitle's shortest candidate fits it.
     static let subtitleWidth: CGFloat = 120
     static let clipboardIcon = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Clipboard")
+    /// The symbol of a remote machine, as in Settings.
+    static let machineIcon = NSImage(systemSymbolName: "laptopcomputer", accessibilityDescription: "Remote machine")
     static let subtitleFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
 
-    /// Subtitles from fullest to shortest, such as "for Codex · in Chrome · 2 notes", then
-    /// without the words, then without the names, keeping the icons.
+    /// Subtitles from fullest to shortest, such as "for Codex · on mac-mini · in Chrome · 2 notes",
+    /// then without the words, then without the names behind app icons.
     static func subtitleCandidates(
-        client: String?, clientIcon: NSImage?, scopeName: String?, scopeIcon: NSImage?, notes: Int, state: SubtitleState
+        client: String?, clientIcon: NSImage?, node: String?, scopeName: String?, scopeIcon: NSImage?, notes: Int, state: SubtitleState
     ) -> [[SubtitlePart]] {
         switch state {
         case .notice(let text):
@@ -723,13 +749,14 @@ struct HUDView: View {
         let detail = notes == 0 ? nil : "\(notes) \(notes == 1 ? "note" : "notes")"
         let full = [
             client.map { SubtitlePart(prefix: "for", icon: clientIcon, text: $0) },
+            node.map { SubtitlePart(prefix: "on", icon: machineIcon, text: $0, keepsName: true) },
             scopeName.map { SubtitlePart(prefix: "in", icon: scopeIcon, text: $0) },
             detail.map { SubtitlePart(text: $0) },
         ].compactMap { $0 }
 
         // Each step drops more: the words, then the names behind icons.
         let steps: [(SubtitlePart) -> SubtitlePart?] = [
-            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon) },
+            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon, text: $0.keepsName ? $0.text : nil, keepsName: $0.keepsName) },
         ]
         var candidates = [full]
         for step in steps {
@@ -755,9 +782,11 @@ struct HUDView: View {
     }
 }
 
-/// A subtitle candidate on one line, laid out at its ideal width so ViewThatFits can measure it.
+/// A subtitle candidate on one line, laid out at its ideal width so ViewThatFits can measure it;
+/// with `truncates`, cut to the space there is.
 private struct SubtitleLine: View {
     let parts: [HUDView.SubtitlePart]
+    var truncates = false
 
     var body: some View {
         HStack(spacing: 3) {
@@ -771,6 +800,7 @@ private struct SubtitleLine: View {
                 if let icon = part.icon {
                     Image(nsImage: icon)
                         .resizable()
+                        .scaledToFit()
                         .frame(width: 14, height: 14)
                 }
                 if let text = part.text {
@@ -779,7 +809,7 @@ private struct SubtitleLine: View {
             }
         }
         .lineLimit(1)
-        .fixedSize()
+        .fixedSize(horizontal: !truncates, vertical: false)
     }
 }
 
