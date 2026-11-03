@@ -546,7 +546,6 @@ struct UXSpecs {
             try await Task.sleep(for: .seconds(1))
             // The phone at the size that fits the window, whatever an earlier run left.
             try await app.press("arrowtriangles.up.right.down.left.magnifyingglass", inApp: "Device Hub")
-            try await Task.sleep(for: .seconds(1))
             try await app.menu("Start Annotation")
             try await app.waitToSee("Annotating")
             step("simulator ready")
@@ -578,21 +577,6 @@ struct UXSpecs {
             try simulator.show("first")
             try await app.waitForBlue(in: area, atLeast: 20, timeout: 10)
             step("region")
-
-            // A zoom moves the phone: the labels go with it, and stay.
-            try await app.press("Zoom In", inApp: "Device Hub")
-            try await Task.sleep(for: .seconds(2))
-            let bar = try await app.waitToSee("Annotating")
-            try await app.hover(over: CGPoint(x: bar.frame.midX, y: bar.frame.midY))
-            // Above Device Hub's hint about zoom controls, whose icon is blue.
-            let content = CGRect(x: window.minX + 260, y: window.minY + 60, width: window.width - 260, height: window.height * 0.6)
-            try await app.waitForBlue(in: content, atLeast: 20, timeout: 10)
-            try simulator.show("second")
-            try await app.waitForBlue(in: content, atMost: 0, timeout: 10)
-            try simulator.show("first")
-            try await app.waitForBlue(in: content, atLeast: 20, timeout: 10)
-            try await app.press("arrowtriangles.up.right.down.left.magnifyingglass", inApp: "Device Hub")
-            step("zoom")
         }
     }
 

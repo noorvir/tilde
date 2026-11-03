@@ -12,9 +12,6 @@ struct NoteFingerprint: Equatable, Sendable {
     static let context: CGFloat = 40
     /// Grey levels, row by row.
     let levels: [UInt8]
-    /// In pixels, to take a later picture of the same size.
-    var width = 0
-    var height = 0
 
     /// A plain area looks the same on any page, so it confirms nothing about an element.
     var isPlain: Bool {
@@ -74,8 +71,6 @@ struct NoteFingerprint: Equatable, Sendable {
             return nil
         }
         self.levels = levels
-        self.width = width
-        self.height = height
     }
 
     init(levels: [UInt8]) {
@@ -85,23 +80,20 @@ struct NoteFingerprint: Equatable, Sendable {
     /// The area of a window, without anything in front of it. Nil without Screen Recording or
     /// when the window is gone.
     /// `windowFrame`: where the window is now, if known; its description can be from earlier.
-    /// `scale`: how much larger the content is than when the first picture was taken, such as a
-    /// device's screen after a zoom; the surroundings grow with it. `size`: the pixel size of that
-    /// first picture, so the two compare.
-    static func capture(window windowID: CGWindowID, area: CGRect, windowFrame: CGRect? = nil, scale: CGFloat = 1, size: CGSize? = nil) async -> NoteFingerprint? {
+    static func capture(window windowID: CGWindowID, area: CGRect, windowFrame: CGRect? = nil) async -> NoteFingerprint? {
         guard let window = await CapturableWindows.shared.window(windowID) else {
             return nil
         }
         let frame = windowFrame ?? window.frame
-        let rect = area.insetBy(dx: -context * scale, dy: -context * scale).intersection(frame)
+        let rect = area.insetBy(dx: -context, dy: -context).intersection(frame)
         guard !rect.isNull, rect.width >= 1, rect.height >= 1 else {
             return nil
         }
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = rect.offsetBy(dx: -frame.minX, dy: -frame.minY)
-        let pixels = min(2, longestSide / max(rect.width, rect.height))
-        configuration.width = size.map { Int($0.width) } ?? Int(rect.width * pixels)
-        configuration.height = size.map { Int($0.height) } ?? Int(rect.height * pixels)
+        let scale = min(2, longestSide / max(rect.width, rect.height))
+        configuration.width = Int(rect.width * scale)
+        configuration.height = Int(rect.height * scale)
         configuration.showsCursor = false
         let filter = SCContentFilter(desktopIndependentWindow: window)
         guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) else {
@@ -134,19 +126,13 @@ struct NoteVisibility: Equatable, Codable {
 
     /// Takes a new similarity and returns whether the note shows. Nothing alike at all hides it
     /// at once: that is another page, not a small change.
-    /// After a scale, as on a zoomed device, the same content matches less closely.
-    static let rescaledHideBelow = 0.85
-    static let rescaledShowAbove = 0.9
-
-    mutating func update(similarity: Double, isRescaled: Bool = false) -> Bool {
+    mutating func update(similarity: Double) -> Bool {
         if similarity == 0 {
             isVisible = false
             readings = 0
             return false
         }
-        let hideBelow = isRescaled ? Self.rescaledHideBelow : Self.hideBelow
-        let showAbove = isRescaled ? Self.rescaledShowAbove : Self.showAbove
-        let wantsChange = isVisible ? similarity < hideBelow : similarity > showAbove
+        let wantsChange = isVisible ? similarity < Self.hideBelow : similarity > Self.showAbove
         readings = wantsChange ? readings + 1 : 0
         if readings >= Self.readingsToChange {
             isVisible.toggle()
