@@ -111,6 +111,94 @@ struct SettingsRow<Accessory: View, Trailing: View>: View {
     }
 }
 
+/// Where one thing that Tilde sets up stands, shown at the right of its row.
+enum SetupState: Equatable {
+    case ok
+    /// A button that sets it up, such as "Set Up" or "Grant".
+    case action(String)
+    /// It failed; the reason goes in the tooltip, and a button tries again.
+    case error(reason: String, action: String)
+    /// It does not apply here, such as an app that the machine does not have.
+    case notApplicable(String)
+
+    /// The state of an app's entry or skill from its install status.
+    static func of(_ status: InstallStatus) -> SetupState {
+        switch status {
+        case .installed: .ok
+        case .partlyInstalled, .notInstalled: .action("Set Up")
+        case .failed(let message): .error(reason: message, action: "Retry")
+        case .notFound: .notApplicable("Not on this machine")
+        }
+    }
+}
+
+/// The trailing status of a sub-row: a green check, a small button, a red cross with a button,
+/// or grey text, all in the column of the switches above.
+struct SetupStatus: View {
+    let state: SetupState
+    let action: () -> Void
+
+    var body: some View {
+        switch state {
+        case .ok:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityLabel("Set up")
+        case .action(let title):
+            Button(title, action: action)
+                .controlSize(.small)
+        case .error(let reason, let title):
+            HStack(spacing: 8) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .help(reason)
+                    .accessibilityLabel(reason)
+                Button(title, action: action)
+                    .controlSize(.small)
+            }
+        case .notApplicable(let text):
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// One thing that Tilde sets up: its plain name at the left, its status at the right. The file,
+/// when there is one, is in its context menu.
+struct SetupItemRow: View {
+    let title: String
+    let state: SetupState
+    var file: URL?
+    /// Whether the file is on this Mac, so Finder can show it.
+    var isLocalFile = true
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(.system(size: 13))
+            Spacer(minLength: 16)
+            SetupStatus(state: state, action: action)
+        }
+        .frame(minHeight: 26)
+        .contentShape(Rectangle())
+        .contextMenu {
+            if let file {
+                if isLocalFile {
+                    Button("Show in Finder") {
+                        revealInFinder(file)
+                    }
+                }
+                Button("Copy Path") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(file.path, forType: .string)
+                }
+            }
+        }
+    }
+}
+
 /// A path on one line in grey: truncated in the middle, in full as a tooltip. A click shows the
 /// file in Finder; under the pointer the path gets an underline and a hand.
 struct PathText: View {

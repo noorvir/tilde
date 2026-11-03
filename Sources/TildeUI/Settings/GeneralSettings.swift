@@ -95,7 +95,7 @@ struct GeneralSettings: View {
     }
 }
 
-/// A permission with a green or grey dot after its name, and a button while it is missing.
+/// A permission with a check when macOS allows it, and a button while it does not.
 private struct PermissionRow: View {
     let title: String
     let subtitle: String
@@ -103,15 +103,8 @@ private struct PermissionRow: View {
     let openSettings: () -> Void
 
     var body: some View {
-        SettingsRow(title: title, subtitle: isAllowed ? subtitle : "Not allowed. \(subtitle) needs it.") {
-            Circle()
-                .fill(isAllowed ? Color.green : Color.secondary.opacity(0.5))
-                .frame(width: 6, height: 6)
-                .accessibilityLabel(isAllowed ? "Allowed" : "Not allowed")
-        } trailing: {
-            if !isAllowed {
-                Button("Open Settings", action: openSettings)
-            }
+        SettingsRow(title: title, subtitle: subtitle) {
+            SetupStatus(state: isAllowed ? .ok : .action("Grant"), action: openSettings)
         }
     }
 }

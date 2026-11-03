@@ -71,37 +71,27 @@ final class NodeSetup: ObservableObject {
         }
     }
 
-    struct Diagnosis: Equatable {
-        enum Fix: Equatable {
-            case install, reconnect, checkAgain
-
-            var title: String {
-                switch self {
-                case .install: "Try Again"
-                case .reconnect: "Reconnect"
-                case .checkAgain: "Check Again"
-                }
-            }
+    /// Whether the machine answers over ssh.
+    nonisolated static func reachableState(of row: Row) -> SetupState {
+        switch row.isReachable {
+        case true?: .ok
+        case false?: .error(reason: "It does not answer over ssh. Check that \"ssh \(row.host)\" works in Terminal", action: "Check Again")
+        case nil: .notApplicable("Checking")
         }
-
-        let reason: String
-        var fix: Fix?
     }
 
-    /// Why a machine is not green, and what fixes it.
-    nonisolated static func diagnosis(of row: Row) -> Diagnosis? {
-        switch row.dot {
-        case .green:
-            return nil
-        case .grey:
-            return Diagnosis(reason: "It does not answer over ssh. Check that \"ssh \(row.host)\" works in Terminal", fix: .checkAgain)
-        case .red:
-            return Diagnosis(reason: row.detail ?? row.note ?? "The install or the link failed", fix: row.status.isInstalled ? .reconnect : .install)
-        case .yellow where row.status.isInstalled:
-            return Diagnosis(reason: "Installed, but the link to this Mac is not up yet. Tilde tries again every few seconds", fix: .reconnect)
-        case .yellow:
-            return Diagnosis(reason: "It answers over ssh. Install Tilde here to use it from this machine's agents", fix: nil)
+    /// Whether the machine's agents can reach this Mac.
+    nonisolated static func linkState(of row: Row) -> SetupState {
+        if row.status == .linked {
+            return .ok
         }
+        if row.hasFailed {
+            return .error(reason: row.detail ?? row.note ?? "The install or the link failed", action: row.status.isInstalled ? "Reconnect" : "Retry")
+        }
+        if row.status.isInstalled {
+            return .action("Reconnect")
+        }
+        return .notApplicable("Not installed")
     }
 
     /// Starts the link to a machine again.

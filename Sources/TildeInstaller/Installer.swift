@@ -243,6 +243,11 @@ public struct Installer: Sendable {
         target(for: harness).skillFile
     }
 
+    /// Whether the app has Tilde's skill as Tilde wrote it.
+    public func hasSkill(_ harness: Harness) -> Bool {
+        (try? files.read(skillFile(for: harness))) == tildeSkill
+    }
+
     public func appBundle(for harness: Harness) -> URL? {
         let target = target(for: harness)
         return (target.detect.apps + target.iconApps).lazy

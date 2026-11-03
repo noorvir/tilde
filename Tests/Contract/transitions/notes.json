@@ -412,8 +412,8 @@
   "isReachable": true,
   "expect": {
    "dot": "green",
-   "reason": "",
-   "fix": ""
+   "reachable": "ok",
+   "link": "ok"
   }
  },
  {
@@ -422,7 +422,8 @@
   "isReachable": true,
   "expect": {
    "dot": "yellow",
-   "fix": ""
+   "reachable": "ok",
+   "link": "Not installed"
   }
  },
  {
@@ -431,7 +432,8 @@
   "isReachable": true,
   "expect": {
    "dot": "yellow",
-   "fix": "reconnect"
+   "reachable": "ok",
+   "link": "Reconnect"
   }
  },
  {
@@ -440,7 +442,8 @@
   "isReachable": false,
   "expect": {
    "dot": "grey",
-   "fix": "checkAgain"
+   "reachable": "error: Check Again",
+   "link": "Reconnect"
   }
  },
  {
@@ -450,7 +453,8 @@
   "hasFailed": true,
   "expect": {
    "dot": "red",
-   "fix": "reconnect"
+   "reachable": "ok",
+   "link": "error: Reconnect"
   }
  },
  {
@@ -485,45 +489,31 @@
   }
  },
  {
-  "name": "An app row with every app set up has nothing to say",
-  "appStatuses": {
-   "Claude Code": "installed",
-   "Claude app": "installed"
-  },
+  "name": "A set-up entry shows a check",
+  "appStatus": "installed",
   "expect": {
-   "reason": "",
-   "fix": ""
+   "setup": "ok"
   }
  },
  {
-  "name": "Claude set up in Claude Code only says which app lacks it, and offers to set it up",
-  "appStatuses": {
-   "Claude Code": "installed",
-   "Claude app": "notInstalled"
-  },
+  "name": "A missing entry offers Set Up",
+  "appStatus": "notInstalled",
   "expect": {
-   "reason": "Not set up in Claude app yet",
-   "fix": "setUp"
+   "setup": "Set Up"
   }
  },
  {
-  "name": "An app with no Tilde says so and offers to set it up",
-  "appStatuses": {
-   "Codex": "notInstalled"
-  },
+  "name": "A config that cannot be read shows a cross and Retry",
+  "appStatus": "failed",
   "expect": {
-   "reason": "Tilde is not set up here. Its agent cannot ask you for feedback",
-   "fix": "setUp"
+   "setup": "error: Retry"
   }
  },
  {
-  "name": "A config that cannot be read says so and shows the file",
-  "appStatuses": {
-   "Cursor": "failed"
-  },
+  "name": "An app the machine lacks is not on this machine",
+  "appStatus": "absent",
   "expect": {
-   "reason": "Cursor's config cannot be read, so Tilde cannot add itself",
-   "fix": "showFile"
+   "setup": "Not on this machine"
   }
  }
 ]

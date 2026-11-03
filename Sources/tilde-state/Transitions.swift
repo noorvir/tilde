@@ -25,7 +25,7 @@ enum Transitions {
         var aliases: [AliasRow]?
         var installed: [String]?
         var nodeStatus: String?
-        var appStatuses: [String: String]?
+        var appStatus: String?
         var foundOnMachine: [String]?
         var onThisMac: [String]?
         var isReachable: Bool?
@@ -53,9 +53,20 @@ enum Transitions {
         var hosts: [String]?
         var machines: [[String]]?
         var dot: String?
-        var reason: String?
-        var fix: String?
+        var setup: String?
+        var reachable: String?
+        var link: String?
         var chosen: [String]?
+    }
+
+    /// "ok", the button's title, "error: <button>", or the grey text.
+    private static func name(_ state: SetupState) -> String {
+        switch state {
+        case .ok: "ok"
+        case .action(let title): title
+        case .error(_, let title): "error: \(title)"
+        case .notApplicable(let text): text
+        }
     }
 
     static func run(_ table: Data) throws -> Data {
@@ -85,25 +96,20 @@ enum Transitions {
                 result.chosen = NodeSetup.chosen(found: found.compactMap { Harness(rawValue: $0) }, onThisMac: mac.compactMap { Harness(rawValue: $0) })
                     .map(\.rawValue)
             }
-            if let statuses = row.appStatuses {
-                let apps = statuses.sorted { $0.key < $1.key }.map { name, status -> (name: String, status: InstallStatus) in
-                    let value: InstallStatus = switch status {
-                    case "installed": .installed
-                    case "failed": .failed("not JSON")
-                    default: .notInstalled
-                    }
-                    return (name: name, status: value)
+            if let status = row.appStatus {
+                let value: InstallStatus = switch status {
+                case "installed": .installed
+                case "failed": .failed("not JSON")
+                case "absent": .notFound
+                default: .notInstalled
                 }
-                let diagnosis = Diagnosis.of(apps, isRemote: false)
-                result.reason = diagnosis?.reason ?? ""
-                result.fix = diagnosis?.fix.map { "\($0)" } ?? ""
+                result.setup = Self.name(SetupState.of(value))
             }
             if let status = row.nodeStatus {
                 result.dot = NodeSetup.Dot(status: NodeSetup.Status(name: status), isReachable: row.isReachable, hasFailed: row.hasFailed ?? false).name
                 let machine = NodeSetup.Row(host: "box", status: NodeSetup.Status(name: status), isReachable: row.isReachable, hasFailed: row.hasFailed ?? false)
-                let diagnosis = NodeSetup.diagnosis(of: machine)
-                result.reason = diagnosis?.reason ?? ""
-                result.fix = diagnosis?.fix.map { "\($0)" } ?? ""
+                result.reachable = Self.name(NodeSetup.reachableState(of: machine))
+                result.link = Self.name(NodeSetup.linkState(of: machine))
             }
             if let aliases = row.aliases {
                 let found = aliases.map { NodeDiscovery.Alias(host: $0.host, machineName: $0.machineName, address: $0.address) }

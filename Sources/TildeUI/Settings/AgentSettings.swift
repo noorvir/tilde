@@ -140,89 +140,33 @@ struct AgentRow: View {
 
     private var files: some View {
         let installer = setup.installer
-        let home = installer.environment.home
-        // MCP configs, then skills. Apps that share a skill folder list it once;
-        // a path listed twice would also share its hover underline.
         let harnesses = setup.present(row)
-        let ordered = harnesses.map(installer.configFile(for:)) + harnesses.map(installer.skillFile(for:))
-        var urls: [URL] = []
-        for url in ordered where !urls.contains(url) {
-            urls.append(url)
+        // The Claude row has two apps, named by their app; other rows have one MCP entry.
+        let entries = harnesses.map { harness in
+            (title: harnesses.count > 1 ? harness.name : "MCP server", harness: harness)
         }
-        let errors = setup.present(row).compactMap { harness -> String? in
-            if case .failed(let message) = installer.status(of: harness) {
-                return message
-            }
-            return nil
+        // Apps that share a skill folder have one skill.
+        var skills: [Harness] = []
+        for harness in harnesses where !skills.contains(where: { installer.skillFile(for: $0) == installer.skillFile(for: harness) }) {
+            skills.append(harness)
         }
 
-        return VStack(alignment: .leading, spacing: 4) {
-            if let diagnosis = setup.diagnosis(of: row) {
-                DiagnosisLine(diagnosis: diagnosis) {
-                    switch diagnosis.fix {
-                    case .setUp:
-                        onResult(setup.install([row]))
-                    case .showFile:
-                        if let harness = setup.present(row).first {
-                            revealInFinder(setup.installer.configFile(for: harness))
-                        }
-                    case nil:
-                        break
-                    }
-                }
-                .padding(.bottom, 4)
-            }
-            ForEach(urls, id: \.self) { url in
-                if setup.isRemote {
-                    Text(tildePath(url, home: home))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } else {
-                    PathText(path: tildePath(url, home: home), url: url)
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(entries, id: \.harness) { entry in
+                SetupItemRow(
+                    title: entry.title, state: SetupState.of(setup.status(of: AgentSetup.Row(name: entry.title, harnesses: [entry.harness]))),
+                    file: installer.configFile(for: entry.harness), isLocalFile: !setup.isRemote
+                ) {
+                    onResult(setup.install([AgentSetup.Row(name: entry.title, harnesses: [entry.harness])]))
                 }
             }
-            ForEach(errors, id: \.self) { message in
-                Text(message)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-            }
-        }
-    }
-}
-
-/// Why something is not green, and a button that fixes it.
-struct DiagnosisLine: View {
-    let reason: String
-    let fixTitle: String?
-    let fix: () -> Void
-
-    init(diagnosis: Diagnosis, fix: @escaping () -> Void) {
-        reason = diagnosis.reason
-        fixTitle = switch diagnosis.fix {
-        case .setUp: "Set Up"
-        case .showFile: "Show File"
-        case nil: nil
-        }
-        self.fix = fix
-    }
-
-    init(reason: String, fixTitle: String?, fix: @escaping () -> Void) {
-        self.reason = reason
-        self.fixTitle = fixTitle
-        self.fix = fix
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(reason)
-                .font(.system(size: 12))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let fixTitle {
-                Button(fixTitle, action: fix)
+            ForEach(skills, id: \.self) { harness in
+                SetupItemRow(
+                    title: "/tilde skill", state: setup.hasSkill(harness) ? .ok : .action("Set Up"),
+                    file: installer.skillFile(for: harness), isLocalFile: !setup.isRemote
+                ) {
+                    onResult(setup.install([AgentSetup.Row(name: harness.name, harnesses: [harness])]))
+                }
             }
         }
     }
@@ -366,24 +310,21 @@ struct MachineSettings: View {
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 58)
-                    if let diagnosis = NodeSetup.diagnosis(of: row) {
-                        SettingsDivider()
-                        DiagnosisLine(reason: diagnosis.reason, fixTitle: diagnosis.fix?.title) {
-                            switch diagnosis.fix {
-                            case .install:
-                                nodes.install(host)
-                            case .reconnect:
+                    SettingsDivider()
+                    VStack(spacing: 2) {
+                        SetupItemRow(title: "Reachable over ssh", state: NodeSetup.reachableState(of: row)) {
+                            nodes.refresh()
+                        }
+                        SetupItemRow(title: "Linked to this Mac", state: NodeSetup.linkState(of: row)) {
+                            if row.status.isInstalled {
                                 nodes.reconnect(host)
-                            case .checkAgain:
-                                nodes.refresh()
-                            case nil:
-                                break
+                            } else {
+                                nodes.install(host)
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
                 }
             }
             MachineAgents(nodes: nodes, host: host, expanded: $expanded)
