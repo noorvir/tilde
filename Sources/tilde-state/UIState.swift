@@ -46,6 +46,8 @@ struct UIState: Decodable {
     var scoped: Bool?
     var pickingWindow: Bool?
     var clientWithIcon: String?
+    /// The remote machine's status dot: green, yellow, grey or red.
+    var machineDot: String?
     var list: Bool?
     var hudInBrowser: Bool?
     var hover: Bool?

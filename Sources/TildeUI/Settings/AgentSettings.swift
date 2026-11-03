@@ -203,18 +203,7 @@ struct MachineLabel: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "laptopcomputer")
-                .font(.system(size: 16))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(dotColor)
-                        .frame(width: 7, height: 7)
-                        .offset(x: 3, y: -1)
-                }
-                .help(row.dot.reason)
-                .accessibilityLabel(row.dot.reason)
+            MachineIcon(dot: row.dot)
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.host)
                     .font(.system(size: 14))
@@ -224,15 +213,6 @@ struct MachineLabel: View {
             }
         }
         .help(row.detail ?? "")
-    }
-
-    private var dotColor: Color {
-        switch row.dot {
-        case .green: .green
-        case .yellow: .yellow
-        case .grey: .gray
-        case .red: .red
-        }
     }
 
     private var subtitle: String {

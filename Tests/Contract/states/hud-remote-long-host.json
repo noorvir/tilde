@@ -10,6 +10,7 @@
     "node": "build-runner-eu-west-1.internal.example.com"
   },
   "clientWithIcon": "Claude Code",
+  "machineDot": "green",
   "notes": 1,
   "paused": true
 }

@@ -102,6 +102,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         let settings = SettingsWindow(model: model)
         controller.clientIcon = { setup.icon(forClient: $0) }
+        controller.machineDot = { host in setup.nodes.rows.first { $0.host == host }?.dot ?? .grey }
         self.toast = toast
         self.settings = settings
         menu = StatusMenu(browser: browser, controller: controller, settings: settings, setup: setup, version: version) { toast.show($0) }

@@ -10,6 +10,7 @@
     "node": "mac-mini-ts"
   },
   "clientWithIcon": "Claude Code",
+  "machineDot": "red",
   "notes": 1,
   "paused": true
 }

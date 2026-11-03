@@ -190,6 +190,8 @@ final class AnnotationController: ObservableObject {
     private var hasLoggedMove = false
     /// The icon of the agent app with this display name, for the HUD; nil when unknown.
     var clientIcon: (String) -> NSImage? = { _ in nil }
+    /// The status of the remote machine with this name, for the HUD's machine icon.
+    var machineDot: (String) -> NodeSetup.Dot = { _ in .grey }
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
 
     /// Where sessions are saved while in progress and kept afterwards.

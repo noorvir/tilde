@@ -9,5 +9,6 @@
     "client": "Claude Code",
     "node": "beast"
   },
-  "clientWithIcon": "Claude Code"
+  "clientWithIcon": "Claude Code",
+  "machineDot": "green"
 }

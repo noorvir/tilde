@@ -37,7 +37,7 @@ final class NodeSetup: ObservableObject {
         }
     }
 
-    enum Dot: Equatable {
+    enum Dot: String, Equatable {
         case green, yellow, grey, red
 
         init(status: Status, isReachable: Bool?, hasFailed: Bool) {

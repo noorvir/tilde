@@ -484,9 +484,24 @@ struct HUDView: View {
             }
             .padding(.leading, -4)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .layoutPriority(1)
+                    // A remote agent's machine, as on the Agents page; its name gives way first.
+                    if let node = controller.session?.node {
+                        HStack(spacing: 3) {
+                            Text("on")
+                            MachineIcon(dot: controller.machineDot(node), size: 14)
+                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
+                            Text(node)
+                                .truncationMode(.tail)
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
                 subtitle
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
@@ -647,14 +662,13 @@ struct HUDView: View {
         return controller.isPickingWindow ? "Choose a window" : "Annotating"
     }
 
-    /// The subtitle: the first candidate that fits the pill, so words drop out and the text
-    /// ends in "…" only when even the shortest is too long, such as for a long machine name.
+    /// The subtitle: the first candidate that fits the pill, so words drop out, and "…" only
+    /// when even the shortest is too long.
     private var subtitle: some View {
         let candidates = Self.subtitleCandidates(
             // A local session's report goes to the clipboard, like an agent's goes to the agent.
             client: controller.session.map { $0.isLocal ? "Clipboard" : $0.client },
             clientIcon: controller.session.flatMap { $0.isLocal ? Self.clipboardIcon : controller.clientIcon($0.client) },
-            node: controller.session?.node,
             // The browser's own toolbar needs no "in Tilde Browser".
             scopeName: isEmbedded ? nil : controller.scopeName,
             scopeIcon: controller.scopeIcon,
@@ -696,27 +710,23 @@ struct HUDView: View {
         case notice(String)
     }
 
-    /// One piece of the subtitle: an optional word, an optional icon, and a name or text.
+    /// One piece of the subtitle: an optional word, an optional app icon, and a name or text.
     struct SubtitlePart: Equatable {
         var prefix: String?
         var icon: NSImage?
         var text: String?
-        /// The icon does not say the name, such as the machine's: the name stays when words drop.
-        var keepsName = false
     }
 
     /// The width the title column has in the fixed pill, for the narrowest layout (the paused
     /// state with its badge). Every subtitle's shortest candidate fits it.
     static let subtitleWidth: CGFloat = 120
     static let clipboardIcon = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Clipboard")
-    /// The symbol of a remote machine, as in Settings.
-    static let machineIcon = NSImage(systemSymbolName: "laptopcomputer", accessibilityDescription: "Remote machine")
     static let subtitleFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
 
-    /// Subtitles from fullest to shortest, such as "for Codex · on mac-mini · in Chrome · 2 notes",
-    /// then without the words, then without the names behind app icons.
+    /// Subtitles from fullest to shortest, such as "for Codex · in Chrome · 2 notes", then
+    /// without the words, then without the names, keeping the icons.
     static func subtitleCandidates(
-        client: String?, clientIcon: NSImage?, node: String?, scopeName: String?, scopeIcon: NSImage?, notes: Int, state: SubtitleState
+        client: String?, clientIcon: NSImage?, scopeName: String?, scopeIcon: NSImage?, notes: Int, state: SubtitleState
     ) -> [[SubtitlePart]] {
         switch state {
         case .notice(let text):
@@ -735,14 +745,13 @@ struct HUDView: View {
         let detail = notes == 0 ? nil : "\(notes) \(notes == 1 ? "note" : "notes")"
         let full = [
             client.map { SubtitlePart(prefix: "for", icon: clientIcon, text: $0) },
-            node.map { SubtitlePart(prefix: "on", icon: machineIcon, text: $0, keepsName: true) },
             scopeName.map { SubtitlePart(prefix: "in", icon: scopeIcon, text: $0) },
             detail.map { SubtitlePart(text: $0) },
         ].compactMap { $0 }
 
         // Each step drops more: the words, then the names behind icons.
         let steps: [(SubtitlePart) -> SubtitlePart?] = [
-            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon, text: $0.keepsName ? $0.text : nil, keepsName: $0.keepsName) },
+            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon) },
         ]
         var candidates = [full]
         for step in steps {

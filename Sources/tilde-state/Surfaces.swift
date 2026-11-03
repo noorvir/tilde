@@ -109,6 +109,9 @@ enum Surfaces {
         if let client = state.clientWithIcon {
             controller.clientIcon = { $0 == client ? Fixtures.appIcon : nil }
         }
+        if let dot = state.machineDot.flatMap(NodeSetup.Dot.init(rawValue:)) {
+            controller.machineDot = { _ in dot }
+        }
         apply(state, drafts: Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true), to: controller)
         controller.showsList = state.list ?? false
         controller.setDrawingForTesting(state.drawing ?? false)
