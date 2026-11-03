@@ -223,26 +223,24 @@ struct BehaviourTests {
     /// Every subtitle has a candidate that fits the fixed pill, so it never truncates.
     @Test func everySubtitleFitsWithoutTruncating() {
         let icon = Fixtures.appIcon
-        let variants: [(client: String?, scope: String?, notes: Int, state: HUDView.SubtitleState)] = [
-            (nil, nil, 0, .annotating),
-            (nil, nil, 12, .annotating),
-            ("Codex", nil, 3, .annotating),
-            ("Claude Code", "Google Chrome", 0, .annotating),
-            ("Claude Code", "Google Chrome", 128, .annotating),
-            (nil, "Tilde Browser", 2, .annotating),
-            ("Windsurf", nil, 0, .choosingWindow),
-            (nil, nil, 1, .paused(shortcut: .keys(KeyCombo(keyCode: 35, modifiers: NSEvent.ModifierFlags([.control, .option, .shift, .command]).rawValue, key: "P")))),
-            (nil, nil, 1, .paused(shortcut: nil)),
-            (nil, nil, 0, .notice("Window closed")),
-            (nil, "Google Chrome", 2, .waitingForWindow),
-            (nil, nil, 1, .paused(shortcut: .doubleTap(.control))),
-            (nil, nil, 1, .paused(shortcut: .doubleTap(.command))),
-            (nil, nil, 1, .paused(shortcut: .doubleTap(.function))),
+        let variants: [(client: String?, scope: String?, state: HUDView.SubtitleState)] = [
+            (nil, nil, .annotating),
+            ("Codex", nil, .annotating),
+            ("Claude Code", "Google Chrome", .annotating),
+            (nil, "Tilde Browser", .annotating),
+            ("Windsurf", nil, .choosingWindow),
+            (nil, nil, .paused(shortcut: .keys(KeyCombo(keyCode: 35, modifiers: NSEvent.ModifierFlags([.control, .option, .shift, .command]).rawValue, key: "P")))),
+            (nil, nil, .paused(shortcut: nil)),
+            (nil, nil, .notice("Window closed")),
+            (nil, "Google Chrome", .waitingForWindow),
+            (nil, nil, .paused(shortcut: .doubleTap(.control))),
+            (nil, nil, .paused(shortcut: .doubleTap(.command))),
+            (nil, nil, .paused(shortcut: .doubleTap(.function))),
         ]
 
         for variant in variants {
             let candidates = HUDView.subtitleCandidates(
-                client: variant.client, clientIcon: icon, scopeName: variant.scope, scopeIcon: icon, notes: variant.notes, state: variant.state
+                client: variant.client, clientIcon: icon, machine: nil, scopeName: variant.scope, scopeIcon: icon, state: variant.state
             )
             let shortest = try! #require(candidates.last)
             #expect(HUDView.width(of: shortest) <= HUDView.subtitleWidth, "\(variant) is \(HUDView.width(of: shortest)) pt")
@@ -250,11 +248,22 @@ struct BehaviourTests {
     }
 
     @Test func subtitlesSayWhereTheReportGoesInBothStates() {
-        let local = HUDView.subtitleCandidates(client: "Clipboard", clientIcon: nil, scopeName: "Google Chrome", scopeIcon: nil, notes: 0, state: .annotating)
+        let local = HUDView.subtitleCandidates(client: "Clipboard", clientIcon: nil, machine: nil, scopeName: "Google Chrome", scopeIcon: nil, state: .annotating)
         #expect(local.first == [HUDView.SubtitlePart(prefix: "for", text: "Clipboard"), HUDView.SubtitlePart(prefix: "in", text: "Google Chrome")])
 
-        let paused = HUDView.subtitleCandidates(client: "Codex", clientIcon: nil, scopeName: nil, scopeIcon: nil, notes: 2, state: .paused(shortcut: .doubleTap(.control)))
-        #expect(paused.first == [HUDView.SubtitlePart(prefix: "for", text: "Codex"), HUDView.SubtitlePart(text: "2 notes")])
+        let paused = HUDView.subtitleCandidates(client: "Codex", clientIcon: nil, machine: nil, scopeName: nil, scopeIcon: nil, state: .paused(shortcut: .doubleTap(.control)))
+        #expect(paused.first == [HUDView.SubtitlePart(prefix: "for", text: "Codex")])
+    }
+
+    @Test func aRemoteSubtitleNamesTheMachineAndKeepsItWhenWordsDrop() {
+        let icon = Fixtures.appIcon
+        let machine = HUDView.Machine(host: "mac-mini-ts", dot: .green)
+        let candidates = HUDView.subtitleCandidates(
+            client: "Claude Code", clientIcon: icon, machine: machine, scopeName: nil, scopeIcon: nil, state: .annotating
+        )
+
+        #expect(candidates.first == [HUDView.SubtitlePart(prefix: "for", icon: icon, text: "Claude Code", machine: machine)])
+        #expect(candidates.last == [HUDView.SubtitlePart(icon: icon, machine: machine)])
     }
 
     @Test func tooltipsStayInsideTheAreaThatDrawsThem() {

@@ -484,24 +484,9 @@ struct HUDView: View {
             }
             .padding(.leading, -4)
             VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .layoutPriority(1)
-                    // A remote agent's machine, as on the Agents page; its name gives way first.
-                    if let node = controller.session?.node {
-                        HStack(spacing: 3) {
-                            Text("on")
-                            MachineIcon(dot: controller.machineDot(node), size: 14)
-                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 3 }
-                            Text(node)
-                                .truncationMode(.tail)
-                        }
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                    }
-                }
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
                 subtitle
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
@@ -669,10 +654,10 @@ struct HUDView: View {
             // A local session's report goes to the clipboard, like an agent's goes to the agent.
             client: controller.session.map { $0.isLocal ? "Clipboard" : $0.client },
             clientIcon: controller.session.flatMap { $0.isLocal ? Self.clipboardIcon : controller.clientIcon($0.client) },
+            machine: controller.session?.node.map { Machine(host: $0, dot: controller.machineDot($0)) },
             // The browser's own toolbar needs no "in Tilde Browser".
             scopeName: isEmbedded ? nil : controller.scopeName,
             scopeIcon: controller.scopeIcon,
-            notes: controller.drafts.count,
             state: subtitleState
         )
         return ViewThatFits(in: .horizontal) {
@@ -715,6 +700,14 @@ struct HUDView: View {
         var prefix: String?
         var icon: NSImage?
         var text: String?
+        /// A remote agent's machine, after its name: "on <machine> host".
+        var machine: Machine?
+    }
+
+    /// A remote machine and its status, drawn as on the Agents page.
+    struct Machine: Equatable {
+        let host: String
+        let dot: NodeSetup.Dot
     }
 
     /// The width the title column has in the fixed pill, for the narrowest layout (the paused
@@ -723,10 +716,10 @@ struct HUDView: View {
     static let clipboardIcon = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Clipboard")
     static let subtitleFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
 
-    /// Subtitles from fullest to shortest, such as "for Codex · in Chrome · 2 notes", then
-    /// without the words, then without the names, keeping the icons.
+    /// Subtitles from fullest to shortest, such as "for Codex on mac-mini · in Chrome", then
+    /// without the words, then without the names, keeping the icons and the machine.
     static func subtitleCandidates(
-        client: String?, clientIcon: NSImage?, scopeName: String?, scopeIcon: NSImage?, notes: Int, state: SubtitleState
+        client: String?, clientIcon: NSImage?, machine: Machine?, scopeName: String?, scopeIcon: NSImage?, state: SubtitleState
     ) -> [[SubtitlePart]] {
         switch state {
         case .notice(let text):
@@ -742,16 +735,14 @@ struct HUDView: View {
             break
         }
 
-        let detail = notes == 0 ? nil : "\(notes) \(notes == 1 ? "note" : "notes")"
         let full = [
-            client.map { SubtitlePart(prefix: "for", icon: clientIcon, text: $0) },
+            client.map { SubtitlePart(prefix: "for", icon: clientIcon, text: $0, machine: machine) },
             scopeName.map { SubtitlePart(prefix: "in", icon: scopeIcon, text: $0) },
-            detail.map { SubtitlePart(text: $0) },
         ].compactMap { $0 }
 
         // Each step drops more: the words, then the names behind icons.
         let steps: [(SubtitlePart) -> SubtitlePart?] = [
-            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon) },
+            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon, machine: $0.machine) },
         ]
         var candidates = [full]
         for step in steps {
@@ -766,12 +757,21 @@ struct HUDView: View {
     /// The width of a subtitle candidate in the HUD's subtitle font.
     static func width(of parts: [SubtitlePart]) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [.font: subtitleFont]
-        let separator = (" · " as NSString).size(withAttributes: attributes).width
-        let widths = parts.map { part in
+        func width(_ words: [String]) -> CGFloat {
+            words.map { ($0 as NSString).size(withAttributes: attributes).width }.reduce(0, +)
+        }
+
+        let separator = width([" · "])
+        let widths = parts.map { part -> CGFloat in
             let words = [part.prefix, part.text].compactMap { $0 }
-            let text = words.map { ($0 as NSString).size(withAttributes: attributes).width }.reduce(0, +)
+            let icon: CGFloat = part.icon == nil ? 0 : 14
             let gaps = CGFloat(max(words.count + (part.icon == nil ? 0 : 1) - 1, 0)) * 3
-            return text + (part.icon == nil ? 0 : 14) + gaps
+            // "on", the machine icon and its host, each after a 3 pt gap.
+            var machine: CGFloat = 0
+            if let host = part.machine?.host {
+                machine = width(["on", host]) + 14 + 3 * 3
+            }
+            return width(words) + icon + gaps + machine
         }
         return widths.reduce(0, +) + CGFloat(max(parts.count - 1, 0)) * separator
     }
@@ -800,6 +800,13 @@ private struct SubtitleLine: View {
                 }
                 if let text = part.text {
                     Text(text)
+                }
+                if let machine = part.machine {
+                    Text("on")
+                    MachineIcon(dot: machine.dot, size: 14)
+                    // A long host name is the first to give way.
+                    Text(machine.host)
+                        .layoutPriority(-1)
                 }
             }
         }
