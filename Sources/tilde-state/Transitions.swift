@@ -11,6 +11,7 @@ enum Transitions {
         var event: SessionFlow.Event?
         var note: NoteVisibility?
         var similarity: Double?
+        var rescaled: Bool?
         var original: PageIdentity?
         var page: PageIdentity?
         var isElementConfirmed: Bool?
@@ -26,6 +27,9 @@ enum Transitions {
         var installed: [String]?
         var nodeStatus: String?
         var appStatus: String?
+        var deviceMade: [CGFloat]?
+        var deviceNow: [CGFloat]?
+        var point: [CGFloat]?
         var foundOnMachine: [String]?
         var onThisMac: [String]?
         var isReachable: Bool?
@@ -54,6 +58,8 @@ enum Transitions {
         var machines: [[String]]?
         var dot: String?
         var setup: String?
+        var movedTo: [Int]?
+        var isDevice: Bool?
         var reachable: String?
         var link: String?
         var chosen: [String]?
@@ -96,6 +102,18 @@ enum Transitions {
                 result.chosen = NodeSetup.chosen(found: found.compactMap { Harness(rawValue: $0) }, onThisMac: mac.compactMap { Harness(rawValue: $0) })
                     .map(\.rawValue)
             }
+            if let made = row.deviceMade, let now = row.deviceNow, let point = row.point {
+                let old = CGRect(x: made[0], y: made[1], width: made[2], height: made[3])
+                let new = CGRect(x: now[0], y: now[1], width: now[2], height: now[3])
+                let moved = DeviceScreen.map(CGPoint(x: point[0], y: point[1]), from: old, to: new)
+                result.movedTo = [Int(moved.x.rounded()), Int(moved.y.rounded())]
+            }
+            if let made = row.deviceMade, let window = row.windowFrame, row.point == nil {
+                result.isDevice = DeviceScreen.isDeviceShaped(
+                    CGRect(x: made[0], y: made[1], width: made[2], height: made[3]),
+                    in: CGRect(x: window[0], y: window[1], width: window[2], height: window[3])
+                )
+            }
             if let status = row.appStatus {
                 let value: InstallStatus = switch status {
                 case "installed": .installed
@@ -130,7 +148,7 @@ enum Transitions {
                 result.labelShows = ElementTracker.visibleFrame(frame, clips: [clip]) != nil
             }
             if var note = row.note, let similarity = row.similarity {
-                _ = note.update(similarity: similarity)
+                _ = note.update(similarity: similarity, isRescaled: row.rescaled ?? false)
                 result.note = note
             }
             return result

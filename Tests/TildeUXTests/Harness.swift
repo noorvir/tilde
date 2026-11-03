@@ -163,6 +163,12 @@ final class TildeApp {
         return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
 
+    /// Presses a control of another app by its accessibility name, such as Device Hub's zoom.
+    func press(_ name: String, inApp appName: String) async throws {
+        let app = try #require(NSWorkspace.shared.runningApplications.first { $0.localizedName == appName })
+        _ = try await drive("press", ["pid": app.processIdentifier, "name": name])
+    }
+
     /// Tilde's list of remote machines, as if they were installed.
     func setNodes(_ hosts: [String]) throws {
         let list = hosts.map { ["host": $0, "token": "test"] }

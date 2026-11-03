@@ -162,7 +162,7 @@ struct AgentRow: View {
             }
             ForEach(skills, id: \.self) { harness in
                 SetupItemRow(
-                    title: "/tilde skill", state: setup.hasSkill(harness) ? .ok : .action("Set Up"),
+                    title: "skill", code: "/tilde", state: setup.hasSkill(harness) ? .ok : .action("Set Up"),
                     file: installer.skillFile(for: harness), isLocalFile: !setup.isRemote
                 ) {
                     onResult(setup.install([AgentSetup.Row(name: harness.name, harnesses: [harness])]))

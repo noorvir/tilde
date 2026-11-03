@@ -72,17 +72,20 @@ struct SettingsRow<Accessory: View, Trailing: View>: View {
     let title: String
     var subtitle: String?
     var subtitleIsError = false
+    /// Shown as code before the subtitle, such as an address.
+    var subtitleCode: String?
     /// Next to the title, such as a status dot.
     @ViewBuilder var accessory: Accessory
     @ViewBuilder let trailing: Trailing
 
     init(
-        title: String, subtitle: String? = nil, subtitleIsError: Bool = false,
+        title: String, subtitle: String? = nil, subtitleIsError: Bool = false, subtitleCode: String? = nil,
         @ViewBuilder accessory: () -> Accessory = { EmptyView() }, @ViewBuilder trailing: () -> Trailing
     ) {
         self.title = title
         self.subtitle = subtitle
         self.subtitleIsError = subtitleIsError
+        self.subtitleCode = subtitleCode
         self.accessory = accessory()
         self.trailing = trailing()
     }
@@ -95,19 +98,70 @@ struct SettingsRow<Accessory: View, Trailing: View>: View {
                         .font(.system(size: 14))
                     accessory
                 }
-                if let subtitle {
-                    // Wraps rather than truncating.
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(subtitleIsError ? Color.red : Color.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if subtitle != nil || subtitleCode != nil {
+                    HStack(spacing: 5) {
+                        if let subtitleCode {
+                            InlineCode(subtitleCode)
+                                .foregroundStyle(Color.secondary)
+                        }
+                        if let subtitle {
+                            // Wraps rather than truncating.
+                            Text(subtitle)
+                                .font(.system(size: 12))
+                                .foregroundStyle(subtitleIsError ? Color.red : Color.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
             }
             Spacer(minLength: 0)
             trailing
         }
         .padding(.horizontal, 16)
-        .frame(minHeight: subtitle == nil ? 50 : 58)
+        .frame(minHeight: subtitle == nil && subtitleCode == nil ? 50 : 58)
+    }
+}
+
+/// A command, path or address in running text: monospaced, on a light rounded chip.
+struct InlineCode: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11.5, design: .monospaced))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.primary.opacity(0.07)))
+    }
+}
+
+/// The system's bordered button with a slightly darker fill under the pointer, which the
+/// system's own does not have.
+struct SettingsButtonStyle: PrimitiveButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button(configuration)
+            .buttonStyle(.bordered)
+            .modifier(HoverFill())
+    }
+
+    private struct HoverFill: ViewModifier {
+        @State private var isHovered = false
+        @Environment(\.colorScheme) private var colorScheme
+
+        func body(content: Content) -> some View {
+            content
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.09) : Color.black.opacity(0.07))
+                        .opacity(isHovered ? 1 : 0)
+                        .allowsHitTesting(false)
+                }
+                .onHover { isHovered = $0 }
+        }
     }
 }
 
@@ -168,6 +222,8 @@ struct SetupStatus: View {
 /// when there is one, is in its context menu.
 struct SetupItemRow: View {
     let title: String
+    /// Shown as code before the title, such as `/tilde` before "skill".
+    var code: String?
     let state: SetupState
     var file: URL?
     /// Whether the file is on this Mac, so Finder can show it.
@@ -176,8 +232,13 @@ struct SetupItemRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(title)
-                .font(.system(size: 13))
+            HStack(spacing: 5) {
+                if let code {
+                    InlineCode(code)
+                }
+                Text(title)
+                    .font(.system(size: 13))
+            }
             Spacer(minLength: 16)
             SetupStatus(state: state, action: action)
         }

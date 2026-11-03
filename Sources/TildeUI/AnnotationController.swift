@@ -25,6 +25,10 @@ struct Draft: Identifiable {
     var sourcePID: pid_t?
     /// The part of its window that the picture check looks at, when that is not its frame.
     var pictureArea: CGRect?
+    /// The screen of a simulated device that the note is on, when it was made.
+    var deviceScreen: Task<CGRect?, Never>?
+    /// That screen when the note was made and now, once read: the note follows its zoom.
+    var deviceScreens: (made: CGRect, now: CGRect)?
 
     var id: UUID { annotation.id }
 }
@@ -69,6 +73,8 @@ struct Pending {
     var page: Task<PageIdentity?, Never>?
     var sourcePID: pid_t?
     var pictureArea: CGRect?
+    /// The screen of a simulated device that the note is on, when it was made.
+    var deviceScreen: Task<CGRect?, Never>?
     var drawingIDs: [String] = []
     /// The shape changed after its picture was taken.
     var isDrawingEdited = false
@@ -1098,27 +1104,50 @@ final class AnnotationController: ObservableObject {
         let page: Task<PageIdentity?, Never>?
         let isElementConfirmed: Bool
         let isElementGone: Bool
+        let deviceScreen: Task<CGRect?, Never>?
+    }
+
+    private struct ContentResult: Sendable {
+        let similarity: Double?
+        /// The device's screen when the note was made and now.
+        let deviceScreens: (made: CGRect, now: CGRect)?
     }
 
     /// How much a note's content is on screen: the page's identity decides when it can, and
     /// the picture of the note's area otherwise. Nil when neither can be read.
-    nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> Double? {
+    nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> ContentResult {
         if let original = await check.page?.value, let isSame = now?.isSamePage(as: original),
            let similarity = NoteVisibility.similarity(isSamePage: isSame, isElementConfirmed: check.isElementConfirmed)
         {
-            return similarity
+            return ContentResult(similarity: similarity, deviceScreens: nil)
         }
 
         if check.isElementGone, await check.fingerprint.value?.isPlain == true {
-            return 0
+            return ContentResult(similarity: 0, deviceScreens: nil)
         }
 
-        guard let original = await check.fingerprint.value,
-              let now = await NoteFingerprint.capture(window: CGWindowID(check.window), area: check.frame, windowFrame: check.windowFrame)
-        else {
-            return nil
+        guard let original = await check.fingerprint.value else {
+            return ContentResult(similarity: nil, deviceScreens: nil)
         }
-        return now.similarity(to: original)
+
+        // On a simulated device, the same area of its screen at its zoom now.
+        var area = check.frame
+        var scale: CGFloat = 1
+        var screens: (made: CGRect, now: CGRect)?
+        if let made = await check.deviceScreen?.value, let pid = check.pid, let windowFrame = check.windowFrame,
+           let now = await Task.detached(operation: { DeviceScreen.find(pid: pid, windowFrame: windowFrame) }).value
+        {
+            area = DeviceScreen.map(check.frame, from: made, to: now)
+            scale = now.width / made.width
+            screens = (made, now)
+        }
+        let size = CGSize(width: original.width, height: original.height)
+        guard let current = await NoteFingerprint.capture(
+            window: CGWindowID(check.window), area: area, windowFrame: check.windowFrame, scale: scale, size: size
+        ) else {
+            return ContentResult(similarity: nil, deviceScreens: screens)
+        }
+        return ContentResult(similarity: current.similarity(to: original), deviceScreens: screens)
     }
 
     /// Checks twice a second whether each note's content is on screen.
@@ -1152,7 +1181,8 @@ final class AnnotationController: ObservableObject {
                 id: draft.id, window: window, windowFrame: windowFrames[window], pid: draft.sourcePID,
                 frame: draft.pictureArea ?? trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint: fingerprint, page: draft.page,
                 isElementConfirmed: trackedElements[draft.id] != nil && !goneElements.contains(draft.id),
-                isElementGone: goneElements.contains(draft.id)
+                isElementGone: goneElements.contains(draft.id),
+                deviceScreen: draft.deviceScreen
             )
         }
         guard !checks.isEmpty else {
@@ -1161,24 +1191,33 @@ final class AnnotationController: ObservableObject {
         isCheckingContent = true
         Task { [weak self] in
             var similarities: [Draft.ID: Double] = [:]
+            var screens: [Draft.ID: (made: CGRect, now: CGRect)] = [:]
             // One read per window, however many notes it has.
             var pages: [Int: PageIdentity] = [:]
             for check in checks {
                 if pages[check.window] == nil, let pid = check.pid, let frame = check.windowFrame {
                     pages[check.window] = await Task.detached { PageIdentity.read(pid: pid, windowFrame: frame) }.value
                 }
-                similarities[check.id] = await Self.similarity(of: check, page: pages[check.window])
+                let result = await Self.similarity(of: check, page: pages[check.window])
+                similarities[check.id] = result.similarity
+                screens[check.id] = result.deviceScreens
             }
-            self?.applyContentChecks(similarities)
+            self?.applyContentChecks(similarities, deviceScreens: screens)
         }
     }
 
-    private func applyContentChecks(_ similarities: [Draft.ID: Double]) {
+    private func applyContentChecks(_ similarities: [Draft.ID: Double], deviceScreens: [Draft.ID: (made: CGRect, now: CGRect)] = [:]) {
         isCheckingContent = false
+        for (id, screens) in deviceScreens {
+            if let index = drafts.firstIndex(where: { $0.id == id }) {
+                drafts[index].deviceScreens = screens
+            }
+        }
         var gone = contentGoneNotes
         for (id, similarity) in similarities {
             var visibility = visibilities[id] ?? NoteVisibility()
-            if visibility.update(similarity: similarity) {
+            let isRescaled = deviceScreens[id].map { $0.made.size != $0.now.size } ?? false
+            if visibility.update(similarity: similarity, isRescaled: isRescaled) {
                 // Back on its page: its element may be a new one, or in a tab that left.
                 if gone.remove(id) != nil {
                     elementsToFindAgain.insert(id)
@@ -1218,6 +1257,9 @@ final class AnnotationController: ObservableObject {
         if draft.isRestored, draft.anchor == nil {
             return nil
         }
+        if let screens = draft.deviceScreens {
+            return DeviceScreen.map(draft.annotation.frame, from: screens.made, to: screens.now)
+        }
         return trackedFrames[draft.id] ?? draft.annotation.frame
     }
 
@@ -1239,7 +1281,13 @@ final class AnnotationController: ObservableObject {
         guard let frame = noteFrame(draft) else {
             return nil
         }
-        return trackedElements[draft.id] != nil ? CGPoint(x: frame.maxX, y: frame.minY) : draft.marker
+        if trackedElements[draft.id] != nil {
+            return CGPoint(x: frame.maxX, y: frame.minY)
+        }
+        if let screens = draft.deviceScreens {
+            return DeviceScreen.map(draft.marker, from: screens.made, to: screens.now)
+        }
+        return draft.marker
     }
 
     /// Reads tracked elements five times a second, besides after scrolls and window moves.
@@ -2071,9 +2119,14 @@ final class AnnotationController: ObservableObject {
             fingerprint = Task { await NoteFingerprint.capture(window: windowID, area: area) }
             page = Task.detached { PageIdentity.read(pid: window.pid, windowFrame: window.frame) }
         }
+        // A note at a point, as on a simulated device, follows the device's screen.
+        var deviceScreen: Task<CGRect?, Never>?
+        if pictureArea != nil, let window {
+            deviceScreen = Task.detached { DeviceScreen.find(pid: window.pid, windowFrame: window.frame) }
+        }
         composer = .new(Pending(
             target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked,
-            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid, pictureArea: pictureArea,
+            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid, pictureArea: pictureArea, deviceScreen: deviceScreen,
             drawingIDs: drawingIDs
         ))
         log.notice("comment opened for \(chip, privacy: .public)")
@@ -2177,7 +2230,7 @@ final class AnnotationController: ObservableObject {
             }
             drafts.append(Draft(
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: capture, anchor: pending.anchor,
-                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
+                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea, deviceScreen: pending.deviceScreen
             ))
             startOcclusion()
             startContentChecks()

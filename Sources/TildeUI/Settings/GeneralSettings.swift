@@ -48,14 +48,14 @@ struct GeneralSettings: View {
             }
 
             SettingsSection("Connection") {
-                SettingsRow(title: "MCP server", subtitle: "\(address) · \(statusText)") {
+                SettingsRow(title: "MCP server", subtitle: statusText, subtitleCode: address) {
                     Button("Copy") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(address, forType: .string)
                     }
                 }
                 SettingsDivider()
-                SettingsRow(title: "Feedback inbox", subtitle: tildePath(inboxRoot)) {
+                SettingsRow(title: "Feedback inbox", subtitleCode: tildePath(inboxRoot)) {
                     Button("Show in Finder") {
                         try? FileManager.default.createDirectory(at: inboxRoot, withIntermediateDirectories: true)
                         NSWorkspace.shared.open(inboxRoot)
