@@ -174,6 +174,11 @@ struct SettingsView: View {
             .background(SettingsColors.content)
         }
         .ignoresSafeArea()
+        // One button look in all of Settings: the system's bordered button, larger, with
+        // rounded corners.
+        .buttonStyle(.bordered)
+        .buttonBorderShape(.roundedRectangle(radius: 8))
+        .controlSize(.large)
     }
 
     @ViewBuilder

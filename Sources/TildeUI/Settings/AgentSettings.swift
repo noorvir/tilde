@@ -223,7 +223,6 @@ struct DiagnosisLine: View {
                 .fixedSize(horizontal: false, vertical: true)
             if let fixTitle {
                 Button(fixTitle, action: fix)
-                    .controlSize(.small)
             }
         }
     }
@@ -333,6 +332,7 @@ struct MachineSettings: View {
             HStack(spacing: 10) {
                 Button(action: back) {
                     Image(systemName: "chevron.left")
+                        .frame(width: 14, height: 18)
                 }
                 .help("Back to Agents")
                 .accessibilityLabel("Back")
