@@ -337,19 +337,28 @@ final class TildeApp {
             }
             try await Task.sleep(for: .milliseconds(20))
         }
-        await saveScreenshot(named: name)
+        await saveFailure(named: name)
         let names = try await seen().compactMap(\.name)
         Issue.record("\"\(name)\" is not on screen. On screen: \(names.prefix(40))", sourceLocation: sourceLocation)
         throw UXFailure(description: "\(name) is not on screen")
     }
 
-    /// Keeps a picture of the screen for a failed expectation, in the temporary folder.
-    private func saveScreenshot(named name: String) async {
+    /// Keeps a picture of the screen for a failed expectation, and the app's last 30 s of note
+    /// decisions, in the temporary folder.
+    private func saveFailure(named name: String) async {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-failure-\(name.prefix(12))")
+        let log = Process()
+        log.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+        log.arguments = ["show", "--last", "30s", "--style", "compact", "--predicate", #"subsystem == "dev.tilde.app" AND category == "annotate""#]
+        FileManager.default.createFile(atPath: base.appendingPathExtension("log").path, contents: nil)
+        log.standardOutput = try? FileHandle(forWritingTo: base.appendingPathExtension("log"))
+        try? log.run()
+        waitForExit(log)
+
         guard let (data, _) = try? await URLSession.shared.data(from: Self.driver.appendingPathComponent("screenshot")) else {
             return
         }
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-failure-\(name.prefix(12)).png")
-        try? data.write(to: file)
+        try? data.write(to: base.appendingPathExtension("png"))
     }
 
     /// Waits until no element with this name is on screen.
@@ -443,7 +452,7 @@ final class TildeApp {
             try await Task.sleep(for: .milliseconds(40))
         }
         Issue.record("\(last) blue pixels, expected \(atLeast)...\(atMost)", sourceLocation: sourceLocation)
-        await saveScreenshot(named: "blue-\(sourceLocation.line)")
+        await saveFailure(named: "blue-\(sourceLocation.line)")
     }
 
     // MARK: - Window pictures
