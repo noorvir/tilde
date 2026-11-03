@@ -29,20 +29,25 @@ for app in dev.tilde.ux dev.tilde.driver dev.tilde.app; do
             "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier, flags, last_modified) VALUES ('$service', '$app', 0, 2, 4, 1, 'UNUSED', 0, strftime('%s', 'now'));"
     done
 done
-# No "bypass the window picker" question at all.
-sudo mkdir -p "/Library/Managed Preferences"
-managed="/Library/Managed Preferences/com.apple.applicationaccess.plist"
-sudo plutil -create xml1 "$managed"
-sudo plutil -insert forceBypassScreenCaptureAlert -bool true "$managed"
-sudo chmod 644 "$managed"
-# And no question: its date is far away, for apps that have asked.
+# ssh may read and write other apps' data, such as replayd's below, without a question on
+# the VM's screen.
+for service in kTCCServiceSystemPolicyAllFiles kTCCServiceSystemPolicyAppData; do
+    sudo sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+        "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier, flags, last_modified) VALUES ('$service', '/usr/libexec/sshd-keygen-wrapper', 1, 2, 4, 1, 'UNUSED', 0, strftime('%s', 'now'));"
+done
+sudo killall tccd 2>/dev/null || true
+# No "bypass the system private window picker" question: its dates are far away. Both are
+# replaced, as replayd writes the real date when it asks. A managed preference
+# (forceBypassScreenCaptureAlert) does not work: without a profile, macOS removes it.
 approvals="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
 here=$(cd "$(dirname "$0")/.." && pwd)
 for app in TildeDriver TildeUX Tilde; do
-    /usr/libexec/PlistBuddy -c "Add :file\\:///${here#/}/build/$app.app/ dict" "$approvals" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Delete :file\\:///${here#/}/build/$app.app/:kScreenCapturePrivacyHintDate" "$approvals" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Add :file\\:///${here#/}/build/$app.app/:kScreenCapturePrivacyHintDate date Sat Jan 01 00:00:00 UTC 2050" "$approvals"
-    /usr/libexec/PlistBuddy -c "Add :file\\:///${here#/}/build/$app.app/:kScreenCaptureApprovalLastAlerted date Sat Jan 01 00:00:00 UTC 2050" "$approvals" 2>/dev/null || true
+    entry=":file\\:///${here#/}/build/$app.app/"
+    /usr/libexec/PlistBuddy -c "Add $entry dict" "$approvals" 2>/dev/null || true
+    for key in kScreenCapturePrivacyHintDate kScreenCaptureApprovalLastAlerted; do
+        /usr/libexec/PlistBuddy -c "Delete $entry:$key" "$approvals" 2>/dev/null || true
+        /usr/libexec/PlistBuddy -c "Add $entry:$key date Sat Jan 01 00:00:00 UTC 2050" "$approvals"
+    done
 done
 killall replayd 2>/dev/null || true
 # The size of a MacBook screen, in the layout the window baselines were recorded in.
