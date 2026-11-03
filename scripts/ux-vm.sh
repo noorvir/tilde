@@ -1,6 +1,7 @@
 #!/bin/sh
 # Runs the UX specs in a disposable macOS VM, so they never touch this Mac's screen, and copies
-# the log and failure screenshots to build/ux-vm/. Needs tart and the image, once:
+# the log, failure screenshots and their app logs to build/ux-vm/<time>/, keeping the last 10 runs. Needs tart
+# and the image, once:
 #   brew install cirruslabs/cli/tart
 #   tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:latest tilde-ux
 #   scripts/ux-vm.sh [test name filter]     TILDE_UX_RECORD=1 records the window baselines
@@ -33,7 +34,7 @@ in_vm "mkdir -p tilde && find tilde -mindepth 1 -maxdepth 1 ! -name .build ! -na
 (git ls-files; git ls-files -o --exclude-standard) | COPYFILE_DISABLE=1 tar czf - -T - | in_vm "tar xzf - -C tilde"
 
 # The specs need the logged-in GUI session, which ssh does not give: launchd runs them there.
-in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*.png(N) /tmp/tilde-ux.log; cat > /tmp/dev.tilde.ux.plist" <<PLIST
+in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*(N) /tmp/tilde-ux.log; cat > /tmp/dev.tilde.ux.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -52,16 +53,16 @@ in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*.png(N) /tmp/til
 <key>StandardErrorPath</key><string>/tmp/tilde-ux.log</string>
 </dict></plist>
 PLIST
-mkdir -p build
+run=build/ux-vm/$(date +%Y%m%d-%H%M%S)
+mkdir -p "$run"
 in_vm "launchctl bootout gui/\$(id -u)/dev.tilde.ux 2>/dev/null; launchctl bootstrap gui/\$(id -u) /tmp/dev.tilde.ux.plist
     until grep -q __exit /tmp/tilde-ux.log 2>/dev/null; do sleep 2; done
-    launchctl bootout gui/\$(id -u)/dev.tilde.ux; cat /tmp/tilde-ux.log" > build/ux-vm.log 2>&1 || true
-cat build/ux-vm.log
-status=$(sed -n "s/^__exit //p" build/ux-vm.log)
+    launchctl bootout gui/\$(id -u)/dev.tilde.ux; cat /tmp/tilde-ux.log" > "$run/run.log" 2>&1 || true
+cat "$run/run.log"
+status=$(sed -n "s/^__exit //p" "$run/run.log")
 
 # The screenshots live on this Mac, so they outlast the VM.
-rm -rf build/ux-vm
-mkdir -p build/ux-vm
-mv build/ux-vm.log build/ux-vm/run.log
-in_vm "cd \$(getconf DARWIN_USER_TEMP_DIR) && tar cf - tilde-ux-failure-*.png(N)" | tar xf - -C build/ux-vm 2>/dev/null || true
+in_vm "cd \$(getconf DARWIN_USER_TEMP_DIR) && tar cf - tilde-ux-failure-*(N)" | tar xf - -C "$run" 2>/dev/null || true
+echo "Log and screenshots: $run"
+ls -d build/ux-vm/*/ | sort -r | tail -n +11 | xargs rm -rf
 [ "${status:-1}" = 0 ]
