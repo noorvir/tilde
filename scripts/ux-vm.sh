@@ -4,14 +4,13 @@
 #   brew install cirruslabs/cli/tart
 #   tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:latest tilde-ux
 #   scripts/ux-vm.sh [test name filter]     TILDE_UX_RECORD=1 records the window baselines
+#                                           TILDE_UX_RELEASE=1 runs the release check
 set -eu
 PATH="$HOME/tools/tart-dl/tart.app/Contents/MacOS:$PATH"
 
 cd "$(dirname "$0")/.."
 vm="${TILDE_UX_VM:-tilde-ux}"
 filter="${1:-TildeUXTests}"
-branch=$(git rev-parse --abbrev-ref HEAD)
-remote=$(git remote get-url origin)
 
 # The image has the public login admin/admin; it serves only this VM on the local network.
 askpass=$(mktemp)
@@ -27,13 +26,42 @@ if ! tart list --format json | grep -q "\"Name\" *: *\"$vm\".*running\|running.*
     nohup tart run --no-graphics "$vm" >/dev/null 2>&1 &
 fi
 ip=$(tart ip "$vm" --wait 180)
+until in_vm true 2>/dev/null; do sleep 3; done
 
-in_vm "test -d tilde || git clone \"$remote\" tilde; cd tilde && git fetch origin \"$branch\" && git checkout -q --detach FETCH_HEAD"
-status=0
-in_vm "cd tilde && TILDE_UX_RECORD=${TILDE_UX_RECORD:-0} scripts/ux.sh \"$filter\"" 2>&1 | tee build/ux-vm.log || status=1
+# This checkout as it is, committed or not; the VM keeps its build folders between runs.
+in_vm "mkdir -p tilde && find tilde -mindepth 1 -maxdepth 1 ! -name .build ! -name build -exec rm -rf {} +"
+(git ls-files; git ls-files -o --exclude-standard) | COPYFILE_DISABLE=1 tar czf - -T - | in_vm "tar xzf - -C tilde"
 
+# The specs need the logged-in GUI session, which ssh does not give: launchd runs them there.
+in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*.png(N) /tmp/tilde-ux.log; cat > /tmp/dev.tilde.ux.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>dev.tilde.ux</string>
+<key>ProgramArguments</key><array>
+    <string>/bin/zsh</string><string>-lc</string><string>scripts/ux.sh "\$0"; echo "__exit \$?"</string><string>$filter</string>
+</array>
+<key>WorkingDirectory</key><string>/Users/admin/tilde</string>
+<key>EnvironmentVariables</key><dict>
+    <key>TILDE_UX_RECORD</key><string>${TILDE_UX_RECORD:-0}</string>
+    <key>TILDE_UX_RELEASE</key><string>${TILDE_UX_RELEASE:-}</string>
+</dict>
+<key>LimitLoadToSessionType</key><string>Aqua</string>
+<key>RunAtLoad</key><true/>
+<key>StandardOutPath</key><string>/tmp/tilde-ux.log</string>
+<key>StandardErrorPath</key><string>/tmp/tilde-ux.log</string>
+</dict></plist>
+PLIST
+mkdir -p build
+in_vm "launchctl bootout gui/\$(id -u)/dev.tilde.ux 2>/dev/null; launchctl bootstrap gui/\$(id -u) /tmp/dev.tilde.ux.plist
+    until grep -q __exit /tmp/tilde-ux.log 2>/dev/null; do sleep 2; done
+    launchctl bootout gui/\$(id -u)/dev.tilde.ux; cat /tmp/tilde-ux.log" > build/ux-vm.log 2>&1 || true
+cat build/ux-vm.log
+status=$(sed -n "s/^__exit //p" build/ux-vm.log)
+
+# The screenshots live on this Mac, so they outlast the VM.
+rm -rf build/ux-vm
 mkdir -p build/ux-vm
 mv build/ux-vm.log build/ux-vm/run.log
-SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
-    "admin@$ip:\$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*.png" build/ux-vm/ 2>/dev/null || true
-exit "$status"
+in_vm "cd \$(getconf DARWIN_USER_TEMP_DIR) && tar cf - tilde-ux-failure-*.png(N)" | tar xf - -C build/ux-vm 2>/dev/null || true
+[ "${status:-1}" = 0 ]
