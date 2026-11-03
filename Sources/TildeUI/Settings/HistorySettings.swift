@@ -65,7 +65,7 @@ struct HistorySettings: View {
     @State private var confirmsClear = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        Form {
             SettingsSection("Sessions") {
                 if history.records.isEmpty {
                     SettingsRow(title: "No sessions yet", subtitle: "Sessions are saved while you annotate") {
@@ -73,9 +73,6 @@ struct HistorySettings: View {
                     }
                 }
                 ForEach(Array(history.records.enumerated()), id: \.element.id) { index, record in
-                    if index > 0 {
-                        SettingsDivider()
-                    }
                     HistoryRow(history: history, record: record, isExpanded: expandedBinding(record))
                 }
             }
@@ -85,11 +82,11 @@ struct HistorySettings: View {
                     Button("Clear History") {
                         confirmsClear = true
                     }
-                    .buttonStyle(SettingsButtonStyle(kind: .gray))
                     .disabled(history.records.isEmpty)
                 }
             }
         }
+        .settingsForm()
         .onAppear(perform: history.reload)
         .confirmationDialog("Delete all saved sessions?", isPresented: $confirmsClear) {
             Button("Clear History", role: .destructive, action: history.clear)
@@ -145,11 +142,9 @@ private struct HistoryRow: View {
                     Button("Restore") {
                         history.restore(record)
                     }
-                    .buttonStyle(SettingsButtonStyle())
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 4)
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -160,9 +155,8 @@ private struct HistoryRow: View {
 
             if isExpanded {
                 details
-                    .padding(.leading, 16 + 12 + 10 + 24 + 10)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 14)
+                    .padding(.leading, 12 + 10 + 24 + 10)
+                    .padding(.top, 6)
             }
         }
         .contextMenu {
@@ -207,7 +201,6 @@ private struct HistoryRow: View {
             HStack(spacing: 8) {
                 actions
             }
-            .buttonStyle(SettingsButtonStyle(kind: .gray))
             .padding(.top, 2)
         }
     }

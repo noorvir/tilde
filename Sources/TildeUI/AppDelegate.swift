@@ -81,9 +81,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             installer: Installer(environment: .standard(home: home, port: String(port), bridgePath: bridge)),
             nodes: NodeSetup(nodePort: port + 1)
         )
-        setup.nodes.onThisMac = { [installer = setup.installer] in
-            installer.harnesses.filter { installer.status(of: $0) == .installed }
-        }
         setup.nodes.startLinks()
         self.nodes = setup.nodes
         let shortcuts = controller.shortcuts

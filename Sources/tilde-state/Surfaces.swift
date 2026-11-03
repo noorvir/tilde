@@ -146,13 +146,6 @@ enum Surfaces {
         )
     }
 
-    private static func agents(_ node: UIState.NodeState) -> [NodeSetup.Agent] {
-        func list(_ names: [String]?, _ status: InstallStatus) -> [NodeSetup.Agent] {
-            (names ?? []).compactMap { Harness(rawValue: $0).map { NodeSetup.Agent(harness: $0, status: status) } }
-        }
-        return list(node.agents, .installed) + list(node.agentsOff, .notInstalled) + list(node.agentsAbsent, .notFound)
-    }
-
     private static func settings(_ state: UIState.Settings) throws -> SettingsModel {
         var history: HistoryModel?
         if state.savedSessions == true {
@@ -172,7 +165,20 @@ enum Surfaces {
         }
         let model = try Fixtures.settingsModel(page: page, history: history)
         model.expandedAgents = Set(state.expandedAgents ?? [])
-        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status), agents: Self.agents($0), isReachable: $0.isReachable, hasFailed: $0.hasFailed ?? false) })
+        if let host = state.machine, let node = state.nodes?.first(where: { $0.host == host }) {
+            let machine = AgentSetup(installer: model.setup.installer, placeholderIcon: Fixtures.appIcon, nodes: model.setup.nodes, isRemote: true)
+            var statuses: [Harness: InstallStatus] = [:]
+            for name in node.agents ?? [] {
+                Harness(rawValue: name).map { statuses[$0] = .installed }
+            }
+            for name in node.agentsOff ?? [] {
+                Harness(rawValue: name).map { statuses[$0] = .notInstalled }
+            }
+            machine.setRemoteStatusesForTesting(statuses)
+            model.setup.nodes.setSetupForTesting(machine, for: host)
+            model.machinePath = [host]
+        }
+        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status), isReachable: $0.isReachable, hasFailed: $0.hasFailed ?? false) })
         if state.recording == true {
             model.recordingShortcut = .togglePause
         }

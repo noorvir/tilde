@@ -19,16 +19,41 @@ final class AgentSetup: ObservableObject {
 
     let installer: Installer
     /// Changes after every install or uninstall, so views read the files again.
-    @Published private(set) var revision = 0
+    @Published fileprivate(set) var revision = 0
     /// Tests draw one placeholder instead of the apps' icons.
     private let placeholderIcon: NSImage?
 
     let nodes: NodeSetup
+    /// A machine reached over ssh: what it has is read away from the main thread and kept.
+    let isRemote: Bool
+    /// This Mac's setup, for the icons of a machine's apps.
+    private weak var iconSource: AgentSetup?
+    @Published private var remoteStatuses: [Harness: InstallStatus] = [:]
+    /// After an install or uninstall on a machine.
+    var onChange: () -> Void = {}
 
-    init(installer: Installer, placeholderIcon: NSImage? = nil, nodes: NodeSetup? = nil) {
+    init(installer: Installer, placeholderIcon: NSImage? = nil, nodes: NodeSetup? = nil, isRemote: Bool = false, iconSource: AgentSetup? = nil) {
         self.nodes = nodes ?? NodeSetup(nodePort: 7312)
         self.installer = installer
         self.placeholderIcon = placeholderIcon
+        self.isRemote = isRemote
+        self.iconSource = iconSource
+        if !isRemote {
+            self.nodes.localSetup = self
+        }
+    }
+
+    /// Reads what a machine has.
+    func load() async {
+        let installer = self.installer
+        remoteStatuses = await Task.detached {
+            Dictionary(uniqueKeysWithValues: installer.harnesses.map { ($0, installer.status(of: $0)) })
+        }.value
+    }
+
+    /// For the contract: a machine's apps without the machine.
+    func setRemoteStatusesForTesting(_ statuses: [Harness: InstallStatus]) {
+        remoteStatuses = statuses
     }
 
     /// The rows with at least one app on this Mac.
@@ -37,12 +62,18 @@ final class AgentSetup: ObservableObject {
     }
 
     func status(of row: Row) -> InstallStatus {
-        installer.status(of: row.harnesses)
+        guard isRemote else {
+            return installer.status(of: row.harnesses)
+        }
+        return Installer.combined(row.harnesses.map { remoteStatuses[$0] ?? .notFound })
     }
 
-    /// The apps of the row that are on this Mac.
+    /// The apps of the row that are on this Mac, or on the machine.
     func present(_ row: Row) -> [Harness] {
-        row.harnesses.filter { installer.isPresent($0) }
+        guard isRemote else {
+            return row.harnesses.filter { installer.isPresent($0) }
+        }
+        return row.harnesses.filter { (remoteStatuses[$0] ?? .notFound) != .notFound }
     }
 
     /// The app's own icon from its bundle on this Mac; Tilde ships no third-party logos.
@@ -50,6 +81,9 @@ final class AgentSetup: ObservableObject {
     func icon(for row: Row) -> NSImage {
         if let placeholderIcon {
             return placeholderIcon
+        }
+        if isRemote, let iconSource {
+            return iconSource.icon(for: row)
         }
         let bundle = row.harnesses.lazy.compactMap { self.installer.appBundle(for: $0) }.first
         let image = bundle.map { NSWorkspace.shared.icon(forFile: $0.path) }
@@ -101,6 +135,11 @@ final class AgentSetup: ObservableObject {
     }
 
     private func run(_ rows: [Row], action: InstallResult.Action) -> InstallResult {
+        if isRemote {
+            apply(rows.flatMap(present), action: action)
+            return InstallResult(action: action, apps: [])
+        }
+
         let apps = rows.map { row in
             let reports = present(row).map { action == .installed ? installer.install($0) : installer.uninstall($0) }
             let failed = reports.contains { report in
@@ -110,6 +149,23 @@ final class AgentSetup: ObservableObject {
         }
         revision += 1
         return InstallResult(action: action, apps: apps)
+    }
+}
+
+extension AgentSetup {
+    /// On a machine: the same install or uninstall, away from the main thread.
+    func apply(_ harnesses: [Harness], action: InstallResult.Action) {
+        let installer = self.installer
+        Task {
+            await Task.detached {
+                for harness in harnesses {
+                    _ = action == .installed ? installer.install(harness) : installer.uninstall(harness)
+                }
+            }.value
+            await load()
+            revision += 1
+            onChange()
+        }
     }
 }
 

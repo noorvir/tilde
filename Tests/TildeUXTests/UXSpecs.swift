@@ -904,7 +904,12 @@ struct UXSpecs {
             try await app.waitToSee("Launch at login")
             try await Task.sleep(for: .seconds(1))
             try await app.press("Agents")
-            try await app.waitToSee("Install vmself", timeout: 10)
+            // The form draws only the rows on screen: the machines are below the apps.
+            let apps = try await app.waitToSee("Apps on this Mac")
+            try await app.scroll(at: CGPoint(x: apps.frame.midX, y: apps.frame.maxY + 200), by: -10)
+            try await app.waitToSee("vmself", timeout: 15)
+            try await app.press("vmself")
+            try await app.waitToSee("Install vmself", timeout: 20)
             try await app.press("Install vmself")
             try await app.waitToSeeText(containing: "Installed and linked", timeout: 30)
             step("installed")

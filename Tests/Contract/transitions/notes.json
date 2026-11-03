@@ -448,7 +448,7 @@
   }
  },
  {
-  "name": "Agents on this Mac are chosen on a machine that has them; others found stay off; absent ones are marked",
+  "name": "A machine's Install sets up the apps that are on this Mac and on the machine",
   "foundOnMachine": [
    "claude-code",
    "codex",
@@ -463,9 +463,6 @@
    "chosen": [
     "claude-code",
     "codex"
-   ],
-   "absent": [
-    "cursor"
    ]
   }
  },
@@ -478,8 +475,7 @@
   "expect": {
    "chosen": [
     "codex"
-   ],
-   "absent": []
+   ]
   }
  }
 ]

@@ -18,7 +18,6 @@ struct UIState: Decodable {
         var hasFailed: Bool?
         var agents: [String]?
         var agentsOff: [String]?
-        var agentsAbsent: [String]?
     }
 
     struct Settings: Decodable {
@@ -27,6 +26,8 @@ struct UIState: Decodable {
         var recording: Bool?
         var savedSessions: Bool?
         var nodes: [NodeState]?
+        /// The machine whose page is open.
+        var machine: String?
     }
 
     let version: Int

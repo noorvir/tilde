@@ -6,14 +6,11 @@ struct ShortcutSettings: View {
     @Binding var recording: ShortcutStore.Action?
 
     var body: some View {
+        Form {
         SettingsSection("Keyboard Shortcuts") {
             ForEach(Array(ShortcutStore.Action.allCases.enumerated()), id: \.element) { index, action in
-                if index > 0 {
-                    SettingsDivider()
-                }
                 ShortcutRow(shortcuts: shortcuts, action: action, recording: $recording)
             }
-            SettingsDivider()
             SettingsRow(title: "Hold to use the app normally", subtitle: "While annotating only: hold the key to click and navigate") {
                 Picker("Hold key", selection: $shortcuts.holdKey) {
                     ForEach([DoubleTapKey.control, .option, .shift]) { key in
@@ -26,6 +23,8 @@ struct ShortcutSettings: View {
                 .fixedSize()
             }
         }
+        }
+        .settingsForm()
         .onChange(of: recording, initial: true) { _, action in
             shortcuts.isRecording = action != nil
         }

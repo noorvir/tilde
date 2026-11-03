@@ -9,7 +9,7 @@ struct AgentSettings: View {
     var body: some View {
         let rows = setup.foundRows
 
-        VStack(alignment: .leading, spacing: 28) {
+        Form {
             SettingsSection("Apps on this Mac") {
                 if rows.isEmpty {
                     SettingsRow(title: "No agent apps found", subtitle: "Use Copy setup below for other agents") {
@@ -17,20 +17,16 @@ struct AgentSettings: View {
                     }
                 }
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 {
-                        SettingsDivider()
-                    }
                     AgentRow(setup: setup, row: row, isExpanded: expandedBinding(row), onResult: onResult)
                 }
             } accessory: {
                 Button("Install everywhere") {
                     onResult(setup.install(setup.foundRows))
                 }
-                .buttonStyle(SettingsButtonStyle(kind: .gray))
                 .disabled(rows.isEmpty)
             }
 
-            NodesSection(nodes: setup.nodes, setup: setup, expanded: $expanded)
+            NodesSection(nodes: setup.nodes)
 
             SettingsSection("Other agents") {
                 SettingsRow(title: "Copy setup", subtitle: "For agents not listed or on another machine") {
@@ -46,11 +42,11 @@ struct AgentSettings: View {
                     }
                     .menuStyle(.button)
                     .menuIndicator(.hidden)
-                    .buttonStyle(SettingsButtonStyle())
                     .fixedSize()
                 }
             }
         }
+        .settingsForm()
     }
 
     private func expandedBinding(_ row: AgentSetup.Row) -> Binding<Bool> {
@@ -67,7 +63,7 @@ struct AgentSettings: View {
 }
 
 /// Icon, name and status dot, a switch (on = installed) and a chevron; open, the files.
-private struct AgentRow: View {
+struct AgentRow: View {
     @ObservedObject var setup: AgentSetup
     let row: AgentSetup.Row
     @Binding var isExpanded: Bool
@@ -93,11 +89,8 @@ private struct AgentRow: View {
                 Spacer(minLength: 16)
                 Toggle(row.name, isOn: installed(status))
                     .toggleStyle(.switch)
-                    .tint(.accentColor)
                     .labelsHidden()
             }
-            .padding(.horizontal, 16)
-            .frame(height: 50)
             .contentShape(Rectangle())
             .onTapGesture {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -109,18 +102,19 @@ private struct AgentRow: View {
 
             if isExpanded {
                 files
-                    .padding(.leading, 16 + 12 + 10 + 24 + 10)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 14)
+                    .padding(.leading, 12 + 10 + 24 + 10)
+                    .padding(.top, 6)
             }
         }
         .contextMenu {
             Button("Reinstall") {
                 onResult(setup.install([row]))
             }
-            Button("Show Files in Finder") {
-                if let harness = setup.present(row).first {
-                    revealInFinder(setup.installer.configFile(for: harness))
+            if !setup.isRemote {
+                Button("Show Files in Finder") {
+                    if let harness = setup.present(row).first {
+                        revealInFinder(setup.installer.configFile(for: harness))
+                    }
                 }
             }
         }
@@ -155,7 +149,15 @@ private struct AgentRow: View {
 
         return VStack(alignment: .leading, spacing: 4) {
             ForEach(urls, id: \.self) { url in
-                PathText(path: tildePath(url, home: home), url: url)
+                if setup.isRemote {
+                    Text(tildePath(url, home: home))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    PathText(path: tildePath(url, home: home), url: url)
+                }
             }
             ForEach(errors, id: \.self) { message in
                 Text(message)
@@ -167,11 +169,9 @@ private struct AgentRow: View {
     }
 }
 
-/// The machines that an agent can use Tilde from, over ssh.
+/// The machines that an agent can use Tilde from, over ssh: each opens its own page.
 private struct NodesSection: View {
     @ObservedObject var nodes: NodeSetup
-    let setup: AgentSetup
-    @Binding var expanded: Set<String>
 
     var body: some View {
         SettingsSection("Remote machines") {
@@ -180,19 +180,12 @@ private struct NodesSection: View {
                     EmptyView()
                 }
             }
-            ForEach(Array(nodes.rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 {
-                    SettingsDivider()
+            ForEach(nodes.rows) { row in
+                NavigationLink(value: row.host) {
+                    MachineLabel(row: row)
                 }
-                NodeRow(nodes: nodes, setup: setup, row: row, isExpanded: Binding {
-                    expanded.contains(row.id)
-                } set: { isOpen in
-                    if isOpen {
-                        expanded.insert(row.id)
-                    } else {
-                        expanded.remove(row.id)
-                    }
-                })
+                .accessibilityLabel(row.host)
+                .accessibilityValue("\(row.status.text). \(row.dot.reason)")
             }
         }
         .task {
@@ -201,11 +194,32 @@ private struct NodesSection: View {
     }
 }
 
-private struct NodeRow: View {
-    let nodes: NodeSetup
-    let setup: AgentSetup
+/// A machine's icon with its status dot, its name, and its status.
+struct MachineLabel: View {
     let row: NodeSetup.Row
-    @Binding var isExpanded: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "laptopcomputer")
+                .font(.system(size: 16))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .overlay(alignment: .topTrailing) {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 7, height: 7)
+                        .offset(x: 3, y: -1)
+                }
+                .help(row.dot.reason)
+                .accessibilityLabel(row.dot.reason)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.host)
+                Text(subtitle)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .help(row.detail ?? "")
+    }
 
     private var dotColor: Color {
         switch row.dot {
@@ -226,106 +240,96 @@ private struct NodeRow: View {
         }
         return parts.joined(separator: ". ")
     }
+}
+
+/// One machine: its status with Install or Remove, then its agents in the same rows as the
+/// apps on this Mac.
+struct MachineSettings: View {
+    @ObservedObject var nodes: NodeSetup
+    let host: String
+    @Binding var expanded: Set<String>
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            machine
-            if isExpanded {
-                ForEach(row.agents) { agent in
-                    SettingsDivider()
-                    agentRow(agent)
-                }
-            }
-        }
-    }
-
-    private func agentRow(_ agent: NodeSetup.Agent) -> some View {
-        HStack(spacing: 10) {
-            Text(agent.harness.name)
-                .font(.system(size: 14))
-            if agent.isOnMachine {
-                StatusDot(status: agent.status)
-            } else {
-                Text("Not on this machine")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 16)
-            Toggle(agent.harness.name, isOn: Binding {
-                row.status.isInstalled ? agent.status == .installed : agent.isChosen
-            } set: { isOn in
-                nodes.setInstalled(agent.harness, isOn, on: row.host)
-            })
-            .toggleStyle(.switch)
-            .tint(.accentColor)
-            .labelsHidden()
-            .disabled(!agent.isOnMachine || row.status.isWorking)
-        }
-        .padding(.leading, 16 + 12 + 10)
-        .padding(.trailing, 16)
-        .frame(height: 44)
-    }
-
-    private var machine: some View {
-        HStack(spacing: 12) {
-            // A disclosure on the left that turns down, as for the apps above.
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(row.agents.isEmpty ? .tertiary : .secondary)
-                .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .frame(width: 12)
-            Image(systemName: "laptopcomputer")
-                .font(.system(size: 18))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
-                .overlay(alignment: .topTrailing) {
-                    Circle()
-                        .fill(dotColor)
-                        .frame(width: 8, height: 8)
-                        .offset(x: 3, y: -1)
-                }
-                .help(row.dot.reason)
-                .accessibilityLabel(row.dot.reason)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.host)
-                    .font(.system(size: 14))
-                Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 16)
-            Button {
-                if !row.status.isInstalled {
-                    nodes.install(row.host)
-                } else {
-                    nodes.uninstall(row.host)
-                }
-            } label: {
-                // While it works, the button keeps its width and its name.
-                ZStack {
-                    Text(row.status.isInstalled ? "Remove" : "Install")
-                        .opacity(row.status.isWorking ? 0 : 1)
-                    if row.status.isWorking {
-                        ProgressView()
-                            .controlSize(.small)
+        Form {
+            if let row = nodes.rows.first(where: { $0.host == host }) {
+                Section {
+                    LabeledContent {
+                        Button {
+                            if row.status.isInstalled {
+                                nodes.uninstall(host)
+                            } else {
+                                nodes.install(host)
+                            }
+                        } label: {
+                            // While it works, the button keeps its width and its name.
+                            ZStack {
+                                Text(row.status.isInstalled ? "Remove" : "Install")
+                                    .opacity(row.status.isWorking ? 0 : 1)
+                                if row.status.isWorking {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
+                            }
+                        }
+                        .disabled(row.status.isWorking)
+                        .accessibilityLabel("\(row.status.isInstalled ? "Remove" : "Install") \(host)")
+                    } label: {
+                        MachineLabel(row: row)
                     }
+                    .listRowBackground(SettingsColors.card)
                 }
             }
-            .buttonStyle(SettingsButtonStyle())
-            .disabled(row.status.isWorking)
-            .accessibilityLabel("\(row.status.isInstalled ? "Remove" : "Install") \(row.host)")
+            MachineAgents(nodes: nodes, host: host, expanded: $expanded)
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 50)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                isExpanded.toggle()
-            }
+        .settingsForm()
+        .navigationTitle(host)
+        .task {
+            await nodes.loadSetup(host)
         }
-        .help(row.detail ?? "")
     }
 }
 
+private struct MachineAgents: View {
+    @ObservedObject var nodes: NodeSetup
+    let host: String
+    @Binding var expanded: Set<String>
+
+    var body: some View {
+        SettingsSection("Agents") {
+            if let setup = nodes.setups[host] {
+                MachineAgentRows(setup: setup, host: host, expanded: $expanded)
+            } else {
+                SettingsRow(title: "Looking for agents", subtitle: "Over ssh") {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+        }
+    }
+}
+
+private struct MachineAgentRows: View {
+    @ObservedObject var setup: AgentSetup
+    let host: String
+    @Binding var expanded: Set<String>
+
+    var body: some View {
+        let rows = setup.foundRows
+        if rows.isEmpty {
+            SettingsRow(title: "No agent apps found", subtitle: "Tilde looks for the same apps as on this Mac") {
+                EmptyView()
+            }
+        }
+        ForEach(rows) { row in
+            AgentRow(setup: setup, row: row, isExpanded: Binding {
+                expanded.contains("\(host)/\(row.id)")
+            } set: { isOpen in
+                if isOpen {
+                    expanded.insert("\(host)/\(row.id)")
+                } else {
+                    expanded.remove("\(host)/\(row.id)")
+                }
+            }, onResult: { _ in })
+        }
+    }
+}

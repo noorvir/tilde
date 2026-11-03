@@ -53,7 +53,6 @@ enum Transitions {
         var machines: [[String]]?
         var dot: String?
         var chosen: [String]?
-        var absent: [String]?
     }
 
     static func run(_ table: Data) throws -> Data {
@@ -80,12 +79,8 @@ enum Transitions {
                 result.confirmation = RemotePush.confirmation(pushed: pushed, failed: failed)
             }
             if let found = row.foundOnMachine, let mac = row.onThisMac {
-                let agents = NodeSetup.agents(
-                    found: found.compactMap { Harness(rawValue: $0) }.map { ($0, InstallStatus.notInstalled) },
-                    onThisMac: mac.compactMap { Harness(rawValue: $0) }
-                )
-                result.chosen = agents.filter(\.isChosen).map(\.harness.rawValue)
-                result.absent = agents.filter { !$0.isOnMachine }.map(\.harness.rawValue)
+                result.chosen = NodeSetup.chosen(found: found.compactMap { Harness(rawValue: $0) }, onThisMac: mac.compactMap { Harness(rawValue: $0) })
+                    .map(\.rawValue)
             }
             if let status = row.nodeStatus {
                 result.dot = NodeSetup.Dot(status: NodeSetup.Status(name: status), isReachable: row.isReachable, hasFailed: row.hasFailed ?? false).name

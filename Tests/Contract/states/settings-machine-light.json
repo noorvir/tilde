@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    920,
+    805
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "agents",
+    "nodes": [
+      {
+        "host": "mac-mini",
+        "status": "linked",
+        "isReachable": true,
+        "agents": [
+          "claude-code",
+          "codex"
+        ],
+        "agentsOff": [
+          "gemini"
+        ]
+      },
+      {
+        "host": "studio",
+        "status": "unreachable",
+        "isReachable": true
+      },
+      {
+        "host": "devbox",
+        "status": "unreachable",
+        "isReachable": false
+      },
+      {
+        "host": "buildbox",
+        "status": "unreachable",
+        "isReachable": true,
+        "hasFailed": true
+      },
+      {
+        "host": "laptop",
+        "status": "notInstalled",
+        "isReachable": true
+      }
+    ],
+    "machine": "mac-mini",
+    "expandedAgents": [
+      "mac-mini/Codex"
+    ]
+  }
+}

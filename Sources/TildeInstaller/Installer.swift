@@ -206,7 +206,12 @@ public struct Installer: Sendable {
 
     /// The status of several apps together, counting only the ones on this Mac.
     public func status(of harnesses: [Harness]) -> InstallStatus {
-        let statuses = harnesses.map { status(of: $0) }.filter { $0 != .notFound }
+        Self.combined(harnesses.map { status(of: $0) })
+    }
+
+    /// The status of several apps together, counting only the ones that are there.
+    public static func combined(_ all: [InstallStatus]) -> InstallStatus {
+        let statuses = all.filter { $0 != .notFound }
         if statuses.isEmpty {
             return .notFound
         }

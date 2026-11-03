@@ -2,8 +2,8 @@
   "version": 1,
   "surface": "settings",
   "size": [
-    760,
-    600
+    920,
+    805
   ],
   "appearance": "light",
   "settings": {
@@ -19,9 +19,6 @@
         ],
         "agentsOff": [
           "gemini"
-        ],
-        "agentsAbsent": [
-          "cursor"
         ]
       },
       {
@@ -45,9 +42,6 @@
         "status": "notInstalled",
         "isReachable": true
       }
-    ],
-    "expandedAgents": [
-      "mac-mini"
     ]
   }
 }

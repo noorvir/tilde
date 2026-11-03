@@ -71,26 +71,9 @@ final class NodeSetup: ObservableObject {
         }
     }
 
-    struct Agent: Identifiable, Equatable {
-        let harness: Harness
-        var status: InstallStatus
-        /// Before an install: whether it will get Tilde.
-        var isChosen = false
-
-        var isOnMachine: Bool { status != .notFound }
-
-        var id: String { harness.rawValue }
-    }
-
-    /// The list under a machine: every agent found there, and the ones switched on on this Mac,
-    /// which are chosen by default; with none on this Mac, all the ones found are. An agent that
-    /// the machine lacks stays in the list, disabled.
-    nonisolated static func agents(found: [(Harness, InstallStatus)], onThisMac: [Harness]) -> [Agent] {
-        var list = found.map { Agent(harness: $0.0, status: $0.1, isChosen: onThisMac.isEmpty || onThisMac.contains($0.0)) }
-        for harness in onThisMac where !list.contains(where: { $0.harness == harness }) && harness != .claudeDesktop {
-            list.append(Agent(harness: harness, status: .notFound))
-        }
-        return list.sorted { Harness.allCases.firstIndex(of: $0.harness)! < Harness.allCases.firstIndex(of: $1.harness)! }
+    /// The apps that a machine's Install sets up: those on this Mac, or all when none are.
+    nonisolated static func chosen(found: [Harness], onThisMac: [Harness]) -> [Harness] {
+        onThisMac.isEmpty ? found : found.filter(onThisMac.contains)
     }
 
     struct Row: Identifiable, Equatable {
@@ -99,8 +82,6 @@ final class NodeSetup: ObservableObject {
         var note: String?
         /// The reason behind the note.
         var detail: String?
-        /// The agents found there, as in "Apps on this Mac".
-        var agents: [Agent] = []
         /// The machine's other names in the ssh config.
         var aliases: [String] = []
         /// Whether it answered over ssh; nil before the first check.
@@ -116,6 +97,12 @@ final class NodeSetup: ObservableObject {
     }
 
     @Published private(set) var rows: [Row] = []
+    /// Each machine's apps, once its page has read them.
+    @Published private(set) var setups: [String: AgentSetup] = [:]
+    /// This Mac's setup, for the icons and the apps that are switched on.
+    weak var localSetup: AgentSetup?
+    /// A machine's token from its first install on; a machine with none installed has a new one.
+    private var pendingTokens: [String: String] = [:]
     private let log = Logger(subsystem: "dev.tilde.app", category: "nodes")
     private let store: NodeStore
     private let nodePort: UInt16
@@ -123,8 +110,6 @@ final class NodeSetup: ObservableObject {
     private var links: [String: Process] = [:]
     private var isLinking = false
     private var isFixed = false
-    /// The agents switched on on this Mac.
-    var onThisMac: () -> [Harness] = { [] }
 
     /// `remotePort` is not Tilde's own port: the node may run a Tilde of its own.
     init(store: NodeStore = NodeStore(), nodePort: UInt16, remotePort: UInt16 = 7319) {
@@ -185,147 +170,105 @@ final class NodeSetup: ObservableObject {
                 row.isReachable = reachable.contains { names.contains($0) }
                 return row
             }
-            loadAgents()
         }
     }
 
-    private func loadAgents() {
-        let url = remoteURL
-        let nodes = store.load()
-        let onThisMac = onThisMac()
-        for row in rows where row.isReachable == true {
-            let host = row.host
-            let token = nodes.first { $0.host == host }?.token ?? ""
-            Task {
-                let agents = await Task.detached { () -> [Agent]? in
-                    (try? Self.installer(host, url: url, token: token)).map { Self.agents(of: $0, onThisMac: onThisMac) }
-                }.value
-                if let agents {
-                    setAgents(host, agents)
-                }
-            }
-        }
-    }
-
-    /// Installs on all the agents of the machine, the same way as on this Mac.
-    func install(_ host: String) {
-        update(host, status: .installing, note: nil)
-        setFailed(host, false)
-        let token = store.load().first { $0.host == host }?.token ?? UUID().uuidString + UUID().uuidString
-        let url = remoteURL
-        let onThisMac = onThisMac()
-        let current = rows.first { $0.host == host }?.agents ?? []
-        let chosen = current.isEmpty ? (onThisMac.isEmpty ? Harness.allCases : onThisMac) : current.filter(\.isChosen).map(\.harness)
-        Task {
-            let result = await Task.detached { () -> Result<[Agent], Error> in
-                Result {
-                    let installer = try Self.installer(host, url: url, token: token)
-                    for harness in installer.harnesses where chosen.contains(harness) && installer.isPresent(harness) {
-                        Self.check(installer.install(harness))
-                    }
-                    return Self.agents(of: installer, onThisMac: onThisMac)
-                }
-            }.value
-            switch result {
-            case .success(let agents) where !agents.contains(where: { $0.status == .installed }):
-                setAgents(host, agents)
-                update(host, status: .notInstalled, note: "No agent to install on")
-            case .success(let agents):
-                var nodes = store.load().filter { $0.host != host }
-                nodes.append(Node(host: host, token: token))
-                try? store.save(nodes)
-                setAgents(host, agents)
-                update(host, status: .unreachable, note: nil)
-                link(host)
-            case .failure(let error):
-                log.error("could not install on \(host, privacy: .public): \(String(describing: error), privacy: .public)")
-                update(host, status: .notInstalled, note: "Install failed", detail: String(describing: error))
-                setFailed(host, true)
-            }
-        }
-    }
-
-    /// Removes Tilde from all the agents of the machine, the same way as on this Mac.
-    func uninstall(_ host: String) {
-        update(host, status: .removing, note: nil)
-        links.removeValue(forKey: host)?.terminate()
-        let url = remoteURL
-        let onThisMac = onThisMac()
-        let token = store.load().first { $0.host == host }?.token ?? ""
-        Task {
-            let result = await Task.detached { () -> Result<[Agent], Error> in
-                Result {
-                    let installer = try Self.installer(host, url: url, token: token)
-                    for harness in installer.harnesses where installer.isPresent(harness) {
-                        Self.check(installer.uninstall(harness))
-                    }
-                    return Self.agents(of: installer, onThisMac: onThisMac)
-                }
-            }.value
-            switch result {
-            case .success(let agents):
-                try? store.save(store.load().filter { $0.host != host })
-                setAgents(host, agents)
-                update(host, status: .notInstalled, note: nil)
-            case .failure(let error):
-                log.error("could not uninstall on \(host, privacy: .public): \(String(describing: error), privacy: .public)")
-                update(host, status: .unreachable, note: "Remove failed", detail: String(describing: error))
-                link(host)
-            }
-        }
-    }
-
-    /// One agent's switch on an installed machine.
-    func setInstalled(_ harness: Harness, _ isOn: Bool, on host: String) {
-        guard let token = store.load().first(where: { $0.host == host })?.token else {
-            // Not installed yet: only the choice changes.
-            if let row = rows.firstIndex(where: { $0.host == host }), let agent = rows[row].agents.firstIndex(where: { $0.harness == harness }) {
-                rows[row].agents[agent].isChosen = isOn
-            }
+    /// Reads what a machine has, for its page, once.
+    func loadSetup(_ host: String) async {
+        guard setups[host] == nil, !isFixed else {
             return
         }
 
+        let token = token(for: host)
         let url = remoteURL
-        let onThisMac = onThisMac()
-        Task {
-            let agents = await Task.detached { () -> [Agent]? in
-                guard let installer = try? Self.installer(host, url: url, token: token) else {
-                    return nil
-                }
-                Self.check(isOn ? installer.install(harness) : installer.uninstall(harness))
-                return Self.agents(of: installer, onThisMac: onThisMac)
-            }.value
-            if let agents {
-                setAgents(host, agents)
+        guard let installer = await Task.detached(operation: { try? Self.installer(host, url: url, token: token) }).value else {
+            update(host, status: rows.first { $0.host == host }?.status ?? .notInstalled, note: "Could not connect by ssh")
+            setFailed(host, true)
+            return
+        }
+
+        let setup = AgentSetup(installer: installer, nodes: self, isRemote: true, iconSource: localSetup)
+        setup.onChange = { [weak self, weak setup] in
+            if let setup {
+                self?.agentsChanged(host, setup)
             }
         }
+        await setup.load()
+        setups[host] = setup
+    }
+
+    /// For the contract: a machine's page without the machine.
+    func setSetupForTesting(_ setup: AgentSetup, for host: String) {
+        setups[host] = setup
+    }
+
+    /// Installs Tilde on the machine's apps that are switched on on this Mac, the same way as on
+    /// this Mac; with none switched on, on all of them.
+    func install(_ host: String) {
+        update(host, status: .installing, note: nil)
+        setFailed(host, false)
+        Task {
+            await loadSetup(host)
+            guard let setup = setups[host] else {
+                update(host, status: .notInstalled, note: "Could not connect by ssh")
+                return
+            }
+            let found = AgentSetup.rows.flatMap(setup.present)
+            let onThisMac = localSetup.map { local in AgentSetup.rows.filter { local.status(of: $0) == .installed }.flatMap(\.harnesses) } ?? []
+            let chosen = Self.chosen(found: found, onThisMac: onThisMac)
+            if chosen.isEmpty {
+                update(host, status: .notInstalled, note: "No agent apps found")
+                return
+            }
+            setup.apply(chosen, action: .installed)
+        }
+    }
+
+    /// Removes Tilde from all of the machine's apps, the same way as on this Mac.
+    func uninstall(_ host: String) {
+        update(host, status: .removing, note: nil)
+        guard let setup = setups[host] else {
+            return
+        }
+        setup.apply(AgentSetup.rows.flatMap(setup.present), action: .removed)
+    }
+
+    /// A machine with Tilde in any app is linked; with none, its link goes.
+    private func agentsChanged(_ host: String, _ setup: AgentSetup) {
+        let isInstalled = AgentSetup.rows.contains { [.installed, .partlyInstalled].contains(setup.status(of: $0)) }
+        let isKnown = store.load().contains { $0.host == host }
+        if isInstalled, !isKnown {
+            try? store.save(store.load() + [Node(host: host, token: token(for: host))])
+            log.notice("installed on \(host, privacy: .public)")
+            update(host, status: .unreachable, note: nil)
+            link(host)
+        } else if !isInstalled {
+            if isKnown {
+                try? store.save(store.load().filter { $0.host != host })
+            }
+            links.removeValue(forKey: host)?.terminate()
+            update(host, status: .notInstalled, note: nil)
+        } else if rows.first(where: { $0.host == host })?.status.isWorking == true {
+            update(host, status: links[host] == nil ? .unreachable : .linked, note: nil)
+        }
+    }
+
+    private func token(for host: String) -> String {
+        if let token = store.load().first(where: { $0.host == host })?.token ?? pendingTokens[host] {
+            return token
+        }
+        let token = UUID().uuidString + UUID().uuidString
+        pendingTokens[host] = token
+        return token
     }
 
     private var remoteURL: String {
         "http://127.0.0.1:\(remotePort)/mcp"
     }
 
-    nonisolated private static func check(_ report: InstallReport) {
-        for change in report.changes {
-            if case .failed(let message) = change.action {
-                Logger(subsystem: "dev.tilde.app", category: "nodes").error("\(change.file.path, privacy: .public): \(message, privacy: .public)")
-            }
-        }
-    }
-
-    nonisolated private static func agents(of installer: Installer, onThisMac: [Harness]) -> [Agent] {
-        agents(found: installer.harnesses.filter(installer.isPresent).map { ($0, installer.status(of: $0)) }, onThisMac: onThisMac)
-    }
-
     nonisolated private static func installer(_ host: String, url: String, token: String) throws -> Installer {
         try Installer.remote(mcpURL: url, authorization: "Bearer \(token)") { command, input in
             try RemotePush.runOnNode(host, command: command, input: input)
-        }
-    }
-
-    private func setAgents(_ host: String, _ agents: [Agent]) {
-        if let index = rows.firstIndex(where: { $0.host == host }) {
-            rows[index].agents = agents
         }
     }
 
