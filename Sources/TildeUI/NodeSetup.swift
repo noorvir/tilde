@@ -242,8 +242,8 @@ final class NodeSetup: ObservableObject {
                 update(host, status: .notInstalled, note: "Could not connect by ssh")
                 return
             }
-            let found = AgentSetup.rows.flatMap(setup.present)
-            let onThisMac = localSetup.map { local in AgentSetup.rows.filter { local.status(of: $0) == .installed }.flatMap(\.harnesses) } ?? []
+            let found = setup.foundRows.map(\.harness)
+            let onThisMac = localSetup.map { local in AgentSetup.rows.filter { local.status(of: $0) == .installed }.map(\.harness) } ?? []
             let chosen = Self.chosen(found: found, onThisMac: onThisMac)
             if chosen.isEmpty {
                 update(host, status: .notInstalled, note: "No agent apps found")
@@ -259,12 +259,12 @@ final class NodeSetup: ObservableObject {
         guard let setup = setups[host] else {
             return
         }
-        setup.apply(AgentSetup.rows.flatMap(setup.present), action: .removed)
+        setup.apply(setup.foundRows.map(\.harness), action: .removed)
     }
 
     /// A machine with Tilde in any app is linked; with none, its link goes.
     private func agentsChanged(_ host: String, _ setup: AgentSetup) {
-        let isInstalled = AgentSetup.rows.contains { [.installed, .partlyInstalled].contains(setup.status(of: $0)) }
+        let isInstalled = AgentSetup.rows.contains { setup.status(of: $0) == .installed }
         let isKnown = store.load().contains { $0.host == host }
         if isInstalled, !isKnown {
             try? store.save(store.load() + [Node(host: host, token: token(for: host))])

@@ -8,7 +8,7 @@ Adds Tilde's MCP server and `tilde` skill to agent apps, or removes them with --
 Without an app, lists the apps and their status. --all means every app found on this Mac.
 --home uses another home folder and finds only apps inside it.
 
-Apps: \(Harness.allCases.map(\.rawValue).joined(separator: ", ")), and claude for both Claude apps
+Apps: \(Harness.allCases.map(\.rawValue).joined(separator: ", ")), and claude for Claude Code
 """
 
 /// Runs `tilde-mcp install ...` and returns the exit status.
@@ -37,10 +37,10 @@ func runInstall(_ arguments: [String]) -> Int32 {
             print(installUsage)
             return 0
         default:
-            guard let named = Harness.named(argument) else {
+            guard let harness = Harness.named(argument) else {
                 return fail("unknown app or option: \(argument)")
             }
-            harnesses += named
+            harnesses.append(harness)
         }
     }
 
@@ -89,7 +89,6 @@ func runInstall(_ arguments: [String]) -> Int32 {
 private func label(_ status: InstallStatus) -> String {
     switch status {
     case .installed: "installed"
-    case .partlyInstalled: "partly installed"
     case .notInstalled: "not installed"
     case .notFound: "not found"
     case .failed(let message): "error: \(message)"

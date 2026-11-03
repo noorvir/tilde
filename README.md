@@ -41,23 +41,19 @@ at launch, so it does not interrupt an annotation. Click **Allow**.
 Tilde serves MCP at `http://127.0.0.1:7311/mcp` (set `TILDE_PORT` to change it).
 
 Choose **Agents** in the menu-bar menu, or open **Settings** (⌘,) → **Agents**. It lists the known agent
-apps that are on your Mac, each with its own icon and a status dot: green installed, yellow
-partly installed, red error (for example a config that is not valid JSON), grey not
-installed. Each app has Install and Uninstall, and Details with its config file, skill
-and last backup. **Install Everywhere** sets up all of them. After a change, a short note
-at the top of the screen says what happened; its Details button opens this page.
-The **Claude** row sets up both the Claude app and
-Claude Code, because they keep MCP servers in different files: the app starts only stdio
-servers, through `tilde-mcp`, and Claude Code connects over HTTP. Cursor, VS Code and
-Windsurf share an editor base, but each one's agent reads its own MCP file, so each has
-its own row. Tilde adds its MCP server entry and a `tilde` skill (`/tilde`, or
-"annotate with Tilde"), keeps everything else in each file, and saves a timestamped backup
-(`<file>.tilde-backup-<time>`) before it changes a file. Then restart the app.
+apps that are on your Mac, each with its own icon and a status dot: green installed, red
+error (for example a config that is not valid JSON), grey not installed. Each app has
+Install and Uninstall, and Details with its config file and skill. **Install Everywhere**
+sets up all of them. After a change, a short note at the top of the screen says what
+happened; its Details button opens this page. The **Claude** row sets up Claude Code.
+Cursor, VS Code and Windsurf share an editor base, but each one's agent reads its own MCP
+file, so each has its own row. Tilde adds its MCP server entry and a `tilde` skill
+(`/tilde`, or "annotate with Tilde"), and changes nothing else in each file. Then restart
+the app.
 
 | App | MCP config | Entry | Skill folder |
 |---|---|---|---|
 | Claude Code | `~/.claude.json` | `mcpServers.tilde`: `type: http`, `url` | `~/.claude/skills` |
-| Claude (desktop) | `~/Library/Application Support/Claude/claude_desktop_config.json` | `mcpServers.tilde`: `command` = `tilde-mcp` (stdio only) | `~/.claude/skills` (Code tab) |
 | Codex | `~/.codex/config.toml` | `[mcp_servers.tilde]`: `url`, `default_tools_approval_mode = "approve"` | `~/.agents/skills` |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers.tilde`: `url` | `~/.agents/skills` |
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` | `servers.tilde`: `type: http`, `url` | `~/.agents/skills` |
@@ -206,7 +202,7 @@ scripts/e2e.sh       # full flow in one process, no permissions needed
 | Layer | Covers | Run |
 |---|---|---|
 | `TildeCoreTests` | MCP session contract, HTTP server, report path compaction | `swift test --filter TildeCoreTests` |
-| `TildeInstallerTests` | Install, merge, idempotency, uninstall, Codex TOML, the Claude apps together and linked skills folders, in a temporary home | `swift test --filter TildeInstallerTests` |
+| `TildeInstallerTests` | Install, merge, idempotency, uninstall, Codex TOML and linked skills folders, in a temporary home | `swift test --filter TildeInstallerTests` |
 | `TildeUITests/BehaviourTests` | Confirm flows, Esc/Return in the confirm state, single delete, close-up and context rules, HUD home, snap distance, on-screen limits | `swift test --filter BehaviourTests` |
 | `TildeUITests/SnapshotTests` | Pixel snapshots of every HUD state, the list, the comment box, the preview, a tooltip, the home outline and the overlay | `swift test --filter SnapshotTests` |
 | `scripts/e2e.sh` | The whole flow with synthesized events: hover, click, comment, preview, region, send, inbox, agent result, capture shapes | `scripts/e2e.sh` |

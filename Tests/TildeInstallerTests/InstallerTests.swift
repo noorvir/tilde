@@ -26,41 +26,20 @@ struct InstallerTests {
         #expect(installer.status(of: .gemini) == .notFound)
     }
 
-    @Test func claudeNamesBothClaudeApps() {
-        #expect(Harness.named("claude") == [.claudeCode, .claudeDesktop])
-        #expect(Harness.named("codex") == [.codex])
+    @Test func claudeNamesClaudeCode() {
+        #expect(Harness.named("claude") == .claudeCode)
+        #expect(Harness.named("codex") == .codex)
         #expect(Harness.named("claude-app") == nil)
     }
 
-    @Test func statusOfBothClaudeAppsCountsOnlyTheOnesFound() throws {
-        let claude: [Harness] = [.claudeDesktop, .claudeCode]
-        #expect(installer.status(of: claude) == .notFound)
+    @Test func invalidConfigIsAnErrorForItsApp() throws {
+        try write(".cursor/mcp.json", "{ not json")
 
-        try write(".claude.json", "{}")
-        #expect(installer.status(of: claude) == .notInstalled)
-        _ = installer.install(.claudeCode)
-        #expect(installer.status(of: claude) == .installed)
-
-        try write("Library/Application Support/Claude/claude_desktop_config.json", "{}")
-        #expect(installer.status(of: claude) == .partlyInstalled)
-        _ = installer.install(.claudeDesktop)
-        #expect(installer.status(of: claude) == .installed)
-    }
-
-    @Test func invalidConfigIsAnErrorForItsAppAndItsRow() throws {
-        try write(".claude.json", "{}")
-        _ = installer.install(.claudeCode)
-        try write("Library/Application Support/Claude/claude_desktop_config.json", "{ not json")
-
-        guard case .failed = installer.status(of: .claudeDesktop) else {
-            Issue.record("expected an error, got \(installer.status(of: .claudeDesktop))")
+        guard case .failed = installer.status(of: .cursor) else {
+            Issue.record("expected an error, got \(installer.status(of: .cursor))")
             return
         }
-        guard case .failed = installer.status(of: [.claudeDesktop, .claudeCode]) else {
-            Issue.record("expected an error for the row")
-            return
-        }
-        #expect(installer.install(.claudeDesktop).changes.first.map { if case .failed = $0.action { true } else { false } } == true)
+        #expect(installer.install(.cursor).changes.first.map { if case .failed = $0.action { true } else { false } } == true)
     }
 
     @Test func commandLineToolsUseTheirMakersAppForTheIcon() throws {
@@ -215,18 +194,18 @@ struct InstallerTests {
               "command": "npx"
             }
           },
-          "globalShortcut": ""
+          "numStartups": 3
         }
 
         """
-        try write("Library/Application Support/Claude/claude_desktop_config.json", original)
+        try write(".claude.json", original)
 
-        _ = installer.install(.claudeDesktop)
-        #expect(try read("Library/Application Support/Claude/claude_desktop_config.json").contains("tilde-mcp"))
-        let report = installer.uninstall(.claudeDesktop)
+        _ = installer.install(.claudeCode)
+        #expect(try read(".claude.json").contains("tilde"))
+        let report = installer.uninstall(.claudeCode)
 
         #expect(report.changes.map(\.action) == [.updated, .removed])
-        #expect(try read("Library/Application Support/Claude/claude_desktop_config.json") == original)
+        #expect(try read(".claude.json") == original)
         #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/tilde").path))
     }
 

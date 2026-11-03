@@ -5,25 +5,23 @@ import TildeSkill
 /// to add one, add a case here, its `name`, and its `Target` in `Installer.target(for:)`.
 public enum Harness: String, CaseIterable, Sendable {
     case claudeCode = "claude-code"
-    case claudeDesktop = "claude-desktop"
     case codex
     case cursor
     case vscode
     case gemini
     case windsurf
 
-    /// The apps for a command-line name: a raw value, or `claude` for both Claude apps.
-    public static func named(_ name: String) -> [Harness]? {
+    /// The app for a command-line name: a raw value, or `claude` for Claude Code.
+    public static func named(_ name: String) -> Harness? {
         if name == "claude" {
-            return [.claudeCode, .claudeDesktop]
+            return .claudeCode
         }
-        return Harness(rawValue: name).map { [$0] }
+        return Harness(rawValue: name)
     }
 
     public var name: String {
         switch self {
         case .claudeCode: "Claude Code"
-        case .claudeDesktop: "Claude app"
         case .codex: "Codex"
         case .cursor: "Cursor"
         case .vscode: "VS Code"
@@ -77,8 +75,6 @@ public struct InstallEnvironment: Sendable {
 public enum InstallStatus: Equatable, Sendable {
     /// The app's config has Tilde's current entry.
     case installed
-    /// Of several apps on this Mac, some have Tilde's current entry and some do not.
-    case partlyInstalled
     /// The app is on this Mac without Tilde's current entry.
     case notInstalled
     case notFound
@@ -183,12 +179,6 @@ public struct Installer: Sendable {
         return Installer(environment: environment, files: ShellFiles(run: run))
     }
 
-    /// The apps that can be set up on this machine. The Claude app starts a local bridge program,
-    /// which another machine does not have.
-    public var harnesses: [Harness] {
-        environment.authorization == nil ? Harness.allCases : Harness.allCases.filter { $0 != .claudeDesktop }
-    }
-
     public func status(of harness: Harness) -> InstallStatus {
         guard isPresent(harness) else {
             return .notFound
@@ -200,29 +190,6 @@ public struct Installer: Sendable {
         } catch {
             return .failed(String(describing: error))
         }
-    }
-
-    /// The status of several apps together, counting only the ones on this Mac.
-    public func status(of harnesses: [Harness]) -> InstallStatus {
-        Self.combined(harnesses.map { status(of: $0) })
-    }
-
-    /// The status of several apps together, counting only the ones that are there.
-    public static func combined(_ all: [InstallStatus]) -> InstallStatus {
-        let statuses = all.filter { $0 != .notFound }
-        if statuses.isEmpty {
-            return .notFound
-        }
-        if let failure = statuses.first(where: { if case .failed = $0 { true } else { false } }) {
-            return failure
-        }
-        if statuses.allSatisfy({ $0 == .installed }) {
-            return .installed
-        }
-        if statuses.contains(.installed) {
-            return .partlyInstalled
-        }
-        return .notInstalled
     }
 
     public func isPresent(_ harness: Harness) -> Bool {
@@ -414,13 +381,6 @@ extension Installer {
                 skills: claudeSkills,
                 detect: Target.Detection(paths: [".claude.json"], files: claudeFolder.map { [$0] } ?? [], binaries: ["claude"]),
                 iconApps: ["Claude.app"]
-            )
-        case .claudeDesktop:
-            return Target(
-                config: home.appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "command", value: .string(environment.bridgePath))])),
-                skills: claudeSkills,
-                detect: Target.Detection(paths: ["Library/Application Support/Claude"], apps: ["Claude.app"])
             )
         case .codex:
             return Target(

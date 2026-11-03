@@ -121,18 +121,16 @@ struct AgentRow: View {
             }
             if !setup.isRemote {
                 Button("Show Files in Finder") {
-                    if let harness = setup.present(row).first {
-                        revealInFinder(setup.installer.configFile(for: harness))
-                    }
+                    revealInFinder(setup.installer.configFile(for: row.harness))
                 }
             }
         }
     }
 
-    /// On when Tilde is in any of the row's apps; turning it on installs, off uninstalls.
+    /// On when Tilde is in the app; turning it on installs, off uninstalls.
     private func installed(_ status: InstallStatus) -> Binding<Bool> {
         Binding {
-            status == .installed || status == .partlyInstalled
+            status == .installed
         } set: { isOn in
             onResult(isOn ? setup.install([row]) : setup.uninstall([row]))
         }
@@ -140,33 +138,19 @@ struct AgentRow: View {
 
     private var files: some View {
         let installer = setup.installer
-        let harnesses = setup.present(row)
-        // The Claude row has two apps, named by their app; other rows have one MCP entry.
-        let entries = harnesses.map { harness in
-            (title: harnesses.count > 1 ? harness.name : "MCP server", harness: harness)
-        }
-        // Apps that share a skill folder have one skill.
-        var skills: [Harness] = []
-        for harness in harnesses where !skills.contains(where: { installer.skillFile(for: $0) == installer.skillFile(for: harness) }) {
-            skills.append(harness)
-        }
 
         return VStack(alignment: .leading, spacing: 2) {
-            ForEach(entries, id: \.harness) { entry in
-                SetupItemRow(
-                    title: entry.title, state: SetupState.of(setup.status(of: AgentSetup.Row(name: entry.title, harnesses: [entry.harness]))),
-                    file: installer.configFile(for: entry.harness), isLocalFile: !setup.isRemote
-                ) {
-                    onResult(setup.install([AgentSetup.Row(name: entry.title, harnesses: [entry.harness])]))
-                }
+            SetupItemRow(
+                title: "MCP server", state: SetupState.of(setup.status(of: row)),
+                file: installer.configFile(for: row.harness), isLocalFile: !setup.isRemote
+            ) {
+                onResult(setup.install([row]))
             }
-            ForEach(skills, id: \.self) { harness in
-                SetupItemRow(
-                    title: "skill", code: "/tilde", state: setup.hasSkill(harness) ? .ok : .action("Set Up"),
-                    file: installer.skillFile(for: harness), isLocalFile: !setup.isRemote
-                ) {
-                    onResult(setup.install([AgentSetup.Row(name: harness.name, harnesses: [harness])]))
-                }
+            SetupItemRow(
+                title: "skill", code: "/tilde", state: setup.hasSkill(row.harness) ? .ok : .action("Set Up"),
+                file: installer.skillFile(for: row.harness), isLocalFile: !setup.isRemote
+            ) {
+                onResult(setup.install([row]))
             }
         }
     }

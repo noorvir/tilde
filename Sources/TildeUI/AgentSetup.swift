@@ -7,15 +7,14 @@ import AppKit
 final class AgentSetup: ObservableObject {
     struct Row: Identifiable, Hashable {
         let name: String
-        let harnesses: [Harness]
+        let harness: Harness
 
         var id: String { name }
     }
 
-    /// The Claude row stands for the Claude app and Claude Code, which keep their MCP servers
-    /// in different files.
-    static let rows = [Row(name: "Claude", harnesses: [.claudeDesktop, .claudeCode])]
-        + Harness.allCases.filter { $0 != .claudeCode && $0 != .claudeDesktop }.map { Row(name: $0.name, harnesses: [$0]) }
+    /// Claude Code shows as Claude, with the Claude app's icon.
+    static let rows = [Row(name: "Claude", harness: .claudeCode)]
+        + Harness.allCases.filter { $0 != .claudeCode }.map { Row(name: $0.name, harness: $0) }
 
     let installer: Installer
     /// Changes after every install or uninstall, so views read the files again.
@@ -48,8 +47,8 @@ final class AgentSetup: ObservableObject {
     func load() async {
         let installer = self.installer
         let (statuses, skills) = await Task.detached {
-            let statuses = Dictionary(uniqueKeysWithValues: installer.harnesses.map { ($0, installer.status(of: $0)) })
-            let skills = Set(installer.harnesses.filter { statuses[$0] != .notFound && installer.hasSkill($0) })
+            let statuses = Dictionary(uniqueKeysWithValues: Harness.allCases.map { ($0, installer.status(of: $0)) })
+            let skills = Set(Harness.allCases.filter { statuses[$0] != .notFound && installer.hasSkill($0) })
             return (statuses, skills)
         }.value
         remoteStatuses = statuses
@@ -62,24 +61,16 @@ final class AgentSetup: ObservableObject {
         remoteSkills = Set(statuses.filter { $0.value == .installed }.keys)
     }
 
-    /// The rows with at least one app on this Mac.
+    /// The rows whose app is on this Mac, or on the machine.
     var foundRows: [Row] {
         Self.rows.filter { status(of: $0) != .notFound }
     }
 
     func status(of row: Row) -> InstallStatus {
         guard isRemote else {
-            return installer.status(of: row.harnesses)
+            return installer.status(of: row.harness)
         }
-        return Installer.combined(row.harnesses.map { remoteStatuses[$0] ?? .notFound })
-    }
-
-    /// The apps of the row that are on this Mac, or on the machine.
-    func present(_ row: Row) -> [Harness] {
-        guard isRemote else {
-            return row.harnesses.filter { installer.isPresent($0) }
-        }
-        return row.harnesses.filter { (remoteStatuses[$0] ?? .notFound) != .notFound }
+        return remoteStatuses[row.harness] ?? .notFound
     }
 
     /// The app's own icon from its bundle on this Mac; Tilde ships no third-party logos.
@@ -91,8 +82,7 @@ final class AgentSetup: ObservableObject {
         if isRemote, let iconSource {
             return iconSource.icon(for: row)
         }
-        let bundle = row.harnesses.lazy.compactMap { self.installer.appBundle(for: $0) }.first
-        let image = bundle.map { NSWorkspace.shared.icon(forFile: $0.path) }
+        let image = installer.appBundle(for: row.harness).map { NSWorkspace.shared.icon(forFile: $0.path) }
             ?? NSImage(systemSymbolName: "terminal", accessibilityDescription: nil)!
         image.size = NSSize(width: 32, height: 32)
         return image
@@ -123,10 +113,10 @@ final class AgentSetup: ObservableObject {
     /// the same as its row on the Agents page (Codex shows the ChatGPT app's icon).
     func icon(forClient name: String) -> NSImage? {
         let harnesses: [String: Harness] = [
-            "Claude": .claudeDesktop, "Claude Code": .claudeCode, "Codex": .codex, "Cursor": .cursor,
+            "Claude": .claudeCode, "Claude Code": .claudeCode, "Codex": .codex, "Cursor": .cursor,
             "VS Code": .vscode, "Gemini CLI": .gemini, "Windsurf": .windsurf,
         ]
-        guard let harness = harnesses[name], let row = Self.rows.first(where: { $0.harnesses.contains(harness) }) else {
+        guard let harness = harnesses[name], let row = Self.rows.first(where: { $0.harness == harness }) else {
             return nil
         }
         return icon(for: row)
@@ -141,17 +131,16 @@ final class AgentSetup: ObservableObject {
     }
 
     private func run(_ rows: [Row], action: InstallResult.Action) -> InstallResult {
+        let found = rows.filter { status(of: $0) != .notFound }
         if isRemote {
-            apply(rows.flatMap(present), action: action)
+            apply(found.map(\.harness), action: action)
             return InstallResult(action: action, apps: [])
         }
 
-        let apps = rows.map { row in
-            let reports = present(row).map { action == .installed ? installer.install($0) : installer.uninstall($0) }
-            let failed = reports.contains { report in
-                report.changes.contains { if case .failed = $0.action { true } else { false } }
-            }
-            return InstallResult.App(name: row.name, icon: icon(for: row), failed: failed, changed: reports.contains(where: \.hasChanges))
+        let apps = found.map { row in
+            let report = action == .installed ? installer.install(row.harness) : installer.uninstall(row.harness)
+            let failed = report.changes.contains { if case .failed = $0.action { true } else { false } }
+            return InstallResult.App(name: row.name, icon: icon(for: row), failed: failed, changed: report.hasChanges)
         }
         revision += 1
         return InstallResult(action: action, apps: apps)

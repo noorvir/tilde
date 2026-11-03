@@ -142,12 +142,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             // The status leads the submenu; a tooltip on the row would cover the submenu.
             let choices = NSMenu()
             choices.autoenablesItems = false
-            for harness in setup.present(row) {
-                let label = setup.installer.status(of: harness).label
-                let line = NSMenuItem(title: row.harnesses.count > 1 ? "\(harness.name): \(label)" : label, action: nil, keyEquivalent: "")
-                line.isEnabled = false
-                choices.addItem(line)
-            }
+            let line = NSMenuItem(title: status.label, action: nil, keyEquivalent: "")
+            line.isEnabled = false
+            choices.addItem(line)
             choices.addItem(.separator())
             let install = action(status == .installed ? "Reinstall" : "Install", #selector(install(_:)))
             install.representedObject = row.id
@@ -177,7 +174,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let color: NSColor
         switch status {
         case .installed: color = .systemGreen
-        case .partlyInstalled: color = .systemYellow
         case .failed: color = .systemRed
         case .notInstalled, .notFound: color = .tertiaryLabelColor
         }

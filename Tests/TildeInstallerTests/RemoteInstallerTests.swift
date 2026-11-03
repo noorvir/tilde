@@ -60,7 +60,6 @@ struct RemoteInstallerTests {
         #expect(installer.isPresent(.codex))
         #expect(installer.isPresent(.cursor))
         #expect(!installer.isPresent(.gemini))
-        #expect(!installer.harnesses.contains(.claudeDesktop))
         #expect(installer.status(of: .codex) == .notInstalled)
 
         for harness in [Harness.claudeCode, .codex, .cursor] {

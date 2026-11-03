@@ -179,7 +179,7 @@ enum SetupState: Equatable {
     static func of(_ status: InstallStatus) -> SetupState {
         switch status {
         case .installed: .ok
-        case .partlyInstalled, .notInstalled: .action("Set Up")
+        case .notInstalled: .action("Set Up")
         case .failed(let message): .error(reason: message, action: "Retry")
         case .notFound: .notApplicable("Not on this machine")
         }
@@ -291,7 +291,7 @@ struct PathText: View {
     }
 }
 
-/// Green: installed. Yellow: partly installed. Red: error. Grey: not installed.
+/// Green: installed. Red: error. Grey: not installed.
 struct StatusDot: View {
     let status: InstallStatus
 
@@ -306,7 +306,6 @@ struct StatusDot: View {
     private var color: Color {
         switch status {
         case .installed: .green
-        case .partlyInstalled: .yellow
         case .failed: .red
         case .notInstalled, .notFound: Color.secondary.opacity(0.5)
         }
@@ -317,7 +316,6 @@ extension InstallStatus {
     var label: String {
         switch self {
         case .installed: "Installed"
-        case .partlyInstalled: "Partly installed"
         case .notInstalled, .notFound: "Not installed"
         case .failed: "Error"
         }
