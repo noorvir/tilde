@@ -201,6 +201,27 @@ final class TildeApp {
         Issue.record("The hand cursor is not \(isHand ? "on" : "off")", sourceLocation: sourceLocation)
     }
 
+    /// Where the browser's page is, without its toolbar and tab bar, which come and go.
+    func pageArea(in browser: WebPages.Browser) async throws -> CGRect? {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: browser.bundleIdentifier).first else {
+            return nil
+        }
+        // The page's elements come a moment after its window.
+        for _ in 0..<20 {
+            let result = try await drive("ax", ["pid": app.processIdentifier])
+            let elements = (result["tree"] as? [[String: Any]] ?? []).map(Seen.init).flatMap(\.flattened)
+            // The web area is as tall as the page; its parent is the part on screen.
+            let areas = elements.compactMap { parent in
+                parent.children.first { $0.role == "AXWebArea" }.map { $0.frame.intersection(parent.frame) }
+            }
+            if let area = areas.max(by: { $0.width * $0.height < $1.width * $1.height }) {
+                return area
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        return nil
+    }
+
     /// Everything on screen from the app.
     func seen() async throws -> [Seen] {
         let result = try await drive("ax", ["pid": pid])
@@ -580,6 +601,13 @@ final class WebPages {
     enum Browser: String, CaseIterable, Sendable {
         case safari = "Safari"
         case chrome = "Google Chrome"
+
+        var bundleIdentifier: String {
+            switch self {
+            case .safari: "com.apple.Safari"
+            case .chrome: "com.google.Chrome"
+            }
+        }
     }
 
     let first: String
@@ -644,6 +672,8 @@ final class WebPages {
             }
             Thread.sleep(forTimeInterval: 0.2)
         }
+        // Each flow starts with no windows from earlier runs.
+        quitBrowser()
     }
 
     /// Goes to a page in the front window of the browser. Chrome runs with its own empty
@@ -653,14 +683,16 @@ final class WebPages {
         switch browser {
         case .safari:
             script.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            script.arguments = ["-a", "Safari", url]
+            // Safari is quit with a kill, so it would bring back the windows of earlier runs.
+            script.arguments = ["-a", "Safari", url, "--args", "-ApplePersistenceIgnoreState", "YES"]
             try? script.run()
             waitForExit(script)
         case .chrome:
-            // Run again with the same profile, Chrome opens the address in its running copy.
+            // Run again with the same profile, Chrome opens the address in its running copy. With
+            // --force-renderer-accessibility it describes its page to the driver too.
             let profile = folder.appendingPathComponent("chrome-profile").path
             script.executableURL = URL(fileURLWithPath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-            script.arguments = ["--user-data-dir=\(profile)", "--no-first-run", "--no-default-browser-check", "--window-position=200,100", "--window-size=1000,700", url]
+            script.arguments = ["--user-data-dir=\(profile)", "--no-first-run", "--no-default-browser-check", "--force-renderer-accessibility", "--window-position=200,100", "--window-size=1000,700", url]
             script.standardOutput = FileHandle.nullDevice
             script.standardError = FileHandle.nullDevice
             try? script.run()
@@ -673,22 +705,22 @@ final class WebPages {
 
     /// Waits for the window of the browser, which is slow to open the first time.
     func waitForPage() async throws {
-        for _ in 0..<120 where pageArea == nil || !hasServedAPage {
+        for _ in 0..<120 where !hasWindow || !hasServedAPage {
             try await Task.sleep(for: .milliseconds(250))
         }
         // The browser draws what the server sent.
         try await Task.sleep(for: .seconds(1))
     }
 
-    /// Where the page is, without the toolbar of the browser.
-    var pageArea: CGRect? {
+    private var hasWindow: Bool {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        for window in list where window[kCGWindowOwnerName as String] as? String == browser.rawValue && window[kCGWindowLayer as String] as? Int == 0 {
-            if let bounds = window[kCGWindowBounds as String] as? NSDictionary, let frame = CGRect(dictionaryRepresentation: bounds), frame.height > 200 {
-                return CGRect(x: frame.minX, y: frame.minY + 90, width: frame.width, height: frame.height - 90)
+        return list.contains { window in
+            guard window[kCGWindowOwnerName as String] as? String == browser.rawValue, window[kCGWindowLayer as String] as? Int == 0,
+                  let bounds = window[kCGWindowBounds as String] as? NSDictionary, let frame = CGRect(dictionaryRepresentation: bounds) else {
+                return false
             }
+            return frame.height > 200
         }
-        return nil
     }
 
     func quitBrowser() {
@@ -697,6 +729,10 @@ final class WebPages {
         quit.arguments = [browser.rawValue]
         try? quit.run()
         waitForExit(quit)
+        // A browser that is still quitting would get the next page.
+        for _ in 0..<50 where !NSRunningApplication.runningApplications(withBundleIdentifier: browser.bundleIdentifier).filter({ !$0.isTerminated }).isEmpty {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
     }
 
     func stop() {

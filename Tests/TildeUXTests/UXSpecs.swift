@@ -337,7 +337,7 @@ struct UXSpecs {
             try await app.waitToSee("Annotating")
             // Chrome starts to describe its page when the session starts.
             try await Task.sleep(for: .seconds(2))
-            let page = try #require(pages.pageArea)
+            let page = try #require(await app.pageArea(in: browser))
             let point = CGPoint(x: page.minX + 120, y: page.minY + 300)
             try await addSmallNote(app, at: point)
             // Below the HUD, whose Send button is blue too.
@@ -402,7 +402,7 @@ struct UXSpecs {
             try await app.waitToSee("Annotating")
             // Chrome starts to describe its page when the session starts.
             try await Task.sleep(for: .seconds(2))
-            let page = try #require(pages.pageArea)
+            let page = try #require(await app.pageArea(in: browser))
             try await addSmallNote(app, at: CGPoint(x: page.minX + 120, y: page.minY + 300))
             // Below the HUD, whose Send button is blue too.
             let area = page.divided(atDistance: 200, from: .minYEdge).remainder
@@ -439,7 +439,7 @@ struct UXSpecs {
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
             try await Task.sleep(for: .seconds(2))
-            let page = try #require(pages.pageArea)
+            let page = try #require(await app.pageArea(in: browser))
             try await addSmallNote(app, at: CGPoint(x: page.minX + 120, y: page.minY + 300))
             let area = page.divided(atDistance: 200, from: .minYEdge).remainder
             try await app.waitForBlue(in: area, atLeast: 20)
