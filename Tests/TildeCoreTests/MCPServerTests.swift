@@ -86,7 +86,7 @@ struct MCPServerTests {
 
     @Test func instructionsAreTheSkillAndThereAreNoPrompts() async throws {
         let initialized = try await request("initialize", ["protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "codex-mcp-client", "version": "1"]])
-        #expect(initialized["instructions"] as? String == tildeSkillBody)
+        #expect(initialized["instructions"] as? String == tildeServerInstructions)
         let capabilities = try #require(initialized["capabilities"] as? [String: Any])
         #expect(capabilities.keys.sorted() == ["resources", "tools"])
 

@@ -143,7 +143,7 @@ public final class MCPServer {
             // No list-changed notifications: replies are per request, so the server cannot push.
             "capabilities": ["tools": [:], "resources": [:]],
             "serverInfo": ["name": "tilde", "version": "0.2.0"],
-            "instructions": tildeSkillBody,
+            "instructions": tildeServerInstructions,
         ])
         return json(body, headers: ["Mcp-Session-Id": sessionID])
     }
