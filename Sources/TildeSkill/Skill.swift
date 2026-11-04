@@ -1,5 +1,5 @@
 /// The `tilde` Agent Skill, written as `<skills folder>/tilde/SKILL.md` by the installer.
-/// This is the only copy of its text: the MCP server also sends the body in its instructions.
+/// This is the only copy of its text: the MCP server also sends the body as its instructions.
 public let tildeSkill = """
 ---
 name: tilde
@@ -21,12 +21,5 @@ public let tildeSkillBody = """
 5. If the user cancelled, stop. If the `tilde` tools are missing or cannot be reached, say in one line that the user must open Tilde on their Mac.
 
 Each annotation has a close-up (primary) and a context image (secondary); look at the context image only if the close-up is not enough. Feedback the user sent earlier is in the resource `tilde://feedback/latest`.
-
-"""
-
-/// The MCP server's instructions: the skill, and what to do with a report that the user pasted,
-/// which Tilde copies to each machine but which may not be there yet.
-public let tildeServerInstructions = tildeSkillBody + """
-If a pasted Tilde report's images under `~/.tilde/inbox/<id>/` are missing, read the resource `tilde://feedback/<id>`.
 
 """

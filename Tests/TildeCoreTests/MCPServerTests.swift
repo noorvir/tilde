@@ -86,7 +86,7 @@ struct MCPServerTests {
 
     @Test func instructionsAreTheSkillAndThereAreNoPrompts() async throws {
         let initialized = try await request("initialize", ["protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "codex-mcp-client", "version": "1"]])
-        #expect(initialized["instructions"] as? String == tildeServerInstructions)
+        #expect(initialized["instructions"] as? String == tildeSkillBody)
         let capabilities = try #require(initialized["capabilities"] as? [String: Any])
         #expect(capabilities.keys.sorted() == ["resources", "tools"])
 
@@ -119,6 +119,22 @@ struct MCPServerTests {
         let missing = await post(["jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": ["uri": "tilde://feedback/../x"]], session: nil, on: server)
         let body = try #require(try JSONSerialization.jsonObject(with: missing.body) as? [String: Any])
         #expect(body["error"] != nil)
+    }
+
+    @Test func aSentReportIsReadByItsID() async throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let server = MCPServer(store: store, inbox: inbox)
+        let folder = try saveToInbox(try sampleFeedback(), sessionID: "abc", root: inbox)
+
+        let read = try await request("tools/call", ["name": "get_report", "arguments": ["id": folder.lastPathComponent]], on: server)
+        let content = try #require(read["content"] as? [[String: Any]])
+        #expect(content.map { $0["type"] as? String } == ["text", "text", "image", "text", "image"])
+        #expect((content[0]["text"] as? String)?.contains("> the badge is misaligned") == true)
+        #expect(content[1]["text"] as? String == "annotation-1.png")
+
+        let missing = try await request("tools/call", ["name": "get_report", "arguments": ["id": "../x"]], on: server)
+        #expect(missing["isError"] as? Bool == true)
     }
 
     @Test func waitingToolCallsStreamProgressThenTheResult() async throws {

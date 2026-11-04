@@ -143,7 +143,7 @@ public final class MCPServer {
             // No list-changed notifications: replies are per request, so the server cannot push.
             "capabilities": ["tools": [:], "resources": [:]],
             "serverInfo": ["name": "tilde", "version": "0.2.0"],
-            "instructions": tildeServerInstructions,
+            "instructions": tildeSkillBody,
         ])
         return json(body, headers: ["Mcp-Session-Id": sessionID])
     }
@@ -234,21 +234,28 @@ public final class MCPServer {
     /// The report as text, then each screenshot as a PNG blob, in report order.
     private func readResource(_ uri: String) -> [[String: Any]]? {
         let prefix = "tilde://feedback/"
-        guard uri.hasPrefix(prefix) else {
+        guard uri.hasPrefix(prefix), let saved = savedReport(String(uri.dropFirst(prefix.count))) else {
             return nil
         }
-        let id = String(uri.dropFirst(prefix.count))
+
+        var contents: [[String: Any]] = [["uri": uri, "mimeType": "text/markdown", "text": saved.report]]
+        for (name, data) in saved.images {
+            contents.append(["uri": "\(uri)/\(name)", "mimeType": "image/png", "blob": data.base64EncodedString()])
+        }
+        return contents
+    }
+
+    /// A sent report from the inbox, by its folder name or "latest", with its screenshots in
+    /// report order.
+    private func savedReport(_ id: String) -> (report: String, images: [(name: String, data: Data)])? {
         let folder = id == "latest" ? latestInboxFolder(root: inbox) : inbox.appendingPathComponent(id)
         guard let folder, !id.contains("/"), let report = try? String(contentsOf: folder.appendingPathComponent("feedback.md"), encoding: .utf8) else {
             return nil
         }
-
-        var contents: [[String: Any]] = [["uri": uri, "mimeType": "text/markdown", "text": report]]
-        for name in inboxImageNames(folder) {
-            let data = (try? Data(contentsOf: folder.appendingPathComponent(name))) ?? Data()
-            contents.append(["uri": "\(uri)/\(name)", "mimeType": "image/png", "blob": data.base64EncodedString()])
+        let images = inboxImageNames(folder).map { name in
+            (name: name, data: (try? Data(contentsOf: folder.appendingPathComponent(name))) ?? Data())
         }
-        return contents
+        return (report, images)
     }
 
     /// "2026-10-28 17:17 · i like this! nice!": the time and the first comment of a batch.
@@ -325,6 +332,18 @@ public final class MCPServer {
                 ],
             ],
             [
+                "name": "get_report",
+                "annotations": ["title": "Read a Tilde report", "readOnlyHint": true, "openWorldHint": false],
+                "description": "Reads a sent Tilde feedback report and its screenshots by id. Use it when the images of a pasted Tilde report are missing under ~/.tilde/inbox/<id>/ on this machine.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "id": ["type": "string", "description": "The report's folder name in ~/.tilde/inbox/, such as 2026-11-04_00-13-48_14d2dc23."],
+                    ],
+                    "required": ["id"],
+                ],
+            ],
+            [
                 "name": "wait_for_annotation",
                 "annotations": ["title": "Wait for visual feedback", "readOnlyHint": true, "openWorldHint": false],
                 "description": "Waits for the user's feedback. Returns the feedback, a cancellation, or that the user is still annotating.",
@@ -370,6 +389,14 @@ public final class MCPServer {
             }
             let state = await store.wait(for: sessionID, seconds: waitSeconds)
             return toolResult(sessionID: sessionID, state: state)
+
+        case "get_report":
+            let id = arguments["id"] as? String ?? ""
+            guard let saved = savedReport(id) else {
+                return toolError("No Tilde report with id \(id)")
+            }
+            let images = saved.images.flatMap { [textBlock($0.name), imageBlock($0.data)] }
+            return ["content": [textBlock(saved.report)] + images]
 
         default:
             return toolError("Unknown tool: \(name)")
