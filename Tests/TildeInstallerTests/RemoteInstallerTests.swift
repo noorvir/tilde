@@ -85,6 +85,19 @@ struct RemoteInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/tilde").path))
     }
 
+    @Test func aConfigWithTheTokenIsForItsOwnerOnly() throws {
+        let home = try home()
+        try make(home, ".codex")
+        try "".write(to: home.appendingPathComponent(".codex/config.toml"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: home.appendingPathComponent(".codex/config.toml").path)
+
+        _ = try installer(home).install(.codex)
+
+        #expect(try text(home, ".codex/config.toml").contains("Bearer secret"))
+        let attributes = try FileManager.default.attributesOfItem(atPath: home.appendingPathComponent(".codex/config.toml").path)
+        #expect(attributes[.posixPermissions] as? Int == 0o600)
+    }
+
     @Test func itWritesThroughALinkedSkillsFolder() throws {
         let home = try home()
         try make(home, "repo/skills")

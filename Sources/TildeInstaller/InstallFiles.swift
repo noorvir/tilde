@@ -4,7 +4,8 @@ import Foundation
 public protocol InstallFiles: Sendable {
     func exists(_ file: URL) -> Bool
     func read(_ file: URL) throws -> String
-    /// Writes through symbolic links, creating the folders on the way.
+    /// Writes through symbolic links, creating the folders on the way. A file it replaces is
+    /// for its owner only (0600): agents' configs hold tokens, such as Tilde's on a machine.
     func write(_ text: String, to file: URL) throws
     func remove(_ file: URL) throws
     /// The names in a folder; none if it is not there.
@@ -26,7 +27,15 @@ public struct LocalFiles: InstallFiles {
     public func write(_ text: String, to file: URL) throws {
         let real = file.resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: real.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data(text.utf8).write(to: real, options: .atomic)
+        // The new file is never readable by others, not even before it replaces the old one.
+        let temporary = real.appendingPathExtension("tilde-new")
+        guard FileManager.default.createFile(atPath: temporary.path, contents: Data(text.utf8), attributes: [.posixPermissions: 0o600]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: temporary.path])
+        }
+        guard rename(temporary.path, real.path) == 0 else {
+            try? FileManager.default.removeItem(at: temporary)
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: real.path])
+        }
     }
 
 
@@ -73,7 +82,7 @@ public struct ShellFiles: InstallFiles {
         let path = quoted(file)
         let temporary = quoted(file.appendingPathExtension("tilde-new"))
         let folder = quoted(file.deletingLastPathComponent())
-        _ = try run("mkdir -p \(folder) && if [ -L \(path) ]; then cat > \(path); else cat > \(temporary) && mv \(temporary) \(path); fi", text)
+        _ = try run("mkdir -p \(folder) && if [ -L \(path) ]; then cat > \(path); else (umask 077 && cat > \(temporary)) && mv \(temporary) \(path); fi", text)
     }
 
 

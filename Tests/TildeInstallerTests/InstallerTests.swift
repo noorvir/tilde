@@ -14,6 +14,16 @@ struct InstallerTests {
         installer = Installer(environment: environment)
     }
 
+    @Test func aConfigItWritesIsForItsOwnerOnly() throws {
+        try write(".cursor/mcp.json", "{}")
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: home.appendingPathComponent(".cursor/mcp.json").path)
+
+        _ = installer.install(.cursor)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: home.appendingPathComponent(".cursor/mcp.json").path)
+        #expect(attributes[.posixPermissions] as? Int == 0o600)
+    }
+
     @Test func detectsOnlyAppsWithTheirFolders() throws {
         try write(".cursor/argv.json", "{}")
         try write(".gemini/GEMINI.md", "")
