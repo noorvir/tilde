@@ -7,7 +7,7 @@ elements or drag regions on any app or web page, add a comment to each, and pres
 Send. The agent gets a markdown report plus one screenshot per annotation.
 
 - Works with every MCP harness: Claude Code, Codex, Cursor, Gemini CLI, VS Code and others.
-- Works with remote agents through an SSH reverse tunnel. Screenshots go back inline.
+- Works with remote agents through an SSH tunnel to a private socket. Screenshots go back inline.
 - No paste step. The result goes back on the agent's own tool call.
 
 ## Install
@@ -110,11 +110,14 @@ Without `default_tools_approval_mode`, Codex asks before each call, and `codex e
 
 **Remote agents** (the agent runs on a server, you annotate on your Mac)
 
-```sh
-ssh -R 7311:127.0.0.1:7311 your-server
-```
-
-Then configure the agent on the server with `http://127.0.0.1:7311/mcp`.
+Settings → Agents → Remote machines lists the hosts of your ssh config and connections. Install
+on one sets up its agent apps as on this Mac, and links it while Tilde runs: an ssh tunnel
+from a private socket on the server (`~/.tilde/tilde.sock`, only your user can open it) to
+Tilde. The agents there start `~/.tilde/bin/tproxy`, a small pipe to that socket, as a stdio
+MCP server. Tilde downloads `tproxy` for the server's system (macOS or Linux, arm64 or x86-64)
+from the GitHub release of its own version, checks its SHA-256, and copies it there again
+whenever it changed. A server of another type is linked by a port that other users there
+can reach, with a token, and Settings shows it as not protected.
 
 ## Tools
 
