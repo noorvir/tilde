@@ -1063,7 +1063,7 @@ final class AnnotationController: ObservableObject {
             return
         }
         Task {
-            let failed = await push(folder, to: machines)
+            let failed = await Self.push(folder, to: machines, log: log)
             if !failed.isEmpty {
                 showPushFailure(failed)
             }
@@ -1071,9 +1071,8 @@ final class AnnotationController: ObservableObject {
     }
 
     /// Sends a report's folder to each machine; the machines it did not reach.
-    private func push(_ folder: URL, to machines: [String]) async -> [String] {
-        let log = self.log
-        return await withTaskGroup(of: String?.self) { group in
+    private nonisolated static func push(_ folder: URL, to machines: [String], log: Logger) async -> [String] {
+        await withTaskGroup(of: String?.self) { group in
             for machine in machines {
                 group.addTask {
                     do {
@@ -2627,9 +2626,11 @@ final class AnnotationController: ObservableObject {
             return
         }
         confirmationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            MainActor.assumeIsolated {
-                self?.handleConfirmationKey(event.keyCode) == true ? nil : event
+            let keyCode = event.keyCode
+            let isAnswer = MainActor.assumeIsolated {
+                self?.handleConfirmationKey(keyCode) == true
             }
+            return isAnswer ? nil : event
         }
     }
 

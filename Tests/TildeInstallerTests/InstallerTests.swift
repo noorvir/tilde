@@ -93,7 +93,7 @@ struct InstallerTests {
         """
         try write(".claude.json", original)
 
-        let report = installer.install(.claudeCode)
+        _ = installer.install(.claudeCode)
 
         #expect(try read(".claude.json") == """
         {

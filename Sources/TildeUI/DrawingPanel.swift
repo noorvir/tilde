@@ -15,7 +15,8 @@ final class DrawingPanel {
         let bounds: CGRect
     }
 
-    private var canvases: [CGRect: DrawingCanvas] = [:]
+    /// One for each screen frame drawn on.
+    private var canvases: [DrawingCanvas] = []
     private var active: DrawingCanvas?
     private var color = "#2F76FF"
     private var releaseTask: Task<Void, Never>?
@@ -31,7 +32,7 @@ final class DrawingPanel {
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
     var windowNumbers: [Int] {
-        canvases.values.compactMap(\.windowNumber)
+        canvases.compactMap(\.windowNumber)
     }
 
     /// Loads a canvas ahead of the first drawing, without taking time from the main thread.
@@ -98,7 +99,7 @@ final class DrawingPanel {
 
     /// The shapes with these ids, wherever they are.
     func shapes(_ ids: [String]) async -> [[String: Any]] {
-        for canvas in canvases.values {
+        for canvas in canvases {
             let shapes = await canvas.shapes(ids)
             if !shapes.isEmpty {
                 return shapes
@@ -123,27 +124,27 @@ final class DrawingPanel {
     /// The session ended: its drawings go, and the canvases wait for the next one.
     func endSession() {
         active = nil
-        canvases.values.forEach { $0.reset() }
+        canvases.forEach { $0.reset() }
         releaseTask?.cancel()
         releaseTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(300))
             if !Task.isCancelled {
-                self?.canvases.values.forEach { $0.close() }
-                self?.canvases = [:]
+                self?.canvases.forEach { $0.close() }
+                self?.canvases = []
             }
         }
     }
 
     func clear() {
-        canvases.values.forEach { $0.run("clear()") }
+        canvases.forEach { $0.run("clear()") }
     }
 
     private func canvas(for frame: CGRect) -> DrawingCanvas {
-        if let canvas = canvases[frame] {
+        if let canvas = canvases.first(where: { $0.frame == frame }) {
             return canvas
         }
         let canvas = DrawingCanvas(frame: frame)
-        canvases[frame] = canvas
+        canvases.append(canvas)
         return canvas
     }
 
@@ -156,7 +157,7 @@ final class DrawingPanel {
 @MainActor
 final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private let log = Logger(subsystem: "dev.tilde.app", category: "drawing")
-    private let frame: CGRect
+    let frame: CGRect
     private var panel: FloatingPanel?
     private var webView: WKWebView?
     private var openedAt: Date?
@@ -296,7 +297,10 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        switch message.body as? String {
+        guard let text = message.body as? String else {
+            return
+        }
+        switch text {
         case "ready":
             isReady = true
             let took = openedAt.map { Date().timeIntervalSince($0) } ?? 0
@@ -313,13 +317,13 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             onEdited()
         case "clickAway":
             onClickAway()
-        case let text as String where text.hasPrefix("pointer:"):
+        case _ where text.hasPrefix("pointer:"):
             let values = text.dropFirst(8).split(separator: ",").compactMap { Double($0) }
             if values.count == 2 {
                 let origin = frame.flipped.origin
                 onPointer(CGPoint(x: origin.x + values[0], y: origin.y + values[1]))
             }
-        case let text as String where text.hasPrefix("error: "):
+        case _ where text.hasPrefix("error: "):
             log.error("drawing canvas \(text, privacy: .public)")
         default:
             break
