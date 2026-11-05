@@ -7,6 +7,11 @@ import TildeCore
 final class HistoryModel: ObservableObject {
     @Published private(set) var records: [SessionRecord] = []
     @Published var expanded: Set<String> = []
+    /// Whether Restore does anything now: always without a session on screen, else as the
+    /// window button's rule allows.
+    @Published var takesRestore = true
+    /// The copy in progress; only the latest one writes the clipboard.
+    private var copying: Task<Void, Never>?
     let archive: SessionArchive
     /// The session on screen, which cannot be restored.
     let currentID: () -> String?
@@ -49,12 +54,14 @@ final class HistoryModel: ObservableObject {
     /// session's report is saved first, which can copy its videos.
     func copyReport(_ record: SessionRecord) {
         let archive = self.archive
-        Task {
+        copying?.cancel()
+        copying = Task {
             let text = await Task.detached { Self.report(of: record, archive: archive) }.value
-            if let text {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(text, forType: .string)
+            guard !Task.isCancelled, let text else {
+                return
             }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
         }
     }
 
@@ -64,9 +71,11 @@ final class HistoryModel: ObservableObject {
             return Annotation(id: note.id, comment: note.comment, target: note.target, frame: note.frame, image: images.image, contextImage: images.contextImage)
         }
         let feedback = Feedback(annotations: annotations)
-        // An unsent session has no report folder yet; it gets one, as Send makes, so the
-        // report's file names are there.
-        guard let folder = record.reportFolder.map({ URL(fileURLWithPath: $0, isDirectory: true) }) ?? (try? saveToInbox(feedback, sessionID: record.id, node: record.node)) else {
+        // An unsent session, or one whose report the inbox has pruned, gets a new report
+        // folder, as Send makes, so the report's file names are there.
+        let saved = record.reportFolder.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let kept = saved.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        guard let folder = kept ?? (try? saveToInbox(feedback, sessionID: record.id, node: record.node)) else {
             return nil
         }
         return reportText(for: feedback, folder: folder)
@@ -161,6 +170,7 @@ private struct HistoryRow: View {
                     Button("Restore") {
                         history.restore(record)
                     }
+                    .disabled(!history.takesRestore)
                 }
             }
             .padding(.horizontal, 16)
@@ -188,7 +198,7 @@ private struct HistoryRow: View {
                 history.delete(record)
             }
         } message: {
-            Text("Its notes and images are deleted.")
+            Text("Its notes, images and recordings are deleted. A sent report stays in the inbox.")
         }
     }
 

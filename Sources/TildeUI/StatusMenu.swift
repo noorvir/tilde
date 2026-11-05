@@ -55,14 +55,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let pause = pauseItem
             menu.addItem(action(pause.title, pause.works ? #selector(togglePause) : nil, shortcut: .togglePause))
             let windowTitle = controller.isRecordMode ? "Record a Specific Window" : "Annotate a Specific Window"
-            menu.addItem(action(windowTitle, flow.canPick && !flow.isPicking ? #selector(chooseWindow) : nil))
-            menu.addItem(action("Cancel Annotation", flow.isPicking ? nil : #selector(cancelAnnotation)))
+            menu.addItem(action(windowTitle, flow.accepts(.windowButton) && !flow.isPicking ? #selector(chooseWindow) : nil))
+            menu.addItem(action("Cancel Annotation", flow.accepts(.requestCancel) ? #selector(cancelAnnotation) : nil))
         }
         menu.addItem(.separator())
 
         menu.addItem(agentsItem())
         menu.addItem(historyItem())
-        menu.addItem(action("Open Browser", #selector(openBrowser)))
+        let opensBrowser = controller.session == nil || controller.flow.accepts(.openBrowser)
+        menu.addItem(action("Open Browser", opensBrowser ? #selector(openBrowser) : nil))
         let settingsItem = action("Settings", #selector(openSettings))
         settingsItem.keyEquivalent = ","
         settingsItem.keyEquivalentModifierMask = .command
@@ -92,11 +93,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             none.isEnabled = false
             submenu.addItem(none)
         }
+        // Restoring into the session on screen follows the window button's rule.
+        let takesRestore = controller.session == nil || controller.flow.accepts(.restore)
         for record in records {
             let count = record.notes.count
             let title = "\(record.title) · \(count) \(count == 1 ? "note" : "notes") · \(record.updated.formatted(date: .abbreviated, time: .shortened))"
             let entry = action(title, #selector(openHistoryEntry(_:)))
             entry.representedObject = record.id
+            entry.isEnabled = takesRestore || !restores(record)
             submenu.addItem(entry)
         }
         submenu.addItem(.separator())
@@ -111,11 +115,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         guard let id = sender.representedObject as? String, let record = controller.archive.record(id) else {
             return
         }
-        if !record.notes.isEmpty, record.id != controller.session?.id {
+        if restores(record) {
             controller.restore(record)
         } else {
             showHistory()
         }
+    }
+
+    /// Whether an entry restores its notes; else it shows History.
+    private func restores(_ record: SessionRecord) -> Bool {
+        !record.notes.isEmpty && record.id != controller.session?.id
     }
 
     @objc private func showHistory() {
@@ -255,14 +264,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     /// The pause command in this mode, and whether it does anything now.
     private var pauseItem: (title: String, works: Bool) {
         let isOpen = if case .open = controller.mode { true } else { false }
+        let works = isOpen && controller.flow.accepts(.togglePause)
         guard controller.isRecordMode else {
-            return (controller.pauses.contains(.user) ? "Resume Annotation" : "Pause Annotation", isOpen && !controller.isPickingWindow)
+            return (controller.pauses.contains(.user) ? "Resume Annotation" : "Pause Annotation", works)
         }
-        switch controller.recording {
-        case .recording: return ("Pause Recording", true)
-        case .paused: return ("Resume Recording", true)
-        default: return ("Pause Recording", false)
-        }
+        return (controller.recording == .paused ? "Resume Recording" : "Pause Recording", works)
     }
 
     /// Asks in the HUD first, as × and Esc do, when there is something to lose.

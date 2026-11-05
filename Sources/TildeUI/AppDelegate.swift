@@ -1,6 +1,7 @@
 import TildeCore
 import TildeInstaller
 import AppKit
+import Combine
 
 /// Status of the local MCP endpoint, shown in the menu.
 @MainActor
@@ -28,6 +29,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindow?
     private var toast: InstallToast?
     private var restorePrompt: RestorePrompt?
+    private var historyRestore: AnyCancellable?
     private var hotKeys: HotKeys?
     private var browserEvents: Any?
 
@@ -105,6 +107,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } icon: { record in
             record.isLocal ? nil : setup.icon(forClient: record.client)
         }
+        historyRestore = controller.$flow
+            .map { flow in flow.mode == .idle || flow.accepts(.restore) }
+            .removeDuplicates()
+            .sink { [weak history] takes in history?.takesRestore = takes }
         let model = SettingsModel(
             setup: setup, shortcuts: shortcuts, browser: browser, history: history, server: serverState, version: version,
             onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.resetHUDPosition() }

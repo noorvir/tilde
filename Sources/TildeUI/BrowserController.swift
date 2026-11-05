@@ -242,6 +242,11 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
                 return true
             }
         case .keyDown where window.isKeyWindow && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command:
+            // ⌘↩ follows the Send button, also from the address field or a note.
+            if event.keyCode == 36, let controller, controller.session != nil {
+                controller.send()
+                return true
+            }
             guard !(window.firstResponder is NSText) else {
                 return false
             }

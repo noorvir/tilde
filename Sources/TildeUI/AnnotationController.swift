@@ -1958,6 +1958,7 @@ final class AnnotationController: ObservableObject {
     /// or phone lifts the limit. A phone only records.
     func choose(_ source: RecordingSource) {
         dispatch(.choose(drawable: source.isDrawable), with: [.applySource: { [self] in
+            browserScopeRequest += 1
             if case .window(let window) = source {
                 setSource(.window(picker.currentWindow(number: window.number) ?? window))
             } else {
@@ -2129,16 +2130,26 @@ final class AnnotationController: ObservableObject {
         scopeToBrowser()
     }
 
-    /// The browser window can take a moment to reach the window list after it opens.
+    /// The browser window can take a moment to reach the window list after it opens. The
+    /// scope is applied to the session that asked, only while its source can change (no clip
+    /// in progress, not choosing) and no other source was chosen meanwhile.
     private func scopeToBrowser() {
+        guard let sessionID = session?.id else {
+            return
+        }
+        browserScopeRequest += 1
+        let request = browserScopeRequest
         let delays = [0.0, 0.3, 0.8]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.isOpen, self.scope == nil else {
+                guard let self, self.browserScopeRequest == request, self.session?.id == sessionID, self.flow.canPick, !self.isPickingWindow else {
                     return
                 }
                 if let number = self.browser.windowNumber, let window = self.picker.currentWindow(number: number) {
-                    self.setScope(window)
+                    self.browserScopeRequest += 1
+                    if self.scope?.number != number {
+                        self.setScope(window)
+                    }
                 } else if delay == delays.last {
                     // The window never came on screen: the session covers everything.
                     self.placeHUD()
@@ -2146,6 +2157,10 @@ final class AnnotationController: ObservableObject {
             }
         }
     }
+
+    /// Counts requests to limit the session to the browser; a choice of another source or a
+    /// newer request makes an older one stale.
+    private var browserScopeRequest = 0
 
     /// The scoped window closed: annotations cover everything again.
     private func endScope() {

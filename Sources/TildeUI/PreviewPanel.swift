@@ -31,6 +31,9 @@ final class PreviewPanel {
         panel.onKey = { [unowned panel] event in
             let isEditing = panel.firstResponder is NSTextView
             switch event.keyCode {
+            // ⌘↩ follows the Send button, also while the comment is edited.
+            case 36 where event.modifierFlags.contains(.command):
+                controller.send()
             case 36 where isEditing && !event.modifierFlags.contains(.shift):
                 panel.makeFirstResponder(nil)
             case 53 where controller.expandedPreviewImage != nil:
