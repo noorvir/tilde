@@ -983,28 +983,14 @@ struct UXSpecs {
             print("NODE \(type), tproxy \(try onNode(host, hash))\(modes)\(configs)")
             step("files")
 
-            // An agent there, through the proxy, as Codex.
-            var agent = try NodeAgent(host: host, command: "\(proxy) \(socket)")
+            // An agent there, through tproxy, as Codex. It runs until the end, through drops.
+            let agent = try NodeAgent(host: host, command: "\(proxy) \(socket)")
+            defer { agent.close() }
             let hello = try await agent.call("initialize", ["protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "codex-mcp-client", "version": "1"]])
             #expect(hello["result"] != nil, "\(hello)")
             try agent.notify("notifications/initialized")
             let tools = try await agent.call("tools/list", [:])
             #expect("\(tools)".contains("wait_for_annotation"))
-            let started = try await agent.call("tools/call", ["name": "start_annotation", "arguments": ["wait_seconds": 0]])
-            let session = try #require("\(started)".components(separatedBy: "session_id: ").last?.prefix { $0 != "." }).description
-            try await app.waitToSee("Annotating", timeout: 15)
-            let frame = ChangingWindow.frame
-            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
-            try await app.waitToSee("add")
-            try await app.type("From the node")
-            try await app.waitToSee("From the node", timeout: 3)
-            try await app.key(.enter)
-            try await app.waitToSeeText(containing: "1 note")
-            try await app.key(.enter, command: true)
-            let report = try await agent.call("tools/call", ["name": "wait_for_annotation", "arguments": ["session_id": session, "wait_seconds": 30]], timeout: 40)
-            #expect("\(report)".contains("From the node"), "\(report)")
-            print("NODE report: \(String("\(report)".prefix(300)))")
-            agent.close()
             step("agent")
 
             // Another user there can open neither the folder nor the socket.
@@ -1016,27 +1002,54 @@ struct UXSpecs {
                 step("other user")
             }
 
-            // A dropped tunnel comes back on the same socket, and a changed proxy is replaced,
-            // with the entries as they were.
-            try onNode(host, "printf x >> \(proxy)")
-            let tunnel = Process()
-            tunnel.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            tunnel.arguments = ["-f", "tilde\\.sock:/"]
-            try tunnel.run()
-            tunnel.waitUntilExit()
-            let back = Date().addingTimeInterval(60)
-            var linked = false
-            while !linked, Date() < back {
-                try await Task.sleep(for: .seconds(2))
-                if try onNode(host, hash).hasPrefix(expected), let again = try? NodeAgent(host: host, command: "\(proxy) \(socket)") {
-                    agent = again
-                    linked = (try? await agent.call("ping", [:], timeout: 5))?["result"] != nil
-                    agent.close()
-                }
+            // A dropped tunnel comes back on the same socket, a changed tproxy is replaced, and
+            // the entries stay as they were.
+            func dropTunnel() throws {
+                let tunnel = Process()
+                tunnel.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+                tunnel.arguments = ["-f", "tilde\\.sock:/"]
+                try tunnel.run()
+                tunnel.waitUntilExit()
             }
-            #expect(linked)
+            // A running tproxy cannot be written to: the changed file replaces it.
+            try onNode(host, "cp \(proxy) \(proxy).x && printf x >> \(proxy).x && mv \(proxy).x \(proxy)")
+            try dropTunnel()
+            let back = Date().addingTimeInterval(60)
+            while try !onNode(host, hash).hasPrefix(expected), Date() < back {
+                try await Task.sleep(for: .seconds(1))
+            }
+            #expect(try onNode(host, hash).hasPrefix(expected))
             #expect(try onNode(host, "cat ~/.codex/config.toml ~/.claude.json") == configs)
             step("relinked")
+
+            // The same agent, with no new initialize, opens a session as Codex.
+            let started = try await agent.call("tools/call", ["name": "start_annotation", "arguments": ["wait_seconds": 0]], timeout: 60)
+            let session = try #require("\(started)".components(separatedBy: "session_id: ").last?.prefix { $0 != "." }).description
+            try await app.waitToSee("Annotating", timeout: 15)
+            try await app.waitToSeeText(containing: "for Codex")
+
+            // A wait cut by a drop is answered at once, to call again; the next wait, sent while
+            // the link is down, goes through when it is back and gets the report.
+            let cut = Task { try await agent.call("tools/call", ["name": "wait_for_annotation", "arguments": ["session_id": session, "wait_seconds": 60]], timeout: 30) }
+            try await Task.sleep(for: .seconds(1))
+            try dropTunnel()
+            let cutAnswer = try await cut.value
+            #expect("\(cutAnswer)".contains("Call again"), "\(cutAnswer)")
+            print("NODE cut wait: \(cutAnswer)")
+            let waiting = Task { try await agent.call("tools/call", ["name": "wait_for_annotation", "arguments": ["session_id": session, "wait_seconds": 60]], timeout: 90) }
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            try await app.waitToSee("add")
+            try await app.type("From the node")
+            try await app.waitToSee("From the node", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+            try await Task.sleep(for: .seconds(8))
+            try await app.key(.enter, command: true)
+            let report = try await waiting.value
+            #expect("\(report)".contains("From the node"), "\(report)")
+            print("NODE report: \(String("\(report)".prefix(300)))")
+            step("same agent after drops")
 
             try await app.press("Remove \(host)")
             try await app.waitToSee("Install \(host)", timeout: 30)
