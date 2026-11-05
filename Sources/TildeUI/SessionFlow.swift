@@ -36,6 +36,27 @@ struct SessionFlow: Equatable {
         var isDrawing = false
         var panel: Panel?
         var question: Question?
+
+        /// A clip that a cancel would lose: recording, paused or being saved.
+        var holdsClip: Bool {
+            switch activity {
+            case .recording(.recording), .recording(.paused), .recording(.finishing): true
+            default: false
+            }
+        }
+
+        /// A clip not stopped yet, which leaving recording mode would throw away.
+        var clipInProgress: Bool {
+            activity == .recording(.recording) || activity == .recording(.paused)
+        }
+
+        /// Whether a source can be chosen now: not while a clip keeps its source.
+        var canPick: Bool {
+            switch activity {
+            case .annotating, .recording(.ready), .picking: true
+            case .recording: false
+            }
+        }
     }
 
     enum Activity: Equatable {
@@ -94,7 +115,9 @@ struct SessionFlow: Equatable {
         case begin(inBrowser: Bool)
         /// The session ended elsewhere, such as the agent cancelling it.
         case ended
-        case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, askRestore, confirm, dismissConfirmation
+        case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
+        /// History's or the menu's Restore, and the menu's Open Browser, while a session is on screen.
+        case restore, openBrowser
         case holdBegan, holdEnded, otherAppInFront, scopeAppInFront
         case openComment, clickAway, submitComment, closeComment, openPreview, closePreview, toggleList
         case startDrawing, finishDrawing, undoDrawing, redoDrawing, shapeFinished
@@ -118,11 +141,11 @@ struct SessionFlow: Equatable {
         /// Into recording mode, and out of it, throwing away a clip in progress.
         case enterRecording, exitRecording
         case startClip, pauseClip, resumeClip, finishClip
-        /// The clip of a finished stop goes to the list; a result nobody waits for any more
-        /// throws its recorder or file away.
-        case keepClip, dropClip
+        /// A started clip records on, and a stopped one goes to the list; a result nobody waits
+        /// for any more throws its recorder or file away.
+        case adoptClip, keepClip, dropClip
         case showStartFailure, showSaveFailure, showSourceGone
-        case startPicking, stopPicking, openPicker, closePicker, applySource
+        case startPicking, stopPicking, openPicker, closePicker, applySource, openBrowser
         case startSend, finishSend, showSendFailure, showPushFailure, hideHUD
     }
 
@@ -172,10 +195,7 @@ struct SessionFlow: Equatable {
 
     /// A clip that a cancel would lose: recording, paused or being saved.
     var holdsClip: Bool {
-        switch clip {
-        case .recording, .paused, .finishing: true
-        case .ready, .starting, nil: false
-        }
+        session?.holdsClip ?? false
     }
 
     /// The window button works: annotating, recording mode with no clip in progress, or
@@ -184,15 +204,12 @@ struct SessionFlow: Equatable {
         guard case .open(let open) = mode else {
             return false
         }
-        switch open.activity {
-        case .annotating, .recording(.ready), .picking: return true
-        case .recording: return false
-        }
+        return open.canPick
     }
 
     /// Send and ⌘↩ have something to send, and nothing is starting or finishing.
     var canSend: Bool {
-        guard case .open(let open) = mode, !isPicking else {
+        guard case .open(let open) = mode, !isPicking, open.question == nil else {
             return false
         }
         switch open.activity {
@@ -203,10 +220,14 @@ struct SessionFlow: Equatable {
 
     // MARK: - Rules
 
-    /// The session on screen, to read and change in the rules below.
-    private var open: Open {
-        get { session ?? Open() }
-        set { mode = .open(newValue) }
+    /// Set by a rule that leaves the session on screen, for sending or for its end; `handle`
+    /// takes it as the new mode.
+    private var leaving: Mode?
+
+    init(mode: Mode = .open(Open()), notes: Int = 0, lastOperation: Int = 0) {
+        self.mode = mode
+        self.notes = notes
+        self.lastOperation = lastOperation
     }
 
     private mutating func nextOperation() -> Int {
@@ -215,11 +236,6 @@ struct SessionFlow: Equatable {
     }
 
     mutating func handle(_ event: Event) -> [Effect] {
-        if case .begin(let inBrowser) = event {
-            // A session in the browser starts paused, so the user can type an address and browse.
-            mode = .open(Open(pauses: inBrowser ? [.user] : []))
-            return []
-        }
         switch mode {
         case .idle:
             return handleWithoutSession(event)
@@ -229,18 +245,36 @@ struct SessionFlow: Equatable {
                 return [.hideHUD]
             }
             return handleWithoutSession(event)
-        case .sending(let operation, let returnTo):
-            return handleSending(event, operation: operation, returnTo: returnTo)
-        case .open(let current):
-            if case .picking(let isRecordMode, let isPickerOpen) = current.activity {
-                return handlePicking(event, isRecordMode: isRecordMode, isPickerOpen: isPickerOpen)
+        case .sending(let operation, var returnTo):
+            let effects = handleSending(event, operation: operation, returnTo: &returnTo)
+            if case .sending = mode {
+                mode = .sending(operation: operation, returnTo: returnTo)
             }
-            return handleOpen(event)
+            return effects
+        case .open(var open):
+            let effects: [Effect]
+            if case .picking(let isRecordMode, let isPickerOpen) = open.activity {
+                effects = handlePicking(event, isRecordMode: isRecordMode, isPickerOpen: isPickerOpen, &open)
+            } else if let question = open.question, !Self.isAnswer(event, to: question) {
+                // A question waits for its answer; nothing else acts under it.
+                effects = []
+            } else {
+                effects = handleOpen(event, &open)
+            }
+            dropStaleQuestion(&open)
+            mode = leaving ?? .open(open)
+            leaving = nil
+            return effects
         }
     }
 
+    /// A session starts only when none is on screen.
     private mutating func handleWithoutSession(_ event: Event) -> [Effect] {
         switch event {
+        case .begin(let inBrowser):
+            // A session in the browser starts paused, so the user can type an address and browse.
+            mode = .open(Open(pauses: inBrowser ? [.user] : []))
+            return []
         case .startShortcut:
             return [.startLocalSession]
         case .pushFailed:
@@ -253,7 +287,9 @@ struct SessionFlow: Equatable {
         }
     }
 
-    private mutating func handleSending(_ event: Event, operation: Int, returnTo: Open) -> [Effect] {
+    /// While the report is made, only its own results act, and the hold key and the session's
+    /// end still count; notes do not change.
+    private mutating func handleSending(_ event: Event, operation: Int, returnTo: inout Open) -> [Effect] {
         switch event {
         case .sendFinished(operation):
             mode = .sent(operation: nextOperation())
@@ -261,6 +297,8 @@ struct SessionFlow: Equatable {
         case .sendFailed(operation):
             mode = .open(returnTo)
             return [.showSendFailure]
+        case .holdEnded:
+            return endHold(&returnTo)
         case .ended:
             mode = .idle
             return [.endSession]
@@ -271,10 +309,36 @@ struct SessionFlow: Equatable {
         }
     }
 
+    /// The events a question takes: its answers, Esc, the session's end, and results and
+    /// changes from outside that no one asked for, such as the hold key or a clip saved.
+    private static func isAnswer(_ event: Event, to question: Question) -> Bool {
+        switch event {
+        case .confirm, .dismissConfirmation, .escape, .ended, .holdEnded, .otherAppInFront, .scopeAppInFront,
+             .clipStarted, .clipStartFailed, .clipFinished, .clipFailed, .captureStopped:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// A question about something that is gone, such as a clip saved meanwhile, goes too.
+    private func dropStaleQuestion(_ open: inout Open) {
+        let isAboutSomething = switch open.question {
+        case .discardRecording: open.clipInProgress
+        case .discardComment: open.panel == .comment
+        case .clearAll: notes > 0
+        case .cancelSession: notes > 0 || open.holdsClip
+        case .restore, nil: true
+        }
+        if !isAboutSomething {
+            open.question = nil
+        }
+    }
+
     /// While choosing, only the window button, Esc (or the picker's Back), the picker and a
-    /// choice act, and the front
-    /// app and hold key keep the pause the session goes back to; nothing else does anything.
-    private mutating func handlePicking(_ event: Event, isRecordMode: Bool, isPickerOpen: Bool) -> [Effect] {
+    /// choice act, and the front app and hold key keep the pause the session goes back to;
+    /// nothing else does anything.
+    private mutating func handlePicking(_ event: Event, isRecordMode: Bool, isPickerOpen: Bool, _ open: inout Open) -> [Effect] {
         let back: Activity = isRecordMode ? .recording(.ready) : .annotating
         switch event {
         case .escape:
@@ -299,13 +363,13 @@ struct SessionFlow: Equatable {
             open.activity = back
             return [.applySource, .stopPicking]
         case .holdEnded:
-            return endHold()
+            return endHold(&open)
         case .otherAppInFront:
-            return isRecordMode ? [] : pauseForOtherApp()
+            return isRecordMode ? [] : pauseForOtherApp(&open)
         case .scopeAppInFront:
-            return endOtherAppPause()
+            return endOtherAppPause(&open)
         case .ended:
-            mode = .idle
+            leaving = .idle
             return [.endSession]
         case .clipStarted, .clipFinished:
             return [.dropClip]
@@ -314,28 +378,28 @@ struct SessionFlow: Equatable {
         }
     }
 
-    private mutating func handleOpen(_ event: Event) -> [Effect] {
+    private mutating func handleOpen(_ event: Event, _ open: inout Open) -> [Effect] {
         switch event {
         case .begin:
             return []
         case .ended:
-            mode = .idle
+            leaving = .idle
             return [.endSession]
 
         case .escape:
-            return escape()
+            return escape(&open)
 
         case .togglePause:
-            return togglePause()
+            return togglePause(&open)
 
         case .resume:
             guard open.activity == .annotating else {
                 return []
             }
-            return open.pauses.contains(.user) ? togglePause() : endOtherAppPause()
+            return open.pauses.contains(.user) ? togglePause(&open) : endOtherAppPause(&open)
 
         case .startShortcut:
-            return open.activity == .annotating && open.pauses.contains(.user) ? togglePause() : [.showHUD]
+            return open.activity == .annotating && open.pauses.contains(.user) ? togglePause(&open) : [.showHUD]
 
         case .requestClearAll:
             guard notes > 0 else {
@@ -345,25 +409,31 @@ struct SessionFlow: Equatable {
             return []
 
         case .requestCancel:
-            guard notes > 0 || holdsClip else {
-                return [.clearNotice, .cancelSession]
-            }
-            open.question = .cancelSession
-            return [.clearNotice]
+            return requestCancel(&open)
 
-        case .askRestore:
+        case .restore:
+            // Into the session on screen, as for choosing a source; notes on screen ask first.
+            guard open.canPick else {
+                return []
+            }
+            guard notes > 0 else {
+                return closePanel(&open) + [.restoreDrafts]
+            }
             open.question = .restore
             return []
 
+        case .openBrowser:
+            // The browser limits the session to its window, as choosing it does.
+            guard open.canPick else {
+                return []
+            }
+            return [.openBrowser]
+
         case .confirm:
-            return confirm()
+            return confirm(&open)
 
         case .dismissConfirmation:
-            if open.question == .discardComment {
-                return keepWriting()
-            }
-            open.question = nil
-            return []
+            return dismiss(&open)
 
         case .holdBegan:
             // Not while typing a comment, where these keys are for the text.
@@ -374,17 +444,17 @@ struct SessionFlow: Equatable {
             return [.plainClicksOn, .applyPause]
 
         case .holdEnded:
-            return endHold()
+            return endHold(&open)
 
         case .otherAppInFront:
             // Recording mode records whatever app is in front.
             guard open.activity == .annotating else {
                 return []
             }
-            return pauseForOtherApp()
+            return pauseForOtherApp(&open)
 
         case .scopeAppInFront:
-            return endOtherAppPause()
+            return endOtherAppPause(&open)
 
         case .openComment:
             guard open.panel != .comment else {
@@ -395,35 +465,24 @@ struct SessionFlow: Equatable {
             return closes + [.showComment]
 
         case .clickAway:
-            guard open.panel == .comment, open.question != .discardComment else {
+            guard open.panel == .comment else {
                 return []
             }
             // A shape is worth keeping without words; words are not thrown away unasked.
             if commentIsOnDrawing, !commentHasText {
-                return handle(.submitComment)
+                return submitComment(&open)
             }
-            return leaveComment()
+            return leaveComment(&open)
 
         case .submitComment:
-            guard open.panel == .comment else {
-                return []
-            }
-            open.panel = nil
-            open.question = nil
-            return [.saveComment]
+            return submitComment(&open)
 
         case .closeComment:
             guard open.panel == .comment else {
                 return []
             }
             open.panel = nil
-            // A comment that asked first had paused annotating.
-            guard open.question == .discardComment else {
-                return [.closeComposer]
-            }
-            open.question = nil
-            open.pauses.remove(.user)
-            return [.closeComposer, .applyPause]
+            return [.closeComposer]
 
         case .openPreview:
             guard open.panel != .comment else {
@@ -433,11 +492,7 @@ struct SessionFlow: Equatable {
             return [.showPreview]
 
         case .closePreview:
-            guard open.panel == .preview else {
-                return []
-            }
-            open.panel = nil
-            return [.closePreview]
+            return closePreview(&open)
 
         case .toggleList:
             return [.toggleList]
@@ -448,9 +503,9 @@ struct SessionFlow: Equatable {
             }
             // A comment with text asks first, like leaving it any other way.
             if open.panel == .comment, commentHasText {
-                return leaveComment()
+                return leaveComment(&open)
             }
-            let closes = closePanel()
+            let closes = closePanel(&open)
             open.isDrawing = true
             return closes + [.showCanvas]
 
@@ -464,23 +519,19 @@ struct SessionFlow: Equatable {
             return open.isDrawing ? [.redoShape] : []
 
         case .finishDrawing:
-            guard open.isDrawing else {
-                return []
-            }
-            open.isDrawing = false
-            return [.keepDrawing]
+            return finishDrawing(&open)
 
         case .toggleRecordingMode:
             if case .recording = open.activity {
-                return leaveRecording()
+                return leaveRecording(&open)
             }
-            return enterRecording()
+            return enterRecording(&open)
 
         case .record:
-            return record()
+            return record(&open)
 
         case .stop:
-            guard case .recording(let clip) = open.activity, clip == .recording || clip == .paused else {
+            guard open.clipInProgress else {
                 return []
             }
             open.activity = .recording(.finishing(operation: nextOperation(), thenSend: false))
@@ -491,7 +542,7 @@ struct SessionFlow: Equatable {
                 return [.dropClip]
             }
             open.activity = .recording(.recording)
-            return []
+            return [.adoptClip]
 
         case .clipStartFailed(let operation):
             guard open.activity == .recording(.starting(operation: operation)) else {
@@ -502,7 +553,7 @@ struct SessionFlow: Equatable {
 
         case .captureStopped:
             // The source went away: the clip ends at its last frame and goes to the list.
-            guard case .recording(let clip) = open.activity, clip == .recording || clip == .paused else {
+            guard open.clipInProgress else {
                 return []
             }
             open.activity = .recording(.finishing(operation: nextOperation(), thenSend: false))
@@ -514,7 +565,7 @@ struct SessionFlow: Equatable {
             }
             open.activity = .recording(.ready)
             notes += 1
-            return [.keepClip] + (thenSend ? handle(.send) : [])
+            return [.keepClip] + (thenSend ? send(&open) : [])
 
         case .clipFailed(let operation):
             guard case .recording(.finishing(operation, _)) = open.activity else {
@@ -524,14 +575,13 @@ struct SessionFlow: Equatable {
             return [.showSaveFailure]
 
         case .windowButton:
-            guard canPick else {
+            guard open.canPick else {
                 return []
             }
             if open.panel == .comment, commentHasText {
-                return leaveComment()
+                return leaveComment(&open)
             }
-            let closes = finishDrawingAndPanel()
-            open.question = nil
+            let closes = finishDrawingAndPanel(&open)
             open.activity = .picking(isRecordMode: open.activity != .annotating, isPickerOpen: false)
             return closes + [.startPicking]
 
@@ -539,39 +589,55 @@ struct SessionFlow: Equatable {
             return []
 
         case .send:
-            return send()
+            return send(&open)
 
         case .sendFinished, .sendFailed, .sentShown, .pushFailed:
             return []
         }
     }
 
-    private mutating func escape() -> [Effect] {
+    private mutating func escape(_ open: inout Open) -> [Effect] {
         if open.panel == .comment {
-            return open.question == .discardComment ? keepWriting() : leaveComment()
-        }
-        if open.panel == .preview {
-            return handle(.closePreview)
-        }
-        if open.isDrawing {
-            return handle(.finishDrawing)
+            return open.question == .discardComment ? keepWriting(&open) : leaveComment(&open)
         }
         if open.question != nil {
-            return handle(.dismissConfirmation)
+            return dismiss(&open)
+        }
+        if open.panel == .preview {
+            return closePreview(&open)
+        }
+        if open.isDrawing {
+            return finishDrawing(&open)
         }
         if case .recording = open.activity {
-            return leaveRecording()
+            return leaveRecording(&open)
         }
         if open.pauses.isEmpty {
             open.pauses.insert(.user)
             return [.applyPause, .showEscapeNotice, .keepKeyboard]
         }
-        return handle(.requestCancel)
+        return requestCancel(&open)
+    }
+
+    private func requestCancel(_ open: inout Open) -> [Effect] {
+        guard notes > 0 || open.holdsClip else {
+            return [.clearNotice, .cancelSession]
+        }
+        open.question = .cancelSession
+        return [.clearNotice]
+    }
+
+    private func dismiss(_ open: inout Open) -> [Effect] {
+        if open.question == .discardComment {
+            return keepWriting(&open)
+        }
+        open.question = nil
+        return []
     }
 
     /// The pause command, the same from the HUD, the menu and the shortcut: annotating pauses
     /// and resumes; recording mode pauses and resumes the clip.
-    private mutating func togglePause() -> [Effect] {
+    private func togglePause(_ open: inout Open) -> [Effect] {
         switch open.activity {
         case .recording(.recording):
             open.activity = .recording(.paused)
@@ -584,11 +650,8 @@ struct SessionFlow: Equatable {
         case .annotating:
             break
         }
-        if open.question == .discardComment {
-            return keepWriting()
-        }
         // The canvas would keep the mouse from the screen that a pause gives back.
-        let finished = handle(.finishDrawing)
+        let finished = finishDrawing(&open)
         if open.pauses.contains(.user) {
             // Annotate pressed on purpose resumes, whatever app was last in front.
             open.pauses.remove(.user)
@@ -600,64 +663,59 @@ struct SessionFlow: Equatable {
     }
 
     /// The leading button in recording mode: starts a clip, pauses it, resumes it.
-    private mutating func record() -> [Effect] {
+    private mutating func record(_ open: inout Open) -> [Effect] {
         switch open.activity {
         case .recording(.ready):
             open.activity = .recording(.starting(operation: nextOperation()))
             return [.startClip]
         case .recording(.recording), .recording(.paused):
-            return togglePause()
+            return togglePause(&open)
         default:
             return []
         }
     }
 
-    private mutating func enterRecording() -> [Effect] {
+    private func enterRecording(_ open: inout Open) -> [Effect] {
         guard open.activity == .annotating else {
             return []
         }
         // A comment with text asks first, as Draw does.
         if open.panel == .comment, commentHasText {
-            return leaveComment()
+            return leaveComment(&open)
         }
-        let closes = finishDrawingAndPanel()
-        open.question = nil
+        let closes = finishDrawingAndPanel(&open)
         open.activity = .recording(.ready)
         return closes + [.enterRecording]
     }
 
     /// Back to annotating; a clip that is not stopped is lost, so that asks first. A clip being
     /// saved finishes first.
-    private mutating func leaveRecording() -> [Effect] {
-        guard case .recording(let clip) = open.activity else {
-            return []
-        }
-        switch clip {
-        case .recording, .paused:
+    private func leaveRecording(_ open: inout Open) -> [Effect] {
+        switch open.activity {
+        case .recording(.recording), .recording(.paused):
             open.question = .discardRecording
             return []
-        case .finishing:
+        case .recording(.ready), .recording(.starting):
+            return exitRecording(&open)
+        default:
             return []
-        case .ready, .starting:
-            return exitRecording()
         }
     }
 
-    private mutating func exitRecording() -> [Effect] {
-        let closes = closePanel()
-        open.question = nil
+    private func exitRecording(_ open: inout Open) -> [Effect] {
+        let closes = closePanel(&open)
         open.activity = .annotating
         return closes + [.exitRecording, .applyPause]
     }
 
-    private mutating func confirm() -> [Effect] {
+    private func confirm(_ open: inout Open) -> [Effect] {
         guard let asked = open.question else {
             return []
         }
         open.question = nil
         switch asked {
         case .clearAll:
-            return closePanel() + [.clearDrafts]
+            return closePanel(&open) + [.clearDrafts]
         case .cancelSession:
             return [.cancelSession]
         case .discardComment:
@@ -665,43 +723,57 @@ struct SessionFlow: Equatable {
             open.panel = nil
             return [.closeComposer, .applyPause]
         case .discardRecording:
-            return exitRecording()
+            return exitRecording(&open)
         case .restore:
-            return [.restoreDrafts]
+            return closePanel(&open) + [.restoreDrafts]
         }
     }
 
     /// Send, ⌘↩ and a comment's send: a comment goes to the list first, and a clip in progress
     /// is stopped and saved first; then the report is made.
-    private mutating func send() -> [Effect] {
-        guard canSend else {
+    private mutating func send(_ open: inout Open) -> [Effect] {
+        guard case .open = mode, !open.activity.isPicking, open.question == nil else {
             return []
         }
+        switch open.activity {
+        case .recording(.starting), .recording(.finishing):
+            return []
+        default:
+            break
+        }
+        var effects: [Effect] = []
         if open.panel == .comment {
             // The comment becomes a note, or edits one.
-            let saved = handle(.submitComment)
+            effects = submitComment(&open)
             notes = max(notes, 1)
-            return saved + handle(.send)
         }
-        if case .recording(let clip) = open.activity, clip == .recording || clip == .paused {
+        if open.clipInProgress {
             open.activity = .recording(.finishing(operation: nextOperation(), thenSend: true))
-            return [.finishClip]
+            return effects + [.finishClip]
         }
         guard notes > 0 else {
+            return effects
+        }
+        effects += finishDrawingAndPanel(&open)
+        leaving = .sending(operation: nextOperation(), returnTo: open)
+        return effects + [.startSend]
+    }
+
+    private func submitComment(_ open: inout Open) -> [Effect] {
+        guard open.panel == .comment else {
             return []
         }
-        let closes = finishDrawingAndPanel()
-        var returnTo = open
-        returnTo.question = nil
-        mode = .sending(operation: nextOperation(), returnTo: returnTo)
-        return closes + [.startSend]
+        open.panel = nil
+        open.question = nil
+        return [.saveComment]
     }
 
     /// Leaving a comment with text asks first, and pauses, so that the screen can be used
     /// meanwhile; the comment waits. An empty comment just goes.
-    private mutating func leaveComment() -> [Effect] {
+    private func leaveComment(_ open: inout Open) -> [Effect] {
         guard commentHasText else {
-            return handle(.closeComment)
+            open.panel = nil
+            return [.closeComposer]
         }
         open.question = .discardComment
         if open.activity == .annotating {
@@ -710,14 +782,30 @@ struct SessionFlow: Equatable {
         return [.applyPause]
     }
 
-    private mutating func keepWriting() -> [Effect] {
+    private func keepWriting(_ open: inout Open) -> [Effect] {
         open.question = nil
         open.pauses.remove(.user)
         return [.applyPause]
     }
 
+    private func closePreview(_ open: inout Open) -> [Effect] {
+        guard open.panel == .preview else {
+            return []
+        }
+        open.panel = nil
+        return [.closePreview]
+    }
+
+    private func finishDrawing(_ open: inout Open) -> [Effect] {
+        guard open.isDrawing else {
+            return []
+        }
+        open.isDrawing = false
+        return [.keepDrawing]
+    }
+
     /// Closes the preview, or an empty comment; a comment with text is resolved before.
-    private mutating func closePanel() -> [Effect] {
+    private func closePanel(_ open: inout Open) -> [Effect] {
         switch open.panel {
         case .preview:
             open.panel = nil
@@ -730,16 +818,11 @@ struct SessionFlow: Equatable {
         }
     }
 
-    private mutating func finishDrawingAndPanel() -> [Effect] {
-        let closes = closePanel()
-        guard open.isDrawing else {
-            return closes
-        }
-        open.isDrawing = false
-        return closes + [.keepDrawing]
+    private func finishDrawingAndPanel(_ open: inout Open) -> [Effect] {
+        closePanel(&open) + finishDrawing(&open)
     }
 
-    private mutating func endHold() -> [Effect] {
+    private func endHold(_ open: inout Open) -> [Effect] {
         guard open.pauses.contains(.hold) else {
             return []
         }
@@ -747,7 +830,7 @@ struct SessionFlow: Equatable {
         return [.plainClicksOff, .applyPause]
     }
 
-    private mutating func pauseForOtherApp() -> [Effect] {
+    private func pauseForOtherApp(_ open: inout Open) -> [Effect] {
         guard !open.pauses.contains(.otherApp) else {
             return []
         }
@@ -755,11 +838,20 @@ struct SessionFlow: Equatable {
         return [.applyPause, .showOtherAppNotice]
     }
 
-    private mutating func endOtherAppPause() -> [Effect] {
+    private func endOtherAppPause(_ open: inout Open) -> [Effect] {
         guard open.pauses.contains(.otherApp) else {
             return []
         }
         open.pauses.remove(.otherApp)
         return [.applyPause]
+    }
+}
+
+extension SessionFlow.Activity {
+    var isPicking: Bool {
+        if case .picking = self {
+            return true
+        }
+        return false
     }
 }

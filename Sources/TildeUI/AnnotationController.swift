@@ -175,8 +175,11 @@ final class AnnotationController: ObservableObject {
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
-        clips.dispatch = { [weak self] event in
-            self?.dispatch(event) ?? []
+        clips.dispatch = { [weak self] event, data in
+            self?.dispatch(event, with: data)
+        }
+        clips.keep = { [weak self] draft in
+            self?.drafts.append(draft)
         }
         return clips
     }()
@@ -484,10 +487,9 @@ final class AnnotationController: ObservableObject {
                 dispatch(.sendFailed(operation))
                 return
             }
-            guard dispatch(.sendFinished(operation)).contains(.finishSend) else {
-                return
-            }
-            finishSend(session, feedback: feedback, folder: folder)
+            dispatch(.sendFinished(operation), with: [.finishSend: { [self] in
+                finishSend(session, feedback: feedback, folder: folder)
+            }])
         }
     }
 
@@ -512,10 +514,17 @@ final class AnnotationController: ObservableObject {
         }
         Task {
             let failed = await Self.push(folder, to: machines, log: log)
-            if !failed.isEmpty, dispatch(.pushFailed).contains(.showPushFailure) {
+            guard !failed.isEmpty else {
+                return
+            }
+            dispatch(.pushFailed, with: [.showPushFailure: { [self] in
                 sentStatus = .failed
                 sentText = RemotePush.failure(failed)
-            }
+                if case .sent(let operation) = mode {
+                    hud.show()
+                    hideConfirmation(operation, after: 4)
+                }
+            }])
         }
     }
 
@@ -582,7 +591,7 @@ final class AnnotationController: ObservableObject {
     /// paused, or the session on screen.
     func annotateInBrowser() {
         if session != nil {
-            openBrowser(at: nil)
+            dispatch(.openBrowser)
             return
         }
         scopesNextLocalSessionToBrowser = true
@@ -898,10 +907,10 @@ final class AnnotationController: ObservableObject {
     }
 
     /// The one way the session's mode changes: the flow decides, with the facts it reads kept
-    /// current, then its effects run. Returns the effects, so a caller that holds data for one
-    /// (a comment, a preview, a source, a report, a clip) carries it out when it is there.
-    @discardableResult
-    func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = []) -> [SessionFlow.Effect] {
+    /// current, then its effects run. `with` gives the data of the effects that need it, as
+    /// what to do for them, such as showing the comment box that the caller built; one the
+    /// flow does not return is dropped.
+    func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = [], with data: [SessionFlow.Effect: () -> Void] = [:]) {
         var next = flow
         next.notes = drafts.count
         next.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -917,15 +926,18 @@ final class AnnotationController: ObservableObject {
             watchConfirmationKeys()
         }
         for effect in effects {
-            run(effect, holdFlag: holdFlag)
+            if let withData = data[effect] {
+                withData()
+            } else {
+                run(effect, holdFlag: holdFlag)
+            }
         }
-        return effects
     }
 
     private func run(_ effect: SessionFlow.Effect, holdFlag: NSEvent.ModifierFlags) {
         switch effect {
-        // The caller of `dispatch` carries these out with the data it holds.
-        case .showComment, .showPreview, .applySource, .finishSend:
+        // Their data comes with the event that returns them, if at all.
+        case .showComment, .showPreview, .applySource, .finishSend, .adoptClip, .keepClip, .dropClip, .showPushFailure:
             break
         case .applyPause: applyPause()
         case .closeComposer: discardComposer()
@@ -1000,11 +1012,6 @@ final class AnnotationController: ObservableObject {
             if case .finishing(let operation, _) = recording {
                 clips.finish(operation: operation)
             }
-        case .keepClip:
-            if let draft = clips.arrivedDraft {
-                drafts.append(draft)
-            }
-        case .dropClip: clips.dropArrived()
         case .showStartFailure: show(notice: "Could not start recording")
         case .showSaveFailure: show(notice: "Could not save the recording")
         case .showSourceGone: show(notice: "Recording stopped")
@@ -1017,16 +1024,12 @@ final class AnnotationController: ObservableObject {
             sourcePicker.stopLoading()
             pickingChanged()
         case .openPicker: openPicker()
+        case .openBrowser: openBrowser(at: nil)
         case .closePicker:
             hover = nil
             sourcePicker.stopLoading()
         case .startSend: startSend()
         case .showSendFailure: show(notice: "Could not save the report")
-        case .showPushFailure:
-            if case .sent(let operation) = mode {
-                hud.show()
-                hideConfirmation(operation, after: 4)
-            }
         }
     }
 
@@ -1578,13 +1581,9 @@ final class AnnotationController: ObservableObject {
 
         if session != nil {
             // Notes on screen are replaced only after the HUD asks.
-            if drafts.isEmpty {
-                replaceDrafts(with: record)
-            } else {
-                restoreRecord = record
-                dispatch(.askRestore)
-                placeHUD()
-            }
+            restoreRecord = record
+            dispatch(.restore)
+            placeHUD()
             return
         }
         markRestored(record)
@@ -1606,7 +1605,6 @@ final class AnnotationController: ObservableObject {
     /// Tilde's browser.
     private func replaceDrafts(with record: SessionRecord) {
         markRestored(record)
-        closeComposer()
         if let session {
             drafts = Self.drafts(from: record, archive: archive, into: session.id)
         }
@@ -1933,14 +1931,13 @@ final class AnnotationController: ObservableObject {
     /// The choice: a window limits the session to it, as clicking it on screen does; a screen
     /// or phone lifts the limit. A phone only records.
     func choose(_ source: RecordingSource) {
-        guard dispatch(.choose(drawable: source.isDrawable)).contains(.applySource) else {
-            return
-        }
-        if case .window(let window) = source {
-            setSource(.window(picker.currentWindow(number: window.number) ?? window))
-        } else {
-            setSource(source)
-        }
+        dispatch(.choose(drawable: source.isDrawable), with: [.applySource: { [self] in
+            if case .window(let window) = source {
+                setSource(.window(picker.currentWindow(number: window.number) ?? window))
+            } else {
+                setSource(source)
+            }
+        }])
     }
 
     static func displayID(of screen: NSScreen?) -> CGDirectDisplayID? {
@@ -2299,11 +2296,24 @@ final class AnnotationController: ObservableObject {
         target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor? = nil,
         tracked: TrackedElement? = nil, pictureArea: CGRect? = nil, captures: Captures? = nil, drawingIDs: [String] = []
     ) {
-        // The session may have moved on while the target was picked.
-        guard dispatch(.openComment).contains(.showComment) else {
+        // The session may have moved on while the target was picked: then nothing opens.
+        var isShown = false
+        dispatch(.openComment, with: [.showComment: { [self] in
+            isShown = true
+            showComposer(
+                target: target, frame: frame, marker: marker, chip: chip, outline: outline, window: window, anchor: anchor, tracked: tracked,
+                pictureArea: pictureArea, captures: captures, drawingIDs: drawingIDs
+            )
+        }])
+        if !isShown {
             drawingPanel.remove(drawingIDs)
-            return
         }
+    }
+
+    private func showComposer(
+        target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor?,
+        tracked: TrackedElement?, pictureArea: CGRect?, captures: Captures?, drawingIDs: [String]
+    ) {
         let closeUpRect = Self.closeUpRect(frame: frame, outline: outline)
         let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
         let browser = self.browser
@@ -2408,13 +2418,12 @@ final class AnnotationController: ObservableObject {
                 return
             }
         }
-        guard dispatch(.openComment).contains(.showComment) else {
-            return
-        }
-        hover = nil
-        composer = .edit(id)
-        commentText = draft.annotation.comment
-        commentPanel.show(chip: draft.chip, isEditing: true, near: draft.marker, below: draft.annotation.frame)
+        dispatch(.openComment, with: [.showComment: { [self] in
+            hover = nil
+            composer = .edit(id)
+            commentText = draft.annotation.comment
+            commentPanel.show(chip: draft.chip, isEditing: true, near: draft.marker, below: draft.annotation.frame)
+        }])
     }
 
     /// The comment box's Return, and ⌘↩ there, which sends the whole report.
@@ -2482,7 +2491,18 @@ final class AnnotationController: ObservableObject {
         hideComposer()
     }
 
+    /// Notes change only while the session is on screen and its report is not being made.
+    var canEditNotes: Bool {
+        if case .open = mode {
+            return true
+        }
+        return false
+    }
+
     func deleteDraft(_ id: Draft.ID) {
+        guard canEditNotes else {
+            return
+        }
         if previewID == id {
             showAdjacentPreview(1)
             if previewID == id {
@@ -2541,16 +2561,18 @@ final class AnnotationController: ObservableObject {
         }
         confirmationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = event.keyCode
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
             let isAnswer = MainActor.assumeIsolated {
-                self?.handleConfirmationKey(keyCode) == true
+                self?.handleConfirmationKey(keyCode, modifiers: modifiers) == true
             }
             return isAnswer ? nil : event
         }
     }
 
-    /// Returns whether the key answered the question on screen.
-    func handleConfirmationKey(_ keyCode: UInt16) -> Bool {
-        guard confirmation != nil else {
+    /// Returns whether the key answered the question on screen: Esc, or ↩ alone. ⌘↩ is Send
+    /// and never answers.
+    func handleConfirmationKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) -> Bool {
+        guard confirmation != nil, modifiers.isEmpty else {
             return false
         }
         switch keyCode {
@@ -2611,13 +2633,12 @@ final class AnnotationController: ObservableObject {
                 return
             }
         }
-        guard dispatch(.openPreview).contains(.showPreview) else {
-            return
-        }
-        hover = nil
-        previewID = id
-        expandedPreviewImage = nil
-        previewPanel.show()
+        dispatch(.openPreview, with: [.showPreview: { [self] in
+            hover = nil
+            previewID = id
+            expandedPreviewImage = nil
+            previewPanel.show()
+        }])
     }
 
     /// Moves the preview by `step` drafts, wrapping around at either end. An enlarged
@@ -2649,6 +2670,9 @@ final class AnnotationController: ObservableObject {
     /// Keeps what was typed and saves it after a short pause: every change to the drafts redraws
     /// the HUD and the overlay, which must not happen on each key.
     func updateCommentSoon(_ id: Draft.ID, _ comment: String) {
+        guard canEditNotes else {
+            return
+        }
         typedComments[id] = comment
         typedCommentsTask?.cancel()
         typedCommentsTask = Task { [weak self] in
@@ -2669,7 +2693,7 @@ final class AnnotationController: ObservableObject {
     }
 
     func updateComment(_ id: Draft.ID, _ comment: String) {
-        guard let index = drafts.firstIndex(where: { $0.id == id }) else {
+        guard canEditNotes, let index = drafts.firstIndex(where: { $0.id == id }) else {
             return
         }
         drafts[index].annotation.comment = comment

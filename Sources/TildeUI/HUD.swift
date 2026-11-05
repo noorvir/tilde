@@ -1139,10 +1139,10 @@ private struct AnnotationRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             // A button's click does not reach the row's tap gesture, so Delete never opens the preview.
-            HUDButton(image: Image(systemName: "trash"), size: 26, isDestructive: true, help: "Delete this annotation") {
+            HUDButton(image: Image(systemName: "trash"), size: 26, isDestructive: true, help: "Delete this note") {
                 controller.deleteDraft(draft.id)
             }
-                .tildeTooltip("Delete this annotation")
+            .disabled(!controller.canEditNotes)
         }
         .padding(.leading, HUDMetrics.leadingInset)
         .padding(.trailing, HUDMetrics.trailingInset)

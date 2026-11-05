@@ -149,6 +149,7 @@ private struct NoteCard: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(isHovered ? 1 : 0)
+                .disabled(!controller.canEditNotes)
                 .help("Delete this note")
                 .accessibilityLabel("Delete note \(number)")
             }
@@ -158,6 +159,7 @@ private struct NoteCard: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.white)
                 .lineLimit(1...6)
+                .disabled(!controller.canEditNotes)
                 .onSubmit { controller.updateComment(draft.id, comment) }
                 .onChange(of: comment) { _, text in
                     controller.updateCommentSoon(draft.id, text)

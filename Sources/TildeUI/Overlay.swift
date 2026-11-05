@@ -225,7 +225,7 @@ final class OverlayView: NSView {
             return
         }
         if controller.confirmation != nil {
-            if event.keyCode == 36 {
+            if event.keyCode == 36, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
                 controller.confirm()
             }
             return

@@ -10,18 +10,16 @@ final class ClipRecorder {
     /// How long the clip in progress has recorded: `before` seconds until `since`, and on
     /// since then while it records. It changes only with the flow's clip, which redraws the HUD.
     var clock = (since: Date(), before: TimeInterval(0))
-    /// Hands a result to the session's flow, runs its effects and returns them.
-    var dispatch: (SessionFlow.Event) -> [SessionFlow.Effect] = { _ in [] }
+    /// Hands a result to the session's flow, with what to do for each effect it may return.
+    var dispatch: (SessionFlow.Event, [SessionFlow.Effect: () -> Void]) -> Void = { _, _ in }
+    /// Puts a stopped clip in the list.
+    var keep: (Draft) -> Void = { _ in }
 
     private var recorder: ScreenRecorder?
     /// What the clip in progress shows: its name, such as "Safari window", and its frame.
     private var recorded = (name: "", frame: CGRect.zero)
-    /// A recorder or a stopped clip that has just arrived, while the flow decides on it.
-    private var arrived: Arrived?
-    private enum Arrived {
-        case recorder(ScreenRecorder)
-        case clip(Draft)
-    }
+    /// Clips whose source went away before their start was taken; they end once it is.
+    private var endedEarly: Set<URL> = []
     private let log = Logger(subsystem: "dev.tilde.app", category: "recording")
 
     /// Starts recording `source` into `video` for the flow's start `operation`. `name` and
@@ -35,18 +33,22 @@ final class ClipRecorder {
         Task {
             do {
                 let started = try await ScreenRecorder.start(source, to: video, browserWindow: browserWindow, onSourceEnded: sourceEnded)
-                arrived = .recorder(started)
-                defer { arrived = nil }
-                guard !dispatch(.clipStarted(operation)).contains(.dropClip) else {
-                    return
+                dispatch(.clipStarted(operation), [
+                    .adoptClip: { [self] in
+                        recorder = started
+                        recorded = (name, frame)
+                        clock = (Date(), 0)
+                        log.notice("recording \(name, privacy: .public)")
+                    },
+                    .dropClip: { started.discard() },
+                ])
+                // A source that went away meanwhile ends the clip now that it is taken.
+                if endedEarly.remove(video) != nil, recorder?.video == video {
+                    dispatch(.captureStopped, [:])
                 }
-                recorder = started
-                recorded = (name, frame)
-                clock = (Date(), 0)
-                log.notice("recording \(name, privacy: .public)")
             } catch {
                 log.error("could not start recording: \(String(describing: error), privacy: .public)")
-                _ = dispatch(.clipStartFailed(operation))
+                dispatch(.clipStartFailed(operation), [:])
             }
         }
     }
@@ -74,13 +76,15 @@ final class ClipRecorder {
                 let target = Target.recording(video: clip.video, seconds: clip.seconds, source: recorded.name)
                 let annotation = Annotation(comment: "", target: target, frame: recorded.frame, image: clip.poster, contextImage: nil)
                 let captures = Captures(image: clip.poster, contextImage: nil)
-                arrived = .clip(Draft(annotation: annotation, marker: .zero, chip: "Recording \(clipLength(clip.seconds))", capture: Task { captures }))
-                defer { arrived = nil }
-                _ = dispatch(.clipFinished(operation))
+                let draft = Draft(annotation: annotation, marker: .zero, chip: "Recording \(clipLength(clip.seconds))", capture: Task { captures })
+                dispatch(.clipFinished(operation), [
+                    .keepClip: { [self] in keep(draft) },
+                    .dropClip: { Self.deleteVideo(of: draft) },
+                ])
                 log.notice("recorded \(Int(clip.seconds), privacy: .public) s")
             } catch {
                 log.error("could not finish recording: \(String(describing: error), privacy: .public)")
-                _ = dispatch(.clipFailed(operation))
+                dispatch(.clipFailed(operation), [:])
             }
         }
     }
@@ -91,29 +95,14 @@ final class ClipRecorder {
         recorder = nil
     }
 
-    /// The stopped clip that just arrived, for the flow's `keepClip`.
-    var arrivedDraft: Draft? {
-        if case .clip(let draft) = arrived {
-            return draft
-        }
-        return nil
-    }
-
-    /// Throws away what just arrived, for the flow's `dropClip`.
-    func dropArrived() {
-        switch arrived {
-        case .recorder(let recorder): recorder.discard()
-        case .clip(let draft): Self.deleteVideo(of: draft)
-        case nil: break
-        }
-    }
-
-    /// The recorded window, display or phone went away: the clip ends at its last frame.
+    /// The recorded window, display or phone went away: the clip ends at its last frame. Before
+    /// its start is taken, it ends right after.
     private func sourceEnded(_ video: URL) {
         guard recorder?.video == video else {
+            endedEarly.insert(video)
             return
         }
-        _ = dispatch(.captureStopped)
+        dispatch(.captureStopped, [:])
     }
 
     /// Deletes the video of a recording's draft; other drafts have no file.
