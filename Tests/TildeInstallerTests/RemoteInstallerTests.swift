@@ -85,6 +85,48 @@ struct RemoteInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/tilde").path))
     }
 
+    /// On a machine linked by its socket, each app starts `tilde-proxy` with the socket as a
+    /// stdio server, in its own words, and a reinstall replaces an older URL entry.
+    @Test func aProxiedMachineGetsStdioEntriesThatReplaceTheURL() throws {
+        let home = try home()
+        for folder in [".codex", ".cursor", ".gemini", ".config/devin", "Library/Application Support/Code/User"] {
+            try make(home, folder)
+        }
+        try "{}".write(to: home.appendingPathComponent(".gemini/settings.json"), atomically: true, encoding: .utf8)
+        try #"{ "mcpServers": { "tilde": { "type": "http", "url": "http://127.0.0.1:7319/mcp" } }, "other": 1 }"#
+            .write(to: home.appendingPathComponent(".claude.json"), atomically: true, encoding: .utf8)
+        let installer = try Installer.remote(mcpURL: "http://127.0.0.1:7319/mcp", authorization: "Bearer secret", proxied: true, run: run(home: home))
+        let proxy = home.path + "/.tilde/bin/tilde-proxy"
+        let socket = home.path + "/.tilde/tilde.sock"
+        #expect(installer.environment.proxy == [proxy, socket])
+        #expect(installer.status(of: .claudeCode) == .notInstalled)
+
+        for harness in Harness.allCases {
+            _ = installer.install(harness)
+            #expect(installer.status(of: harness) == .installed, "\(harness)")
+        }
+
+        func entry(_ path: String, _ keys: [String]) throws -> [String: Any] {
+            var value: Any = try JSONSerialization.jsonObject(with: Data(contentsOf: home.appendingPathComponent(path)))
+            for key in keys {
+                value = try #require((value as? [String: Any])?[key])
+            }
+            return try #require(value as? [String: Any])
+        }
+        let stdio: [String: Any] = ["command": proxy, "args": [socket]]
+        let typed = stdio.merging(["type": "stdio"]) { $1 }
+        #expect(NSDictionary(dictionary: try entry(".claude.json", ["mcpServers", "tilde"])) == NSDictionary(dictionary: typed))
+        #expect(NSDictionary(dictionary: try entry("Library/Application Support/Code/User/mcp.json", ["servers", "tilde"])) == NSDictionary(dictionary: typed))
+        for path in [".cursor/mcp.json", ".gemini/settings.json", ".config/devin/mcp_config.json"] {
+            #expect(NSDictionary(dictionary: try entry(path, ["mcpServers", "tilde"])) == NSDictionary(dictionary: stdio), "\(path)")
+        }
+        #expect(try entry(".claude.json", [])["other"] as? Int == 1)
+        let codex = try text(home, ".codex/config.toml")
+        #expect(codex.contains("command = \"\(proxy)\"\nargs = [\"\(socket)\"]\ndefault_tools_approval_mode = \"approve\""))
+        #expect(!codex.contains("Bearer"))
+        #expect(!codex.contains("url ="))
+    }
+
     @Test func aConfigWithTheTokenIsForItsOwnerOnly() throws {
         let home = try home()
         try make(home, ".codex")

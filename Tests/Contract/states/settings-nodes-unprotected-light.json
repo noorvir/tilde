@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    920,
+    805
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "agents",
+    "nodes": [
+      {
+        "host": "mac-mini",
+        "status": "linked",
+        "isReachable": true,
+        "agents": [
+          "claude-code",
+          "codex"
+        ]
+      },
+      {
+        "host": "bsd-box",
+        "status": "linked",
+        "isReachable": true,
+        "isProtected": false
+      }
+    ]
+  }
+}
