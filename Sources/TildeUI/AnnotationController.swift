@@ -246,6 +246,9 @@ final class AnnotationController: ObservableObject {
 
     /// Where sessions are saved while in progress and kept afterwards.
     let archive: SessionArchive
+    /// Where sent reports go, and where a report without an agent is copied; tests give their own.
+    var inbox = inboxRoot
+    var pasteboard = NSPasteboard.general
     /// When the session on screen started, for its saved record.
     private var sessionStarted = Date()
     private var saveTask: Task<Void, Never>?
@@ -477,7 +480,8 @@ final class AnnotationController: ObservableObject {
             let feedback = Feedback(annotations: Self.groupedByPage(annotations))
             let folder: URL
             do {
-                folder = try await Task.detached { try saveToInbox(feedback, sessionID: session.id, node: session.node) }.value
+                let inbox = self.inbox
+                folder = try await Task.detached { try saveToInbox(feedback, sessionID: session.id, node: session.node, root: inbox) }.value
             } catch {
                 log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
                 dispatch(.sendFailed(operation))
@@ -1034,8 +1038,8 @@ final class AnnotationController: ObservableObject {
     /// Copies the report of a session without an agent.
     private func copyReport(_ feedback: Feedback, folder: URL) {
         let text = reportText(for: feedback, folder: folder, linkFolder: homeRelativePath(folder))
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     /// Sends a report's folder to each machine; the machines it did not reach.
@@ -1584,6 +1588,7 @@ final class AnnotationController: ObservableObject {
             } else {
                 restoreRecord = record
                 dispatch(.askRestore)
+                placeHUD()
             }
             return
         }
@@ -2700,6 +2705,7 @@ extension AnnotationController {
         pauseNotice: PauseNotice? = nil,
         restoreRecord: SessionRecord? = nil,
         sentText: String = "",
+        notice: String? = nil,
         clipClock: (since: Date, before: TimeInterval) = (Date(), 0)
     ) {
         self.session = session
@@ -2713,6 +2719,7 @@ extension AnnotationController {
         self.pauseNotice = pauseNotice
         self.restoreRecord = restoreRecord
         self.sentText = sentText
+        self.notice = notice
         clips.clock = clipClock
         isHUDShown = true
     }

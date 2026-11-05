@@ -1,8 +1,8 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Warnings are errors: in Swift 5 mode an API newer than macOS 14, such as a 15-only
-// conformance, is only a warning, and it crashes at run time on 14.
+// Warnings are errors in everything that ships: in Swift 5 mode an API newer than macOS 14,
+// such as a 15-only conformance, is only a warning, and it crashes at run time on 14.
 let strict: [SwiftSetting] = [.unsafeFlags(["-warnings-as-errors"])]
 
 let package = Package(
@@ -35,13 +35,13 @@ let package = Package(
         // tilde-ui-check, which uses no code of Tilde, compares the pictures. See Tests/Contract.
         .executableTarget(name: "tilde-state", dependencies: ["TildeCore", "TildeInstaller", "TildeUI"], swiftSettings: strict),
         .executableTarget(name: "tilde-ui-check", swiftSettings: strict),
-        .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill"], swiftSettings: strict),
-        .testTarget(name: "TildeInstallerTests", dependencies: ["TildeInstaller", "TildeSkill"], swiftSettings: strict),
+        .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill"]),
+        .testTarget(name: "TildeInstallerTests", dependencies: ["TildeInstaller", "TildeSkill"]),
         // Snapshot and behaviour tests of the UI; they render offscreen and need a logged-in Mac.
-        .testTarget(name: "TildeUITests", dependencies: ["TildeCore", "TildeUI"], swiftSettings: strict),
+        .testTarget(name: "TildeUITests", dependencies: ["TildeCore", "TildeUI"]),
         // Black-box UX specs: they import nothing of Tilde and drive the built app like a user,
         // so they survive a rewrite. They take over the screen; run them with scripts/ux.sh.
-        .testTarget(name: "TildeUXTests", exclude: ["README.md", "Baselines"], swiftSettings: strict),
+        .testTarget(name: "TildeUXTests", exclude: ["README.md", "Baselines"]),
     ],
     swiftLanguageModes: [.v5]
 )

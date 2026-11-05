@@ -120,7 +120,7 @@ public final class HTTPServer: @unchecked Sendable {
                 buffer.append(data)
             }
 
-            switch self.parse(buffer) {
+            switch Self.parse(buffer, maxBodySize: self.maxBodySize) {
             case .incomplete where error == nil && !isComplete:
                 self.receive(on: connection, buffer: buffer, reading: reading)
             case .incomplete:
@@ -139,13 +139,14 @@ public final class HTTPServer: @unchecked Sendable {
         }
     }
 
-    private enum ParseResult {
+    enum ParseResult {
         case incomplete
         case invalid(status: Int)
         case request(HTTPRequest)
     }
 
-    private func parse(_ buffer: Data) -> ParseResult {
+    /// A request from the bytes so far, or whether more must come, or the error status.
+    static func parse(_ buffer: Data, maxBodySize: Int) -> ParseResult {
         guard let headerEnd = buffer.range(of: Data("\r\n\r\n".utf8)) else {
             return buffer.count > 64 * 1024 ? .invalid(status: 431) : .incomplete
         }

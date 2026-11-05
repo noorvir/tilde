@@ -341,11 +341,11 @@ struct SessionFlow: Equatable {
                 return [.clearNotice, .cancelSession]
             }
             open.question = .cancelSession
-            return [.clearNotice, .showHUD]
+            return [.clearNotice]
 
         case .askRestore:
             open.question = .restore
-            return [.showHUD]
+            return []
 
         case .confirm:
             return confirm()

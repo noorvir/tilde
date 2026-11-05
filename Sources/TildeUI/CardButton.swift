@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// A button of the preview card and the source picker: an icon, an optional title, and its
-/// help as the tooltip and the accessible name, such as "‹ Back" or Delete.
+/// help as the tooltip. Its accessible name is its title, or for an icon alone its help; a
+/// titled one has its help as the hint.
 struct CardButton: View {
     let symbol: String
     var title: String?
@@ -29,7 +30,8 @@ struct CardButton: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .tildeTooltip(help)
-        .accessibilityLabel(help)
+        .accessibilityLabel(title ?? help)
+        .accessibilityHint(title == nil ? "" : help)
     }
     private var foreground: Color {
         if isDestructive {

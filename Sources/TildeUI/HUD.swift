@@ -486,7 +486,7 @@ struct HUDView: View {
             SendButton(copies: controller.session?.isLocal == true, action: controller.send)
                 .disabled(!flow.canSend)
                 .tildeTooltip(sendHelp)
-                .accessibilityLabel(sendHelp)
+                .accessibilityHint(sendHelp)
             .padding(.leading, 4)
 
             // Esc closes the session only while paused; elsewhere it pauses or steps back.
