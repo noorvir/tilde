@@ -114,10 +114,11 @@ Settings → Agents → Remote machines lists the hosts of your ssh config and c
 on one sets up its agent apps as on this Mac, and links it while Tilde runs: an ssh tunnel
 from a private socket on the server (`~/.tilde/tilde.sock`, only your user can open it) to
 Tilde. The agents there start `~/.tilde/bin/tproxy`, a small pipe to that socket, as a stdio
-MCP server. Tilde downloads `tproxy` for the server's system (macOS or Linux, arm64 or x86-64)
+MCP server; it rides out a dropped link, so a running agent keeps Tilde. Tilde downloads `tproxy` for the server's system (macOS or Linux, arm64 or x86-64)
 from the GitHub release of its own version, checks its SHA-256, and copies it there again
 whenever it changed. A server of another type is linked by a port that other users there
-can reach, with a token, and Settings shows it as not protected.
+can reach, with a token, and Settings shows it as not protected. A server that an older Tilde
+linked by a port moves to the socket with one Install for all its apps.
 
 ## Tools
 
