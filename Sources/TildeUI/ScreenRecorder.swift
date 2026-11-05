@@ -41,8 +41,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
 
     /// Set once, right after the recorder exists, as the stream needs it as its delegate.
     private var capture: Capture?
-    /// What a stream records, to take a picture of it at Resume; a phone streams all the time.
-    private var stillSource: (filter: SCContentFilter, configuration: SCStreamConfiguration)?
+    /// Takes a picture of what a stream records, at Resume; a phone streams all the time.
+    private var takeStill: (@Sendable () async -> CMSampleBuffer?)?
     /// The clock of the frame times, which pauses are measured on.
     private let clock: CMClock
     private let writer: AVAssetWriter
@@ -60,6 +60,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// a pause is never written.
     private var pauses: [(start: CMTime, end: CMTime?)] = []
     private var hasSourceEnded = false
+    /// Counts each pause and resume: a Resume still belongs to the stretch of recording it
+    /// was taken for, and is dropped once that stretch is over.
+    private var interval = 0
+    /// Set by Stop and Discard: from then on nothing is written.
+    private var isStopped = false
 
     /// Starts recording a source into `video`. `browserWindow`, Tilde's browser, stays in a
     /// recording of the screen; Tilde's other windows do not.
@@ -103,7 +108,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: onSourceEnded)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: recorder)
         recorder.capture = .stream(stream)
-        recorder.stillSource = (filter, configuration)
+        recorder.takeStill = { [filter, configuration] in
+            try? await SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: configuration)
+        }
         try stream.addStreamOutput(recorder, type: .screen, sampleHandlerQueue: recorder.queue)
         do {
             try await stream.startCapture()
@@ -219,6 +226,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         queue.async { [self] in
             if pauses.last.map({ $0.end != nil }) ?? true {
                 pauses.append((now, nil))
+                interval += 1
             }
         }
     }
@@ -229,23 +237,26 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
                 return
             }
             pauses[pauses.count - 1].end = now
-            writeStill()
+            interval += 1
+            writeStill(for: interval)
         }
     }
 
     /// A screen sends frames only when it changes: after Resume, a picture taken now shows it
-    /// as it is, also when it does not change.
-    private func writeStill() {
-        guard let stillSource else {
+    /// as it is, also when it does not change. It goes in at the time it was taken, and only
+    /// while the recording it was taken for goes on.
+    private func writeStill(for interval: Int) {
+        guard let takeStill else {
             return
         }
-        Task { [self] in
-            guard let buffer = try? await SCScreenshotManager.captureSampleBuffer(contentFilter: stillSource.filter, configuration: stillSource.configuration) else {
+        Task { [weak self] in
+            let buffer = await takeStill()
+            guard let buffer, buffer.presentationTimeStamp.isValid, let self else {
                 return
             }
             let still = Still(buffer: buffer)
-            queue.async { [self] in
-                writeUntilAccepted(still, takenAt: now, tries: 20)
+            queue.async { [weak self] in
+                self?.writeUntilAccepted(still, interval: interval)
             }
         }
     }
@@ -256,14 +267,14 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     }
 
     /// A busy encoder can refuse the picture; it is offered again until it is written, a newer
-    /// frame is, or a pause began after it was taken.
-    private func writeUntilAccepted(_ still: Still, takenAt: CMTime, tries: Int) {
-        guard let time = videoTime(of: takenAt), lastTime.map({ time > $0 }) ?? true, tries > 0 else {
+    /// frame is, or its stretch of recording ended (a pause, Stop or Discard).
+    private func writeUntilAccepted(_ still: Still, interval: Int) {
+        guard interval == self.interval, !isStopped, let time = videoTime(of: still.buffer.presentationTimeStamp), lastTime.map({ time > $0 }) ?? true else {
             return
         }
         guard write(still.buffer, at: time) else {
-            queue.asyncAfter(deadline: .now() + 0.05) { [self] in
-                writeUntilAccepted(still, takenAt: takenAt, tries: tries - 1)
+            queue.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.writeUntilAccepted(still, interval: interval)
             }
             return
         }
@@ -278,6 +289,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         await stopCapture()
         let (start, end, lastFrame) = await withCheckedContinuation { continuation in
             queue.async { [self] in
+                isStopped = true
                 continuation.resume(returning: (startTime, endTime, self.lastFrame))
             }
         }
@@ -306,10 +318,15 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
 
     /// Ends the recording and deletes its file.
     func discard() {
+        queue.async { [self] in
+            isStopped = true
+        }
         Task {
             await stopCapture()
-            writer.cancelWriting()
-            try? FileManager.default.removeItem(at: writer.outputURL)
+            queue.async { [self] in
+                writer.cancelWriting()
+                try? FileManager.default.removeItem(at: writer.outputURL)
+            }
         }
     }
 
@@ -367,7 +384,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// goes back, and the whole clip with it. Returns false when the encoder is busy.
     @discardableResult
     private func write(_ buffer: CMSampleBuffer, at time: CMTime) -> Bool {
-        guard lastTime.map({ time > $0 }) ?? true, let frame = buffer.imageBuffer else {
+        // A stopped, cancelled or failed writer throws on any call: nothing goes to it.
+        guard !isStopped, writer.status == .writing, lastTime.map({ time > $0 }) ?? true, let frame = buffer.imageBuffer else {
             return true
         }
         if startTime == nil {
@@ -421,3 +439,16 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         CMClockGetTime(clock)
     }
 }
+
+#if DEBUG
+extension ScreenRecorder {
+    /// A recorder of `width` × `height` frames into `video` with no source, whose Resume
+    /// pictures come from `takeStill`. Debug builds only.
+    static func forTesting(video: URL, width: Int, height: Int, takeStill: @escaping @Sendable () async -> CMSampleBuffer?) throws -> ScreenRecorder {
+        let (writer, input) = try makeWriter(width: width, height: height, to: video)
+        let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: {})
+        recorder.takeStill = takeStill
+        return recorder
+    }
+}
+#endif
