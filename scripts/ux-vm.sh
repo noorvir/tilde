@@ -4,9 +4,7 @@
 # and the image, once:
 #   brew install cirruslabs/cli/tart
 #   tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:latest tilde-ux
-#   scripts/ux-vm.sh [test name filter]     TILDE_UX_RECORD=1 records the window baselines
-#                                           TILDE_UX_RELEASE=1 runs the release check
-#                                           TILDE_UX_NODE=<ssh host> links that machine
+#   scripts/ux-vm.sh [test name filter]     TILDE_UX_NODE=<ssh host> links that machine
 set -eu
 PATH="$HOME/tools/tart-dl/tart.app/Contents/MacOS:$PATH"
 
@@ -47,8 +45,6 @@ in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*(N) /tmp/tilde-u
 </array>
 <key>WorkingDirectory</key><string>/Users/admin/tilde</string>
 <key>EnvironmentVariables</key><dict>
-    <key>TILDE_UX_RECORD</key><string>${TILDE_UX_RECORD:-0}</string>
-    <key>TILDE_UX_RELEASE</key><string>${TILDE_UX_RELEASE:-}</string>
     <key>TILDE_UX_NODE</key><string>${TILDE_UX_NODE:-vmself}</string>
 </dict>
 <key>LimitLoadToSessionType</key><string>Aqua</string>

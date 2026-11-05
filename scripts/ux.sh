@@ -2,7 +2,7 @@
 # Runs the black-box UX specs in Tests/TildeUXTests against the built app, like a user would.
 # They post real input and take over the screen for a few minutes. Needs TildeDriver and
 # TildeUX with Accessibility, once; the script says so when they are missing.
-#   scripts/ux.sh [test name filter]        TILDE_UX_RECORD=1 records the window baselines
+#   scripts/ux.sh [test name filter]
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -65,17 +65,9 @@ if [ "$real_running" = 1 ]; then
     sleep 1
 fi
 status=0
-# The flows that need real input and real apps; Tests/Contract covers the rest without them.
-release_flows="aNodeIsInstalled|aCopiedReportGoes|anAgentOpens|anArrowIsEdited|aRectangleLeaves|aLabelHidesWhenItsContent|notesInTheRealSimulator|theHoldKeyWorks|twoClipsReachTheAgentAsVideos|theSourcePickerChoosesAWindowToRecord"
+# Only the flows that need real input and real apps; Tests/Contract covers the rest without them.
 limit=${TILDE_UX_LIMIT:-180}
-if [ -n "${TILDE_UX_RELEASE:-}" ]; then
-    set -- --filter "$release_flows"
-    # A device that is still booting takes minutes, and its screen keeps changing under a note.
-    xcrun simctl boot "iPhone 17e" 2>/dev/null || true
-    xcrun simctl bootstatus "iPhone 17e" >/dev/null
-else
-    set -- --filter "$filter"
-fi
+set -- --filter "$filter"
 swift build --build-tests >/dev/null
 # A run that was killed leaves its page servers on their ports.
 pkill -f "http.server 739" 2>/dev/null || true

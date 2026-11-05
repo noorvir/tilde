@@ -18,4 +18,4 @@ Run it on every commit.
 
 Pictures belong to one macOS version and one SDK: `pictures/macos-<major.minor>/`, with the exact setup in `recorded-on.txt`. On another version the check says that it skips them, and it warns when the SDK or patch version differs. Record only on the macOS they are for.
 
-Clicks, keys and real apps are not tested here: `scripts/e2e-release.sh` does that before a release, in at most 3 minutes.
+Clicks, keys and real apps are not tested here: the 5 flows in `Tests/TildeUXTests` do that before a release, in at most 3 minutes (`scripts/ux.sh`, or `scripts/ux-vm.sh` in the VM).

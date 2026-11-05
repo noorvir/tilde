@@ -176,52 +176,6 @@ final class TildeApp {
         try JSONSerialization.data(withJSONObject: list).write(to: nodes)
     }
 
-    /// Moves over these points until the system cursor is the hand.
-    func findHandCursor(over points: [CGPoint]) async throws -> Bool {
-        for point in points {
-            try await hover(over: point)
-            try await Task.sleep(for: .milliseconds(150))
-            let result = try await drive("cursor", [:])
-            if result["isHand"] as? Bool == true {
-                return true
-            }
-        }
-        return false
-    }
-
-    /// Waits for the system cursor to be the hand, or not.
-    func waitForHandCursor(_ isHand: Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        for _ in 0..<30 {
-            let result = try await drive("cursor", [:])
-            if result["isHand"] as? Bool == isHand {
-                return
-            }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        Issue.record("The hand cursor is not \(isHand ? "on" : "off")", sourceLocation: sourceLocation)
-    }
-
-    /// Where the browser's page is, without its toolbar and tab bar, which come and go.
-    func pageArea(in browser: WebPages.Browser) async throws -> CGRect? {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: browser.bundleIdentifier).first else {
-            return nil
-        }
-        // The page's elements come a moment after its window.
-        for _ in 0..<20 {
-            let result = try await drive("ax", ["pid": app.processIdentifier])
-            let elements = (result["tree"] as? [[String: Any]] ?? []).map(Seen.init).flatMap(\.flattened)
-            // The web area is as tall as the page; its parent is the part on screen.
-            let areas = elements.compactMap { parent in
-                parent.children.first { $0.role == "AXWebArea" }.map { $0.frame.intersection(parent.frame) }
-            }
-            if let area = areas.max(by: { $0.width * $0.height < $1.width * $1.height }) {
-                return area
-            }
-            try await Task.sleep(for: .milliseconds(250))
-        }
-        return nil
-    }
-
     /// Everything on screen from the app.
     func seen() async throws -> [Seen] {
         let result = try await drive("ax", ["pid": pid])
@@ -281,23 +235,6 @@ final class TildeApp {
 
     func drag(from start: CGPoint, to end: CGPoint) async throws {
         try await drive("mouse", ["type": "drag", "x": start.x, "y": start.y, "toX": end.x, "toY": end.y])
-    }
-
-    /// The heights a window of this width takes, in order, while `action` runs.
-    func heights(ofWindowWidth width: Double, seconds: Double, during action: () async throws -> Void) async throws -> [Double] {
-        async let reply = drive("frames", ["pid": pid, "width": width, "seconds": seconds])
-        try await Task.sleep(for: .milliseconds(100))
-        try await action()
-        return try await reply["heights"] as? [Double] ?? []
-    }
-
-    /// Frame by frame, where the visible part of a window of this width starts and ends, while
-    /// `action` runs.
-    func edges(ofWindowWidth width: Double, seconds: Double, during action: () async throws -> Void) async throws -> [[Double]] {
-        async let reply = drive("edges", ["pid": pid, "width": width, "seconds": seconds])
-        try await Task.sleep(for: .milliseconds(300))
-        try await action()
-        return try await reply["edges"] as? [[Double]] ?? []
     }
 
     /// A real scroll wheel at a point; negative scrolls the page down.
@@ -455,65 +392,6 @@ final class TildeApp {
         await saveFailure(named: "blue-\(sourceLocation.line)")
     }
 
-    // MARK: - Window pictures
-
-    /// Compares the app's window with this title to its baseline PNG, leaving out the version
-    /// text at the bottom of the sidebar, which changes with every build.
-    func expectWindow(titled title: String, matches name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        try await Task.sleep(for: .milliseconds(100))
-        let reply = try await drive("window", ["pid": pid, "title": title])
-        guard let encoded = reply["png"] as? String, let picture = Data(base64Encoded: encoded) else {
-            Issue.record("No window titled \(title)", sourceLocation: sourceLocation)
-            return
-        }
-        let actual = FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString).png")
-        try picture.write(to: actual)
-
-        let baseline = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Baselines/\(name).png")
-        if ProcessInfo.processInfo.environment["TILDE_UX_RECORD"] == "1" {
-            try? FileManager.default.removeItem(at: baseline)
-            try FileManager.default.copyItem(at: actual, to: baseline)
-            return
-        }
-        // Baselines belong to one macOS version, as controls render differently on others.
-        let recordedOn = (try? String(contentsOf: baseline.deletingLastPathComponent().appendingPathComponent("macos-version.txt"), encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard recordedOn == String(ProcessInfo.processInfo.operatingSystemVersion.majorVersion) else {
-            return
-        }
-        guard let expected = NSBitmapImageRep(data: try Data(contentsOf: baseline)),
-              let image = NSBitmapImageRep(data: try Data(contentsOf: actual))
-        else {
-            Issue.record("No baseline \(name); record it with TILDE_UX_RECORD=1", sourceLocation: sourceLocation)
-            return
-        }
-        let difference = Self.difference(expected, image)
-        #expect(difference < 0.002, "\(name) differs by \(difference * 100)%: \(actual.path)", sourceLocation: sourceLocation)
-    }
-
-    private static func difference(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep) -> Double {
-        guard a.pixelsWide == b.pixelsWide, a.pixelsHigh == b.pixelsHigh else {
-            return 1
-        }
-        var different = 0
-        // The bottom left corner holds the version.
-        let versionTop = a.pixelsHigh - 100
-        let versionRight = a.pixelsWide / 4
-        for y in stride(from: 0, to: a.pixelsHigh, by: 2) {
-            for x in stride(from: 0, to: a.pixelsWide, by: 2) where !(y > versionTop && x < versionRight) {
-                guard let p = a.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), let q = b.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
-                    continue
-                }
-                let red: CGFloat = abs(p.redComponent - q.redComponent)
-                let green: CGFloat = abs(p.greenComponent - q.greenComponent)
-                let blue: CGFloat = abs(p.blueComponent - q.blueComponent)
-                if red + green + blue > 0.05 {
-                    different += 1
-                }
-            }
-        }
-        return Double(different) / Double(a.pixelsWide * a.pixelsHigh / 4)
-    }
 }
 
 /// An agent connected over MCP, as Codex or Claude Code would be.
@@ -608,151 +486,6 @@ final class ChangingWindow {
     }
 }
 
-/// Two pages of plain text with the same layout, in Safari: a real browser, not Tilde's.
-final class WebPages {
-    enum Browser: String, CaseIterable, Sendable {
-        case safari = "Safari"
-        case chrome = "Google Chrome"
-
-        var bundleIdentifier: String {
-            switch self {
-            case .safari: "com.apple.Safari"
-            case .chrome: "com.google.Chrome"
-            }
-        }
-    }
-
-    let first: String
-    let second: String
-    let singlePage: String
-    let sameAddress: String
-    let browser: Browser
-    private let server = Process()
-    private let folder: URL
-    private var requests: URL { folder.appendingPathComponent("requests.log") }
-
-    /// Where the buttons of the single page app are, from the top left of the page.
-    static let forward = CGPoint(x: 50, y: 22)
-    static let back = CGPoint(x: 150, y: 22)
-    static let load = CGPoint(x: 250, y: 22)
-
-    init(browser: Browser, port: Int = 7398) throws {
-        self.browser = browser
-        folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-web-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        func page(_ rows: [String], script: String = "") -> String {
-            let list = rows.map { "<p style=\"margin:0;line-height:30px\">\($0)</p>" }.joined()
-            let bar = "<div style=\"position:fixed;top:0;left:0;height:44px\"><button id=f style=\"width:90px;height:44px\">Next</button><button id=b style=\"width:90px;height:44px;margin-left:10px\">Back</button><button onclick=\"location.href='second.html'\" style=\"width:90px;height:44px;margin-left:10px\">Load</button></div>"
-            return "<!doctype html><meta charset=utf-8><title>T</title><body style=\"font:16px sans-serif;margin:60px 40px 0;color:#111\">\(bar)\(list)\(script)</body>"
-        }
-        // A new address each run: browsers keep pages of earlier runs.
-        let run = UUID().uuidString
-        let pagesFolder = folder.appendingPathComponent(run, isDirectory: true)
-        try FileManager.default.createDirectory(at: pagesFolder, withIntermediateDirectories: true)
-        let rows = (1...12).map { "Starlink outages disrupt drone operations \($0)" }
-        try page(rows).write(to: pagesFolder.appendingPathComponent("first.html"), atomically: true, encoding: .utf8)
-        // The same layout and the same first rows: only the address and the last row differ.
-        try page(Array(rows.dropLast()) + ["Museum opens wing for modern painters"])
-            .write(to: pagesFolder.appendingPathComponent("second.html"), atomically: true, encoding: .utf8)
-        // Identical on both routes, so that only the address tells them apart.
-        let routes = "<script>f.onclick=()=>history.pushState({},\"\",\"?route=b\");b.onclick=()=>history.back()</script>"
-        try page(rows, script: routes).write(to: pagesFolder.appendingPathComponent("spa.html"), atomically: true, encoding: .utf8)
-        // Another screen on the same address and title, made of new elements, and long enough to scroll.
-        let swap = "<script>const swap=t=>document.querySelectorAll(\"p\").forEach((p,i)=>{const n=document.createElement(\"p\");n.style.cssText=p.style.cssText;n.textContent=t+\" \"+i;p.replaceWith(n)});f.onclick=()=>swap(\"Museum opens wing for modern painters\");b.onclick=()=>swap(\"Starlink outages disrupt drone operations\")</script>"
-        try page((0..<80).map { "Starlink outages disrupt drone operations \($0)" }, script: swap)
-            .write(to: pagesFolder.appendingPathComponent("same.html"), atomically: true, encoding: .utf8)
-        server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        server.arguments = ["-u", "-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]
-        server.standardOutput = FileHandle.nullDevice
-        let log = folder.appendingPathComponent("requests.log")
-        FileManager.default.createFile(atPath: log.path, contents: nil)
-        server.standardError = try FileHandle(forWritingTo: log)
-        try server.run()
-        first = "http://127.0.0.1:\(port)/\(run)/first.html"
-        second = "http://127.0.0.1:\(port)/\(run)/second.html"
-        singlePage = "http://127.0.0.1:\(port)/\(run)/spa.html"
-        sameAddress = "http://127.0.0.1:\(port)/\(run)/same.html"
-        // The first page must not fail to load because the server is not listening yet.
-        for _ in 0..<50 {
-            let check = Process()
-            check.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
-            check.arguments = ["-z", "127.0.0.1", String(port)]
-            try check.run()
-            waitForExit(check)
-            if check.terminationStatus == 0 {
-                break
-            }
-            Thread.sleep(forTimeInterval: 0.2)
-        }
-        // Each flow starts with no windows from earlier runs.
-        quitBrowser()
-    }
-
-    /// Goes to a page in the front window of the browser. Chrome runs with its own empty
-    /// profile the first time.
-    func go(to url: String) {
-        let script = Process()
-        switch browser {
-        case .safari:
-            script.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            // Safari is quit with a kill, so it would bring back the windows of earlier runs.
-            script.arguments = ["-a", "Safari", url, "--args", "-ApplePersistenceIgnoreState", "YES"]
-            try? script.run()
-            waitForExit(script)
-        case .chrome:
-            // Run again with the same profile, Chrome opens the address in its running copy. With
-            // --force-renderer-accessibility it describes its page to the driver too.
-            let profile = folder.appendingPathComponent("chrome-profile").path
-            script.executableURL = URL(fileURLWithPath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-            script.arguments = ["--user-data-dir=\(profile)", "--no-first-run", "--no-default-browser-check", "--force-renderer-accessibility", "--window-position=200,100", "--window-size=1000,700", url]
-            script.standardOutput = FileHandle.nullDevice
-            script.standardError = FileHandle.nullDevice
-            try? script.run()
-        }
-    }
-
-    private var hasServedAPage: Bool {
-        (try? String(contentsOf: requests, encoding: .utf8))?.contains(".html") ?? false
-    }
-
-    /// Waits for the window of the browser, which is slow to open the first time.
-    func waitForPage() async throws {
-        for _ in 0..<120 where !hasWindow || !hasServedAPage {
-            try await Task.sleep(for: .milliseconds(250))
-        }
-        // The browser draws what the server sent.
-        try await Task.sleep(for: .seconds(1))
-    }
-
-    private var hasWindow: Bool {
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        return list.contains { window in
-            guard window[kCGWindowOwnerName as String] as? String == browser.rawValue, window[kCGWindowLayer as String] as? Int == 0,
-                  let bounds = window[kCGWindowBounds as String] as? NSDictionary, let frame = CGRect(dictionaryRepresentation: bounds) else {
-                return false
-            }
-            return frame.height > 200
-        }
-    }
-
-    func quitBrowser() {
-        let quit = Process()
-        quit.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-        quit.arguments = [browser.rawValue]
-        try? quit.run()
-        waitForExit(quit)
-        // A browser that is still quitting would get the next page.
-        for _ in 0..<50 where !NSRunningApplication.runningApplications(withBundleIdentifier: browser.bundleIdentifier).filter({ !$0.isTerminated }).isEmpty {
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-    }
-
-    func stop() {
-        server.terminate()
-        waitForExit(server)
-    }
-}
-
 /// A small web page on localhost for the browser flows.
 final class TestPage {
     let url: String
@@ -799,40 +532,5 @@ final class TestPage {
     func stop() {
         server.terminate()
         waitForExit(server)
-    }
-}
-
-/// The real iOS Simulator with a small app of two screens with the same layout.
-final class SimulatorScreens {
-    private static let device = "iPhone 17e"
-
-    init() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let source = root.appendingPathComponent("scripts/ux-sim-app").path
-        let app = FileManager.default.temporaryDirectory.appendingPathComponent("TwoScreens.app").path
-        // The device stays booted and the app installed between runs: booting takes minutes.
-        try Self.run("xcrun simctl boot \"\(Self.device)\" 2>/dev/null; xcrun simctl bootstatus \"\(Self.device)\" >/dev/null; open \"$(xcode-select -p)/../Applications/DeviceHub.app\"; xcrun simctl get_app_container \"\(Self.device)\" dev.tilde.ux.twoscreens >/dev/null 2>&1 || { mkdir -p \"\(app)\"; cp \"\(source)/Info.plist\" \"\(app)/\"; xcrun -sdk iphonesimulator swiftc -parse-as-library -target arm64-apple-ios17.0-simulator \"\(source)/App.swift\" -o \"\(app)/TwoScreens\" && codesign -s - \"\(app)\"; xcrun simctl install \"\(Self.device)\" \"\(app)\"; }; xcrun simctl launch --terminate-running-process \"\(Self.device)\" dev.tilde.ux.twoscreens >/dev/null")
-    }
-
-    func show(_ screen: String) throws {
-        // The Simulator shares the Mac's files. A link would ask before it opens the app.
-        try screen.write(toFile: "/tmp/tilde-ux-screen", atomically: true, encoding: .utf8)
-    }
-
-    var window: CGRect? {
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        let bounds = list.first { $0[kCGWindowOwnerName as String] as? String == "Device Hub" && $0[kCGWindowLayer as String] as? Int == 0 }?[kCGWindowBounds as String] as? NSDictionary
-        return bounds.flatMap { CGRect(dictionaryRepresentation: $0) }
-    }
-
-    func stop() {
-    }
-
-    private static func run(_ command: String) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", command]
-        try process.run()
-        waitForExit(process)
     }
 }
