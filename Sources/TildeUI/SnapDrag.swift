@@ -29,6 +29,8 @@ final class SnapDrag {
     /// Tilde late, so the pointer's and the button's state now can be ahead of them.
     private var monitor: Any?
     private var isSnapped = false
+    /// Called after each move of a drag, and with `true` once it is dropped.
+    var moved: (_ ended: Bool) -> Void = { _ in }
 
     init(window: NSWindow, outlineCornerRadius: CGFloat, positionsKey: String) {
         self.window = window
@@ -112,6 +114,7 @@ final class SnapDrag {
         isSnapped = isNearHome
         outline.show(current.outlineFrame(homeFrame), isSnapped: isNearHome, below: window.windowNumber)
         guard ended else {
+            moved(false)
             return
         }
 
@@ -120,11 +123,12 @@ final class SnapDrag {
         outline.hide()
         if isNearHome {
             forgetTop(on: screen)
-            return
+        } else {
+            let kept = current.clamped(top, screen.visibleFrame)
+            window.setFrameOrigin(NSPoint(x: kept.x - size.width / 2, y: kept.y - size.height))
+            saveTop(kept, on: screen)
         }
-        let kept = current.clamped(top, screen.visibleFrame)
-        window.setFrameOrigin(NSPoint(x: kept.x - size.width / 2, y: kept.y - size.height))
-        saveTop(kept, on: screen)
+        moved(true)
     }
 
     /// Whether a dragged panel's centre is close enough to home's centre to snap there.

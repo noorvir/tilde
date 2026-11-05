@@ -1839,8 +1839,9 @@ final class AnnotationController: ObservableObject {
         source ?? .screen(hudDisplay ?? CGMainDisplayID())
     }
 
-    /// The display the floating HUD was last placed on.
-    var hudDisplay: CGDirectDisplayID?
+    /// The display the floating HUD is on, which its panel keeps up to date as it is placed
+    /// and dragged.
+    @Published var hudDisplay: CGDirectDisplayID?
 
     private func startClip() {
         guard case .starting(let operation) = recording, let session else {

@@ -16,8 +16,9 @@ final class HUDPanel {
     let window: NSPanel
     private let hosting: FirstMouseHostingView<HUDView>
     private unowned let controller: AnnotationController
-    /// Where the HUD was before choosing moved it up for the picker's room.
+    /// Where the HUD was before choosing moved it home for the picker's room.
     private var placeBeforePicking: NSPoint?
+    private var screenObserver: Any?
     private lazy var zoom = ZoomPresenter(panel: window) { [controller] isShown in
         controller.isHUDShown = isShown
     }
@@ -57,6 +58,13 @@ final class HUDPanel {
         } onContentFrame: { [weak self] frame in
             self?.contentFrame = frame
         }
+        // A drag can take the HUD to another screen; Record and the picker follow it there.
+        screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screenChanged() }
+        }
+        snapDrag.moved = { [weak self] ended in
+            self?.pillMoved(ended: ended)
+        }
     }
 
     /// Shows the HUD on the screen that has the pointer, or with its top centre at `top`.
@@ -76,26 +84,49 @@ final class HUDPanel {
 
     /// Tells the source picker how much room it has under the pill (or, in Tilde's browser,
     /// under the panel's top) on the panel's screen, so it never leaves the screen. A HUD
-    /// dragged too low for the picker goes up to its home while choosing, and back after.
+    /// too low for the picker goes up to its home while choosing, and back after.
     func fitPicker() {
-        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else {
+        guard let screen = window.screen ?? NSScreen.main else {
             return
         }
-        let pill = controller.isHUDInBrowser ? 0 : HUDMetrics.height + 8
-        var room = room(under: window.frame, pill: pill, in: visible)
-        if room.height < SourcePickerView.sizes.min.height, !controller.isHUDInBrowser, placeBeforePicking == nil {
+        if pickerRoom(on: screen).height < SourcePickerView.sizes.min.height, !controller.isHUDInBrowser, placeBeforePicking == nil {
             placeBeforePicking = window.frame.origin
-            window.setFrameOrigin(NSPoint(x: window.frame.minX, y: visible.maxY + 4 - window.frame.height))
-            room = self.room(under: window.frame, pill: pill, in: visible)
+            let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
+            window.setFrameOrigin(NSPoint(x: home.x - window.frame.width / 2, y: home.y - window.frame.height))
         }
-        controller.sourcePicker.space = room
+        controller.sourcePicker.space = pickerRoom(on: screen)
     }
 
-    /// Back where the HUD was before choosing moved it up.
+    /// Back where the HUD was before choosing moved it home.
     func endPicking() {
         if let place = placeBeforePicking {
             window.setFrameOrigin(place)
             placeBeforePicking = nil
+        }
+    }
+
+    /// The picker's room under the pill where the panel is now.
+    private func pickerRoom(on screen: NSScreen) -> CGSize {
+        let pill = controller.isHUDInBrowser ? 0 : HUDMetrics.height + 8
+        return room(under: window.frame, pill: pill, in: screen.visibleFrame)
+    }
+
+    /// While choosing, the picker's room follows a drag of the pill; a drop too low for it
+    /// moves the HUD home until choosing ends, then back to the drop.
+    private func pillMoved(ended: Bool) {
+        guard controller.isPickingWindow, let screen = window.screen else {
+            return
+        }
+        if ended {
+            fitPicker()
+        } else {
+            controller.sourcePicker.space = pickerRoom(on: screen)
+        }
+    }
+
+    private func screenChanged() {
+        if let display = AnnotationController.displayID(of: window.screen) {
+            controller.hudDisplay = display
         }
     }
 
@@ -122,16 +153,18 @@ final class HUDPanel {
             return
         }
 
-        controller.hudDisplay = AnnotationController.displayID(of: screen)
         let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
         let top = given ?? Self.clamped(snapDrag.savedTop(on: screen) ?? home, in: screen.visibleFrame)
         let height = screen.visibleFrame.height + 4
         window.setFrame(NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height), display: true)
+        screenChanged()
     }
 
     /// Moves the panel with the pointer while the pill is dragged; it snaps to home within
     /// 40 pt, where the outline of the pill shows (below the 16 pt content padding).
     private func dragPill() {
+        // The user puts it somewhere else: choosing no longer moves it back.
+        placeBeforePicking = nil
         let height = window.frame.height
         snapDrag.begin { screen in
             let top = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
