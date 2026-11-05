@@ -122,6 +122,7 @@ final class HUDPanel {
             return
         }
 
+        controller.hudDisplay = AnnotationController.displayID(of: screen)
         let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
         let top = given ?? Self.clamped(snapDrag.savedTop(on: screen) ?? home, in: screen.visibleFrame)
         let height = screen.visibleFrame.height + 4

@@ -1836,8 +1836,11 @@ final class AnnotationController: ObservableObject {
 
     /// What Record records: the chosen source, or the screen with the HUD when there is none.
     var clipSource: RecordingSource {
-        source ?? .screen(Self.displayID(of: hud.window.screen) ?? CGMainDisplayID())
+        source ?? .screen(hudDisplay ?? CGMainDisplayID())
     }
+
+    /// The display the floating HUD was last placed on.
+    var hudDisplay: CGDirectDisplayID?
 
     private func startClip() {
         guard case .starting(let operation) = recording, let session else {
