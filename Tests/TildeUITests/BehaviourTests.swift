@@ -100,8 +100,9 @@ struct BehaviourTests {
         #expect(!FileManager.default.fileExists(atPath: try #require(Fixtures.video(of: clip)).path))
     }
 
-    /// A cancelled session keeps its notes in History, but not its recordings.
-    @Test func cancellingDeletesTheRecordings() throws {
+    /// A cancelled session keeps its stopped recordings in History, like its notes, and a
+    /// restore of it plays them again.
+    @Test func cancellingKeepsStoppedRecordings() throws {
         let session = Fixtures.session()
         let clip = try Fixtures.clip(in: controller.archive.newClip(in: session.id))
         open(drafts: [clip] + Fixtures.drafts(1), session: session)
@@ -110,8 +111,107 @@ struct BehaviourTests {
         controller.confirm()
         controller.archive.flush()
 
-        #expect(!FileManager.default.fileExists(atPath: try #require(Fixtures.video(of: clip)).path))
-        #expect(controller.archive.record(session.id)?.notes.count == 1)
+        let video = try #require(Fixtures.video(of: clip))
+        #expect(FileManager.default.fileExists(atPath: video.path))
+        let record = try #require(controller.archive.record(session.id))
+        #expect(record.notes.count == 2)
+        let restored = AnnotationController.drafts(from: record, archive: controller.archive, into: "0f0f0f0f")
+        #expect(restored.compactMap(Fixtures.video).count == 1)
+    }
+
+    // MARK: - Regressions of round 2
+
+    /// The first comment saved enables Send at once, and deleting the last note disables it.
+    @Test func sendFollowsTheNotes() throws {
+        let pending = Pending(
+            target: .region, frame: CGRect(x: 10, y: 10, width: 80, height: 40), marker: .zero, chip: "Region",
+            capture: Task { Captures(image: nil, contextImage: nil) }
+        )
+        controller.setStateForTesting(
+            session: Fixtures.session(), mode: .open(SessionFlow.Open(panel: .comment)), composer: .new(pending)
+        )
+        controller.submitComment(thenSend: false)
+        #expect(controller.drafts.count == 1)
+        #expect(controller.flow.canSend)
+
+        controller.deleteDraft(try #require(controller.drafts.first).id)
+        #expect(!controller.flow.canSend)
+    }
+
+    /// Choosing in recording mode offers a phone, and the HUD stays in recording mode.
+    @Test func choosingInRecordingModeOffersAPhone() {
+        let (screens, apps) = Fixtures.sources()
+        controller.sourcePicker.injected = (screens, apps, .done)
+
+        open(activity: .recording(.ready))
+        controller.toggleWindowPick()
+        controller.openSourcePicker()
+        #expect(controller.isRecordMode)
+        #expect(controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) })
+
+        open()
+        controller.toggleWindowPick()
+        controller.openSourcePicker()
+        #expect(!controller.isRecordMode)
+        #expect(!controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) })
+    }
+
+    /// Clear History keeps the session on screen, whose notes and recordings are in use.
+    @Test func clearHistoryKeepsTheSessionOnScreen() {
+        let archive = Fixtures.archive()
+        archive.save(Fixtures.record(id: "a1b2c3d4", notes: 1))
+        archive.save(Fixtures.record(id: "b1b2c3d4", notes: 1))
+        archive.flush()
+        let history = HistoryModel(archive: archive, currentID: { "a1b2c3d4" })
+
+        history.clear()
+
+        #expect(archive.record("a1b2c3d4") != nil)
+        #expect(archive.record("b1b2c3d4") == nil)
+    }
+
+    /// ⌘↩ is Send: it never answers a question, and Send waits under it.
+    @Test func commandReturnNeverAnswersAQuestion() throws {
+        let overlay = OverlayWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200), level: .normal, isWindowSized: true, controller: controller)
+        defer { overlay.close() }
+        let view = try #require(overlay.contentView)
+        let commandReturn = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: overlay.windowNumber, context: nil,
+            characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
+        ))
+        open(drafts: Fixtures.drafts(2), question: .cancelSession)
+
+        view.keyDown(with: commandReturn)
+        #expect(!controller.handleConfirmationKey(36, modifiers: .command))
+        #expect(controller.confirmation == .cancelSession)
+        #expect(controller.session != nil)
+        #expect(HUDView.status(of: controller).title == "Annotating")
+    }
+
+    /// A restore and Open Browser wait while a clip records, as the window button does.
+    @Test func aClipKeepsItsNotesAndSource() {
+        open(drafts: Fixtures.drafts(1), activity: .recording(.recording))
+        controller.restore(Fixtures.record(notes: 3))
+        controller.annotateInBrowser()
+        #expect(controller.drafts.count == 1)
+        #expect(controller.confirmation == nil)
+        #expect(controller.scope == nil)
+    }
+
+    /// While the report is made, notes are neither deleted nor edited.
+    @Test func notesStayAsTheyAreWhileSending() {
+        let unfinished = Task { () -> Captures in
+            try? await Task.sleep(for: .seconds(3600))
+            return Captures(image: nil, contextImage: nil)
+        }
+        let draft = Fixtures.drafts(1)[0]
+        open(drafts: [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)] + Fixtures.drafts(2).dropFirst())
+        controller.send()
+
+        controller.deleteDraft(draft.id)
+        controller.updateComment(draft.id, "changed")
+        #expect(controller.drafts.count == 2)
+        #expect(controller.drafts.first?.annotation.comment == draft.annotation.comment)
     }
 
     // MARK: - Send
@@ -453,7 +553,7 @@ struct BehaviourTests {
         controller.refreshScope()
 
         #expect(controller.scope == nil)
-        #expect(controller.notice == "Window closed")
+        #expect(controller.notice?.rawValue == "Window closed")
     }
 
     // MARK: - HUD subtitle

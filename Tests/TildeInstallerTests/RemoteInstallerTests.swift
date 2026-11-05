@@ -117,6 +117,23 @@ struct RemoteInstallerTests {
         #expect(try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int == 0o600)
     }
 
+    /// A linked config that an older Tilde left readable by others is made private, also when
+    /// its text is already right.
+    @Test func anUnchangedLinkedConfigBecomesPrivate() throws {
+        let home = try home()
+        try make(home, "dotfiles")
+        try make(home, ".codex")
+        let target = home.appendingPathComponent("dotfiles/config.toml")
+        try "".write(to: target, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(".codex/config.toml"), withDestinationURL: target)
+        _ = try installer(home).install(.codex)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: target.path)
+
+        _ = try installer(home).install(.codex)
+
+        #expect(try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int == 0o600)
+    }
+
     @Test func itWritesThroughALinkedSkillsFolder() throws {
         let home = try home()
         try make(home, "repo/skills")

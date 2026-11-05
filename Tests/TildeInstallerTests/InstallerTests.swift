@@ -1,5 +1,6 @@
 @testable import TildeInstaller
 import Foundation
+import os
 import TildeSkill
 import Testing
 
@@ -19,11 +20,25 @@ struct InstallerTests {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-home-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
 
-        let token = LocalToken.load(home: home)
+        let token = try LocalToken.load(home: home)
         #expect(token.count == 64)
-        #expect(LocalToken.load(home: home) == token)
+        #expect(try LocalToken.load(home: home) == token)
         #expect(try FileManager.default.attributesOfItem(atPath: LocalToken.file(home: home).path)[.posixPermissions] as? Int == 0o600)
-        #expect(InstallEnvironment.local(home: home, port: "7311", bridgePath: "", isolated: true).authorization == "Bearer \(token)")
+        #expect(try InstallEnvironment.local(home: home, port: "7311", bridgePath: "", isolated: true).authorization == "Bearer \(token)")
+    }
+
+    /// Processes that start at the same moment get the same token: it is made once.
+    @Test func theLocalTokenIsMadeOnce() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let tokens = OSAllocatedUnfairLock(initialState: Set<String>())
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            if let token = try? LocalToken.load(home: home) {
+                tokens.withLock { _ = $0.insert(token) }
+            }
+        }
+        #expect(tokens.withLock { $0.count } == 1)
+        #expect(try LocalToken.load(home: home) == tokens.withLock { $0.first })
     }
 
     @Test func aConfigItWritesIsForItsOwnerOnly() throws {

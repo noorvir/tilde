@@ -285,6 +285,65 @@ struct MCPServerTests {
         #expect(await store.wait(for: mine.id, node: nil, seconds: 0) == nil)
     }
 
+    /// A machine never gets this Mac's scope by sending a local agent's session id.
+    @Test func aSessionCountsOnlyForTheMachineThatMadeIt() async throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let server = MCPServer(store: store, localToken: "test", inbox: inbox)
+        _ = try saveToInbox(try sampleFeedback(), sessionID: "a1b2c3d4", root: inbox)
+        let hello = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["clientInfo": ["name": "codex"]]])
+        let local = await server.handle(HTTPRequest(method: "POST", path: "/mcp", headers: ["host": "127.0.0.1:7311", "content-type": "application/json"], body: hello), node: nil)
+        let session = try #require(local.headers["Mcp-Session-Id"])
+
+        let call = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "get_report", "arguments": ["id": "latest"]]])
+        let headers = ["host": "127.0.0.1:7319", "content-type": "application/json", "mcp-session-id": session]
+        let response = await server.handle(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: call), node: "box")
+        let body = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+        #expect((body["result"] as? [String: Any])?["isError"] as? Bool == true)
+    }
+
+    @Test func aRequestTargetIsAPath() {
+        func status(_ target: String) -> Int? {
+            switch HTTPServer.parse(Data("GET \(target) HTTP/1.1\r\nHost: localhost\r\n\r\n".utf8), maxBodySize: 1024) {
+            case .invalid(let status): return status
+            case .request: return 200
+            case .incomplete: return nil
+            }
+        }
+        #expect(status("?") == 400)
+        #expect(status("mcp") == 400)
+        #expect(status("/mcp?x=1") == 200)
+    }
+
+    /// Reports are kept as History keeps sessions: 30 days, and always the last 100.
+    @Test func oldReportsGo() throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let old = Date(timeIntervalSinceNow: -40 * 86_400)
+        for day in 1...102 {
+            let folder = inbox.appendingPathComponent(String(format: "2026-01-01_00-00-%02d_a1b2c%03d", day % 60, day))
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: folder.path)
+        }
+        pruneInbox(root: inbox)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: inbox.path).count == 100)
+    }
+
+    /// Reports saved by an older Tilde, readable by others, become private.
+    @Test func olderReportsBecomePrivate() throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let folder = inbox.appendingPathComponent("2026-01-01_00-00-00_a1b2c3d4")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let file = folder.appendingPathComponent("annotation-1.png")
+        FileManager.default.createFile(atPath: file.path, contents: Data([1]), attributes: [.posixPermissions: 0o644])
+
+        makePrivate(tree: inbox)
+
+        #expect(try FileManager.default.attributesOfItem(atPath: folder.path)[.posixPermissions] as? Int == 0o700)
+        #expect(try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int == 0o600)
+    }
+
     @Test func aRequestLengthIsDigitsOnly() {
         func status(_ length: String) -> Int? {
             let request = Data("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: \(length)\r\n\r\n{}".utf8)

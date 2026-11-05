@@ -206,6 +206,31 @@ struct SessionArchiveTests {
         #expect(archive.record(record.id) != nil)
     }
 
+    /// Recordings an older Tilde kept in ~/.tilde/recordings move into their sessions, and
+    /// that folder goes.
+    @Test func olderRecordingsMoveIntoTheirSessions() throws {
+        let archive = Fixtures.archive()
+        let older = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recordings-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
+        let clip = try Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
+        var record = Fixtures.record(notes: 0, pageURL: nil)
+        record.notes = [SessionRecord.Note(id: clip.id, comment: "", target: clip.annotation.target, frame: .zero, marker: .zero, chip: clip.chip, anchor: nil)]
+        archive.save(record)
+        archive.flush()
+
+        archive.prune(olderClips: older)
+        archive.flush()
+
+        let moved = try #require(archive.record(record.id)?.notes.first)
+        guard case .recording(let video, _, _) = moved.target else {
+            Issue.record("not a recording")
+            return
+        }
+        #expect(video.deletingLastPathComponent() == archive.folder(record.id))
+        #expect(FileManager.default.fileExists(atPath: video.path))
+        #expect(!FileManager.default.fileExists(atPath: older.path))
+    }
+
     /// Only the owner can open a saved session.
     @Test func savedSessionsArePrivate() throws {
         let archive = Fixtures.archive()
