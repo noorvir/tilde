@@ -408,11 +408,13 @@ struct SessionFlow: Equatable {
             guard open.panel == .comment else {
                 return []
             }
-            if open.question == .discardComment {
-                open.question = nil
-                open.pauses.remove(.user)
-            }
             open.panel = nil
+            // A comment that asked first had paused annotating.
+            guard open.question == .discardComment else {
+                return [.closeComposer]
+            }
+            open.question = nil
+            open.pauses.remove(.user)
             return [.closeComposer, .applyPause]
 
         case .openPreview:

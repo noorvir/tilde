@@ -27,13 +27,14 @@ final class ClipRecorder {
     /// Starts recording `source` into `video` for the flow's start `operation`. `name` and
     /// `frame` say in the report what it shows.
     func start(_ source: RecordingSource, name: String, frame: CGRect, into video: URL, browserWindow: Int?, operation: Int) {
+        let sourceEnded: @Sendable () -> Void = { [weak self] in
+            Task { @MainActor in
+                self?.sourceEnded(video)
+            }
+        }
         Task {
             do {
-                let started = try await ScreenRecorder.start(source, to: video, browserWindow: browserWindow) { [weak self] in
-                    Task { @MainActor in
-                        self?.sourceEnded(video)
-                    }
-                }
+                let started = try await ScreenRecorder.start(source, to: video, browserWindow: browserWindow, onSourceEnded: sourceEnded)
                 arrived = .recorder(started)
                 defer { arrived = nil }
                 guard !dispatch(.clipStarted(operation)).contains(.dropClip) else {
