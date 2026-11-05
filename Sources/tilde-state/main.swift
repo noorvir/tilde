@@ -7,7 +7,8 @@ import AppKit
 let arguments = CommandLine.arguments
 if arguments.count == 3, arguments[1] == "transition" {
     let table = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))
-    FileHandle.standardOutput.write(try Transitions.run(table))
+    // Top-level code runs on the main thread.
+    FileHandle.standardOutput.write(try MainActor.assumeIsolated { try Transitions.run(table) })
     exit(0)
 }
 guard arguments.count >= 4, arguments[1] == "render" else {

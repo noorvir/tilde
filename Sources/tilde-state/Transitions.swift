@@ -1,9 +1,10 @@
 import TildeInstaller
 import TildeCore
 @testable import TildeUI
-import Foundation
+import AppKit
 
 /// Runs the rows of a transition table through the real rules.
+@MainActor
 enum Transitions {
     struct Row: Decodable {
         let name: String
@@ -29,6 +30,26 @@ enum Transitions {
         var onThisMac: [String]?
         var isReachable: Bool?
         var hasFailed: Bool?
+        var keys: [KeyEvent]?
+        var watching: [String]?
+        var tapped: String?
+        var startKey: String?
+        var pauseKey: String?
+        var isPaused: Bool?
+        var hasSession: Bool?
+        var dropCentre: [CGFloat]?
+        var homeCentre: [CGFloat]?
+        var visibleFrame: [CGFloat]?
+        var previewSize: [CGFloat]?
+        var room: [CGFloat]?
+    }
+
+    /// A modifier going down or up (`down` is every modifier held after it), or, with `other`,
+    /// another key or a click.
+    struct KeyEvent: Decodable {
+        var down: [String]?
+        var other: Bool?
+        let at: TimeInterval
     }
 
     struct AliasRow: Decodable {
@@ -56,6 +77,11 @@ enum Transitions {
         var reachable: String?
         var link: String?
         var chosen: [String]?
+        var doubleTaps: [String]?
+        var doubleTapAction: String?
+        var snapsHome: Bool?
+        var browserFrame: [CGFloat]?
+        var previewSize: [CGFloat]?
     }
 
     /// "ok", the button's title, "error: <button>", or the grey text.
@@ -127,6 +153,32 @@ enum Transitions {
                 let frame = CGRect(x: element[0], y: element[1], width: element[2], height: element[3])
                 let clip = CGRect(x: window[0], y: window[1], width: window[2], height: window[3])
                 result.labelShows = ElementTracker.visibleFrame(frame, clips: [clip]) != nil
+            }
+            if let events = row.keys {
+                var detector = DoubleTapDetector()
+                let watching = Set((row.watching ?? []).compactMap(DoubleTapKey.init(rawValue:)))
+                result.doubleTaps = events.compactMap { event in
+                    let flags = (event.down ?? []).compactMap(DoubleTapKey.init(rawValue:)).reduce(into: NSEvent.ModifierFlags()) { $0.insert($1.flag) }
+                    return detector.handle(isFlagsChanged: event.other != true, flags: flags, at: event.at, watching: watching)?.rawValue
+                }
+            }
+            if let tapped = row.tapped.flatMap(DoubleTapKey.init(rawValue:)) {
+                let action = AnnotationController.doubleTapAction(
+                    for: tapped, startKey: row.startKey.flatMap(DoubleTapKey.init(rawValue:)), pauseKey: row.pauseKey.flatMap(DoubleTapKey.init(rawValue:)),
+                    isPaused: row.isPaused ?? false, hasSession: row.hasSession ?? false
+                )
+                result.doubleTapAction = action.map { "\($0)" } ?? "nothing"
+            }
+            if let drop = row.dropCentre, let home = row.homeCentre {
+                result.snapsHome = SnapDrag.snapsHome(NSPoint(x: drop[0], y: drop[1]), home: NSPoint(x: home[0], y: home[1]))
+            }
+            if let visible = row.visibleFrame {
+                let frame = BrowserController.defaultFrame(in: CGRect(x: visible[0], y: visible[1], width: visible[2], height: visible[3]))
+                result.browserFrame = [frame.minX, frame.minY, frame.width, frame.height]
+            }
+            if let size = row.previewSize, let room = row.room {
+                let fit = fitted(CGSize(width: size[0], height: size[1]), min: PreviewPanel.minSize, max: CGSize(width: room[0], height: room[1]))
+                result.previewSize = [fit.width, fit.height]
             }
             if var note = row.note, let similarity = row.similarity {
                 _ = note.update(similarity: similarity)
