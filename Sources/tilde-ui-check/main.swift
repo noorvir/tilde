@@ -1,6 +1,7 @@
 // Checks Tilde's UI from its contract: draws each state in Tests/Contract/states through
 // tilde-state, in parallel, and compares the pictures. It uses no code of Tilde.
 //   tilde-ui-check [--record] [name filter]
+// TILDE_STATE names the drawing tool; by default it is next to this one.
 import AppKit
 
 let started = Date()
@@ -11,7 +12,8 @@ let os = ProcessInfo.processInfo.operatingSystemVersion
 let major = "\(os.majorVersion).\(os.minorVersion)"
 let pictures = contract.appendingPathComponent("pictures/macos-\(major)")
 let out = root.appendingPathComponent(".build/ui-check")
-let bin = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
+let stateTool = ProcessInfo.processInfo.environment["TILDE_STATE"].map(URL.init(fileURLWithPath:))
+    ?? URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("tilde-state")
 let isRecording = CommandLine.arguments.contains("--record")
 let filter = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") }
 
@@ -25,13 +27,13 @@ let names = try FileManager.default.contentsOfDirectory(atPath: contract.appendi
     .filter { $0.hasSuffix(".json") && (filter == nil || $0.contains(filter!)) }.sorted()
 
 // Render in parallel: each worker takes every n-th state.
-let workers = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
+let workers = ProcessInfo.processInfo.activeProcessorCount
 var processes: [Process] = []
 for worker in 0..<workers {
     let shard = names.enumerated().filter { $0.offset % workers == worker }.map { contract.appendingPathComponent("states/\($0.element)").path }
     guard !shard.isEmpty else { continue }
     let process = Process()
-    process.executableURL = bin.appendingPathComponent("tilde-state")
+    process.executableURL = stateTool
     process.arguments = ["render", out.path] + shard
     try process.run()
     processes.append(process)
@@ -66,7 +68,7 @@ if !hasPictures, !isRecording {
 func toolSDK() -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/vtool")
-    process.arguments = ["-show-build", bin.appendingPathComponent("tilde-state").path]
+    process.arguments = ["-show-build", stateTool.path]
     let pipe = Pipe()
     process.standardOutput = pipe
     try? process.run()
@@ -143,7 +145,7 @@ var rowCount = 0
 for table in tables.sorted() {
     let path = contract.appendingPathComponent("transitions/\(table)")
     let process = Process()
-    process.executableURL = bin.appendingPathComponent("tilde-state")
+    process.executableURL = stateTool
     process.arguments = ["transition", path.path]
     let pipe = Pipe()
     process.standardOutput = pipe

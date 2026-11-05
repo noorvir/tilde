@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 # The owner's builds make warnings errors; see Package.swift.
 export TILDE_STRICT=1
 swift build --product tilde-state >/dev/null
-swift build --product tilde-ui-check >/dev/null
-scripts/stamp-sdk.sh "$(swift build --show-bin-path)/tilde-state"
-exec "$(swift build --show-bin-path)/tilde-ui-check" "$@"
+# The checker compares every pixel; a debug build of it takes most of the time.
+swift build -c release --product tilde-ui-check >/dev/null
+TILDE_STATE=.build/debug/tilde-state
+scripts/stamp-sdk.sh "$TILDE_STATE"
+export TILDE_STATE
+exec .build/release/tilde-ui-check "$@"
