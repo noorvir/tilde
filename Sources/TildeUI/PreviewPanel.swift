@@ -20,7 +20,7 @@ final class PreviewPanel {
     static let minSize = NSSize(width: 560, height: 420)
     private static let sizeKey = "PreviewSize"
     private let defaults: UserDefaults
-    private var resizeObserver: Any?
+    private var resizeObservers: [Any] = []
     private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: 18, positionsKey: "PreviewPositions")
     /// The frame when a drag of the corner grip began.
     private var resizeStart: NSRect?
@@ -66,27 +66,30 @@ final class PreviewPanel {
         } onResize: { [weak self] distance in
             self?.resize(by: distance)
         } onResizeEnded: { [weak self] in
-            self?.resizeStart = nil
+            self?.endResize()
         }
-        resizeObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else {
-                    return
+        // The size is the user's only once a resize by an edge or the grip ends, never from
+        // fitting the card onto a smaller screen.
+        let center = NotificationCenter.default
+        resizeObservers = [
+            center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.window.invalidateShadow()
                 }
-                self.window.invalidateShadow()
-                Self.save(self.window.frame.size, to: self.defaults)
-            }
-        }
+            },
+            center.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.endResize()
+                }
+            },
+        ]
     }
 
     /// The card's size on a screen: the remembered size, or the default, kept inside the
     /// screen and above the minimum.
     static func size(on visible: NSRect, defaults: UserDefaults) -> NSSize {
         let saved = defaults.string(forKey: sizeKey).map(NSSizeFromString)
-        let size = saved ?? defaultSize
-        let width = min(max(size.width, minSize.width), visible.width)
-        let height = min(max(size.height, minSize.height), visible.height)
-        return NSSize(width: width, height: height)
+        return fitted(saved ?? defaultSize, min: minSize, max: visible.size)
     }
 
     /// The top centre of a card of this size centred in the screen's visible area.
@@ -115,6 +118,7 @@ final class PreviewPanel {
 
         let visible = screen.visibleFrame
         let size = Self.size(on: visible, defaults: defaults)
+        window.maxSize = visible.size
         let top = Self.clamped(snapDrag.savedTop(on: screen) ?? Self.homeTop(of: size, on: visible), size: size, in: visible)
         window.setFrame(NSRect(x: top.x - size.width / 2, y: top.y - size.height, width: size.width, height: size.height), display: true)
         window.makeKeyAndOrderFront(nil)
@@ -144,13 +148,20 @@ final class PreviewPanel {
         }
     }
 
-    /// Resizes the card from its corner grip; the top left corner stays.
+    /// Resizes the card from its corner grip; the top left corner stays, and the card stays
+    /// on its screen.
     private func resize(by distance: CGSize) {
         let start = resizeStart ?? window.frame
         resizeStart = start
-        let width = max(start.width + distance.width, Self.minSize.width)
-        let height = max(start.height + distance.height, Self.minSize.height)
-        window.setFrame(NSRect(x: start.minX, y: start.maxY - height, width: width, height: height), display: true)
+        let visible = window.screen?.visibleFrame ?? start
+        let room = CGSize(width: visible.maxX - start.minX, height: start.maxY - visible.minY)
+        let size = fitted(CGSize(width: start.width + distance.width, height: start.height + distance.height), min: Self.minSize, max: room)
+        window.setFrame(NSRect(x: start.minX, y: start.maxY - size.height, width: size.width, height: size.height), display: true)
+    }
+
+    private func endResize() {
+        resizeStart = nil
+        Self.save(window.frame.size, to: defaults)
     }
 }
 
@@ -206,7 +217,7 @@ struct PreviewView: View {
                 Text("\(index + 1) of \(controller.drafts.count)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
-                PreviewButton(symbol: "xmark", help: "Close  Esc") {
+                CardButton(symbol: "xmark", help: "Close  Esc") {
                     controller.closePreview()
                 }
             }
@@ -244,14 +255,14 @@ struct PreviewView: View {
 
     private func footer(id: Draft.ID) -> some View {
         HStack(spacing: 6) {
-            PreviewButton(symbol: "chevron.left", help: "Previous  ←") {
+            CardButton(symbol: "chevron.left", help: "Previous  ←") {
                 controller.showAdjacentPreview(-1)
             }
-            PreviewButton(symbol: "chevron.right", help: "Next  →") {
+            CardButton(symbol: "chevron.right", help: "Next  →") {
                 controller.showAdjacentPreview(1)
             }
             Spacer()
-            PreviewButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this annotation") {
+            CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this annotation") {
                 controller.deleteDraft(id)
             }
         }
@@ -296,7 +307,7 @@ struct PreviewView: View {
     private func enlarged(title: String, data: Data?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                PreviewButton(symbol: "chevron.left", title: "Back", help: "Back  Esc") {
+                CardButton(symbol: "chevron.left", title: "Back", help: "Back  Esc") {
                     controller.expandedPreviewImage = nil
                 }
                 Text(title)
@@ -312,7 +323,7 @@ struct PreviewView: View {
         case .drawing:
             return "Drawing"
         case .recording(_, let seconds, let source):
-            return "Recording of \(source), \(Int(seconds.rounded())) s"
+            return "Recording of \(source), \(clipLength(seconds))"
         case .region:
             return "Region \(Int(annotation.frame.width))×\(Int(annotation.frame.height))"
         case .element(.web(let element)):
@@ -433,48 +444,5 @@ private struct CommentEditor: View {
             .onChange(of: text) {
                 controller.updateCommentSoon(id, text)
             }
-    }
-}
-
-private struct PreviewButton: View {
-    let symbol: String
-    var title: String?
-    var isDestructive = false
-    let help: String
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .semibold))
-                if let title {
-                    Text(title)
-                        .font(.system(size: 12.5, weight: .medium))
-                }
-            }
-            .foregroundStyle(foreground)
-            .padding(.horizontal, title == nil ? 0 : 10)
-            .frame(minWidth: 30, minHeight: 30)
-            .background(RoundedRectangle(cornerRadius: 8).fill(background))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .tildeTooltip(help)
-    }
-    private var foreground: Color {
-        if isDestructive {
-            return Color.red.opacity(isHovered ? 1 : 0.85)
-        }
-        return .white.opacity(isHovered ? 0.95 : 0.7)
-    }
-
-    private var background: Color {
-        if isDestructive {
-            return Color.red.opacity(isHovered ? 0.26 : 0.16)
-        }
-        return .white.opacity(isHovered ? 0.14 : 0.07)
     }
 }

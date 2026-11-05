@@ -2,21 +2,26 @@ import SwiftUI
 
 /// Under the HUD while choosing a source: a "Use window picker" button that grows into the picker,
 /// in the style of the HUD's list, with screens and a phone on a cable in one tab, apps and
-/// then their windows in the other. Its cross shrinks it back to the button.
+/// then their windows in the other. "‹ Back" and Esc step back one level: from an app's
+/// windows to the apps, then to the button.
 struct SourcePickerView: View {
     /// As many columns as fit; tiles past the picker's height scroll.
     private static let columns = [GridItem(.adaptive(minimum: 150), spacing: 12, alignment: .top)]
-    /// The picker stays inside the HUD's panel.
-    private static let sizes = (min: CGSize(width: 420, height: 260), max: CGSize(width: 780, height: 900))
+    /// The picker stays inside the HUD's panel, and inside the room under the pill.
+    static let sizes = (min: CGSize(width: 420, height: 260), max: CGSize(width: 780, height: 900))
 
     @ObservedObject var model: SourcePickerModel
     @ObservedObject var controller: AnnotationController
-    @State private var isOpenerHovered = false
-    /// The picker's size, which its corner changes; Tilde remembers it.
-    @AppStorage("SourcePickerWidth") private var width = 560.0
-    @AppStorage("SourcePickerHeight") private var height = 340.0
-    /// The size when the corner's drag began.
-    @State private var resizeStart: CGSize?
+    /// The size the user gave it with its corner, saved when the drag ends.
+    @AppStorage("SourcePickerWidth") private var savedWidth = 560.0
+    @AppStorage("SourcePickerHeight") private var savedHeight = 340.0
+    /// The size while its corner is dragged, and the size when the drag began.
+    @State private var resizing: (start: CGSize, size: CGSize)?
+
+    private var size: CGSize {
+        let largest = CGSize(width: min(Self.sizes.max.width, model.space.width), height: min(Self.sizes.max.height, model.space.height))
+        return fitted(resizing?.size ?? CGSize(width: savedWidth, height: savedHeight), min: Self.sizes.min, max: largest)
+    }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: controller.isSourcePickerOpen ? 16 : 18)
@@ -25,8 +30,11 @@ struct SourcePickerView: View {
                 picker
                     .transition(.opacity)
             } else {
-                opener
-                    .transition(.opacity)
+                CardButton(symbol: "square.grid.2x2", title: "Use window picker", help: "Choose from pictures of the screens and windows") {
+                    controller.openSourcePicker()
+                }
+                .padding(4)
+                .transition(.opacity)
             }
         }
         .background(shape.fill(Color.tildeInk))
@@ -37,71 +45,63 @@ struct SourcePickerView: View {
         .environment(\.colorScheme, .dark)
     }
 
-    private var opener: some View {
-        Button {
-            controller.openSourcePicker()
-        } label: {
-            HStack(spacing: HUDMetrics.iconGap) {
-                Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("Use window picker")
-                    .font(.system(size: 12.5, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.leading, HUDMetrics.leadingInset)
-            .padding(.trailing, HUDMetrics.trailingInset)
-            .frame(height: 36)
-            .background(Color.white.opacity(isOpenerHovered ? 0.09 : 0))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isOpenerHovered = $0 }
-        .fixedSize()
-    }
-
     private var picker: some View {
-        VStack(spacing: 14) {
-            Picker("Source", selection: $model.tab) {
-                Text("Screens").tag(SourcePickerModel.Tab.screens)
-                Text("Windows").tag(SourcePickerModel.Tab.windows)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .frame(maxWidth: .infinity)
-            .overlay(alignment: .trailing) {
-                HUDButton(image: Image(systemName: "xmark"), size: 26, help: "Back to clicking on screen") {
-                    controller.closeSourcePicker()
+        let openApp = model.apps.first { $0.pid == model.openApp }
+        return VStack(spacing: 14) {
+            ZStack {
+                Picker("Source", selection: $model.tab) {
+                    Text("Screens").tag(SourcePickerModel.Tab.screens)
+                    Text("Windows").tag(SourcePickerModel.Tab.windows)
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                CardButton(symbol: "chevron.left", title: "Back", help: openApp == nil ? "Back to clicking on screen  Esc" : "Back to all apps  Esc") {
+                    controller.stepBackInSourcePicker()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onChange(of: model.tab) {
                 model.openApp = nil
             }
 
-            switch model.tab {
-            case .screens:
-                grid {
-                    ForEach(model.screens) { tile in
-                        tileButton(tile)
+            switch (model.phase, model.tab) {
+            case (.listing, _):
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxHeight: .infinity)
+            case (.failed, _):
+                message("Could not list the screens and windows", "Tilde needs Screen Recording in System Settings → Privacy & Security.")
+            case (_, .screens):
+                if model.screens.isEmpty {
+                    message("No screens", "")
+                } else {
+                    grid {
+                        ForEach(model.screens) { tile in
+                            tileButton(tile)
+                        }
                     }
                 }
-            case .windows:
-                if let app = model.apps.first(where: { $0.pid == model.openApp }) {
+            case (_, .windows):
+                if let openApp {
                     VStack(alignment: .leading, spacing: 10) {
-                        BackButton(title: app.name) { model.openApp = nil }
-                            .padding(.leading, -8)
+                        Text(openApp.name)
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
                         grid {
-                            ForEach(app.windows) { tile in
+                            ForEach(openApp.windows) { tile in
                                 tileButton(tile)
                             }
                         }
                     }
+                } else if model.apps.isEmpty {
+                    message("No windows", "Windows on screen show here.")
                 } else {
                     grid {
                         ForEach(model.apps) { app in
                             SourceTile(
                                 title: app.name, detail: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
-                                picture: app.windows.first?.picture, badge: app.icon, isSelected: controller.scope?.pid == app.pid
+                                picture: app.windows.first?.picture, isLoading: model.phase == .picturing, badge: app.icon, isSelected: controller.scope?.pid == app.pid
                             ) {
                                 // An app with one window has nothing more to choose.
                                 if app.windows.count == 1 {
@@ -117,22 +117,44 @@ struct SourcePickerView: View {
         }
         .padding(.horizontal, HUDMetrics.leadingInset)
         .padding(.vertical, 14)
-        .frame(width: width, height: height)
+        .frame(width: size.width, height: size.height)
         // It stays centred under the pill, so it grows on both sides.
         .overlay(alignment: .bottomTrailing) {
             ResizeGrip { distance in
-                let start = resizeStart ?? CGSize(width: width, height: height)
-                resizeStart = start
-                width = min(max(start.width + 2 * distance.width, Self.sizes.min.width), Self.sizes.max.width)
-                height = min(max(start.height + distance.height, Self.sizes.min.height), Self.sizes.max.height)
+                let start = resizing?.start ?? size
+                resizing = (start, CGSize(width: start.width + 2 * distance.width, height: start.height + distance.height))
             } onEnded: {
-                resizeStart = nil
+                let final = size
+                savedWidth = final.width
+                savedHeight = final.height
+                resizing = nil
             }
         }
     }
 
+    private func message(_ title: String, _ detail: String) -> some View {
+        VStack(spacing: 4) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.8))
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// In recording mode, what the next clip records; while annotating, the chosen source.
+    private var selectedID: String? {
+        controller.recording == nil ? controller.source?.id : controller.clipSource.id
+    }
+
     private func tileButton(_ tile: SourcePickerModel.Tile) -> some View {
-        SourceTile(title: tile.title, detail: tile.detail, picture: tile.picture, badge: nil, isSelected: controller.source?.id == tile.id) {
+        SourceTile(
+            title: tile.title, detail: tile.detail, picture: tile.picture, isLoading: model.phase == .picturing, badge: nil,
+            isSelected: selectedID == tile.id
+        ) {
             controller.choose(tile.source)
         }
     }
@@ -152,6 +174,8 @@ private struct SourceTile: View {
     let title: String
     let detail: String
     let picture: CGImage?
+    /// Its picture is still being taken; once done, a missing one shows as a plain symbol.
+    let isLoading: Bool
     /// An app's icon on the picture's corner.
     let badge: NSImage?
     let isSelected: Bool
@@ -170,9 +194,13 @@ private struct SourceTile: View {
                                 .aspectRatio(contentMode: .fit)
                                 .clipShape(RoundedRectangle(cornerRadius: 4))
                                 .padding(6)
-                        } else {
+                        } else if isLoading {
                             ProgressView()
                                 .controlSize(.small)
+                        } else {
+                            Image(systemName: "eye.slash")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.3))
                         }
                     }
                     .overlay(alignment: .bottomTrailing) {
@@ -203,30 +231,6 @@ private struct SourceTile: View {
         .onHover { isHovered = $0 }
         .accessibilityLabel(title)
         .accessibilityValue(detail)
-    }
-}
-
-/// "‹ App name" above an app's windows, back to the list of apps.
-private struct BackButton: View {
-    let title: String
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 12.5, weight: .semibold))
-            }
-            .foregroundStyle(.white.opacity(0.9))
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(RoundedRectangle(cornerRadius: 7).fill(.white.opacity(isHovered ? 0.09 : 0)))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

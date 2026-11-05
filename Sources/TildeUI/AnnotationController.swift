@@ -881,7 +881,17 @@ final class AnnotationController: ObservableObject {
     }
 
     func escapePressed() {
+        // In the picker, Esc first goes from an app's windows back to the apps, as "‹ Back".
+        if isSourcePickerOpen, sourcePicker.openApp != nil {
+            sourcePicker.openApp = nil
+            return
+        }
         dispatch(.escape)
+    }
+
+    /// The picker's "‹ Back": one level back, as Esc.
+    func stepBackInSourcePicker() {
+        escapePressed()
     }
 
     /// The one way the session's mode changes: the flow decides, with the facts it reads kept
@@ -1667,12 +1677,18 @@ final class AnnotationController: ObservableObject {
         guard session != nil, isOpen else {
             return
         }
-        // The picker shows under the floating HUD.
-        isHUDInBrowser = isInBrowser && !isPickingWindow
-        if isHUDInBrowser {
+        // In Tilde's browser the HUD stays in its toolbar, and the floating panel shows only
+        // the picker, under the toolbar, while choosing.
+        isHUDInBrowser = isInBrowser
+        if isHUDInBrowser, isPickingWindow, let frame = browser.window?.frame {
+            hud.show(top: NSPoint(x: frame.midX, y: frame.maxY - BrowserMetrics.toolbarHeight + 10))
+        } else if isHUDInBrowser {
             hud.hide()
         } else if !isHUDShown {
             hud.show()
+        }
+        if isPickingWindow {
+            hud.fitPicker()
         }
     }
 
@@ -1811,12 +1827,16 @@ final class AnnotationController: ObservableObject {
         dispatch(.stop)
     }
 
-    /// Records the chosen source, or the screen with the HUD when there is none.
+    /// What Record records: the chosen source, or the screen with the HUD when there is none.
+    var clipSource: RecordingSource {
+        source ?? .screen(Self.displayID(of: hud.window.screen) ?? CGMainDisplayID())
+    }
+
     private func startClip() {
         guard case .starting(let operation) = recording, let session else {
             return
         }
-        let recordingSource = source ?? .screen(Self.displayID(of: hud.window.screen) ?? CGMainDisplayID())
+        let recordingSource = clipSource
         let name: String
         let frame: CGRect
         switch recordingSource {
@@ -1878,7 +1898,7 @@ final class AnnotationController: ObservableObject {
                 let target = Target.recording(video: clip.video, seconds: clip.seconds, source: source.name)
                 let annotation = Annotation(comment: "", target: target, frame: source.frame, image: clip.poster, contextImage: nil)
                 let captures = Captures(image: clip.poster, contextImage: nil)
-                arrivedClip = .clip(Draft(annotation: annotation, marker: .zero, chip: "Recording \(Self.clock(clip.seconds))", capture: Task { captures }))
+                arrivedClip = .clip(Draft(annotation: annotation, marker: .zero, chip: "Recording \(clipLength(clip.seconds))", capture: Task { captures }))
                 defer { arrivedClip = nil }
                 dispatch(.clipFinished(operation))
                 log.notice("recorded \(Int(clip.seconds), privacy: .public) s")
@@ -1894,12 +1914,6 @@ final class AnnotationController: ObservableObject {
         if case .recording(let video, _, _) = draft.annotation.target {
             try? FileManager.default.removeItem(at: video)
         }
-    }
-
-    /// A length as minutes and seconds, such as "1:05".
-    nonisolated static func clock(_ seconds: TimeInterval) -> String {
-        let total = Int(seconds)
-        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     // MARK: - Window scope
@@ -1976,11 +1990,6 @@ final class AnnotationController: ObservableObject {
         sourcePicker.openApp = nil
         hover = nil
         sourcePicker.load(browserWindow: browser.windowNumber, drawableOnly: recording == nil)
-    }
-
-    /// The picker's back button: back to choosing on screen.
-    func closeSourcePicker() {
-        dispatch(.closePicker)
     }
 
     /// The choice: a window limits the session to it, as clicking it on screen does; a screen

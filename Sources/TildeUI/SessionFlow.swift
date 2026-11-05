@@ -102,7 +102,7 @@ struct SessionFlow: Equatable {
         case clipStarted(Int), clipStartFailed(Int), clipFinished(Int), clipFailed(Int)
         /// The recorded window, screen or phone stopped sending frames.
         case captureStopped
-        case windowButton, openPicker, closePicker
+        case windowButton, openPicker
         /// A window or screen (drawable) or a phone was chosen.
         case choose(drawable: Bool)
         case send, sendFinished(Int), sendFailed(Int), sentShown(Int), pushFailed
@@ -263,7 +263,8 @@ struct SessionFlow: Equatable {
         }
     }
 
-    /// While choosing, only the window button, Esc, the picker and a choice act, and the front
+    /// While choosing, only the window button, Esc (or the picker's Back), the picker and a
+    /// choice act, and the front
     /// app and hold key keep the pause the session goes back to; nothing else does anything.
     private mutating func handlePicking(_ event: Event, isRecordMode: Bool, isPickerOpen: Bool) -> [Effect] {
         let back: Activity = isRecordMode ? .recording(.ready) : .annotating
@@ -282,9 +283,6 @@ struct SessionFlow: Equatable {
         case .openPicker:
             open.activity = .picking(isRecordMode: isRecordMode, isPickerOpen: true)
             return [.openPicker]
-        case .closePicker:
-            open.activity = .picking(isRecordMode: isRecordMode, isPickerOpen: false)
-            return [.closePicker]
         case .choose(let drawable):
             // A phone only records; annotating takes only what it can draw on.
             guard drawable || isRecordMode else {
@@ -527,7 +525,7 @@ struct SessionFlow: Equatable {
             open.activity = .picking(isRecordMode: open.activity != .annotating, isPickerOpen: false)
             return closes + [.startPicking]
 
-        case .openPicker, .closePicker, .choose:
+        case .openPicker, .choose:
             return []
 
         case .send:

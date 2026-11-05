@@ -54,6 +54,18 @@ final class SourcePickerModel: ObservableObject {
         var id: pid_t { pid }
     }
 
+    /// Where the list is: listing the sources, taking their pictures, done, or failed, such as
+    /// without the Screen Recording permission.
+    enum Phase: Equatable {
+        case listing
+        case picturing
+        case done
+        case failed
+    }
+
+    @Published private(set) var phase = Phase.listing
+    /// The most room the picker has under the HUD's pill on its screen; the HUD sets it.
+    @Published var space = CGSize(width: 780, height: 900)
     @Published var tab = Tab.screens
     /// The app whose windows are shown, or nil for the list of apps.
     @Published var openApp: pid_t?
@@ -67,6 +79,7 @@ final class SourcePickerModel: ObservableObject {
     /// annotating.
     func load(browserWindow: Int?, drawableOnly: Bool) {
         loading?.cancel()
+        phase = .listing
         loading = Task {
             await reload(browserWindow: browserWindow, drawableOnly: drawableOnly)
         }
@@ -80,7 +93,14 @@ final class SourcePickerModel: ObservableObject {
 
     private func reload(browserWindow: Int?, drawableOnly: Bool) async {
         PhoneCapture.allowPhones()
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true), !Task.isCancelled else {
+        let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        guard !Task.isCancelled else {
+            return
+        }
+        guard let content else {
+            screens = []
+            apps = []
+            phase = .failed
             return
         }
 
@@ -95,6 +115,7 @@ final class SourcePickerModel: ObservableObject {
         let tilde = content.applications.filter { $0.processID == getpid() }
         let browser = content.windows.filter { Int($0.windowID) == browserWindow }
         let tiles = screens + apps.flatMap(\.windows)
+        phase = .picturing
         await withTaskGroup(of: (String, CGImage?).self) { group in
             for tile in tiles {
                 switch tile.source {
@@ -119,6 +140,9 @@ final class SourcePickerModel: ObservableObject {
                 setPicture(picture, for: id)
             }
         }
+        if !Task.isCancelled {
+            phase = .done
+        }
     }
 
     /// The screens and phones to offer: only those Tilde can draw on, for annotating.
@@ -126,7 +150,8 @@ final class SourcePickerModel: ObservableObject {
         tiles.filter { !drawableOnly || $0.source.isDrawable }
     }
 
-    func setForTesting(screens: [Tile], apps: [App], tab: Tab, openApp: pid_t? = nil, drawableOnly: Bool) {
+    func setForTesting(screens: [Tile], apps: [App], tab: Tab, openApp: pid_t? = nil, drawableOnly: Bool, phase: Phase = .done) {
+        self.phase = phase
         self.screens = Self.offered(screens, drawableOnly: drawableOnly)
         self.apps = apps
         self.tab = tab

@@ -1,0 +1,47 @@
+import SwiftUI
+
+/// A button of the preview card and the source picker: an icon, an optional title, and its
+/// help as the tooltip and the accessible name, such as "‹ Back" or Delete.
+struct CardButton: View {
+    let symbol: String
+    var title: String?
+    var isDestructive = false
+    let help: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                if let title {
+                    Text(title)
+                        .font(.system(size: 12.5, weight: .medium))
+                }
+            }
+            .foregroundStyle(foreground)
+            .padding(.horizontal, title == nil ? 0 : 10)
+            .frame(minWidth: 30, minHeight: 30)
+            .background(RoundedRectangle(cornerRadius: 8).fill(background))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .tildeTooltip(help)
+        .accessibilityLabel(help)
+    }
+    private var foreground: Color {
+        if isDestructive {
+            return Color.red.opacity(isHovered ? 1 : 0.85)
+        }
+        return .white.opacity(isHovered ? 0.95 : 0.7)
+    }
+
+    private var background: Color {
+        if isDestructive {
+            return Color.red.opacity(isHovered ? 0.26 : 0.16)
+        }
+        return .white.opacity(isHovered ? 0.14 : 0.07)
+    }
+}

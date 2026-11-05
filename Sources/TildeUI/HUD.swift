@@ -1,4 +1,5 @@
 import AppKit
+import TildeCore
 import SwiftUI
 
 /// Floating indicator while annotating: status, agent message, tools and the list of
@@ -24,8 +25,8 @@ final class HUDPanel {
     private var contentFrame: CGRect = .zero
     private var clickMonitor: Any?
 
-    /// The widest pill, with room around it for its shadow and the list below it.
-    private static let width: CGFloat = HUDView.maxWidth + 98
+    /// Room for the widest content (the source picker) and its shadow.
+    private static let width: CGFloat = SourcePickerView.sizes.max.width + 2 * 16
 
     init(controller: AnnotationController) {
         self.controller = controller
@@ -54,10 +55,10 @@ final class HUDPanel {
         }
     }
 
-    /// Shows the HUD on the screen that has the pointer.
-    func show() {
+    /// Shows the HUD on the screen that has the pointer, or with its top centre at `top`.
+    func show(top: NSPoint? = nil) {
         pendingHide?.cancel()
-        place()
+        place(top: top)
         // Lays the collapsed pill out at its place now. The first time, the hosting view has
         // never been laid out, and its first layout inside the zoom below would animate the
         // pill in from the window's left edge.
@@ -84,6 +85,19 @@ final class HUDPanel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: hide)
     }
 
+    /// Tells the source picker how much room it has under the pill (or, in Tilde's browser,
+    /// under the panel's top) on the panel's screen, so it never leaves the screen.
+    func fitPicker() {
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else {
+            return
+        }
+        let frame = window.frame
+        let pill = controller.isHUDInBrowser ? 0 : HUDMetrics.height + 8
+        let top = frame.maxY - 16 - pill
+        let halfWidth = min(frame.midX - visible.minX, visible.maxX - frame.midX) - 16
+        controller.sourcePicker.space = CGSize(width: 2 * halfWidth, height: top - visible.minY - 16)
+    }
+
     /// Forgets the dragged positions and moves the HUD back to the top centre.
     func resetPosition() {
         snapDrag.forgetAll()
@@ -92,15 +106,16 @@ final class HUDPanel {
         }
     }
 
-    /// Puts the panel on the screen with the pointer, at the saved position for that screen.
-    private func place() {
-        let pointer = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.screens.first else {
+    /// Puts the panel on the screen with the pointer, at the saved position for that screen,
+    /// or at `top`.
+    private func place(top given: NSPoint? = nil) {
+        let point = given ?? NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.screens.first else {
             return
         }
 
         let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
-        let top = Self.clamped(snapDrag.savedTop(on: screen) ?? home, in: screen.visibleFrame)
+        let top = given ?? Self.clamped(snapDrag.savedTop(on: screen) ?? home, in: screen.visibleFrame)
         let height = screen.visibleFrame.height + 4
         window.setFrame(NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height), display: true)
     }
@@ -124,9 +139,9 @@ final class HUDPanel {
         NSPoint(x: screenFrame.midX, y: visibleFrame.maxY + 4)
     }
 
-    /// Keeps the pill's top centre inside the screen's visible area, at any width.
+    /// Keeps the pill's top centre where the whole pill is inside the screen's visible area.
     static func clamped(_ top: NSPoint, in visible: NSRect) -> NSPoint {
-        let halfWidth = HUDView.maxWidth / 2 + 16
+        let halfWidth = HUDView.width / 2 + 16
         let x = min(max(top.x, visible.minX + halfWidth), visible.maxX - halfWidth)
         let y = min(max(top.y, visible.minY + HUDMetrics.height + 32), visible.maxY + 4)
         return NSPoint(x: x, y: y)
@@ -172,12 +187,10 @@ func insertNewlineOnShiftReturn(_ event: NSEvent, in window: NSWindow) -> Bool {
 
 struct HUDView: View {
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
-    /// The width of the pill in every mode, and the most it grows for a long subtitle. The widest
-    /// title and a two-digit note count fit in it (the HUD reserves their space with hidden
-    /// labels), so changing the mode or adding notes never moves a button;
-    /// `everyModeFitsThePillWidth` checks it.
+    /// The width of the pill in every mode. The widest title and a two-digit note count fit in
+    /// it (the HUD reserves their space with hidden labels), so changing the mode or adding
+    /// notes never moves a button; `everyModeFitsThePillWidth` checks it.
     static let width: CGFloat = 513
-    static let maxWidth = width * 1.4
 
     @ObservedObject var controller: AnnotationController
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -249,14 +262,9 @@ struct HUDView: View {
         return isPillHovered ? 1.015 : 1
     }
 
-    /// While annotating the pill is at least `width`, and wider only when its title needs it,
-    /// up to `maxWidth`: the extra goes to the title column, and the buttons keep their sizes.
-    /// After Send it shrinks to fit the confirmation.
-    private var pillContentWidth: ClosedRange<CGFloat>? {
-        if controller.sentConfirmation != nil {
-            return nil
-        }
-        return Self.width...Self.maxWidth
+    /// The pill is `width` wide in every mode; after Send it shrinks to fit the confirmation.
+    private var isConfirmingSend: Bool {
+        controller.sentConfirmation != nil
     }
 
     /// The pill's content width, the same in every state; embedded, the same without the
@@ -267,7 +275,7 @@ struct HUDView: View {
     private var pill: some View {
         if isEmbedded {
             pillContent
-                .frame(minWidth: pillContentWidth.map { _ in Self.embeddedWidth }, minHeight: 30, maxHeight: 30)
+                .frame(minWidth: isConfirmingSend ? nil : Self.embeddedWidth, minHeight: 30, maxHeight: 30)
                 .environment(\.isHUDEmbedded, true)
         } else {
             floatingPill
@@ -367,7 +375,7 @@ struct HUDView: View {
     ]
 
     private var floatingPill: some View {
-        capsule(pillContent, width: pillContentWidth)
+        capsule(pillContent, width: isConfirmingSend ? nil : Self.width)
         // Opening and closing zoom the laid-out pill in and out of its centre. Under the
         // pointer it grows a little to show that it can be dragged; a drag that starts on a
         // button moves the HUD and does not press it.
@@ -382,7 +390,7 @@ struct HUDView: View {
     }
 
     private var drawingBar: some View {
-        capsule(HStack(spacing: 4) { drawingContent }, width: HUDView.width...HUDView.width)
+        capsule(HStack(spacing: 4) { drawingContent }, width: HUDView.width)
             .opacity(controller.isHUDShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -390,11 +398,12 @@ struct HUDView: View {
             )
     }
 
-    private func capsule(_ content: some View, width: ClosedRange<CGFloat>?) -> some View {
+    /// `width`: the pill's whole width, or nil to fit the content.
+    private func capsule(_ content: some View, width: CGFloat?) -> some View {
         content
             .padding(.leading, HUDMetrics.leadingInset)
             .padding(.trailing, HUDMetrics.trailingInset)
-            .frame(minWidth: width?.lowerBound, maxWidth: width?.upperBound)
+            .frame(width: width)
             .frame(height: HUDMetrics.height)
             .clipShape(Capsule())
             .background(Capsule().fill(Color.tildeInk))
@@ -488,7 +497,8 @@ struct HUDView: View {
             // A session without an agent copies the report.
             SendButton(copies: controller.session?.isLocal == true, action: controller.send)
                 .disabled(!flow.canSend)
-            .tildeTooltip(sendHelp)
+                .tildeTooltip(sendHelp)
+                .accessibilityLabel(sendHelp)
             .padding(.leading, 4)
 
             // Esc closes the session only while paused; elsewhere it pauses or steps back.
@@ -705,10 +715,10 @@ struct HUDView: View {
             switch status.clock {
             case .running(let since, let before):
                 TimelineView(.periodic(from: since, by: 1)) { context in
-                    Text("\(status.title) \(AnnotationController.clock(before + context.date.timeIntervalSince(since)))")
+                    Text("\(status.title) \(clipLength(before + context.date.timeIntervalSince(since)))")
                 }
             case .stopped(let elapsed):
-                Text("\(status.title) \(AnnotationController.clock(elapsed))")
+                Text("\(status.title) \(clipLength(elapsed))")
             case nil:
                 Text(status.title)
             }
@@ -900,12 +910,7 @@ struct HUDButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                if badge != nil {
-                    label(count: "88").hidden()
-                }
-                label(count: badge.flatMap { $0 > 0 ? "\($0)" : nil })
-            }
+            label
             .foregroundStyle(foreground)
             .padding(.horizontal, badge == nil ? 0 : 9)
             .frame(minWidth: size, minHeight: size)
@@ -918,14 +923,19 @@ struct HUDButton: View {
         .accessibilityLabel(help)
     }
 
-    private func label(count: String?) -> some View {
+    /// The icon, then a slot two digits wide for the count, empty at zero, so the icon stays
+    /// put as the count changes.
+    private var label: some View {
         HStack(spacing: 4) {
             image
                 .font(.system(size: 12, weight: .semibold))
                 .symbolEffect(.bounce, value: bounce)
-            if let count {
-                Text(count)
-                    .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+            if let badge {
+                ZStack(alignment: .leading) {
+                    Text("88").hidden()
+                    Text(badge > 0 ? "\(badge)" : "")
+                }
+                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
             }
         }
     }
@@ -1145,7 +1155,9 @@ private struct AnnotationRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             // A button's click does not reach the row's tap gesture, so Delete never opens the preview.
-            RowDeleteButton { controller.deleteDraft(draft.id) }
+            HUDButton(image: Image(systemName: "trash"), size: 26, isDestructive: true, help: "Delete this annotation") {
+                controller.deleteDraft(draft.id)
+            }
                 .tildeTooltip("Delete this annotation")
         }
         .padding(.leading, HUDMetrics.leadingInset)
@@ -1182,24 +1194,6 @@ private struct Thumbnail: View {
 }
 
 /// Trash button of a list row, red like the other delete buttons.
-private struct RowDeleteButton: View {
-    let action: () -> Void
-    @State private var isHovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "trash")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Color.red.opacity(isHovered ? 1 : 0.85))
-                .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.red.opacity(isHovered ? 0.26 : 0.12)))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-    }
-}
-
 private extension Color {
     /// From "#RRGGBB".
     init(hex: String) {

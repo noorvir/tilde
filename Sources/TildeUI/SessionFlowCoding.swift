@@ -132,7 +132,7 @@ extension SessionFlow.Event: Codable {
             "redoDrawing": .redoDrawing, "shapeFinished": .shapeFinished, "toggleRecordingMode": .toggleRecordingMode, "record": .record,
             "stop": .stop, "clipStarted": .clipStarted(operation), "clipStartFailed": .clipStartFailed(operation),
             "clipFinished": .clipFinished(operation), "clipFailed": .clipFailed(operation), "captureStopped": .captureStopped,
-            "windowButton": .windowButton, "openPicker": .openPicker, "closePicker": .closePicker, "choose": .choose(drawable: value != "phone"),
+            "windowButton": .windowButton, "openPicker": .openPicker, "choose": .choose(drawable: value != "phone"),
             "send": .send, "sendFinished": .sendFinished(operation), "sendFailed": .sendFailed(operation), "sentShown": .sentShown(operation),
             "pushFailed": .pushFailed,
         ]

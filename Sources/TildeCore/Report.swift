@@ -76,6 +76,13 @@ public func contextImageName(_ number: Int) -> String {
     "annotation-\(number)-context.png"
 }
 
+/// A recording's length as minutes and seconds, such as "1:05", to the nearest second; the
+/// HUD, the list, the preview and the report all say it so.
+public func clipLength(_ seconds: Double) -> String {
+    let total = Int(seconds.rounded())
+    return String(format: "%d:%02d", total / 60, total % 60)
+}
+
 /// File name of the video of the recording with this 1-based number.
 public func videoName(_ number: Int) -> String {
     "annotation-\(number).mp4"
@@ -108,7 +115,7 @@ private func details(for target: Target) -> [String] {
         return ["- Shapes, in points from the `origin` (the top left of the window, or of the screen, in screen points): `\(shapes)`"]
 
     case .recording(_, let seconds, let source):
-        return ["- Recorded: \(source)", "- Length: \(Int(seconds.rounded())) s"]
+        return ["- Recorded: \(source)", "- Length: \(clipLength(seconds))"]
 
     case .element(.web(let element)):
         var lines = [
