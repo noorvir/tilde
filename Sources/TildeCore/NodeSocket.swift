@@ -4,7 +4,7 @@ import Network
 
 /// A node's door to Tilde: a Unix socket on this Mac in a folder only this user can open, which
 /// the node's ssh link forwards the node's own socket to. Whoever connects is that node, as only
-/// its link reaches the socket. A connection speaks MCP's stdio framing, the one `tilde-proxy`
+/// its link reaches the socket. A connection speaks MCP's stdio framing, the one `tproxy`
 /// pipes from the node's agents: one JSON-RPC message per line each way.
 public final class NodeSocket: @unchecked Sendable {
     public let path: String

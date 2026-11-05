@@ -1,5 +1,7 @@
 #!/bin/sh
 # Builds build/Tilde.app (menu-bar app plus the tilde-mcp stdio shim) and signs it ad hoc.
+# TILDE_BUNDLE_TPROXY=1 (dev builds) puts the tproxy files in it, built with Go, or the ones in
+# proxy/dist where there is no Go; without it, Tilde downloads them from its version's release.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -16,6 +18,13 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/Tilde" "$bin/tilde-mcp" "$app/Contents/MacOS/"
 scripts/stamp-sdk.sh "$app/Contents/MacOS/Tilde"
 cp Sources/TildeUI/DrawingWeb/* "$app/Contents/Resources/"
+if [ "${TILDE_BUNDLE_TPROXY:-}" = 1 ]; then
+    if command -v go >/dev/null; then
+        proxy/build.sh
+    fi
+    mkdir "$app/Contents/Resources/tproxy"
+    cp proxy/dist/tproxy-* "$app/Contents/Resources/tproxy/"
+fi
 
 iconset="build/AppIcon.iconset"
 rm -rf "$iconset"

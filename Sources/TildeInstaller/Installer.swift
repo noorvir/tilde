@@ -44,7 +44,7 @@ public struct InstallEnvironment: Sendable {
     /// The `Authorization` header of the MCP entries: the local token on this Mac, a node's
     /// token on a machine that reaches Tilde by a tunnel.
     public var authorization: String?
-    /// On a machine linked by its socket: `tilde-proxy` and the socket, which the entries start
+    /// On a machine linked by its socket: `tproxy` and the socket, which the entries start
     /// as a stdio server instead of reaching `mcpURL`.
     public var proxy: [String]?
     /// Variables that move an app's folder, such as `CODEX_HOME`.
@@ -173,7 +173,7 @@ public struct Installer: Sendable {
     }
 
     /// The installer of another machine, reached by a shell and a tunnel to `mcpURL`, or with
-    /// `proxied`, by `tilde-proxy` and its socket in the machine's `~/.tilde`. Its folders come
+    /// `proxied`, by `tproxy` and its socket in the machine's `~/.tilde`. Its folders come
     /// from its login shell.
     public static func remote(mcpURL: String, authorization: String, proxied: Bool = false, run: @escaping ShellFiles.Run) throws -> Installer {
         let names = ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME"]
@@ -190,7 +190,7 @@ public struct Installer: Sendable {
         environment.mcpURL = mcpURL
         environment.authorization = authorization
         if proxied {
-            environment.proxy = [values[0] + "/.tilde/bin/tilde-proxy", values[0] + "/.tilde/tilde.sock"]
+            environment.proxy = [values[0] + "/.tilde/bin/tproxy", values[0] + "/.tilde/tilde.sock"]
         }
         for (name, value) in zip(names, values).dropFirst(2) where !value.isEmpty {
             environment.variables[name] = value

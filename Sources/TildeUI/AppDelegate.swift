@@ -173,7 +173,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.server = server
 
-            // The door for tunnels from node types with no tilde-proxy: every request needs the
+            // The door for tunnels from node types with no tproxy: every request needs the
             // token of such a node, and one node's long polls cannot take every connection.
             let store = NodeStore()
             let nodeServer = try HTTPServer(port: state.port + 1, maxRequestsPerCaller: 8) { request in

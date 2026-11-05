@@ -4,8 +4,8 @@ import TildeInstaller
 import os
 
 /// The machines that Tilde can be installed on, and a link to each machine that has it: an ssh
-/// tunnel from the node's socket, which its agents reach through `tilde-proxy`, to this Mac's
-/// socket for that node. A node type with no `tilde-proxy` file is linked by a port instead.
+/// tunnel from the node's socket, which its agents reach through `tproxy`, to this Mac's
+/// socket for that node. A node type with no `tproxy` file is linked by a port instead.
 @MainActor
 final class NodeSetup: ObservableObject {
     enum Status: Equatable {
@@ -118,7 +118,7 @@ final class NodeSetup: ObservableObject {
         var isReachable: Bool?
         /// An install or a tunnel failed on a machine that answers.
         var hasFailed = false
-        /// Linked by its socket. A node type with no `tilde-proxy` file is linked by a port,
+        /// Linked by its socket. A node type with no `tproxy` file is linked by a port,
         /// which every user on the node can reach.
         var isProtected = true
 
@@ -143,7 +143,7 @@ final class NodeSetup: ObservableObject {
     /// Serves the nodes' sockets; links start once it is set.
     var mcp: MCPServer?
     private var links: [String: Process] = [:]
-    /// Nodes whose `tilde-proxy` is being checked before their tunnel starts.
+    /// Nodes whose `tproxy` is being checked before their tunnel starts.
     private var preparing: Set<String> = []
     private var sockets: [String: NodeSocket] = [:]
     private var isLinking = false
@@ -276,7 +276,7 @@ final class NodeSetup: ObservableObject {
     }
 
     /// A machine with Tilde in any app is linked, by its socket when its entries start
-    /// `tilde-proxy`; with none, its link goes.
+    /// `tproxy`; with none, its link goes.
     private func agentsChanged(_ host: String, _ setup: AgentSetup) {
         let isInstalled = AgentSetup.rows.contains { setup.status(of: $0) == .installed }
         let known = store.load().first { $0.host == host }
@@ -300,7 +300,7 @@ final class NodeSetup: ObservableObject {
             if let socket = known?.socket {
                 let folder = (socket as NSString).deletingLastPathComponent
                 Task.detached {
-                    _ = try? RemotePush.runOnNode(host, command: "rm -f \(Self.quoted(socket)) \(Self.quoted(folder + "/bin/tilde-proxy"))")
+                    _ = try? RemotePush.runOnNode(host, command: "rm -f \(Self.quoted(socket)) \(Self.quoted(folder + "/bin/tproxy"))")
                 }
             }
             update(host, status: .notInstalled, note: nil)
@@ -322,13 +322,13 @@ final class NodeSetup: ObservableObject {
         "http://127.0.0.1:\(remotePort)/mcp"
     }
 
-    /// The machine's installer: its entries start `tilde-proxy` when its type has a file.
+    /// The machine's installer: its entries start `tproxy` when its type has a file.
     nonisolated private static func installer(_ host: String, url: String, token: String) throws -> Installer {
         let run: ShellFiles.Run = { command, input in
             try RemotePush.runOnNode(host, command: command, input: input)
         }
         let type = try run("uname -sm", nil)
-        return try Installer.remote(mcpURL: url, authorization: "Bearer \(token)", proxied: TildeProxy.Target(uname: type) != nil, run: run)
+        return try Installer.remote(mcpURL: url, authorization: "Bearer \(token)", proxied: TProxy.Target(uname: type) != nil, run: run)
     }
 
     nonisolated static func quoted(_ path: String) -> String {
@@ -336,11 +336,10 @@ final class NodeSetup: ObservableObject {
     }
 
     /// Readies the node for its link: its `~/.tilde` and `~/.tilde/bin` are this user's, 0700,
-    /// no stale socket is left, and its `tilde-proxy` is the one with the built-in hash; a file
-    /// with another hash is replaced. Returns the reason when it cannot.
+    /// no stale socket is left, and it prints its type and its `tproxy`'s hash, if any.
     nonisolated static func prepareCommand(socket: String) -> String {
         let folder = quoted((socket as NSString).deletingLastPathComponent)
-        let hash = "{ sha256sum || shasum -a 256; } 2>/dev/null <\"$t/bin/tilde-proxy\""
+        let hash = "{ sha256sum || shasum -a 256; } 2>/dev/null <\"$t/bin/tproxy\""
         return [
             "umask 077 && t=\(folder) && mkdir -p \"$t/bin\"",
             "[ ! -L \"$t\" ] && [ -O \"$t\" ] && [ ! -L \"$t/bin\" ] && [ -O \"$t/bin\" ] && chmod 700 \"$t\" \"$t/bin\"",
@@ -351,19 +350,21 @@ final class NodeSetup: ObservableObject {
 
     nonisolated private static func prepare(_ host: String, socket: String) async throws {
         let lines = try RemotePush.runOnNode(host, command: prepareCommand(socket: socket)).split(whereSeparator: \.isNewline)
-        guard let type = lines.first, let target = TildeProxy.Target(uname: String(type)) else {
-            throw RemotePush.Failure.failed("Tilde has no tilde-proxy for this machine")
+        guard let type = lines.first, let target = TProxy.Target(uname: String(type)) else {
+            throw RemotePush.Failure.failed("Tilde has no tproxy for this machine")
         }
-        guard lines.dropFirst().first?.split(separator: " ").first.map(String.init) != target.sha256 else {
+        // The node's file is replaced whenever it differs from Tilde's.
+        let file = try await TProxy.file(for: target)
+        let expected = TProxy.sha256(try Data(contentsOf: file))
+        guard lines.dropFirst().first?.split(separator: " ").first.map(String.init) != expected else {
             return
         }
 
-        let file = try await TildeProxy.file(for: target)
-        let proxy = (socket as NSString).deletingLastPathComponent + "/bin/tilde-proxy"
+        let proxy = (socket as NSString).deletingLastPathComponent + "/bin/tproxy"
         try RemotePush.copy(file, to: host, path: proxy + ".new")
         let check = "chmod 700 \(quoted(proxy + ".new")) && mv -f \(quoted(proxy + ".new")) \(quoted(proxy)) && { sha256sum || shasum -a 256; } 2>/dev/null <\(quoted(proxy))"
-        guard try RemotePush.runOnNode(host, command: check).hasPrefix(target.sha256) else {
-            throw RemotePush.Failure.failed("tilde-proxy changed on its way to the machine")
+        guard try RemotePush.runOnNode(host, command: check).hasPrefix(expected) else {
+            throw RemotePush.Failure.failed("tproxy changed on its way to the machine")
         }
     }
 
@@ -384,7 +385,7 @@ final class NodeSetup: ObservableObject {
     }
 
     /// One tunnel, started again whenever it ends: sleep and network changes end it. A node
-    /// with a socket gets its `tilde-proxy` checked first, and its tunnel joins the two sockets.
+    /// with a socket gets its `tproxy` checked first, and its tunnel joins the two sockets.
     private func link(_ host: String, attempt: Int = 0) {
         guard links[host] == nil, !preparing.contains(host), RemotePush.isValid(host: host), let mcp,
               let node = store.load().first(where: { $0.host == host }) else {

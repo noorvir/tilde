@@ -1,13 +1,12 @@
 import CryptoKit
 import Foundation
 
-/// `tilde-proxy`, the pipe from a node's agents to Tilde: they start it as a stdio MCP server,
-/// and it connects to the socket that Tilde's ssh link forwards to the node. Tilde takes each
-/// node's file from the GitHub release of `version` and copies it there only when it has the
-/// hash built in here, the same as `proxy/SHA256SUMS`.
-public enum TildeProxy {
-    public static let version = "1.0.0"
-
+/// `tproxy`, the pipe from a node's agents to Tilde: they start it as a stdio MCP server,
+/// and it connects to the socket that Tilde's ssh link forwards to the node. Tilde copies each
+/// node the file for its type: the one in Tilde.app when the build put them there (dev builds),
+/// or else the one from the GitHub release of this Tilde's version, with the hash built in here,
+/// the same as `proxy/SHA256SUMS`.
+public enum TProxy {
     /// A node type that has a file.
     public enum Target: String, CaseIterable, Sendable {
         case darwinArm64 = "darwin-arm64"
@@ -33,15 +32,16 @@ public enum TildeProxy {
         }
 
         public var fileName: String {
-            "tilde-proxy-\(rawValue)"
+            "tproxy-\(rawValue)"
         }
 
+        /// The release file's hash.
         public var sha256: String {
             switch self {
-            case .darwinArm64: "fbc2696db5e3b33308dbe986be4c9d37ecdea335e8f73cfff5e28cfe252ca92e"
-            case .darwinAmd64: "f7187e62fc963e705b5709a343863dd357e21afd87ffef0a2c502285c9661a0d"
-            case .linuxAmd64: "5cc15c81274c977beadd4f7558c190cb39f2c396e6fd4951a691258a6f92edbd"
-            case .linuxArm64: "ceb84ca1586b56b67d53216c96fb283d17a74c823538b6f8216976a27a59bdb5"
+            case .darwinArm64: "c8782c721b027c6b6927010585c22743f67cf27e39e758f9d29ad5fd9deb0337"
+            case .darwinAmd64: "d29007226862a85e2f2527562d7b7f315861980b9b07b2bdbbdb5c986e26edef"
+            case .linuxAmd64: "105617cce37b2a904af94bd48ec4816af5c47c7954dba7935eb4b96dd6b1cfbf"
+            case .linuxArm64: "c67513e7f3de33e8ee6eba9fd255a0c3720bcf76af615f66b8b246c1ec756a58"
             }
         }
     }
@@ -52,31 +52,43 @@ public enum TildeProxy {
 
         public var description: String {
             switch self {
-            case .download(let reason): "Could not download tilde-proxy: \(reason)"
+            case .download(let reason): "Could not download tproxy: \(reason)"
             case .wrongHash(let name): "The downloaded \(name) is not the one Tilde expects, so it was not used"
             }
         }
     }
 
-    /// The release's files. `TILDE_PROXY_DOWNLOAD_URL` replaces it for tests only.
-    public static var downloadBase: URL {
-        if let base = ProcessInfo.processInfo.environment["TILDE_PROXY_DOWNLOAD_URL"], let url = URL(string: base) {
-            return url
-        }
-        return URL(string: "https://github.com/noorvir/tilde/releases/download/tilde-proxy-v\(version)")!
+    /// The files in Tilde.app, when the build put them there.
+    public static var bundled: URL? {
+        let folder = Bundle.main.resourceURL?.appendingPathComponent("tproxy")
+        return folder.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    }
+
+    /// The release of this Tilde's version.
+    public static var release: URL {
+        URL(string: "https://github.com/noorvir/tilde/releases/download/v\(appVersion)")!
     }
 
     public static var defaultCache: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("dev.tilde.app/tilde-proxy-\(version)")
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("dev.tilde.app/tproxy-v\(appVersion)")
+    }
+
+    private static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
     public static func sha256(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// The node type's file on this Mac, with its built-in hash: from the cache, or else
-    /// downloaded, checked and then cached. A file with another hash is never returned.
-    public static func file(for target: Target, cache: URL = defaultCache, base: URL = downloadBase) async throws -> URL {
+    /// The node type's file on this Mac: Tilde.app's own, or else the release's, which is
+    /// downloaded once, checked against its built-in hash and cached. A release file with
+    /// another hash is never returned.
+    public static func file(for target: Target, bundled: URL? = bundled, cache: URL = defaultCache, release: URL = release) async throws -> URL {
+        if let bundled {
+            return bundled.appendingPathComponent(target.fileName)
+        }
+
         let file = cache.appendingPathComponent(target.fileName)
         if let data = try? Data(contentsOf: file), sha256(data) == target.sha256 {
             return file
@@ -84,7 +96,7 @@ public enum TildeProxy {
 
         let data: Data
         do {
-            let (body, response) = try await URLSession.shared.data(from: base.appendingPathComponent(target.fileName))
+            let (body, response) = try await URLSession.shared.data(from: release.appendingPathComponent(target.fileName))
             if let status = (response as? HTTPURLResponse)?.statusCode, status != 200 {
                 throw Failure.download("the server answered \(status)")
             }

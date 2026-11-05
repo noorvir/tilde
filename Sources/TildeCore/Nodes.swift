@@ -1,8 +1,8 @@
 import Foundation
 
-/// Machines that Tilde is installed on. A node's agents reach this Mac through `tilde-proxy` and
+/// Machines that Tilde is installed on. A node's agents reach this Mac through `tproxy` and
 /// the node's socket, which its ssh link forwards to a socket of this Mac for that node only; a
-/// node type with no `tilde-proxy` file reaches it through the node port with its token.
+/// node type with no `tproxy` file reaches it through the node port with its token.
 public struct Node: Codable, Equatable, Sendable {
     public let host: String
     public let token: String

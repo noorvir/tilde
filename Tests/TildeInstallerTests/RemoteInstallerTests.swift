@@ -85,7 +85,7 @@ struct RemoteInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/tilde").path))
     }
 
-    /// On a machine linked by its socket, each app starts `tilde-proxy` with the socket as a
+    /// On a machine linked by its socket, each app starts `tproxy` with the socket as a
     /// stdio server, in its own words, and a reinstall replaces an older URL entry.
     @Test func aProxiedMachineGetsStdioEntriesThatReplaceTheURL() throws {
         let home = try home()
@@ -96,7 +96,7 @@ struct RemoteInstallerTests {
         try #"{ "mcpServers": { "tilde": { "type": "http", "url": "http://127.0.0.1:7319/mcp" } }, "other": 1 }"#
             .write(to: home.appendingPathComponent(".claude.json"), atomically: true, encoding: .utf8)
         let installer = try Installer.remote(mcpURL: "http://127.0.0.1:7319/mcp", authorization: "Bearer secret", proxied: true, run: run(home: home))
-        let proxy = home.path + "/.tilde/bin/tilde-proxy"
+        let proxy = home.path + "/.tilde/bin/tproxy"
         let socket = home.path + "/.tilde/tilde.sock"
         #expect(installer.environment.proxy == [proxy, socket])
         #expect(installer.status(of: .claudeCode) == .notInstalled)

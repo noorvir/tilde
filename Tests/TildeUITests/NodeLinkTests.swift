@@ -44,14 +44,14 @@ struct NodeLinkTests {
 
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tilde.path)
         try Data("stale".utf8).write(to: tilde.appendingPathComponent("tilde.sock"))
-        try Data("proxy".utf8).write(to: tilde.appendingPathComponent("bin/tilde-proxy"))
+        try Data("proxy".utf8).write(to: tilde.appendingPathComponent("bin/tproxy"))
         let again = prepare(home)
         #expect(again.status == 0)
         #expect(mode(tilde) == 0o700)
         #expect(!FileManager.default.fileExists(atPath: tilde.appendingPathComponent("tilde.sock").path))
         let lines = again.output.split(separator: "\n")
         #expect(lines.count == 2)
-        #expect(lines.last?.hasPrefix(TildeProxy.sha256(Data("proxy".utf8))) == true)
+        #expect(lines.last?.hasPrefix(TProxy.sha256(Data("proxy".utf8))) == true)
     }
 
     /// A `~/.tilde` that is a link, such as one to another user's folder, is never used.
