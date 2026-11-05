@@ -3,13 +3,35 @@ import Foundation
 /// The flow as the contract rows write it: one flat object, such as
 /// `{"mode": "recording", "clip": "paused", "notes": 2}`. A key left out has its default: a
 /// session annotating with no notes. `sending` keeps the session it goes back to in `returnTo`.
+/// An unknown key or value is an error, so a typo cannot test another state.
 extension SessionFlow: Codable {
-    private enum Key: String, CodingKey {
+    private enum Key: String, CodingKey, CaseIterable {
         case mode, pauses, drawing, panel, question, clip, operation, thenSend, recordMode, pickerOpen, returnTo
         case notes, commentHasText, commentIsOnDrawing, lastOperation
     }
 
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+
+        init(stringValue: String) {
+            self.stringValue = stringValue
+        }
+
+        init?(intValue: Int) {
+            nil
+        }
+    }
+
+    private static func unknown(_ value: String, _ decoder: Decoder) -> DecodingError {
+        .dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown \(value)"))
+    }
+
     init(from decoder: Decoder) throws {
+        let known = Set(Key.allCases.map(\.rawValue))
+        if let key = try decoder.container(keyedBy: AnyKey.self).allKeys.first(where: { !known.contains($0.stringValue) }) {
+            throw Self.unknown("key \(key.stringValue)", decoder)
+        }
         let values = try decoder.container(keyedBy: Key.self)
         notes = try values.decodeIfPresent(Int.self, forKey: .notes) ?? 0
         commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
@@ -25,12 +47,14 @@ extension SessionFlow: Codable {
         case "sending":
             let returnTo = try values.decodeIfPresent(SessionFlow.self, forKey: .returnTo)
             mode = .sending(operation: operation, returnTo: returnTo?.session ?? Open())
-        default:
-            mode = .open(try Self.open(from: values, operation: operation))
+        case "annotating", "recording", "picking":
+            mode = .open(try Self.open(from: values, operation: operation, decoder: decoder))
+        case let other:
+            throw Self.unknown("mode \(other)", decoder)
         }
     }
 
-    private static func open(from values: KeyedDecodingContainer<Key>, operation: Int) throws -> Open {
+    private static func open(from values: KeyedDecodingContainer<Key>, operation: Int, decoder: Decoder) throws -> Open {
         var open = Open()
         open.pauses = Set(try values.decodeIfPresent([PauseReason].self, forKey: .pauses) ?? [])
         open.isDrawing = try values.decodeIfPresent(Bool.self, forKey: .drawing) ?? false
@@ -40,11 +64,12 @@ extension SessionFlow: Codable {
         switch try values.decodeIfPresent(String.self, forKey: .mode) ?? "annotating" {
         case "recording":
             let clip: Clip = switch try values.decodeIfPresent(String.self, forKey: .clip) ?? "ready" {
+            case "ready": .ready
             case "starting": .starting(operation: operation)
             case "recording": .recording
             case "paused": .paused
             case "finishing": .finishing(operation: operation, thenSend: try values.decodeIfPresent(Bool.self, forKey: .thenSend) ?? false)
-            default: .ready
+            case let other: throw unknown("clip \(other)", decoder)
             }
             open.activity = .recording(clip)
         case "picking":
