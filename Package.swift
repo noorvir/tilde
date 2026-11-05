@@ -1,9 +1,11 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Warnings are errors in everything that ships: in Swift 5 mode an API newer than macOS 14,
-// such as a 15-only conformance, is only a warning, and it crashes at run time on 14.
-let strict: [SwiftSetting] = [.unsafeFlags(["-warnings-as-errors"])]
+// With TILDE_STRICT=1 (the test, UX and install scripts), warnings are errors in everything
+// that ships: in Swift 5 mode an API newer than macOS 14, such as a 15-only conformance, is
+// only a warning, and it crashes at run time on 14. Other builds do not depend on the exact
+// compiler's warnings.
+let strict: [SwiftSetting] = Context.environment["TILDE_STRICT"] == "1" ? [.unsafeFlags(["-warnings-as-errors"])] : []
 
 let package = Package(
     name: "Tilde",

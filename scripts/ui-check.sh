@@ -4,6 +4,8 @@
 #   scripts/ui-check.sh [--record] [name filter]
 set -eu
 cd "$(dirname "$0")/.."
+# The owner's builds make warnings errors; see Package.swift.
+export TILDE_STRICT=1
 swift build --product tilde-state >/dev/null
 swift build --product tilde-ui-check >/dev/null
 scripts/stamp-sdk.sh "$(swift build --show-bin-path)/tilde-state"

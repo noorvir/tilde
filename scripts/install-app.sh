@@ -5,6 +5,8 @@
 set -eu
 
 cd "$(dirname "$0")/.."
+# The owner's builds make warnings errors; see Package.swift.
+export TILDE_STRICT=1
 sessions="${TILDE_SESSIONS:-$HOME/Library/Application Support/Tilde/Sessions}"
 
 if [ "${1:-}" != "--force" ] && pgrep -x Tilde >/dev/null; then

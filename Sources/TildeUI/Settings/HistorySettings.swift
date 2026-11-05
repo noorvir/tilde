@@ -45,8 +45,20 @@ final class HistoryModel: ObservableObject {
         reload()
     }
 
-    /// The report as an agent or the clipboard gets it.
+    /// The report as an agent or the clipboard gets it. Made off the main thread: an unsent
+    /// session's report is saved first, which can copy its videos.
     func copyReport(_ record: SessionRecord) {
+        let archive = self.archive
+        Task {
+            let text = await Task.detached { Self.report(of: record, archive: archive) }.value
+            if let text {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+            }
+        }
+    }
+
+    private nonisolated static func report(of record: SessionRecord, archive: SessionArchive) -> String? {
         let annotations = record.notes.map { note in
             let images = archive.images(of: note, in: record.id)
             return Annotation(id: note.id, comment: note.comment, target: note.target, frame: note.frame, image: images.image, contextImage: images.contextImage)
@@ -55,10 +67,9 @@ final class HistoryModel: ObservableObject {
         // An unsent session has no report folder yet; it gets one, as Send makes, so the
         // report's file names are there.
         guard let folder = record.reportFolder.map({ URL(fileURLWithPath: $0, isDirectory: true) }) ?? (try? saveToInbox(feedback, sessionID: record.id, node: record.node)) else {
-            return
+            return nil
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(reportText(for: feedback, folder: folder), forType: .string)
+        return reportText(for: feedback, folder: folder)
     }
 
     func canRestore(_ record: SessionRecord) -> Bool {

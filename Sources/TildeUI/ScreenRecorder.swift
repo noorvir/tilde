@@ -48,6 +48,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
     private let queue = DispatchQueue(label: "dev.tilde.recorder")
+    private let writerWatch: DispatchSourceTimer
     private let log = Logger(subsystem: "dev.tilde.app", category: "recording")
 
     // Read and written on `queue` only.
@@ -134,7 +135,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         )
         let center = NotificationCenter.default
         let ended: @Sendable (Notification) -> Void = { [weak recorder] _ in
-            recorder?.queue.async { recorder?.sourceEnded() }
+            recorder?.queue.async { [weak recorder] in
+                recorder?.sourceEnded()
+            }
         }
         recorder.capture = .session(session, observers: [
             center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil, using: ended),
@@ -186,9 +189,21 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         self.writer = writer
         self.input = input
         self.onSourceEnded = onSourceEnded
+        writerWatch = DispatchSource.makeTimerSource(queue: queue)
+        super.init()
+        // A writer can fail while it takes no frames, or while none come: each second it is
+        // checked, and a failed one ends the clip.
+        writerWatch.schedule(deadline: .now() + 1, repeating: 1)
+        writerWatch.setEventHandler { [weak self] in
+            if self?.writer.status == .failed {
+                self?.sourceEnded()
+            }
+        }
+        writerWatch.resume()
     }
 
     private func stopCapture() async {
+        writerWatch.cancel()
         switch capture {
         case .stream(let stream):
             try? await stream.stopCapture()

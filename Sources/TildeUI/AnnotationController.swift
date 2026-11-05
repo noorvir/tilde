@@ -1142,7 +1142,7 @@ final class AnnotationController: ObservableObject {
         trackingQueue.async { [weak self] in
             let stack = ElementPicker.windowStack(browserWindow: browserWindow, screenFrames: screenFrames, overlayLevel: overlayLevel)
                 .map { StackWindow(number: $0.number, frame: $0.frame) }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
                     self?.applyOcclusion(stack, windows: windows)
                 }
@@ -1419,7 +1419,7 @@ final class AnnotationController: ObservableObject {
         elementsToFindAgain = []
         trackingQueue.async { [weak self] in
             let results = work.map { id, tracked, last, findsAgain in (id, ElementTracker.locate(tracked, lastFrame: last, findsAgain: findsAgain)) }
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
                     self?.applyTracking(results)
                 }
