@@ -127,6 +127,35 @@ struct RemoteInstallerTests {
         #expect(!codex.contains("url ="))
     }
 
+    /// VS Code keeps its config in ~/.config on Linux (or XDG_CONFIG_HOME), in ~/Library on macOS.
+    @Test func vsCodeIsFoundAndInstalledWhereTheSystemKeepsIt() throws {
+        let linux = try home()
+        let bin = linux.appendingPathComponent("fake-bin")
+        try make(linux, "fake-bin")
+        try "#!/bin/sh\necho Linux\n".write(to: bin.appendingPathComponent("uname"), atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: bin.appendingPathComponent("uname").path)
+        let path = ["PATH": "\(bin.path):/usr/bin:/bin"]
+
+        try make(linux, ".config/Code/User")
+        let onLinux = try Installer.remote(mcpURL: "http://127.0.0.1:7319/mcp", authorization: "Bearer secret", run: run(home: linux, variables: path))
+        #expect(onLinux.environment.isLinux)
+        #expect(onLinux.isPresent(.vscode))
+        _ = onLinux.install(.vscode)
+        #expect(try text(linux, ".config/Code/User/mcp.json").contains("Bearer secret"))
+        #expect(!FileManager.default.fileExists(atPath: linux.appendingPathComponent("Library").path))
+
+        try make(linux, "xdg/Code/User")
+        let moved = try Installer.remote(mcpURL: "http://127.0.0.1:7319/mcp", authorization: "Bearer secret", run: run(home: linux, variables: path.merging(["XDG_CONFIG_HOME": linux.path + "/xdg"]) { $1 }))
+        #expect(moved.configFile(for: .vscode).path == linux.path + "/xdg/Code/User/mcp.json")
+
+        let mac = try home()
+        try make(mac, "Library/Application Support/Code/User")
+        let local = try installer(mac)
+        #expect(!local.environment.isLinux)
+        #expect(local.isPresent(.vscode))
+        #expect(local.configFile(for: .vscode).path == mac.path + "/Library/Application Support/Code/User/mcp.json")
+    }
+
     @Test func aConfigWithTheTokenIsForItsOwnerOnly() throws {
         let home = try home()
         try make(home, ".codex")

@@ -49,6 +49,8 @@ public struct InstallEnvironment: Sendable {
     public var proxy: [String]?
     /// Variables that move an app's folder, such as `CODEX_HOME`.
     public var variables: [String: String] = [:]
+    /// A Linux machine, where some apps keep their config elsewhere, such as VS Code.
+    public var isLinux = false
 
     public init(home: URL, applications: [URL], binaries: [URL], mcpURL: String, bridgePath: String) {
         self.home = home
@@ -185,6 +187,7 @@ public struct Installer: Sendable {
         }
 
         var environment = InstallEnvironment.standard(home: URL(fileURLWithPath: values[0]), port: "0", bridgePath: "", isolated: true)
+        environment.isLinux = try run("uname -s", nil).trimmingCharacters(in: .whitespacesAndNewlines) == "Linux"
         environment.applications.insert(URL(fileURLWithPath: "/Applications"), at: 0)
         environment.binaries += values[1].split(separator: ":").map { URL(fileURLWithPath: String($0)) }
         environment.mcpURL = mcpURL
@@ -435,11 +438,12 @@ extension Installer {
                 detect: Target.Detection(paths: [".cursor"], apps: ["Cursor.app"])
             )
         case .vscode:
+            let codeFolder = environment.isLinux ? configFolder.appendingPathComponent("Code/User") : home.appendingPathComponent("Library/Application Support/Code/User")
             return Target(
-                config: home.appendingPathComponent("Library/Application Support/Code/User/mcp.json"),
+                config: codeFolder.appendingPathComponent("mcp.json"),
                 format: .json(path: ["servers", "tilde"], entry: .object(proxy.map { [.init(key: "type", value: .string("stdio"))] + $0 } ?? [.init(key: "type", value: .string("http")), .init(key: "url", value: url)] + headers)),
                 skills: agentSkills,
-                detect: Target.Detection(paths: ["Library/Application Support/Code/User"], apps: ["Visual Studio Code.app"], binaries: ["code"])
+                detect: Target.Detection(files: [codeFolder], apps: ["Visual Studio Code.app"], binaries: ["code"])
             )
         case .gemini:
             return Target(
