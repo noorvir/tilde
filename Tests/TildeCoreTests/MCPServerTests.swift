@@ -9,7 +9,7 @@ struct MCPServerTests {
     let server: MCPServer
 
     init() {
-        server = MCPServer(store: store)
+        server = MCPServer(store: store, localToken: "test")
     }
 
     @Test func sendBetweenWaitsIsReturnedByTheNextWait() async throws {
@@ -80,7 +80,7 @@ struct MCPServerTests {
 
     @Test func rejectsRequestsForOtherHosts() async throws {
         let request = HTTPRequest(method: "POST", path: "/mcp", headers: ["host": "evil.example:7311"], body: Data("{}".utf8))
-        let response = await server.handle(request)
+        let response = await server.handle(request, node: nil)
         #expect(response.status == 403)
     }
 
@@ -98,12 +98,12 @@ struct MCPServerTests {
     @Test func sentBatchesAreResources() async throws {
         let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: inbox) }
-        let server = MCPServer(store: store, inbox: inbox)
+        let server = MCPServer(store: store, localToken: "test", inbox: inbox)
 
         let empty = try await request("resources/list", [:], on: server)
         #expect((empty["resources"] as? [[String: Any]])?.isEmpty == true)
 
-        let folder = try saveToInbox(try sampleFeedback(), sessionID: "abc", root: inbox)
+        let folder = try saveToInbox(try sampleFeedback(), sessionID: "a1b2c3d4", root: inbox)
         let list = try await request("resources/list", [:], on: server)
         let resources = try #require(list["resources"] as? [[String: Any]])
         #expect(resources.map { $0["uri"] as? String } == ["tilde://feedback/latest", "tilde://feedback/\(folder.lastPathComponent)"])
@@ -124,8 +124,8 @@ struct MCPServerTests {
     @Test func aSentReportIsReadByItsID() async throws {
         let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: inbox) }
-        let server = MCPServer(store: store, inbox: inbox)
-        let folder = try saveToInbox(try sampleFeedback(), sessionID: "abc", root: inbox)
+        let server = MCPServer(store: store, localToken: "test", inbox: inbox)
+        let folder = try saveToInbox(try sampleFeedback(), sessionID: "a1b2c3d4", root: inbox)
 
         let read = try await request("tools/call", ["name": "get_report", "arguments": ["id": folder.lastPathComponent]], on: server)
         let content = try #require(read["content"] as? [[String: Any]])
@@ -189,7 +189,7 @@ struct MCPServerTests {
             headers["mcp-session-id"] = session
         }
         let body = try! JSONSerialization.data(withJSONObject: message)
-        return await (server ?? self.server).handle(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: body))
+        return await (server ?? self.server).handle(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: body), node: nil)
     }
 
     private func text(of result: [String: Any]) -> String {
@@ -211,6 +211,107 @@ struct MCPServerTests {
             contextImage: Data([0x89, 0x50, 0x4E, 0x47, 0x0D])
         )
         return Feedback(annotations: [annotation])
+    }
+    // MARK: - Who may call
+
+    /// Agents on this Mac need the local token; other processes on the Mac do not have it.
+    @Test func theLocalListenerAsksForTheToken() async throws {
+        let body = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8)
+        func status(_ authorization: String?) async -> Int {
+            var headers = ["host": "127.0.0.1:7311", "content-type": "application/json"]
+            headers["authorization"] = authorization
+            return await server.handleLocal(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: body)).status
+        }
+        #expect(await status(nil) == 401)
+        #expect(await status("Bearer wrong") == 401)
+        #expect(await status("Bearer test") == 200)
+    }
+
+    /// A web page cannot call Tilde: a JSON body needs a preflight, and an Origin that is not
+    /// local, "null" from a sandboxed frame or a file included, is refused.
+    @Test func webPagesCannotCall() async throws {
+        let body = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8)
+        func status(_ headers: [String: String]) async -> Int {
+            await server.handle(HTTPRequest(method: "POST", path: "/mcp", headers: ["host": "127.0.0.1:7311"].merging(headers) { $1 }, body: body), node: nil).status
+        }
+        #expect(await status(["content-type": "text/plain"]) == 415)
+        #expect(await status(["content-type": "application/json", "origin": "null"]) == 403)
+        #expect(await status(["content-type": "application/json", "origin": "https://evil.example"]) == 403)
+        #expect(await status(["content-type": "application/json", "origin": "http://localhost:3000"]) == 200)
+    }
+
+    @Test func onlyWebPagesOpenInTheBrowser() async throws {
+        let sessionID = try await initialize(client: "codex-mcp-client")
+        let result = try await call("start_annotation", ["url": "file:///etc/passwd", "wait_seconds": 0], session: sessionID)
+        #expect(result["isError"] as? Bool == true)
+        #expect(store.active == nil)
+    }
+
+    /// A machine lists and gets "latest" of only the reports for its own agents; any report
+    /// is read by its exact id, as a pasted report names it, and nothing outside the inbox.
+    @Test func aMachineListsOnlyItsOwnReports() async throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let server = MCPServer(store: store, localToken: "test", inbox: inbox)
+        let local = try saveToInbox(try sampleFeedback(), sessionID: "a1b2c3d4", root: inbox)
+        let own = try saveToInbox(try sampleFeedback(), sessionID: "b1b2c3d4", node: "box", root: inbox)
+
+        func list(_ node: String?) async throws -> [String] {
+            let response = await server.handle(HTTPRequest(method: "POST", path: "/mcp", headers: ["host": "127.0.0.1:7311", "content-type": "application/json"], body: Data(#"{"jsonrpc":"2.0","id":1,"method":"resources/list"}"#.utf8)), node: node)
+            let body = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+            let resources = (body["result"] as? [String: Any])?["resources"] as? [[String: Any]] ?? []
+            return resources.compactMap { $0["uri"] as? String }
+        }
+        #expect(try await list("box") == ["tilde://feedback/latest", "tilde://feedback/\(own.lastPathComponent)"])
+        #expect(try await list(nil).count == 3)
+
+        func read(_ id: String, as node: String?) async throws -> Bool {
+            let call: [String: Any] = ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "get_report", "arguments": ["id": id]]]
+            let body = try JSONSerialization.data(withJSONObject: call)
+            let response = await server.handle(HTTPRequest(method: "POST", path: "/mcp", headers: ["host": "127.0.0.1:7311", "content-type": "application/json"], body: body), node: node)
+            let reply = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+            return ((reply["result"] as? [String: Any])?["isError"] as? Bool) != true
+        }
+        #expect(try await read(local.lastPathComponent, as: "box"))
+        #expect(try await read("..", as: nil) == false)
+        #expect(try await read("../inbox", as: nil) == false)
+    }
+
+    /// A machine waits only for its own agents' sessions.
+    @Test func aMachineWaitsOnlyForItsOwnSessions() async throws {
+        let mine = store.start(client: "Codex", node: "box", url: nil)
+        #expect(await store.wait(for: mine.id, node: "box", seconds: 0) != nil)
+        #expect(await store.wait(for: mine.id, node: "other", seconds: 0) == nil)
+        #expect(await store.wait(for: mine.id, node: nil, seconds: 0) == nil)
+    }
+
+    @Test func aRequestLengthIsDigitsOnly() {
+        func status(_ length: String) -> Int? {
+            let request = Data("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: \(length)\r\n\r\n{}".utf8)
+            switch HTTPServer.parse(request, maxBodySize: 1024) {
+            case .invalid(let status): return status
+            case .request: return 200
+            case .incomplete: return nil
+            }
+        }
+        #expect(status("-1") == 400)
+        #expect(status("+2") == 400)
+        #expect(status("2") == 200)
+        #expect(status("4096") == 413)
+    }
+
+    /// Only the owner can open a report; a report for a machine names it.
+    @Test func reportsArePrivate() throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let folder = try saveToInbox(try sampleFeedback(), sessionID: "a1b2c3d4", node: "box", root: inbox)
+
+        #expect(try FileManager.default.attributesOfItem(atPath: folder.path)[.posixPermissions] as? Int == 0o700)
+        let report = folder.appendingPathComponent("feedback.md").path
+        #expect(try FileManager.default.attributesOfItem(atPath: report)[.posixPermissions] as? Int == 0o600)
+        #expect(reportNode(folder) == "box")
+        #expect(isReportID(folder.lastPathComponent))
+        #expect(!isReportID("2026-11-04_00-13-48_abc"))
     }
 }
 
@@ -294,7 +395,7 @@ private final class Locked<Value>: @unchecked Sendable {
 
 @MainActor @Suite struct ClientNameAfterRestartTests {
     private func request(_ message: [String: Any], session: String? = nil, userAgent: String? = nil) throws -> HTTPRequest {
-        var headers = ["host": "127.0.0.1:1", "accept": "application/json"]
+        var headers = ["host": "127.0.0.1:1", "accept": "application/json", "content-type": "application/json"]
         headers["mcp-session-id"] = session
         headers["user-agent"] = userAgent
         return HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: try JSONSerialization.data(withJSONObject: message))
@@ -302,24 +403,24 @@ private final class Locked<Value>: @unchecked Sendable {
 
     private func start(on server: MCPServer, session: String?, userAgent: String? = nil) async throws {
         let call: [String: Any] = ["jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": ["name": "start_annotation", "arguments": ["wait_seconds": 0]]]
-        _ = await server.handle(try request(call, session: session, userAgent: userAgent))
+        _ = await server.handle(try request(call, session: session, userAgent: userAgent), node: nil)
     }
 
     @Test func aSessionKeepsItsClientNameWhenTildeRestarts() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-clients-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
-        let first = MCPServer(store: SessionStore(), clientsFile: file)
+        let first = MCPServer(store: SessionStore(), localToken: "test", clientsFile: file)
         let hello: [String: Any] = ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["clientInfo": ["name": "claude-code"]]]
-        let session = try #require(await first.handle(try request(hello)).headers["Mcp-Session-Id"])
+        let session = try #require(await first.handle(try request(hello), node: nil).headers["Mcp-Session-Id"])
 
         let store = SessionStore()
-        try await start(on: MCPServer(store: store, clientsFile: file), session: session)
+        try await start(on: MCPServer(store: store, localToken: "test", clientsFile: file), session: session)
         #expect(store.active?.client == "Claude Code")
     }
 
     @Test func anUnknownSessionIsNamedByItsUserAgent() async throws {
         let store = SessionStore()
-        try await start(on: MCPServer(store: store), session: "gone", userAgent: "claude-code/2.1 (cli)")
+        try await start(on: MCPServer(store: store, localToken: "test"), session: "gone", userAgent: "claude-code/2.1 (cli)")
         #expect(store.active?.client == "Claude Code")
     }
 }

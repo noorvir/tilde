@@ -29,7 +29,7 @@ struct SessionArchiveTests {
         archive.saveImages([SessionArchive.imageName(note.id): Data([7]), SessionArchive.contextImageName(note.id): Data([8])], of: record.id)
         archive.flush()
 
-        let drafts = AnnotationController.drafts(from: record, archive: archive)
+        let drafts = AnnotationController.drafts(from: record, archive: archive, into: record.id)
 
         // The preview and the list read the annotation's images; the report reads the captures.
         #expect(drafts.first?.annotation.image == Data([7]))
@@ -135,7 +135,8 @@ struct SessionArchiveTests {
         controller.setStateForTesting(session: Fixtures.session(), drafts: Array(Fixtures.drafts(1)))
 
         controller.restore(record)
-        #expect(controller.confirmation == .restore(record))
+        #expect(controller.confirmation == .restore)
+        #expect(controller.restoreRecord == record)
         #expect(controller.drafts.count == 1)
 
         controller.confirm()
@@ -152,18 +153,70 @@ struct SessionArchiveTests {
 
         let store = SessionStore()
         let controller = AnnotationController(store: store, browser: BrowserController(), archive: archive)
-        store.reattach = { controller.reattach($0) }
+        store.reattach = { id, node in controller.reattach(id, node: node) }
         try await Task.sleep(for: .milliseconds(20))
 
-        let state = await store.wait(for: record.id, seconds: 0)
+        // Not for an agent on another machine.
+        #expect(await store.wait(for: record.id, node: "box", seconds: 0) == nil)
+
+        let state = await store.wait(for: record.id, node: nil, seconds: 0)
         #expect(state != nil)
         #expect(store.session(record.id)?.client == "Codex")
         #expect(store.session(record.id)?.isLocal == false)
         try await waitUntil { controller.drafts.count == 2 }
         #expect(controller.session?.id == record.id)
 
-        // Unknown ids still find nothing.
-        #expect(await store.wait(for: "nope", seconds: 0) == nil)
+        // Unknown ids, and ids that are not Tilde's, find nothing.
+        #expect(await store.wait(for: "0badc0de", node: nil, seconds: 0) == nil)
+        #expect(await store.wait(for: "../x", node: nil, seconds: 0) == nil)
+    }
+
+    /// A session owns its recordings: restored into another session, a clip is linked into
+    /// that session's folder; one gone with its session is left out.
+    @Test func aRestoredRecordingBelongsToTheNewSession() throws {
+        let archive = Fixtures.archive()
+        let clip = try Fixtures.clip(in: archive.newClip(in: "a1b2c3d4"))
+        var record = Fixtures.record(notes: 0, pageURL: nil)
+        record.notes = [SessionRecord.Note(
+            id: clip.id, comment: "", target: clip.annotation.target, frame: clip.annotation.frame, marker: .zero, chip: clip.chip, anchor: nil
+        )]
+
+        let drafts = AnnotationController.drafts(from: record, archive: archive, into: "0e0e0e0e")
+        let video = try #require(drafts.first.flatMap(Fixtures.video))
+        #expect(video.deletingLastPathComponent() == archive.folder("0e0e0e0e"))
+        #expect(FileManager.default.fileExists(atPath: video.path))
+
+        try FileManager.default.removeItem(at: try #require(Fixtures.video(of: clip)))
+        #expect(AnnotationController.drafts(from: record, archive: archive, into: record.id).isEmpty)
+    }
+
+    /// Recordings no note has, such as one in progress when Tilde quit, go at launch.
+    @Test func pruningDeletesRecordingsNoNoteHas() throws {
+        let archive = Fixtures.archive()
+        let record = Fixtures.record(notes: 1, pageURL: nil)
+        archive.save(record)
+        archive.flush()
+        let orphan = archive.newClip(in: record.id)
+        try Data([1]).write(to: orphan)
+
+        archive.prune()
+        archive.flush()
+
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))
+        #expect(archive.record(record.id) != nil)
+    }
+
+    /// Only the owner can open a saved session.
+    @Test func savedSessionsArePrivate() throws {
+        let archive = Fixtures.archive()
+        let record = Fixtures.record(notes: 1, pageURL: nil)
+        archive.save(record)
+        archive.flush()
+
+        let folder = try FileManager.default.attributesOfItem(atPath: archive.folder(record.id).path)
+        let file = try FileManager.default.attributesOfItem(atPath: archive.folder(record.id).appendingPathComponent("session.json").path)
+        #expect(folder[.posixPermissions] as? Int == 0o700)
+        #expect(file[.posixPermissions] as? Int == 0o600)
     }
 
     private func waitUntil(_ condition: () -> Bool) async throws {

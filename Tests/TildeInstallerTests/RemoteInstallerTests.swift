@@ -98,6 +98,25 @@ struct RemoteInstallerTests {
         #expect(attributes[.posixPermissions] as? Int == 0o600)
     }
 
+    /// A config that is a link, as in a dotfiles repository, is replaced at its target, whole
+    /// and private, never written in place; the link stays.
+    @Test func aLinkedConfigIsReplacedAtItsTargetForItsOwnerOnly() throws {
+        let home = try home()
+        try make(home, "dotfiles")
+        try make(home, ".codex")
+        let target = home.appendingPathComponent("dotfiles/config.toml")
+        try "model = \"o3\"\n".write(to: target, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: target.path)
+        try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(".codex/config.toml"), withDestinationURL: target)
+
+        _ = try installer(home).install(.codex)
+
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: home.appendingPathComponent(".codex/config.toml").path) == target.path)
+        #expect(try text(home, "dotfiles/config.toml").contains("Bearer secret"))
+        #expect(try text(home, "dotfiles/config.toml").contains("model = \"o3\""))
+        #expect(try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int == 0o600)
+    }
+
     @Test func itWritesThroughALinkedSkillsFolder() throws {
         let home = try home()
         try make(home, "repo/skills")

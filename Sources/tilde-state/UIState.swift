@@ -41,6 +41,13 @@ struct UIState: Decodable {
     var sent: String?
     /// Send was pressed and the report is being made.
     var sending: Bool?
+    /// A short note in the HUD's subtitle, such as "Could not start recording".
+    var notice: String?
+    /// The first note is a stopped recording of the Safari window, 12 s long.
+    var clip: Bool?
+    /// The source picker while it lists ("listing"), after it failed ("failed"), or with
+    /// nothing to offer ("empty").
+    var pickerPhase: String?
     var paused: Bool?
     var autoPaused: Bool?
     var confirmation: String?

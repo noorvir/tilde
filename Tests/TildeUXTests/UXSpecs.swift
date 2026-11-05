@@ -93,16 +93,16 @@ struct UXSpecs {
             try await app.key(.escape)
             try await app.waitToSee("Paused")
             try await app.key(.escape)
-            try await app.waitToSee("Discard and close?")
+            try await app.waitToSee("Discard the note?")
             try await app.waitToSee("Cancel, esc")
             try await app.waitToSee("Discard")
 
             try await app.key(.escape)
-            try await app.waitNotToSee("Discard and close?")
+            try await app.waitNotToSee("Discard the note?")
             try await app.waitToSee("Paused")
 
             try await app.key(.escape)
-            try await app.waitToSee("Discard and close?")
+            try await app.waitToSee("Discard the note?")
             try await app.key(.enter)
             try await app.waitNotToSee("Paused")
         }
@@ -964,6 +964,7 @@ struct UXSpecs {
                 var request = URLRequest(url: URL(string: "http://127.0.0.1:7319/mcp")!)
                 request.httpMethod = "POST"
                 request.httpBody = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8)
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.setValue(header, forHTTPHeaderField: "Authorization")
                 let (_, response) = try await URLSession.shared.data(for: request)
                 return (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -1177,8 +1178,11 @@ struct UXSpecs {
             try await app.waitToSee("Choose a window")
             try await app.press("Use window picker")
             try await app.waitToSee("Screens")
+            // One level back at a time: the picker, then choosing.
             try await app.key(.escape)
             try await app.waitNotToSee("Screens")
+            try await app.waitToSee("Use window picker")
+            try await app.key(.escape)
             try await app.waitNotToSee("Use window picker")
             try await app.waitToSee("Annotating")
         }
@@ -1204,7 +1208,7 @@ struct UXSpecs {
             try await app.waitToSee("Choose a window")
             try await app.press("Use window picker")
             try await app.waitToSee("Screens")
-            try await app.press("Back to clicking on screen")
+            try await app.press("Back")
             try await app.waitNotToSee("Screens")
 
             // A click on the window itself.
@@ -1241,7 +1245,9 @@ struct UXSpecs {
         }
     }
 
-    @Test func twoRecordingsOfTheScreenGoToTheAgentAsVideos() async throws {
+    /// Two clips reach the agent as videos: the first without its 2 s pause, and the second
+    /// sent while it records. Esc asks before it drops a clip that is not stopped.
+    @Test func twoClipsReachTheAgentAsVideos() async throws {
         try await withApp { app in
             let agent = try await MCPAgent(port: app.port, name: "Codex")
             let reply = try await agent.call("start_annotation", ["wait_seconds": 0])
@@ -1269,10 +1275,62 @@ struct UXSpecs {
             try await app.waitToSee("1 of 1")
             try await app.waitToSee("play/pause")
             try await app.waitToSee("timeline")
+            try await app.key(.escape)
+            try await app.waitNotToSee("1 of 1")
+
+            // Esc goes back to annotating.
+            try await app.key(.escape)
+            try await app.waitToSee("Annotating")
+            try await app.press("Record a video")
+            try await app.waitToSeeText(containing: "Ready to record")
+
+            // Send while a clip is in progress keeps that clip too. Before that, Esc asks to
+            // discard the clip, and Esc again keeps it.
+            try await app.press("Start recording the screen")
+            try await app.waitToSeeText(containing: "Recording 0:0")
+            try await app.key(.escape)
+            try await app.waitToSee("Discard the recording?")
+            try await app.key(.escape)
+            try await app.waitNotToSee("Discard the recording?")
+            try await Task.sleep(for: .seconds(1))
+            try await app.key(.enter, command: true)
+
+            let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
+            #expect(report.text.contains("Screen recording"))
+            let folder = try #require(report.text.components(separatedBy: "\n").first { $0.hasPrefix("Saved to: ") }?.dropFirst("Saved to: ".count))
+            // The first clip leaves out its 2 s pause.
+            for (number, shortest, longest) in [(1, 2.5, firstClipTime - 1.5), (2, 0.5, 4.0)] {
+                let asset = AVURLAsset(url: URL(fileURLWithPath: "\(folder)/annotation-\(number).mp4"))
+                let seconds = try await asset.load(.duration).seconds
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                step("recording \(number): \(seconds) s of \(longest + 1.5) s, \(tracks.count) video track")
+                #expect(tracks.count == 1)
+                #expect(seconds >= shortest && seconds <= longest)
+            }
+        }
+    }
+
+    /// The preview's edges and the grip in its corner resize it, and it opens at that size;
+    /// the strip above the pictures moves it, and a place away from home stays. Resized, it
+    /// still snaps to the centre and keeps its size.
+    @Test func thePreviewResizesMovesAndSnapsToTheCentre() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.midX, y: frame.midY))
+            try await app.waitToSee("add")
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+            try await app.press("Show annotations")
+            try await app.press("No comment")
+            try await app.waitToSee("1 of 1")
 
             // Its edge resizes it, and the next preview opens at that size.
             func height() async throws -> CGFloat {
-                let close = try await app.waitToSee("Close")
+                let close = try await app.waitToSee("Close  Esc")
                 let delete = try await app.waitToSee("Delete")
                 return delete.frame.maxY - close.frame.minY
             }
@@ -1306,7 +1364,7 @@ struct UXSpecs {
             try await Task.sleep(for: .milliseconds(300))
             let moved = try await app.waitToSee("1 of 1").frame
             #expect(abs(moved.minX - (home.minX - 200)) < 3 && abs(moved.minY - (home.minY + 60)) < 3, "\(home), then \(moved)")
-            try await app.press("Close")
+            try await app.press("Close  Esc")
             try await app.waitNotToSee("1 of 1")
             try await app.press("No comment")
             let again = try await app.waitToSee("1 of 1").frame
@@ -1329,36 +1387,6 @@ struct UXSpecs {
             #expect(abs(try await height() - resized) < 2)
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
-
-            // Esc goes back to annotating.
-            try await app.key(.escape)
-            try await app.waitToSee("Annotating")
-            try await app.press("Record a video")
-            try await app.waitToSeeText(containing: "Ready to record")
-
-            // Send while a clip is in progress keeps that clip too. Before that, Esc asks to
-            // discard the clip, and Esc again keeps it.
-            try await app.press("Start recording the screen")
-            try await app.waitToSeeText(containing: "Recording 0:0")
-            try await app.key(.escape)
-            try await app.waitToSee("Discard the recording?")
-            try await app.key(.escape)
-            try await app.waitNotToSee("Discard the recording?")
-            try await Task.sleep(for: .seconds(1))
-            try await app.key(.enter, command: true)
-
-            let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
-            #expect(report.text.contains("Screen recording"))
-            let folder = try #require(report.text.components(separatedBy: "\n").first { $0.hasPrefix("Saved to: ") }?.dropFirst("Saved to: ".count))
-            // The first clip leaves out its 2 s pause.
-            for (number, shortest, longest) in [(1, 2.5, firstClipTime - 1.5), (2, 0.5, 4.0)] {
-                let asset = AVURLAsset(url: URL(fileURLWithPath: "\(folder)/annotation-\(number).mp4"))
-                let seconds = try await asset.load(.duration).seconds
-                let tracks = try await asset.loadTracks(withMediaType: .video)
-                step("recording \(number): \(seconds) s of \(longest + 1.5) s, \(tracks.count) video track")
-                #expect(tracks.count == 1)
-                #expect(seconds >= shortest && seconds <= longest)
-            }
         }
     }
 }

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "surface": "toolbar",
+  "session": {
+    "client": "Codex"
+  },
+  "notes": 1,
+  "pickingWindow": true,
+  "hudInBrowser": true,
+  "scoped": true
+}

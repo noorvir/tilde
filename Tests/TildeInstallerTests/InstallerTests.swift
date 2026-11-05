@@ -14,6 +14,18 @@ struct InstallerTests {
         installer = Installer(environment: environment)
     }
 
+    /// The local token is made once, private, and the local install sends it.
+    @Test func theLocalTokenIsPrivateAndInEveryLocalEntry() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let token = LocalToken.load(home: home)
+        #expect(token.count == 64)
+        #expect(LocalToken.load(home: home) == token)
+        #expect(try FileManager.default.attributesOfItem(atPath: LocalToken.file(home: home).path)[.posixPermissions] as? Int == 0o600)
+        #expect(InstallEnvironment.local(home: home, port: "7311", bridgePath: "", isolated: true).authorization == "Bearer \(token)")
+    }
+
     @Test func aConfigItWritesIsForItsOwnerOnly() throws {
         try write(".cursor/mcp.json", "{}")
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: home.appendingPathComponent(".cursor/mcp.json").path)

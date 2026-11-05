@@ -4,7 +4,7 @@
 
 ## The release check
 
-`scripts/e2e-release.sh` runs 8 flows with real input and real apps: an agent session with its report; an arrow reshaped with its comment open, its label, preview and a real scroll; a rectangle, another page and a crash; a label hiding in Chrome and Safari; notes in the real Simulator; the hold key and a comment never lost; a remote machine installed from Settings, and a copied report sent to it. The VM needs `vmself` in its ssh config, its own key in `authorized_keys`, a `~/.claude.json` file and a `~/.codex` folder. Each flow prints `STEP` times to its log.
+`scripts/e2e-release.sh` runs 10 flows with real input and real apps: an agent session with its report; an arrow reshaped with its comment open, its label, preview and a real scroll; a rectangle, another page and a crash; a label hiding in Chrome and Safari; notes in the real Simulator; the hold key and a comment never lost; a remote machine installed from Settings, and a copied report sent to it; two screen recordings sent to the agent as playable videos; and the source picker choosing a window to record. The VM needs `vmself` in its ssh config, its own key in `authorized_keys`, a `~/.claude.json` file and a `~/.codex` folder. Each flow prints `STEP` times to its log.
 
 The other specs here stay as a longer check, `scripts/ux.sh`, for when a change touches windows, focus or input.
 
@@ -31,3 +31,5 @@ shell). Run them on the test Mac, not on a Mac someone is using: they take the m
 Each spec's name is its user story. Not covered here, because they need other apps' windows or
 draw without accessibility (see the offscreen snapshots in `Tests/TildeUITests`): notes drawn
 over pages, notes hidden behind other windows, notes that follow elements in other apps.
+An iPhone on a cable as a recording source is not covered anywhere: the VM has no device;
+try it by hand.

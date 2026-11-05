@@ -61,7 +61,7 @@ enum Surfaces {
             let browser = BrowserController()
             let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive())
             try await Task.sleep(for: .milliseconds(20))
-            apply(state, drafts: Fixtures.drafts(state.notes ?? 0), to: controller)
+            apply(state, drafts: try drafts(state), to: controller)
             let toolbar = BrowserToolbar(browser: browser, controller: controller).background(Color(white: 0.1))
             return try await hosted(toolbar, size: CGSize(width: BrowserMetrics.minWindowWidth, height: BrowserMetrics.toolbarHeight))
 
@@ -112,7 +112,7 @@ enum Surfaces {
         if let dot = state.machineDot.flatMap(NodeSetup.Dot.init(rawValue:)) {
             controller.machineDot = { _ in dot }
         }
-        apply(state, drafts: Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true), to: controller)
+        apply(state, drafts: try drafts(state), to: controller)
         controller.showsList = state.list ?? false
         controller.sentStatus = state.sentStatus == "failed" ? .failed : .done
         if let color = state.drawingColor {
@@ -120,6 +120,16 @@ enum Surfaces {
         }
         controller.expandedPreviewImage = state.enlarged == "closeUp" ? .closeUp : state.enlarged == "context" ? .context : nil
         return controller
+    }
+
+    /// The state's notes; with `clip`, the first is a recording.
+    private static func drafts(_ state: UIState) throws -> [Draft] {
+        let drafts = Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true)
+        guard state.clip == true else {
+            return drafts
+        }
+        let video = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-state-clip.mp4")
+        return [try Fixtures.clip(in: video)] + drafts.dropFirst()
     }
 
     private static func apply(_ state: UIState, drafts: [Draft], composer: Composer? = nil, to controller: AnnotationController) {
@@ -175,14 +185,20 @@ enum Surfaces {
             pauseNotice: notice,
             restoreRecord: state.confirmation == "restore" ? Fixtures.record(notes: 3) : nil,
             sentText: state.sent ?? "",
+            notice: state.notice,
             // A clip in progress has run for 12 seconds.
             clipClock: (Date(), 12)
         )
         if let picker = state.sourcePicker {
-            let (screens, apps) = Fixtures.sources()
+            let (screens, apps) = state.pickerPhase == nil ? Fixtures.sources() : ([], [])
+            let phase: SourcePickerModel.Phase = switch state.pickerPhase {
+            case "listing": .listing
+            case "failed": .failed
+            default: .done
+            }
             controller.sourcePicker.setForTesting(
                 screens: screens, apps: apps, tab: picker == "screens" ? .screens : .windows, openApp: picker == "app" ? Fixtures.window.pid : nil,
-                drawableOnly: state.recording == nil
+                drawableOnly: state.recording == nil, phase: phase
             )
         }
     }

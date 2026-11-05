@@ -31,8 +31,11 @@ enum Fixtures {
         )
     }
 
+    /// A controller whose reports and copies never reach the user's inbox or clipboard.
     static func controller() async throws -> AnnotationController {
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive())
+        controller.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
+        controller.pasteboard = NSPasteboard(name: NSPasteboard.Name("tilde-tests-\(UUID().uuidString)"))
         try await Task.sleep(for: .milliseconds(20))
         return controller
     }
@@ -62,8 +65,9 @@ enum Fixtures {
             (.region, CGRect(x: 80, y: 180, width: 320, height: 120), "Region", "Too much empty space under the table"),
         ]
 
-        return all.prefix(count).enumerated().map { index, entry in
-            let (target, frame, chip, comment) = entry
+        // More than three repeat them, for counts such as 10.
+        return (0..<count).map { index in
+            let (target, frame, chip, comment) = all[index % all.count]
             let annotation = Annotation(
                 id: id(index + 1), comment: comment, target: target, frame: frame,
                 image: withImages ? closeUp(index) : nil, contextImage: withImages ? context(index) : nil
@@ -74,6 +78,21 @@ enum Fixtures {
     }
 
     /// The hover highlight on the first draft's web element.
+    /// A stopped clip of the Safari window, 12 s long, with its video file at `video`.
+    static func clip(in video: URL) throws -> Draft {
+        try Data([0, 0, 0, 0x18]).write(to: video)
+        let target = Target.recording(video: video, seconds: 12, source: "Safari window")
+        let annotation = Annotation(id: id(90), comment: "", target: target, frame: window.frame, image: closeUp(0), contextImage: nil)
+        return Draft(annotation: annotation, marker: .zero, chip: "Recording \(clipLength(12))", capture: Task { Captures(image: closeUp(0), contextImage: nil) })
+    }
+
+    static func video(of draft: Draft) -> URL? {
+        if case .recording(let video, _, _) = draft.annotation.target {
+            return video
+        }
+        return nil
+    }
+
     static func hover() -> Picked {
         let draft = drafts(1)[0]
         guard case .element(let element) = draft.annotation.target else {

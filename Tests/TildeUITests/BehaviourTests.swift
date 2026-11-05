@@ -16,21 +16,29 @@ struct BehaviourTests {
         controller = try await Fixtures.controller()
     }
 
+    /// A session on screen in a mode; `question` and `clip` as in the flow.
+    private func open(
+        drafts: [Draft] = [], pauses: Set<SessionFlow.PauseReason> = [], activity: SessionFlow.Activity = .annotating,
+        question: SessionFlow.Question? = nil, session: SessionStore.Session? = nil, source: RecordingSource? = nil
+    ) {
+        controller.setStateForTesting(
+            session: session ?? Fixtures.session(), drafts: drafts, mode: .open(SessionFlow.Open(activity: activity, pauses: pauses, question: question)), source: source
+        )
+    }
+
     // MARK: - Confirmations
 
     @Test func cancelWithoutAnnotationsClosesAtOnce() {
-        controller.setStateForTesting(session: Fixtures.session())
+        open()
         controller.requestCancel()
         #expect(controller.confirmation == nil)
-        #expect(controller.mode == .idle)
         #expect(controller.session == nil)
     }
 
     @Test func cancelWithAnnotationsAsksFirst() {
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2))
+        open(drafts: Fixtures.drafts(2))
         controller.requestCancel()
         #expect(controller.confirmation == .cancelSession)
-        #expect(controller.mode == .annotating)
 
         controller.dismissConfirmation()
         #expect(controller.confirmation == nil)
@@ -38,27 +46,33 @@ struct BehaviourTests {
 
         controller.requestCancel()
         controller.confirm()
-        #expect(controller.mode == .idle)
+        #expect(controller.session == nil)
         #expect(controller.drafts.isEmpty)
     }
 
+    /// A clip that is not stopped is lost on cancel like a note, so × asks for it too.
+    @Test func cancelAsksForAClipInProgress() {
+        open(activity: .recording(.recording))
+        controller.requestCancel()
+        #expect(controller.confirmation == .cancelSession)
+    }
+
     @Test func clearAllAsksAndKeepsTheSession() {
-        controller.setStateForTesting(session: Fixtures.session())
+        open()
         controller.requestClearAll()
         #expect(controller.confirmation == nil)
 
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(3))
+        open(drafts: Fixtures.drafts(3))
         controller.requestClearAll()
         #expect(controller.confirmation == .clearAll)
         controller.confirm()
         #expect(controller.drafts.isEmpty)
-        #expect(controller.mode == .annotating)
         #expect(controller.session != nil)
     }
 
     @Test func escapeDismissesAndReturnConfirms() throws {
         let overlay = OverlayView(controller: controller)
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), confirmation: .clearAll)
+        open(drafts: Fixtures.drafts(2), question: .clearAll)
 
         overlay.keyDown(with: try key(53))
         #expect(controller.confirmation == nil)
@@ -71,140 +85,82 @@ struct BehaviourTests {
 
     @Test func deletingOneAnnotationDoesNotAsk() {
         let drafts = Fixtures.drafts(3)
-        controller.setStateForTesting(session: Fixtures.session(), drafts: drafts)
+        open(drafts: drafts)
         controller.deleteDraft(drafts[1].id)
         #expect(controller.confirmation == nil)
         #expect(controller.drafts.map(\.id) == [drafts[0].id, drafts[2].id])
     }
 
+    // MARK: - Recordings on disk
+
+    @Test func deletingARecordingDeletesItsVideo() throws {
+        let clip = try Fixtures.clip(in: controller.archive.newClip(in: "a1b2c3d4"))
+        open(drafts: [clip])
+        controller.deleteDraft(clip.id)
+        #expect(!FileManager.default.fileExists(atPath: try #require(Fixtures.video(of: clip)).path))
+    }
+
+    /// A cancelled session keeps its notes in History, but not its recordings.
+    @Test func cancellingDeletesTheRecordings() throws {
+        let session = Fixtures.session()
+        let clip = try Fixtures.clip(in: controller.archive.newClip(in: session.id))
+        open(drafts: [clip] + Fixtures.drafts(1), session: session)
+
+        controller.requestCancel()
+        controller.confirm()
+        controller.archive.flush()
+
+        #expect(!FileManager.default.fileExists(atPath: try #require(Fixtures.video(of: clip)).path))
+        #expect(controller.archive.record(session.id)?.notes.count == 1)
+    }
+
     // MARK: - Send
 
-    /// A session without an agent says only "Copied", done, also with remote machines; the
-    /// images go to them in the background. (The report waits here, so nothing is copied.)
-    @Test func aCopySaysOnlyCopied() {
+    /// "Copied" shows only once the report is saved and on the clipboard; while a screenshot
+    /// is still being taken, the HUD says "Sending" and nothing is copied yet.
+    @Test func copiedShowsOnlyAfterTheCopy() async throws {
         let unfinished = Task { () -> Captures in
             try? await Task.sleep(for: .seconds(3600))
             return Captures(image: nil, contextImage: nil)
         }
         let draft = Fixtures.drafts(1)[0]
-        let drafts = [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)]
-        controller.setStateForTesting(session: Fixtures.session(isLocal: true), drafts: drafts)
+        open(drafts: [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)], session: Fixtures.session(isLocal: true))
 
         controller.send()
-        #expect(controller.mode == .sent(confirmation: "Copied"))
-        #expect(controller.sentStatus == .done)
+        #expect(HUDView.status(of: controller).title == "Sending")
+        #expect(controller.sentConfirmation == nil)
+        #expect(controller.pasteboard.string(forType: .string) == nil)
+
+        open(drafts: Fixtures.drafts(1), session: Fixtures.session(isLocal: true))
+        controller.send()
+        try await until { controller.sentConfirmation != nil }
+        #expect(controller.sentConfirmation == "Copied")
+        #expect(controller.pasteboard.string(forType: .string)?.contains("Avatar and name are not vertically centered") == true)
     }
 
-    @Test func sendStopsPickingBeforeTheReportIsReady() {
-        // A screenshot that is still being taken keeps the report from being made.
+    /// While the report is made, the overlay takes nothing and × and Esc do nothing, so the
+    /// report cannot be sent twice or lost.
+    @Test func whileSendingNothingElseActs() {
         let unfinished = Task { () -> Captures in
             try? await Task.sleep(for: .seconds(3600))
             return Captures(image: nil, contextImage: nil)
         }
         let draft = Fixtures.drafts(1)[0]
-        let drafts = [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)]
-        controller.setStateForTesting(session: Fixtures.session(), drafts: drafts, hover: Fixtures.hover())
+        open(drafts: [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)])
+        controller.hover = Fixtures.hover()
 
         controller.send()
-        #expect(controller.mode == .sent(confirmation: "Sent to Codex"))
-        #expect(!controller.overlayTakesInput)
         #expect(controller.hover == nil)
-
-        controller.cancel()
+        controller.requestCancel()
+        controller.escapePressed()
+        controller.send()
         #expect(controller.session != nil)
-    }
-
-    @Test func recordingModeTakesNoInputExceptToChooseAWindow() {
-        controller.setStateForTesting(session: Fixtures.session(), hover: Fixtures.hover())
-        #expect(controller.overlayTakesInput)
-
-        controller.toggleRecordingMode()
-        #expect(controller.mode == .recording(.ready))
-        #expect(!controller.overlayTakesInput)
-        #expect(controller.hover == nil)
-
-        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready), isPickingWindow: true)
-        #expect(controller.overlayTakesInput)
-        controller.cancelWindowPick()
-        #expect(controller.mode == .recording(.ready))
-        #expect(!controller.overlayTakesInput)
-    }
-
-    /// A source with no size, as an iPhone reports before it streams, is an error, not the
-    /// exception that crashed Tilde; a phone's screen in portrait is fine.
-    @Test func aRecordingNeedsASizeItCanWrite() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-writer-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-
-        #expect(throws: ScreenRecorder.Failure.badSize) {
-            _ = try ScreenRecorder.makeWriter(width: 0, height: 0, in: folder)
-        }
-        let (writer, _) = try ScreenRecorder.makeWriter(width: 1290, height: 2796, in: folder)
-        writer.cancelWriting()
-    }
-
-    /// The record toggle and Esc go back to annotating; with a clip not stopped they ask first.
-    @Test func leavingRecordingModeAsksToDiscardAClipNotStopped() {
-        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready))
-        controller.escapePressed()
-        #expect(controller.mode == .annotating)
-
-        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.paused(3)))
-        controller.toggleRecordingMode()
-        #expect(controller.confirmation == .discardRecording)
-        #expect(controller.mode == .recording(.paused(3)))
-        controller.escapePressed()
         #expect(controller.confirmation == nil)
-        #expect(controller.mode == .recording(.paused(3)))
-
-        controller.escapePressed()
-        controller.confirm()
-        #expect(controller.mode == .annotating)
-        #expect(controller.drafts.isEmpty)
+        #expect(HUDView.status(of: controller).title == "Sending")
     }
 
-    /// Annotating takes only sources Tilde can draw on. A phone chosen for recording goes when
-    /// recording mode ends, back to everything on screen.
-    @Test func aPhoneIsARecordingSourceOnly() {
-        let phone = Phone(id: "phone", name: "iPhone")
-        #expect(!RecordingSource.phone(phone).isDrawable)
-        #expect(RecordingSource.screen(1).isDrawable)
-        #expect(RecordingSource.window(Fixtures.window).isDrawable)
-
-        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true)
-        controller.choose(.phone(phone))
-        #expect(controller.chosenSource == nil)
-
-        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready), isPickingWindow: true)
-        controller.choose(.phone(phone))
-        #expect(controller.chosenSource == .phone(phone))
-        controller.toggleRecordingMode()
-        #expect(controller.mode == .annotating)
-        #expect(controller.chosenSource == nil)
-    }
-
-    @Test func aChosenSourceIsWhatTheNextClipRecords() {
-        let phone = Phone(id: "phone", name: "iPhone")
-        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready))
-        #expect(controller.chosenSource == nil)
-
-        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready), scope: Fixtures.window, isPickingWindow: true)
-        #expect(controller.chosenSource == .window(Fixtures.window))
-
-        controller.choose(.phone(phone))
-        #expect(controller.chosenSource == .phone(phone))
-        #expect(controller.scope == nil)
-        #expect(!controller.isPickingWindow)
-
-        // A window limits the session to it, as choosing it on screen does.
-        controller.choose(.window(Fixtures.window))
-        #expect(controller.scope == Fixtures.window)
-        #expect(controller.chosenSource == .window(Fixtures.window))
-    }
-
-    /// While a window is being chosen, ⌘↩ does not send; the overlay takes only Esc.
-    @Test func choosingAWindowTakesNoOtherKey() throws {
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(1), isPickingWindow: true)
+    /// ⌘↩ follows the Send button: it sends while paused too, and not while choosing a window.
+    @Test func commandReturnSendsWheneverSendIsEnabled() throws {
         let overlay = OverlayWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200), level: .normal, isWindowSized: true, controller: controller)
         defer { overlay.close() }
         let view = try #require(overlay.contentView)
@@ -213,23 +169,51 @@ struct BehaviourTests {
             characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
         ))
 
+        open(drafts: Fixtures.drafts(1), activity: .picking(isRecordMode: false, isPickerOpen: false))
         view.keyDown(with: send)
+        #expect(controller.isPickingWindow)
 
-        #expect(controller.mode == .annotating)
-        #expect(controller.drafts.count == 1)
+        open(drafts: Fixtures.drafts(1), pauses: [.user])
+        view.keyDown(with: send)
+        #expect(HUDView.status(of: controller).title == "Sending")
     }
 
-    @Test func anOverlayWithoutInputGetsNoPointerEvents() throws {
-        let overlay = OverlayWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200), level: .normal, isWindowSized: true, controller: controller)
-        defer { overlay.close() }
-        let view = try #require(overlay.contentView)
-        view.updateTrackingAreas()
-        #expect(!view.trackingAreas.isEmpty)
+    /// A source with no size, as an iPhone reports before it streams, is an error, not the
+    /// exception that crashed Tilde; a phone's screen in portrait is fine.
+    @Test func aRecordingNeedsASizeItCanWrite() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-writer-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
 
-        overlay.takesInput = false
-        #expect(overlay.ignoresMouseEvents)
-        #expect(!overlay.acceptsMouseMovedEvents)
-        #expect(view.trackingAreas.isEmpty)
+        #expect(throws: ScreenRecorder.Failure.badSize) {
+            _ = try ScreenRecorder.makeWriter(width: 0, height: 0, to: folder.appendingPathComponent("a.mp4"))
+        }
+        let (writer, _) = try ScreenRecorder.makeWriter(width: 1290, height: 2796, to: folder.appendingPathComponent("b.mp4"))
+        writer.cancelWriting()
+    }
+
+    /// A 5K screen records at 2560 px on its long side, in proportion; a phone is not scaled.
+    @Test func videosAreAtMost2560PixelsLong() {
+        #expect(ScreenRecorder.videoSize(of: CGSize(width: 5120, height: 2880)) == (2560, 1440))
+        #expect(ScreenRecorder.videoSize(of: CGSize(width: 1170, height: 2532)) == (1170, 2532))
+        #expect(ScreenRecorder.videoSize(of: CGSize(width: 3455, height: 2235)) == (2560, 1656))
+    }
+
+    /// Annotating takes only sources Tilde can draw on. A phone chosen for recording goes when
+    /// recording mode ends, back to everything on screen.
+    @Test func aPhoneIsARecordingSourceOnly() {
+        let phone = Phone(id: "phone", name: "iPhone")
+        open(activity: .picking(isRecordMode: false, isPickerOpen: false))
+        controller.choose(.phone(phone))
+        #expect(controller.source == nil)
+        #expect(controller.isPickingWindow)
+
+        open(activity: .picking(isRecordMode: true, isPickerOpen: false))
+        controller.choose(.phone(phone))
+        #expect(controller.source == .phone(phone))
+        controller.toggleRecordingMode()
+        #expect(controller.recording == nil)
+        #expect(controller.source == nil)
     }
 
     // MARK: - Captures
@@ -256,18 +240,23 @@ struct BehaviourTests {
     /// in it, and a long subtitle drops words instead of widening it, so changing the mode or
     /// adding notes never moves a button.
     @Test(arguments: [
-        AnnotationController.Mode.annotating, .paused([.user]), .recording(.ready), .recording(.recording(since: Date(), before: 0)), .recording(.paused(599)),
+        SessionFlow.Activity.annotating, .recording(.ready), .recording(.starting(operation: 0)), .recording(.recording),
+        .recording(.paused), .recording(.finishing(operation: 0, thenSend: false)), .picking(isRecordMode: true, isPickerOpen: false),
     ])
-    func everyModeFitsThePillWidth(mode: AnnotationController.Mode) {
-        for isPickingWindow in [false, true] {
-            controller.setStateForTesting(
-                session: Fixtures.session(isLocal: true), drafts: Fixtures.drafts(3), mode: mode, scope: Fixtures.window, isPickingWindow: isPickingWindow
-            )
-            let width = NSHostingView(rootView: HUDView(controller: controller, isEmbedded: true)).fittingSize.width
-            #expect(width <= HUDView.embeddedWidth, "\(mode) needs \(width) pt, the pill has \(HUDView.embeddedWidth)")
-            // The floating pill, inside the panel's 16 pt padding.
-            let floating = NSHostingView(rootView: HUDView(controller: controller)).fittingSize.width - 32
-            #expect(floating == HUDView.width, "\(mode) makes the floating pill \(floating) pt wide")
+    func everyModeFitsThePillWidth(activity: SessionFlow.Activity) {
+        for pauses in [[], [SessionFlow.PauseReason.user]] as [Set<SessionFlow.PauseReason>] {
+            let open = SessionFlow.Open(activity: activity, pauses: pauses)
+            for mode in [SessionFlow.Mode.open(open), .sending(operation: 0, returnTo: open)] {
+                controller.setStateForTesting(
+                    session: Fixtures.session(isLocal: true), drafts: Fixtures.drafts(10), mode: mode, source: .window(Fixtures.window),
+                    clipClock: (Date(), 3599)
+                )
+                let width = NSHostingView(rootView: HUDView(controller: controller, isEmbedded: true)).fittingSize.width
+                #expect(width <= HUDView.embeddedWidth, "\(mode) needs \(width) pt, the pill has \(HUDView.embeddedWidth)")
+                // The floating pill, inside the panel's 16 pt padding.
+                let floating = NSHostingView(rootView: HUDView(controller: controller)).fittingSize.width - 32
+                #expect(floating == HUDView.width, "\(mode) makes the floating pill \(floating) pt wide")
+            }
         }
     }
 
@@ -305,7 +294,7 @@ struct BehaviourTests {
 
     @Test func positionsStayOnScreen() {
         let visible = NSRect(x: 0, y: 0, width: 1800, height: 1130)
-        let halfWidth = HUDView.maxWidth / 2 + 16
+        let halfWidth = HUDView.width / 2 + 16
         #expect(HUDPanel.clamped(NSPoint(x: -500, y: 5000), in: visible) == NSPoint(x: halfWidth, y: 1134))
         #expect(HUDPanel.clamped(NSPoint(x: 5000, y: -10), in: visible) == NSPoint(x: 1800 - halfWidth, y: HUDMetrics.height + 32))
         #expect(HUDPanel.clamped(NSPoint(x: 900, y: 600), in: visible) == NSPoint(x: 900, y: 600))
@@ -315,6 +304,13 @@ struct BehaviourTests {
         let window = NSRect(x: 2800, y: 0, width: 560, height: 1444)
         let content = CGRect(x: 33, y: 0, width: 494, height: 76)
         #expect(HUDPanel.screenRect(ofContent: content, inWindow: window) == NSRect(x: 2833, y: 1368, width: 494, height: 76))
+    }
+
+    private func until(_ condition: @escaping () -> Bool) async throws {
+        for _ in 0..<100 where !condition() {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(condition())
     }
 
     private func key(_ code: UInt16) throws -> NSEvent {
@@ -386,54 +382,68 @@ struct BehaviourTests {
     }
 
     /// The window button picks on screen, with the picker closed to its button; a second click
-    /// stops with no change.
+    /// stops with no change. A choice is taken only while choosing.
     @Test func windowButtonChoosesAgainAndTheScreenTileLiftsTheScope() {
         let elsewhere = CGPoint(x: -5000, y: -5000)
-        controller.setStateForTesting(session: Fixtures.session())
+        open()
         controller.toggleWindowPick()
         #expect(controller.isPickingWindow)
         #expect(!controller.isSourcePickerOpen)
         controller.toggleWindowPick()
         #expect(!controller.isPickingWindow)
 
-        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true)
-        controller.setScope(Fixtures.window)
+        controller.choose(.window(Fixtures.window))
+        #expect(controller.scope == nil)
+
+        controller.toggleWindowPick()
+        controller.choose(.window(Fixtures.window))
         #expect(controller.scope == Fixtures.window)
         #expect(!controller.isPickingWindow)
         #expect(controller.scopeName == "Safari")
         #expect(!controller.allows(elsewhere))
 
         // Limited to a window, choosing takes the other windows too, and Esc keeps the limit.
-        controller.setStateForTesting(session: Fixtures.session(), scope: Fixtures.window, isPickingWindow: true)
+        open(activity: .picking(isRecordMode: false, isPickerOpen: false), source: .window(Fixtures.window))
         #expect(controller.allows(elsewhere))
-        controller.cancelWindowPick()
+        controller.escapePressed()
         #expect(controller.scope == Fixtures.window)
         #expect(!controller.allows(elsewhere))
 
-        controller.setStateForTesting(session: Fixtures.session(), scope: Fixtures.window, isPickingWindow: true)
+        open(activity: .picking(isRecordMode: false, isPickerOpen: false), source: .window(Fixtures.window))
         controller.choose(.screen(1))
         #expect(controller.scope == nil)
         #expect(!controller.isPickingWindow)
-        #expect(controller.chosenSource == .screen(1))
+        #expect(controller.source == .screen(1))
     }
 
-    /// The open picker stops choosing on screen (opening it loads the screens' pictures, so the
-    /// test starts in that state). Its cross goes back to choosing on screen; Esc ends both.
-    @Test func theOpenPickerTakesNoClicksOnScreen() {
-        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true, isSourcePickerOpen: true)
+    /// The window button does nothing while a clip is in progress: a clip keeps its source.
+    @Test func aClipKeepsItsSource() {
+        for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, thenSend: false)] {
+            open(activity: .recording(clip))
+            controller.toggleWindowPick()
+            #expect(!controller.isPickingWindow, "\(clip)")
+        }
+    }
+
+    /// The open picker takes no clicks on screen. "‹ Back" and Esc step back one level: an
+    /// app's windows, then the picker, then choosing.
+    @Test func theOpenPickerStepsBackOneLevelAtATime() {
+        open(activity: .picking(isRecordMode: false, isPickerOpen: true))
         controller.click(at: CGPoint(x: -5000, y: -5000))
-        #expect(controller.isPickingWindow)
-        #expect(controller.scope == nil)
-        #expect(controller.chosenSource == nil)
+        #expect(controller.isSourcePickerOpen)
+        #expect(controller.source == nil)
 
-        controller.closeSourcePicker()
+        controller.sourcePicker.openApp = Fixtures.window.pid
+        controller.stepBackInSourcePicker()
+        #expect(controller.sourcePicker.openApp == nil)
+        #expect(controller.isSourcePickerOpen)
+
+        controller.escapePressed()
         #expect(controller.isPickingWindow)
         #expect(!controller.isSourcePickerOpen)
 
-        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true, isSourcePickerOpen: true)
-        controller.cancelWindowPick()
+        controller.escapePressed()
         #expect(!controller.isPickingWindow)
-        #expect(!controller.isSourcePickerOpen)
     }
 
     @Test func scopeEndsWhenTheWindowIsGone() {
@@ -505,11 +515,11 @@ struct BehaviourTests {
 
     @Test func annotateResumesAWindowSessionThatPausedByItself() async throws {
         let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), mode: .paused([.user, .otherApp]))
+        controller.setStateForTesting(session: Fixtures.session(), mode: .open(SessionFlow.Open(pauses: [.user, .otherApp])))
 
         controller.togglePause()
 
-        #expect(controller.mode == .annotating)
+        #expect(controller.pauses.isEmpty)
     }
 
     // MARK: - Double-tap
@@ -591,17 +601,18 @@ struct BehaviourTests {
 
     @Test func theStartKeyBringsAnnotatingUp() {
         let action = AnnotationController.doubleTapAction
-        // Arguments: key, start key, pause key, annotating, paused, has a session.
-        #expect(action(.control, .control, nil, false, false, false) == .start)
-        #expect(action(.control, .control, nil, true, true, true) == .resume)
+        // Arguments: key, start key, pause key, paused, has a session.
+        #expect(action(.control, .control, nil, false, false) == .start)
+        #expect(action(.control, .control, nil, true, true) == .resume)
         // While annotating it does nothing; Esc pauses.
-        #expect(action(.control, .control, nil, true, false, true) == nil)
+        #expect(action(.control, .control, nil, false, true) == nil)
         // The same key for start and pause: it also pauses while annotating.
-        #expect(action(.control, .control, .control, true, false, true) == .togglePause)
-        // Different keys each do only their own.
-        #expect(action(.option, .control, .option, true, false, true) == .togglePause)
-        #expect(action(.option, .control, .option, false, false, false) == nil)
-        #expect(action(.control, nil, nil, false, false, false) == nil)
+        #expect(action(.control, .control, .control, false, true) == .togglePause)
+        // Different keys each do only their own; the pause key is the pause command of the
+        // mode, such as for the clip in recording mode.
+        #expect(action(.option, .control, .option, false, true) == .togglePause)
+        #expect(action(.option, .control, .option, false, false) == nil)
+        #expect(action(.control, nil, nil, false, false) == nil)
     }
 
     // MARK: - Esc
@@ -623,8 +634,7 @@ struct BehaviourTests {
     }
 
     @Test func theQuestionTakesReturnAndEscFromAnyOfTildesWindows() async throws {
-        let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), mode: .paused([.user]), confirmation: .clearAll)
+        open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)
 
         // Other keys pass on, such as to a focused text field.
         #expect(controller.handleConfirmationKey(0) == false)
@@ -635,15 +645,14 @@ struct BehaviourTests {
         // Paused in a popped-out session: Esc asks, ↩ answers.
         controller.escapePressed()
         #expect(controller.confirmation == .cancelSession)
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), mode: .paused([.user]), confirmation: .clearAll)
+        open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)
         #expect(controller.handleConfirmationKey(36))
         #expect(controller.drafts.isEmpty)
         #expect(controller.handleConfirmationKey(36) == false)
     }
 
     @Test func escEndsChoosingAWindowFirst() async throws {
-        let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(1), isPickingWindow: true)
+        open(drafts: Fixtures.drafts(1), activity: .picking(isRecordMode: false, isPickerOpen: false))
 
         controller.escapePressed()
 
@@ -652,8 +661,7 @@ struct BehaviourTests {
     }
 
     @Test func escWhilePausedAlsoAsksToCancel() async throws {
-        let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(1), mode: .paused([.user]))
+        open(drafts: Fixtures.drafts(1), pauses: [.user])
 
         controller.escapePressed()
 
