@@ -27,10 +27,12 @@ struct SessionFlowTests {
         opens.append(Open(isDrawing: true))
         let modes = opens.map(SessionFlow.Mode.open) + opens.prefix(18).map { .sending(operation: 3, returnTo: $0) }
             + [.sent(operation: 3), .idle]
+        // With and without notes, and with and without text in the comment: the first
+        // comment of a session has text and no note yet.
         let flows = modes.flatMap { mode in
-            [0, 2].map { notes in
+            [(0, false), (0, true), (2, false), (2, true)].map { notes, hasText in
                 var flow = SessionFlow(mode: mode, notes: notes, lastOperation: 3)
-                flow.commentHasText = notes > 0
+                flow.commentHasText = hasText
                 return flow
             }
         }
@@ -46,9 +48,13 @@ struct SessionFlowTests {
         guard case .open(let open) = flow.mode, let question = open.question else {
             return true
         }
+        // Choosing holds no question, and only the comment's own is asked while it is open.
+        if open.activity.isPicking || (open.panel == .comment && question != .discardComment) {
+            return false
+        }
         switch question {
         case .discardRecording: return open.clipInProgress
-        case .discardComment: return open.panel == .comment
+        case .discardComment: return open.panel == .comment && flow.commentHasText
         case .clearAll: return flow.notes > 0
         case .cancelSession: return flow.notes > 0 || open.holdsClip
         case .restore: return true
@@ -57,7 +63,7 @@ struct SessionFlowTests {
 
     static let events: [SessionFlow.Event] = [
         .begin(inBrowser: false), .begin(inBrowser: true), .ended, .escape, .togglePause, .resume, .startShortcut, .requestClearAll,
-        .requestCancel, .confirm, .dismissConfirmation, .restore, .openBrowser, .holdBegan, .holdEnded, .otherAppInFront,
+        .requestCancel, .confirm, .dismissConfirmation, .restore, .openBrowser, .deleteNote, .editNote, .holdBegan, .holdEnded, .otherAppInFront,
         .scopeAppInFront, .openComment, .clickAway, .submitComment, .closeComment, .openPreview, .closePreview, .toggleList,
         .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .toggleRecordingMode, .record, .stop,
         .clipStarted(3), .clipStarted(2), .clipStartFailed(3), .clipStartFailed(2), .clipFinished(3), .clipFinished(2),
@@ -166,18 +172,68 @@ struct SessionFlowTests {
         }
     }
 
-    /// No question outlives what it asks about.
-    @Test func aQuestionIsAlwaysAboutSomething() {
+    /// The pill shows a question only while ↩ on it still does what it says, to something that
+    /// is there: notes to clear, a session with notes or a clip to close, words to discard, a
+    /// clip in progress to throw away, notes to replace.
+    @Test func aQuestionIsAskedOnlyWhileReturnStillLosesSomething() {
         everyTransition { state, event, next, _ in
             guard case .open(let open) = next.mode, let question = open.question, state.mode != next.mode else {
                 return
             }
+            var answered = next
+            let effects = answered.handle(.confirm)
+            let context = "\(state.mode) + \(event)"
             switch question {
-            case .discardRecording: #expect(open.clipInProgress, "\(state.mode) + \(event)")
-            case .discardComment: #expect(open.panel == .comment, "\(state.mode) + \(event)")
-            case .clearAll: #expect(next.notes > 0, "\(state.mode) + \(event)")
-            case .cancelSession: #expect(next.notes > 0 || open.holdsClip, "\(state.mode) + \(event)")
-            case .restore: break
+            case .clearAll: #expect(effects.contains(.clearDrafts) && next.notes > 0, "\(context)")
+            case .cancelSession: #expect(effects.contains(.cancelSession) && (next.notes > 0 || open.holdsClip), "\(context)")
+            case .discardComment: #expect(effects.contains(.closeComposer) && next.commentHasText, "\(context)")
+            case .discardRecording: #expect(effects.contains(.exitRecording) && open.clipInProgress, "\(context)")
+            case .restore: #expect(effects.contains(.restoreDrafts), "\(context)")
+            }
+        }
+    }
+
+    /// No question opens over a comment but the comment's own, so ↩ typed in the comment never
+    /// answers a question about the session.
+    @Test func aQuestionNeverOpensOverAComment() {
+        everyTransition { state, event, next, _ in
+            guard case .open(let open) = next.mode, open.panel == .comment, let question = open.question else {
+                return
+            }
+            #expect(question == .discardComment, "\(state.mode) + \(event) asks \(question) over a comment")
+        }
+    }
+
+    /// Esc on a question about the session dismisses it and changes nothing else.
+    @Test func escOnAQuestionOnlyDismissesIt() {
+        everyTransition { state, event, next, effects in
+            guard event == .escape, case .open(var open) = state.mode, let question = open.question, question != .discardComment,
+                  !open.activity.isPicking
+            else {
+                return
+            }
+            open.question = nil
+            #expect(next.mode == .open(open) && effects.isEmpty, "\(state.mode) + Esc gave \(next.mode), \(effects)")
+        }
+    }
+
+    /// An effect whose data the caller gives comes only from the event that gives it, so the
+    /// caller never misses it.
+    @Test func aDataEffectComesOnlyFromItsOwnEvent() {
+        everyTransition { state, event, _, effects in
+            for effect in effects {
+                let isOwn = switch (effect, event) {
+                case (.showComment, .openComment), (.showPreview, .openPreview), (.applySource, .choose), (.finishSend, .sendFinished),
+                     (.adoptClip, .clipStarted), (.keepClip, .clipFinished), (.dropClip, .clipStarted), (.dropClip, .clipFinished),
+                     (.showPushFailure, .pushFailed), (.askRestore, .restore), (.deleteNote, .deleteNote), (.editNote, .editNote):
+                    true
+                case (.showComment, _), (.showPreview, _), (.applySource, _), (.finishSend, _), (.adoptClip, _), (.keepClip, _),
+                     (.dropClip, _), (.showPushFailure, _), (.askRestore, _), (.deleteNote, _), (.editNote, _):
+                    false
+                default:
+                    true
+                }
+                #expect(isOwn, "\(state.mode) + \(event) gave \(effect)")
             }
         }
     }
