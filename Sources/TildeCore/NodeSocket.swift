@@ -57,6 +57,21 @@ public final class NodeSocket: @unchecked Sendable {
     /// One agent's MCP session, from `initialize` on; read and written on the main actor.
     @MainActor private final class Session {
         var id: String?
+        /// The id of the agent's tproxy, which it sends first on each connection.
+        var proxy: String?
+    }
+
+    /// The MCP session of each tproxy, newest last, so that an agent whose link dropped gets
+    /// its session back when tproxy connects again, without a new `initialize`.
+    @MainActor private var proxySessions: [(proxy: String, session: String)] = []
+
+    @MainActor private func remember(_ session: Session) {
+        guard let proxy = session.proxy, let id = session.id else {
+            return
+        }
+        proxySessions.removeAll { $0.proxy == proxy }
+        proxySessions.append((proxy, id))
+        proxySessions.removeFirst(max(0, proxySessions.count - 100))
     }
 
     private func accept(_ connection: NWConnection) {
@@ -81,11 +96,19 @@ public final class NodeSocket: @unchecked Sendable {
                     guard !line.allSatisfy({ $0 == 0x20 || $0 == 0x0D }) else {
                         continue
                     }
+                    // tproxy's id, before any other line: its session, if it had one.
+                    let hello = line.range(of: Data("tproxy/connect".utf8)) == nil ? nil : (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
+                    if hello?["method"] as? String == "tproxy/connect", let proxy = (hello?["params"] as? [String: Any])?["id"] as? String {
+                        session.proxy = proxy
+                        session.id = self.proxySessions.last { $0.proxy == proxy }?.session
+                        continue
+                    }
                     Task { @MainActor in
                         let id = await self.mcp.handleLine(line, session: session.id, node: self.node) { reply in
                             connection.send(content: reply + Data("\n".utf8), completion: .idempotent)
                         }
                         session.id = id ?? session.id
+                        self.remember(session)
                     }
                 }
 

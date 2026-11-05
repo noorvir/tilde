@@ -45,6 +45,38 @@ struct NodeSocketTests {
         #expect(mode(socket.path) == 0o600)
     }
 
+    /// After a drop, tproxy connects again with its id: the agent keeps its MCP session with no
+    /// new `initialize`, and another tproxy does not get it.
+    @Test func aTproxyGetsItsSessionBackWhenItConnectsAgain() async throws {
+        let folder = folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let socket = try NodeSocket(node: "box", mcp: MCPServer(store: store, localToken: "test"), folder: folder)
+        socket.start()
+        defer { socket.stop() }
+        let hello = #"{"jsonrpc":"2.0","method":"tproxy/connect","params":{"id":"a1"}}"#
+        let start = #"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"start_annotation","arguments":{"wait_seconds":0}}}"#
+
+        let first = try await LineClient(path: socket.path)
+        try first.send(hello)
+        try first.send(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"codex-mcp-client"}}}"#)
+        _ = try await first.reply()
+        first.close()
+
+        let again = try await LineClient(path: socket.path)
+        try again.send(hello)
+        try again.send(start)
+        _ = try await again.reply()
+        #expect(store.active?.client == "Codex")
+        #expect(store.active?.node == "box")
+        store.finish(try #require(store.active?.id), with: .cancelled)
+
+        let other = try await LineClient(path: socket.path)
+        try other.send(#"{"jsonrpc":"2.0","method":"tproxy/connect","params":{"id":"b2"}}"#)
+        try other.send(start)
+        _ = try await other.reply()
+        #expect(store.active?.client == "Agent")
+    }
+
     @Test func eachNodeHasItsOwnSocket() {
         #expect(NodeSocket.path(for: "box") != NodeSocket.path(for: "other"))
         #expect(NodeSocket.path(for: "box") == NodeSocket.path(for: "box"))
@@ -92,8 +124,12 @@ private final class LineClient: @unchecked Sendable {
             }
             try await Task.sleep(for: .milliseconds(20))
         }
-        close(fd)
+        Darwin.close(fd)
         throw POSIXError(.ECONNREFUSED)
+    }
+
+    func close() {
+        try? handle.close()
     }
 
     func send(_ line: String) throws {
