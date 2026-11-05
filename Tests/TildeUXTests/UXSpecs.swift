@@ -93,16 +93,16 @@ struct UXSpecs {
             try await app.key(.escape)
             try await app.waitToSee("Paused")
             try await app.key(.escape)
-            try await app.waitToSee("Discard the note?")
+            try await app.waitToSee("Discard the note and close?")
             try await app.waitToSee("Cancel, esc")
             try await app.waitToSee("Discard")
 
             try await app.key(.escape)
-            try await app.waitNotToSee("Discard the note?")
+            try await app.waitNotToSee("Discard the note and close?")
             try await app.waitToSee("Paused")
 
             try await app.key(.escape)
-            try await app.waitToSee("Discard the note?")
+            try await app.waitToSee("Discard the note and close?")
             try await app.key(.enter)
             try await app.waitNotToSee("Paused")
         }
@@ -998,6 +998,14 @@ struct UXSpecs {
             try await app.waitToSee("For the remote", timeout: 3)
             try await app.key(.enter)
             try await app.waitToSeeText(containing: "1 note")
+            // A clip goes to the machine with the images.
+            try await app.press("Record a video")
+            try await app.waitToSeeText(containing: "Ready to record")
+            try await app.press("Start recording the screen")
+            try await app.waitToSeeText(containing: "Recording 0:0")
+            try await Task.sleep(for: .seconds(1))
+            try await app.press("Stop and add the recording to the list")
+            try await app.waitToSeeText(containing: "Ready to record")
             try await app.key(.enter, command: true)
             // "Copied" at once, and gone again while the images go to the machine.
             try await app.waitToSee("Copied", timeout: 5)
@@ -1014,6 +1022,7 @@ struct UXSpecs {
                 try await Task.sleep(for: .milliseconds(200))
             }
             #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("annotation-1.png").path))
+            #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("annotation-2.mp4").path))
             #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("feedback.md").path))
 
             // A machine that cannot be reached: the report still copies, with local paths, and
@@ -1095,7 +1104,7 @@ struct UXSpecs {
         try await second.waitToSeeText(containing: "1 note", timeout: 15)
         try await second.waitForBlue(in: beside, atMost: 0)
         try await second.waitForBlue(in: left(of: start, offset: 200), atMost: 0)
-        try await second.press("Show annotations")
+        try await second.press("Show notes")
         try await second.waitToSee("On the window")
         step("restored")
     }
@@ -1144,7 +1153,7 @@ struct UXSpecs {
             try await app.waitToSeeText(containing: "1 note")
 
             // In the preview, with the text box focused.
-            try await app.press("Show annotations")
+            try await app.press("Show notes")
             try await app.press("first\nsecond")
             try await app.waitToSee("1 of 1")
             try await app.press("first\nsecond")
@@ -1270,7 +1279,7 @@ struct UXSpecs {
             try await app.waitToSeeText(containing: "Ready to record")
 
             // The clip waits in the preview's native player; Esc closes the preview.
-            try await app.press("Show annotations")
+            try await app.press("Show notes")
             try await app.press("No comment")
             try await app.waitToSee("1 of 1")
             try await app.waitToSee("play/pause")
@@ -1324,7 +1333,7 @@ struct UXSpecs {
             try await app.waitToSee("add")
             try await app.key(.enter)
             try await app.waitToSeeText(containing: "1 note")
-            try await app.press("Show annotations")
+            try await app.press("Show notes")
             try await app.press("No comment")
             try await app.waitToSee("1 of 1")
 
