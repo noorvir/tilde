@@ -71,8 +71,8 @@ final class OverlayView: NSView {
     init(controller: AnnotationController) {
         self.controller = controller
         super.init(frame: .zero)
-        // The browser's notes move with its page.
-        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange)
+        // The browser's notes move with its page; the hover highlight changes on its own.
+        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange, controller.hoverHighlight.objectWillChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.needsDisplay = true }
     }

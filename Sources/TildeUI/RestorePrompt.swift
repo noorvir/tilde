@@ -8,6 +8,9 @@ import SwiftUI
 final class RestorePrompt {
     private let panel: NSPanel
     private let state = RestorePromptState()
+    private lazy var zoom = ZoomPresenter(panel: panel) { [state] isShown in
+        state.isShown = isShown
+    }
 
     private static let size = NSSize(width: 560, height: HUDMetrics.height + 32)
 
@@ -37,21 +40,11 @@ final class RestorePrompt {
             let top = HUDPanel.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
             panel.setFrameOrigin(NSPoint(x: top.x - Self.size.width / 2, y: top.y - Self.size.height))
         }
-        panel.orderFrontRegardless()
-        DispatchQueue.main.async { [state] in
-            withAnimation(HUDPanel.motion) {
-                state.isShown = true
-            }
-        }
+        zoom.show()
     }
 
     func hide() {
-        withAnimation(HUDPanel.motion) {
-            state.isShown = false
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [panel] in
-            panel.orderOut(nil)
-        }
+        zoom.hide()
     }
 }
 
@@ -104,9 +97,7 @@ struct RestorePromptView: View {
         .padding(.leading, HUDMetrics.leadingInset)
         .padding(.trailing, 8)
         .frame(height: HUDMetrics.height)
-        .background(Capsule().fill(Color.tildeInk))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+        .hudPill()
         .scaleEffect(state.isShown ? 1 : 0.5)
         .opacity(state.isShown ? 1 : 0)
     }

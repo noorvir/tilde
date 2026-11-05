@@ -16,7 +16,9 @@ final class HUDPanel {
     let window: NSPanel
     private let hosting: FirstMouseHostingView<HUDView>
     private unowned let controller: AnnotationController
-    private var pendingHide: DispatchWorkItem?
+    private lazy var zoom = ZoomPresenter(panel: window) { [controller] isShown in
+        controller.isHUDShown = isShown
+    }
     /// Drags the pill, snapping it home, and remembers where it was dropped on each screen.
     private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: HUDMetrics.height / 2, positionsKey: "HUDPositions")
     /// The visible content (pill, message, list) in the panel's SwiftUI coordinates, which
@@ -57,32 +59,17 @@ final class HUDPanel {
 
     /// Shows the HUD on the screen that has the pointer, or with its top centre at `top`.
     func show(top: NSPoint? = nil) {
-        pendingHide?.cancel()
         place(top: top)
         // Lays the collapsed pill out at its place now. The first time, the hosting view has
-        // never been laid out, and its first layout inside the zoom below would animate the
-        // pill in from the window's left edge.
+        // never been laid out, and its first layout inside the zoom would animate the pill in
+        // from the window's left edge.
         hosting.layoutSubtreeIfNeeded()
-        window.orderFrontRegardless()
-
-        // Grow on the next pass, after SwiftUI has laid out the collapsed pill.
-        DispatchQueue.main.async { [controller] in
-            withAnimation(Self.motion) {
-                controller.isHUDShown = true
-            }
-        }
+        zoom.show()
     }
 
     /// Collapses the pill into its centre, then hides the panel.
     func hide() {
-        withAnimation(Self.motion) {
-            controller.isHUDShown = false
-        }
-        let hide = DispatchWorkItem { [window] in
-            window.orderOut(nil)
-        }
-        pendingHide = hide
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: hide)
+        zoom.hide()
     }
 
     /// Tells the source picker how much room it has under the pill (or, in Tilde's browser,
@@ -233,7 +220,11 @@ struct HUDView: View {
                     .transition(Self.zoom)
             }
             if controller.isHUDShown, controller.isPickingWindow {
-                SourcePickerView(model: controller.sourcePicker, controller: controller)
+                SourcePickerView(
+                    model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
+                    selectedID: controller.recording == nil ? controller.source?.id : controller.clipSource.id,
+                    onOpen: controller.openSourcePicker, onBack: controller.stepBackInSourcePicker, onChoose: controller.choose
+                )
                     .transition(Self.zoom)
             }
         }
@@ -405,10 +396,7 @@ struct HUDView: View {
             .padding(.trailing, HUDMetrics.trailingInset)
             .frame(width: width)
             .frame(height: HUDMetrics.height)
-            .clipShape(Capsule())
-            .background(Capsule().fill(Color.tildeInk))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
-            .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+            .hudPill()
     }
 
     @ViewBuilder
@@ -647,7 +635,7 @@ struct HUDView: View {
 
     static func status(of controller: AnnotationController) -> Status {
         let shortcut = controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause)
-        let clock = controller.clipClock
+        let clock = controller.clips.clock
         switch controller.mode {
         case .sending(_, let returnTo):
             var status = status(of: returnTo, scopeName: controller.scopeName, shortcut: shortcut, clock: clock)
@@ -1032,9 +1020,7 @@ struct PauseToast: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
         .frame(maxWidth: HUDView.width, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.tildeInk))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.22), radius: 10, y: 3)
+        .hudCard(cornerRadius: 12)
         .fixedSize()
         .onHover { controller.holdPauseNotice($0) }
     }
@@ -1109,9 +1095,7 @@ private struct AnnotationList: View {
         }
         .padding(.vertical, 4)
         .frame(width: HUDView.width)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.tildeInk))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.22), radius: 14, y: 4)
+        .hudCard()
         .environment(\.colorScheme, .dark)
     }
 }

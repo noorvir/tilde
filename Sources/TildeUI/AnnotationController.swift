@@ -41,6 +41,11 @@ enum PreviewImage {
     case context
 }
 
+@MainActor
+final class HoverHighlight: ObservableObject {
+    @Published var picked: Picked?
+}
+
 /// Screenshots taken when a target is picked, before the user finishes the comment.
 struct Captures: Sendable {
     let image: Data?
@@ -125,7 +130,13 @@ final class AnnotationController: ObservableObject {
             scheduleSave()
         }
     }
-    @Published private(set) var hover: Picked?
+    /// The element under the pointer. It changes at pointer rate and only the overlay draws
+    /// it, so it is apart from the state that the HUD and the panels redraw on.
+    let hoverHighlight = HoverHighlight()
+    var hover: Picked? {
+        get { hoverHighlight.picked }
+        set { hoverHighlight.picked = newValue }
+    }
     /// How the confirmation after Send reads: done, or a copy's images that did not reach a
     /// remote machine.
     enum SentStatus {
@@ -164,22 +175,16 @@ final class AnnotationController: ObservableObject {
         }
         return nil
     }
-    /// The clip in progress, from its start to Stop.
-    private var recorder: ScreenRecorder?
-    /// A recorder or a stopped clip that has just arrived, while `flow` decides whether it is
-    /// still wanted.
-    private var arrivedClip: ArrivedClip?
-    private enum ArrivedClip {
-        case recorder(ScreenRecorder)
-        case clip(Draft)
-    }
-    /// How long the clip in progress has recorded: `before` seconds until `since`, and on
-    /// since then while it records.
-    private(set) var clipClock = (since: Date(), before: TimeInterval(0))
+    /// The clip of recording mode.
+    private(set) lazy var clips: ClipRecorder = {
+        let clips = ClipRecorder()
+        clips.dispatch = { [weak self] event in
+            self?.dispatch(event) ?? []
+        }
+        return clips
+    }()
     /// The source picker under the HUD while choosing.
     let sourcePicker = SourcePickerModel()
-    /// What the clip in progress shows: its name, such as "Safari window", and its frame.
-    private var recordedSource = (name: "", frame: CGRect.zero)
     /// A short note in the HUD subtitle, such as that the scoped window closed.
     @Published private(set) var notice: String?
     /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
@@ -425,8 +430,7 @@ final class AnnotationController: ObservableObject {
     /// Closes everything that annotates: the overlays, the comment, the preview, the hover and
     /// the input monitors. The HUD stays, for the confirmation after Send.
     private func stopAnnotating() {
-        recorder?.discard()
-        recorder = nil
+        clips.discard()
         stopHoldMonitor()
         stopOcclusion()
         stopContentChecks()
@@ -591,7 +595,7 @@ final class AnnotationController: ObservableObject {
         log.notice("session \(session.id, privacy: .public) cancelled")
         // A cancelled session keeps its notes in History, but not its recordings.
         let clips = drafts.filter(\.isRecording)
-        clips.forEach(Self.deleteVideo)
+        clips.forEach(ClipRecorder.deleteVideo)
         drafts.removeAll(where: \.isRecording)
         saveSession(state: .cancelled)
         store.finish(session.id, with: .cancelled)
@@ -963,7 +967,7 @@ final class AnnotationController: ObservableObject {
         case .endSession: end()
         case .cancelSession: cancelSession()
         case .clearDrafts:
-            drafts.forEach(Self.deleteVideo)
+            drafts.forEach(ClipRecorder.deleteVideo)
             drafts = []
         case .restoreDrafts:
             if let record = restoreRecord {
@@ -984,31 +988,24 @@ final class AnnotationController: ObservableObject {
         case .enterRecording:
             hover = nil
         case .exitRecording:
-            recorder?.discard()
-            recorder = nil
+            clips.discard()
             // A phone cannot be annotated: back to everything on screen.
             if source?.isDrawable == false {
                 setSource(nil)
             }
             frontmostAppChanged(to: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         case .startClip: startClip()
-        case .pauseClip:
-            recorder?.pause()
-            clipClock = (Date(), clipClock.before + Date().timeIntervalSince(clipClock.since))
-        case .resumeClip:
-            recorder?.resume()
-            clipClock = (Date(), clipClock.before)
-        case .finishClip: finishClip()
+        case .pauseClip: clips.pause()
+        case .resumeClip: clips.resume()
+        case .finishClip:
+            if case .finishing(let operation, _) = recording {
+                clips.finish(operation: operation)
+            }
         case .keepClip:
-            if case .clip(let draft) = arrivedClip {
+            if let draft = clips.arrivedDraft {
                 drafts.append(draft)
             }
-        case .dropClip:
-            switch arrivedClip {
-            case .recorder(let recorder): recorder.discard()
-            case .clip(let draft): Self.deleteVideo(of: draft)
-            case nil: break
-            }
+        case .dropClip: clips.dropArrived()
         case .showStartFailure: show(notice: "Could not start recording")
         case .showSaveFailure: show(notice: "Could not save the recording")
         case .showSourceGone: show(notice: "Recording stopped")
@@ -1852,68 +1849,9 @@ final class AnnotationController: ObservableObject {
         }
 
         // The clip belongs to the session: it is in its folder, and goes with it.
-        let video = archive.newClip(in: session.id)
-        let browserWindow = browser.windowNumber
-        Task {
-            do {
-                let started = try await ScreenRecorder.start(recordingSource, to: video, browserWindow: browserWindow) { [weak self] in
-                    Task { @MainActor in
-                        self?.recordedSourceEnded(video)
-                    }
-                }
-                arrivedClip = .recorder(started)
-                defer { arrivedClip = nil }
-                guard !dispatch(.clipStarted(operation)).contains(.dropClip) else {
-                    return
-                }
-                recorder = started
-                recordedSource = (name, frame)
-                clipClock = (Date(), 0)
-                log.notice("recording \(name, privacy: .public)")
-            } catch {
-                log.error("could not start recording: \(String(describing: error), privacy: .public)")
-                dispatch(.clipStartFailed(operation))
-            }
-        }
-    }
-
-    /// The recorded window, display or phone went away: the clip ends at its last frame.
-    private func recordedSourceEnded(_ video: URL) {
-        guard recorder?.video == video else {
-            return
-        }
-        dispatch(.captureStopped)
-    }
-
-    /// Saves the clip in progress; `flow` decides whether it still goes to the list.
-    private func finishClip() {
-        guard case .finishing(let operation, _) = recording, let recorder else {
-            return
-        }
-        self.recorder = nil
-        let source = recordedSource
-        Task {
-            do {
-                let clip = try await recorder.stop()
-                let target = Target.recording(video: clip.video, seconds: clip.seconds, source: source.name)
-                let annotation = Annotation(comment: "", target: target, frame: source.frame, image: clip.poster, contextImage: nil)
-                let captures = Captures(image: clip.poster, contextImage: nil)
-                arrivedClip = .clip(Draft(annotation: annotation, marker: .zero, chip: "Recording \(clipLength(clip.seconds))", capture: Task { captures }))
-                defer { arrivedClip = nil }
-                dispatch(.clipFinished(operation))
-                log.notice("recorded \(Int(clip.seconds), privacy: .public) s")
-            } catch {
-                log.error("could not finish recording: \(String(describing: error), privacy: .public)")
-                dispatch(.clipFailed(operation))
-            }
-        }
-    }
-
-    /// Deletes the video of a recording's draft; other drafts have no file.
-    nonisolated static func deleteVideo(of draft: Draft) {
-        if case .recording(let video, _, _) = draft.annotation.target {
-            try? FileManager.default.removeItem(at: video)
-        }
+        clips.start(
+            recordingSource, name: name, frame: frame, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
+        )
     }
 
     // MARK: - Window scope
@@ -2551,7 +2489,7 @@ final class AnnotationController: ObservableObject {
                 closePreview()
             }
         }
-        drafts.filter { $0.id == id }.forEach(Self.deleteVideo)
+        drafts.filter { $0.id == id }.forEach(ClipRecorder.deleteVideo)
         drafts.removeAll { $0.id == id }
         if case .edit(id) = composer {
             closeComposer()
@@ -2775,7 +2713,7 @@ extension AnnotationController {
         self.pauseNotice = pauseNotice
         self.restoreRecord = restoreRecord
         self.sentText = sentText
-        self.clipClock = clipClock
+        clips.clock = clipClock
         isHUDShown = true
     }
 }

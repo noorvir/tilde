@@ -11,7 +11,15 @@ struct SourcePickerView: View {
     static let sizes = (min: CGSize(width: 420, height: 260), max: CGSize(width: 780, height: 900))
 
     @ObservedObject var model: SourcePickerModel
-    @ObservedObject var controller: AnnotationController
+    /// Open in full, or only its "Use window picker" button.
+    let isOpen: Bool
+    /// The source that shows as chosen: in recording mode what Record records, else the
+    /// chosen one.
+    let selectedID: String?
+    let onOpen: () -> Void
+    /// "‹ Back", one level back as Esc.
+    let onBack: () -> Void
+    let onChoose: (RecordingSource) -> Void
     /// The size the user gave it with its corner, saved when the drag ends.
     @AppStorage("SourcePickerWidth") private var savedWidth = 560.0
     @AppStorage("SourcePickerHeight") private var savedHeight = 340.0
@@ -24,24 +32,19 @@ struct SourcePickerView: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: controller.isSourcePickerOpen ? 16 : 18)
         ZStack {
-            if controller.isSourcePickerOpen {
+            if isOpen {
                 picker
                     .transition(.opacity)
             } else {
                 CardButton(symbol: "square.grid.2x2", title: "Use window picker", help: "Choose from pictures of the screens and windows") {
-                    controller.openSourcePicker()
+                    onOpen()
                 }
                 .padding(4)
                 .transition(.opacity)
             }
         }
-        .background(shape.fill(Color.tildeInk))
-        .clipShape(shape)
-        // A stroke takes the clicks inside its shape too.
-        .overlay(shape.strokeBorder(Color.white.opacity(0.1)).allowsHitTesting(false))
-        .shadow(color: .black.opacity(0.22), radius: 14, y: 4)
+        .hudCard(cornerRadius: isOpen ? 16 : 18)
         .environment(\.colorScheme, .dark)
     }
 
@@ -57,7 +60,7 @@ struct SourcePickerView: View {
                 .labelsHidden()
                 .fixedSize()
                 CardButton(symbol: "chevron.left", title: "Back", help: openApp == nil ? "Back to clicking on screen  Esc" : "Back to all apps  Esc") {
-                    controller.stepBackInSourcePicker()
+                    onBack()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -101,11 +104,11 @@ struct SourcePickerView: View {
                         ForEach(model.apps) { app in
                             SourceTile(
                                 title: app.name, detail: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
-                                picture: app.windows.first?.picture, isLoading: model.phase == .picturing, badge: app.icon, isSelected: controller.scope?.pid == app.pid
+                                picture: app.windows.first?.picture, isLoading: model.phase == .picturing, badge: app.icon, isSelected: app.windows.contains { $0.id == selectedID }
                             ) {
                                 // An app with one window has nothing more to choose.
                                 if app.windows.count == 1 {
-                                    controller.choose(app.windows[0].source)
+                                    onChoose(app.windows[0].source)
                                 } else {
                                     model.openApp = app.pid
                                 }
@@ -145,17 +148,12 @@ struct SourcePickerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// In recording mode, what the next clip records; while annotating, the chosen source.
-    private var selectedID: String? {
-        controller.recording == nil ? controller.source?.id : controller.clipSource.id
-    }
-
     private func tileButton(_ tile: SourcePickerModel.Tile) -> some View {
         SourceTile(
             title: tile.title, detail: tile.detail, picture: tile.picture, isLoading: model.phase == .picturing, badge: nil,
             isSelected: selectedID == tile.id
         ) {
-            controller.choose(tile.source)
+            onChoose(tile.source)
         }
     }
 

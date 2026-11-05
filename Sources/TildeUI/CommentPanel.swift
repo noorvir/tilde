@@ -334,9 +334,7 @@ struct CommentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
         .frame(width: 320)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color.tildeInk))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.24), radius: 16, y: 6)
+        .hudCard()
         .padding(18)
         .environment(\.colorScheme, .dark)
         .onExitCommand { controller.escapePressed() }

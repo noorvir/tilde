@@ -9,7 +9,9 @@ final class InstallToast {
     private let panel: NSPanel
     private let state = ToastState()
     private var pendingDismiss: DispatchWorkItem?
-    private var pendingHide: DispatchWorkItem?
+    private lazy var zoom = ZoomPresenter(panel: panel) { [state] isShown in
+        state.isShown = isShown
+    }
     private var monitors: [Any] = []
 
     private static let size = NSSize(width: 560, height: HUDMetrics.height + 32)
@@ -33,15 +35,9 @@ final class InstallToast {
     }
 
     func show(_ result: InstallResult) {
-        pendingHide?.cancel()
         state.result = result
         place()
-        panel.orderFrontRegardless()
-        DispatchQueue.main.async { [state] in
-            withAnimation(HUDPanel.motion) {
-                state.isShown = true
-            }
-        }
+        zoom.show()
         scheduleDismiss()
         watchForDismissal()
     }
@@ -52,15 +48,7 @@ final class InstallToast {
             NSEvent.removeMonitor(monitor)
         }
         monitors = []
-
-        withAnimation(HUDPanel.motion) {
-            state.isShown = false
-        }
-        let hide = DispatchWorkItem { [panel] in
-            panel.orderOut(nil)
-        }
-        pendingHide = hide
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: hide)
+        zoom.hide()
     }
 
     private func place() {
@@ -166,9 +154,7 @@ struct InstallToastView: View {
         .padding(.leading, HUDMetrics.leadingInset)
         .padding(.trailing, 8)
         .frame(height: HUDMetrics.height)
-        .background(Capsule().fill(Color.tildeInk))
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+        .hudPill()
         .scaleEffect(state.isShown ? 1 : 0.5)
         .opacity(state.isShown ? 1 : 0)
         .onHover(perform: onHover)
