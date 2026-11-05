@@ -3,6 +3,7 @@ import Foundation
 /// A JSON value that the installer writes. Members keep their order.
 indirect enum JSONValue: Equatable {
     case string(String)
+    case array([JSONValue])
     case object([Member])
 
     struct Member: Equatable {
@@ -14,6 +15,8 @@ indirect enum JSONValue: Equatable {
         switch self {
         case .string(let string):
             return string
+        case .array(let values):
+            return values.map(\.foundation)
         case .object(let members):
             return Dictionary(uniqueKeysWithValues: members.map { ($0.key, $0.value.foundation) })
         }
@@ -138,6 +141,8 @@ struct JSONEditor {
         switch value {
         case .string(let string):
             return quoted(string)
+        case .array(let values):
+            return "[" + values.map { render($0, indent: indent, unit: unit) }.joined(separator: ", ") + "]"
         case .object(let members):
             guard !members.isEmpty else {
                 return "{}"

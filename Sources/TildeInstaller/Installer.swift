@@ -44,6 +44,9 @@ public struct InstallEnvironment: Sendable {
     /// The `Authorization` header of the MCP entries: the local token on this Mac, a node's
     /// token on a machine that reaches Tilde by a tunnel.
     public var authorization: String?
+    /// On a machine linked by its socket: `tilde-proxy` and the socket, which the entries start
+    /// as a stdio server instead of reaching `mcpURL`.
+    public var proxy: [String]?
     /// Variables that move an app's folder, such as `CODEX_HOME`.
     public var variables: [String: String] = [:]
 
@@ -169,9 +172,10 @@ public struct Installer: Sendable {
         self.files = files
     }
 
-    /// The installer of another machine, reached by a shell and a tunnel to `mcpURL`. Its folders
-    /// come from its login shell.
-    public static func remote(mcpURL: String, authorization: String, run: @escaping ShellFiles.Run) throws -> Installer {
+    /// The installer of another machine, reached by a shell and a tunnel to `mcpURL`, or with
+    /// `proxied`, by `tilde-proxy` and its socket in the machine's `~/.tilde`. Its folders come
+    /// from its login shell.
+    public static func remote(mcpURL: String, authorization: String, proxied: Bool = false, run: @escaping ShellFiles.Run) throws -> Installer {
         let names = ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME"]
         let printed = names.map { "\"$\($0)\"" }.joined(separator: " ")
         let output = try run("${SHELL:-/bin/sh} -lc 'printf \"%s\\n\" \(printed)' | tail -n \(names.count)", nil)
@@ -185,6 +189,9 @@ public struct Installer: Sendable {
         environment.binaries += values[1].split(separator: ":").map { URL(fileURLWithPath: String($0)) }
         environment.mcpURL = mcpURL
         environment.authorization = authorization
+        if proxied {
+            environment.proxy = [values[0] + "/.tilde/bin/tilde-proxy", values[0] + "/.tilde/tilde.sock"]
+        }
         for (name, value) in zip(names, values).dropFirst(2) where !value.isEmpty {
             environment.variables[name] = value
         }
@@ -386,11 +393,20 @@ extension Installer {
         let headers: [JSONValue.Member] = environment.authorization.map { authorization in
             [.init(key: "headers", value: .object([.init(key: "Authorization", value: .string(authorization))]))]
         } ?? []
+        // The stdio entry on a machine linked by its socket, in each app's words.
+        let proxy = environment.proxy.map { command in
+            [JSONValue.Member(key: "command", value: .string(command[0])), .init(key: "args", value: .array(command.dropFirst().map(JSONValue.string)))]
+        }
         let claudeFolder = environment.variables["CLAUDE_CONFIG_DIR"].map { URL(fileURLWithPath: $0) }
         let codexFolder = environment.variables["CODEX_HOME"].map { URL(fileURLWithPath: $0) }
         let configFolder = environment.variables["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".config")
         // Claude reads only its own folder. The other apps all read ~/.agents/skills; Cursor and
         // VS Code also read ~/.claude/skills, so they get one skill folder in common with Claude.
+        var codexServer = ["url = \"\(environment.mcpURL)\""] + (environment.authorization.map { ["http_headers = { Authorization = \"\($0)\" }"] } ?? [])
+        if let command = environment.proxy {
+            let args = command.dropFirst().map { "\"\($0)\"" }.joined(separator: ", ")
+            codexServer = ["command = \"\(command[0])\"", "args = [\(args)]"]
+        }
         let claudeSkills = claudeFolder?.appendingPathComponent("skills") ?? home.appendingPathComponent(".claude/skills")
         let agentSkills = home.appendingPathComponent(".agents/skills")
 
@@ -398,7 +414,7 @@ extension Installer {
         case .claudeCode:
             return Target(
                 config: (claudeFolder ?? home).appendingPathComponent(".claude.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "type", value: .string("http")), .init(key: "url", value: url)] + headers)),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object(proxy.map { [.init(key: "type", value: .string("stdio"))] + $0 } ?? [.init(key: "type", value: .string("http")), .init(key: "url", value: url)] + headers)),
                 skills: claudeSkills,
                 detect: Target.Detection(paths: [".claude.json"], files: claudeFolder.map { [$0] } ?? [], binaries: ["claude"]),
                 iconApps: ["Claude.app"]
@@ -406,12 +422,7 @@ extension Installer {
         case .codex:
             return Target(
                 config: (codexFolder ?? home.appendingPathComponent(".codex")).appendingPathComponent("config.toml"),
-                format: .toml(table: "mcp_servers.tilde", lines: [
-                    "[mcp_servers.tilde]",
-                    "url = \"\(environment.mcpURL)\"",
-                ] + (environment.authorization.map { ["http_headers = { Authorization = \"\($0)\" }"] } ?? []) + [
-                    "default_tools_approval_mode = \"approve\"",
-                ]),
+                format: .toml(table: "mcp_servers.tilde", lines: ["[mcp_servers.tilde]"] + codexServer + ["default_tools_approval_mode = \"approve\""]),
                 skills: agentSkills,
                 detect: Target.Detection(paths: [".codex"], files: codexFolder.map { [$0] } ?? [], apps: ["Codex.app"], binaries: ["codex"]),
                 iconApps: ["ChatGPT.app"]
@@ -419,21 +430,21 @@ extension Installer {
         case .cursor:
             return Target(
                 config: home.appendingPathComponent(".cursor/mcp.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "url", value: url)] + headers)),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object(proxy ?? [.init(key: "url", value: url)] + headers)),
                 skills: agentSkills,
                 detect: Target.Detection(paths: [".cursor"], apps: ["Cursor.app"])
             )
         case .vscode:
             return Target(
                 config: home.appendingPathComponent("Library/Application Support/Code/User/mcp.json"),
-                format: .json(path: ["servers", "tilde"], entry: .object([.init(key: "type", value: .string("http")), .init(key: "url", value: url)] + headers)),
+                format: .json(path: ["servers", "tilde"], entry: .object(proxy.map { [.init(key: "type", value: .string("stdio"))] + $0 } ?? [.init(key: "type", value: .string("http")), .init(key: "url", value: url)] + headers)),
                 skills: agentSkills,
                 detect: Target.Detection(paths: ["Library/Application Support/Code/User"], apps: ["Visual Studio Code.app"], binaries: ["code"])
             )
         case .gemini:
             return Target(
                 config: home.appendingPathComponent(".gemini/settings.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "httpUrl", value: url)] + headers)),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object(proxy ?? [.init(key: "httpUrl", value: url)] + headers)),
                 skills: agentSkills,
                 detect: Target.Detection(paths: [".gemini/settings.json"], binaries: ["gemini"])
             )
@@ -441,7 +452,7 @@ extension Installer {
             return Target(
                 // Windsurf is now Devin Desktop; it moved its config from ~/.codeium/windsurf.
                 config: configFolder.appendingPathComponent("devin/mcp_config.json"),
-                format: .json(path: ["mcpServers", "tilde"], entry: .object([.init(key: "serverUrl", value: url)] + headers)),
+                format: .json(path: ["mcpServers", "tilde"], entry: .object(proxy ?? [.init(key: "serverUrl", value: url)] + headers)),
                 skills: agentSkills,
                 detect: Target.Detection(paths: [".codeium/windsurf"], files: [configFolder.appendingPathComponent("devin")], apps: ["Devin.app", "Windsurf.app"])
             )
