@@ -60,7 +60,8 @@ struct SessionRecord: Codable, Equatable, Identifiable {
 }
 
 /// Sessions saved in `~/Library/Application Support/Tilde/Sessions/<id>/`: `session.json`,
-/// written atomically, and each note's images. Writes run on a background queue in order;
+/// written atomically, each note's images and its recordings, all only for the owner (0700
+/// folders, 0600 files). Writes run on a background queue in order;
 /// `flush()` waits for them, such as when Tilde quits.
 final class SessionArchive: @unchecked Sendable {
     let root: URL
@@ -100,8 +101,8 @@ final class SessionArchive: @unchecked Sendable {
                 guard !FileManager.default.fileExists(atPath: url.path) else {
                     continue
                 }
-                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                try? data.write(to: url, options: .atomic)
+                try? createPrivateFolder(folder)
+                try? writePrivate(data, to: url)
             }
         }
     }
@@ -188,7 +189,8 @@ final class SessionArchive: @unchecked Sendable {
     /// pruning History deletes it too.
     func newClip(in id: String) -> URL {
         let folder = folder(id)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? createPrivateFolder(root)
+        try? createPrivateFolder(folder)
         return folder.appendingPathComponent("clip-\(UUID().uuidString).mp4")
     }
 
@@ -205,12 +207,13 @@ final class SessionArchive: @unchecked Sendable {
     private func write(_ record: SessionRecord) {
         let folder = folder(record.id)
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try createPrivateFolder(root)
+            try createPrivateFolder(folder)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
             // Atomic: a crash mid-write leaves the previous file.
-            try encoder.encode(record).write(to: folder.appendingPathComponent("session.json"), options: .atomic)
+            try writePrivate(encoder.encode(record), to: folder.appendingPathComponent("session.json"))
         } catch {
             NSLog("Tilde could not save session \(record.id): \(error.localizedDescription)")
         }

@@ -40,7 +40,7 @@ final class Harness {
     let store = SessionStore()
     let browser = BrowserController()
     lazy var controller = AnnotationController(store: store, browser: browser)
-    lazy var mcp = MCPServer(store: store)
+    lazy var mcp = MCPServer(store: store, localToken: Agent.token)
     var servers: [HTTPServer] = []
 
     func start() {
@@ -50,7 +50,7 @@ final class Harness {
         let mcp = self.mcp
         let fixture = try! Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("fixture.html"))
         servers = [
-            try! HTTPServer(port: mcpPort) { request in await mcp.handle(request) },
+            try! HTTPServer(port: mcpPort) { request in await mcp.handleLocal(request) },
             try! HTTPServer(port: pagePort) { _ in HTTPResponse(status: 200, headers: ["Content-Type": "text/html; charset=utf-8"], body: fixture) },
         ]
         for server in servers {
@@ -639,6 +639,9 @@ final class Harness {
 
 /// Minimal MCP client over HTTP, standing in for an agent harness.
 final class Agent {
+    /// The local token of this run's MCP server.
+    static let token = UUID().uuidString
+
     struct Result {
         let text: String
         let images: [Data]
@@ -668,6 +671,7 @@ final class Agent {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Self.token)", forHTTPHeaderField: "Authorization")
         if let sessionID {
             request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
         }

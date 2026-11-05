@@ -245,6 +245,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         if let error = writer.error {
             throw error
         }
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: writer.outputURL.path)
 
         var poster: Data?
         if let lastFrame {

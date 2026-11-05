@@ -42,8 +42,9 @@ public final class SessionStore: ObservableObject {
     private let finishedLimit = 50
 
     /// Asked for a session id this store does not know, such as an agent waiting again for a
-    /// session from before Tilde restarted. Returns whether it started that session again.
-    public var reattach: ((String) -> Bool)?
+    /// session from before Tilde restarted, with the waiting agent's machine. Returns whether
+    /// it started that session again.
+    public var reattach: ((_ id: String, _ node: String?) -> Bool)?
 
     public init() {}
 
@@ -72,12 +73,16 @@ public final class SessionStore: ObservableObject {
     }
 
     /// Returns the session state once it finishes, or its current state after `seconds`.
-    /// Returns nil for an unknown session.
-    public func wait(for id: String, seconds: Double) async -> State? {
-        if session(id) == nil, reattach?(id) != true {
+    /// Returns nil for an unknown session. `node` is the waiting agent's machine, nil for this
+    /// Mac: a session of another machine is unknown to it.
+    public func wait(for id: String, node: String?, seconds: Double) async -> State? {
+        guard Self.isSessionID(id) else {
             return nil
         }
-        guard let session = session(id) else {
+        if session(id) == nil, reattach?(id, node) != true {
+            return nil
+        }
+        guard let session = session(id), session.node == node else {
             return nil
         }
         if session.state.isFinished || seconds <= 0 {
@@ -131,6 +136,11 @@ public final class SessionStore: ObservableObject {
 
         let dropped = Set(finished.prefix(finished.count - finishedLimit).map(\.id))
         sessions.removeAll { dropped.contains($0.id) }
+    }
+
+    /// Whether text has the form of a session id that Tilde makes, such as `14d2dc23`.
+    public static func isSessionID(_ text: String) -> Bool {
+        text.wholeMatch(of: #/[0-9a-f]{8}/#) != nil
     }
 
     private static func newID() -> String {

@@ -473,7 +473,7 @@ final class AnnotationController: ObservableObject {
             let feedback = Feedback(annotations: Self.groupedByPage(annotations))
             let folder: URL
             do {
-                folder = try await Task.detached { try saveToInbox(feedback, sessionID: session.id) }.value
+                folder = try await Task.detached { try saveToInbox(feedback, sessionID: session.id, node: session.node) }.value
             } catch {
                 log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
                 dispatch(.sendFailed(operation))
@@ -1610,8 +1610,8 @@ final class AnnotationController: ObservableObject {
 
     /// Starts an agent's unfinished session again under its own id, with its notes, when the
     /// agent waits for it after Tilde restarted. Returns whether it did.
-    func reattach(_ id: String) -> Bool {
-        guard let record = archive.record(id), record.state == .active, !record.isLocal else {
+    func reattach(_ id: String, node: String?) -> Bool {
+        guard let record = archive.record(id), record.state == .active, !record.isLocal, record.node == node else {
             return false
         }
         pendingRestore = record

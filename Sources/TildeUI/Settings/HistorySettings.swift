@@ -53,7 +53,7 @@ final class HistoryModel: ObservableObject {
         let feedback = Feedback(annotations: annotations)
         // An unsent session has no report folder yet; it gets one, as Send makes, so the
         // report's file names are there.
-        guard let folder = record.reportFolder.map({ URL(fileURLWithPath: $0, isDirectory: true) }) ?? (try? saveToInbox(feedback, sessionID: record.id)) else {
+        guard let folder = record.reportFolder.map({ URL(fileURLWithPath: $0, isDirectory: true) }) ?? (try? saveToInbox(feedback, sessionID: record.id, node: record.node)) else {
             return
         }
         NSPasteboard.general.clearContents()

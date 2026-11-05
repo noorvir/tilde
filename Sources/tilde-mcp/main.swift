@@ -5,6 +5,7 @@
 
 import AppKit
 import Foundation
+import TildeInstaller
 
 if CommandLine.arguments.dropFirst().first == "install" {
     exit(runInstall(Array(CommandLine.arguments.dropFirst(2))))
@@ -12,6 +13,7 @@ if CommandLine.arguments.dropFirst().first == "install" {
 
 let port = ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "7311"
 let endpoint = URL(string: "http://127.0.0.1:\(port)/mcp")!
+let authorization = LocalToken.authorization(home: FileManager.default.homeDirectoryForCurrentUser)
 let output = DispatchQueue(label: "tilde-mcp.stdout")
 let session: URLSession = {
     let configuration = URLSessionConfiguration.ephemeral
@@ -61,6 +63,7 @@ actor Bridge {
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
         if let mcpSessionID {
             request.setValue(mcpSessionID, forHTTPHeaderField: "Mcp-Session-Id")
         }

@@ -10,6 +10,8 @@ import TildeSkill
 public final class MCPServer {
     private let store: SessionStore
     private let inbox: URL
+    /// What agents on this Mac send as `Authorization: Bearer <token>`.
+    private let localToken: String
     /// Connected harnesses, keyed by `Mcp-Session-Id`.
     private var clients: [String: Client] = [:]
     /// Keeps those, oldest first, as a harness keeps its session when Tilde restarts.
@@ -20,8 +22,9 @@ public final class MCPServer {
     private let supportedVersions = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
     private let defaultWaitSeconds = 45.0
     private let maxWaitSeconds = 600.0
-    public init(store: SessionStore, inbox: URL = inboxRoot, clientsFile: URL? = nil) {
+    public init(store: SessionStore, localToken: String, inbox: URL = inboxRoot, clientsFile: URL? = nil) {
         self.store = store
+        self.localToken = localToken
         self.inbox = inbox
         self.clientsFile = clientsFile
         if let clientsFile, let data = try? Data(contentsOf: clientsFile), let saved = try? JSONDecoder().decode([SavedClient].self, from: data) {
@@ -52,6 +55,14 @@ public final class MCPServer {
         try? data.write(to: clientsFile, options: .atomic)
     }
 
+    /// A request from an agent on this Mac: only with the local token.
+    public func handleLocal(_ request: HTTPRequest) async -> HTTPResponse {
+        guard request.headers["authorization"] == "Bearer \(localToken)" else {
+            return HTTPResponse(status: 401)
+        }
+        return await handle(request, node: nil)
+    }
+
     /// A request from a node's tunnel: only with that node's token.
     public func handleFromNode(_ request: HTTPRequest, store: NodeStore) async -> HTTPResponse {
         guard let node = store.node(forAuthorization: request.headers["authorization"]) else {
@@ -60,7 +71,8 @@ public final class MCPServer {
         return await handle(request, node: node.host)
     }
 
-    public func handle(_ request: HTTPRequest, node: String? = nil) async -> HTTPResponse {
+    /// A request whose caller is known: `node` is the machine it came from, nil for this Mac.
+    func handle(_ request: HTTPRequest, node: String?) async -> HTTPResponse {
         guard isLocalRequest(request) else {
             return HTTPResponse(status: 403)
         }
@@ -70,7 +82,10 @@ public final class MCPServer {
 
         switch request.method {
         case "POST":
-            break
+            // A web page can only send JSON after a preflight, which gets 405.
+            guard request.headers["content-type"]?.lowercased().hasPrefix("application/json") == true else {
+                return HTTPResponse(status: 415)
+            }
         case "DELETE":
             if let sessionID = request.headers["mcp-session-id"] {
                 clients.removeValue(forKey: sessionID)
@@ -109,10 +124,10 @@ public final class MCPServer {
             let content = await callTool(params: params, client: client)
             return json(result(id: id, content))
         case "resources/list":
-            return json(result(id: id, ["resources": resources]))
+            return json(result(id: id, ["resources": resources(for: node)]))
         case "resources/read":
             let uri = params["uri"] as? String ?? ""
-            guard let contents = readResource(uri) else {
+            guard let contents = readResource(uri, node: node) else {
                 return json(error(id: id, code: -32002, message: "Resource not found: \(uri)"))
             }
             return json(result(id: id, ["contents": contents]))
@@ -165,7 +180,8 @@ public final class MCPServer {
         let ticker = Task {
             var progress = 0
             while !Task.isCancelled {
-                let session = waitedSession.flatMap(store.session) ?? store.active
+                let waited = waitedSession.flatMap(store.session).flatMap { $0.node == client.node ? $0 : nil }
+                let session = waited ?? store.active
                 let notification: [String: Any] = [
                     "jsonrpc": "2.0",
                     "method": "notifications/progress",
@@ -205,9 +221,9 @@ public final class MCPServer {
     // MARK: - Resources
 
     /// Sent feedback as resources, for clients that attach resources (for example with "@"):
-    /// `tilde://feedback/latest` and one per recent batch.
-    private var resources: [[String: Any]] {
-        let folders = recentInboxFolders(root: inbox, limit: 10)
+    /// `tilde://feedback/latest` and one per recent batch of the caller's machine.
+    private func resources(for node: String?) -> [[String: Any]] {
+        let folders = reportFolders(for: node, limit: 10)
         guard !folders.isEmpty else {
             return []
         }
@@ -232,9 +248,9 @@ public final class MCPServer {
     }
 
     /// The report as text, then each screenshot as a PNG blob, in report order.
-    private func readResource(_ uri: String) -> [[String: Any]]? {
+    private func readResource(_ uri: String, node: String?) -> [[String: Any]]? {
         let prefix = "tilde://feedback/"
-        guard uri.hasPrefix(prefix), let saved = savedReport(String(uri.dropFirst(prefix.count))) else {
+        guard uri.hasPrefix(prefix), let saved = savedReport(String(uri.dropFirst(prefix.count)), node: node) else {
             return nil
         }
 
@@ -246,16 +262,26 @@ public final class MCPServer {
     }
 
     /// A sent report from the inbox, by its folder name or "latest", with its screenshots in
-    /// report order.
-    private func savedReport(_ id: String) -> (report: String, images: [(name: String, data: Data)])? {
-        let folder = id == "latest" ? latestInboxFolder(root: inbox) : inbox.appendingPathComponent(id)
-        guard let folder, !id.contains("/"), let report = try? String(contentsOf: folder.appendingPathComponent("feedback.md"), encoding: .utf8) else {
+    /// report order. Any report can be read by its exact id, as a pasted report names it;
+    /// "latest" and the lists show another machine only the reports for its own agents.
+    private func savedReport(_ id: String, node: String?) -> (report: String, images: [(name: String, data: Data)])? {
+        let folder = id == "latest" ? reportFolders(for: node, limit: 1).first : isReportID(id) ? inbox.appendingPathComponent(id) : nil
+        guard let folder, let report = try? String(contentsOf: folder.appendingPathComponent("feedback.md"), encoding: .utf8) else {
             return nil
         }
         let images = inboxImageNames(folder).map { name in
             (name: name, data: (try? Data(contentsOf: folder.appendingPathComponent(name))) ?? Data())
         }
         return (report, images)
+    }
+
+    /// The newest reports the caller's machine may list: all of them on this Mac, else only
+    /// the ones for agents on that machine.
+    private func reportFolders(for node: String?, limit: Int) -> [URL] {
+        guard let node else {
+            return recentInboxFolders(root: inbox, limit: limit)
+        }
+        return Array(recentInboxFolders(root: inbox, limit: .max).filter { reportNode($0) == node }.prefix(limit))
     }
 
     /// "2026-10-28 17:17 · i like this! nice!": the time and the first comment of a batch.
@@ -368,8 +394,8 @@ public final class MCPServer {
         case "start_annotation":
             var url: URL?
             if let text = arguments["url"] as? String {
-                guard let parsed = URL(string: text), parsed.scheme != nil else {
-                    return toolError("Invalid url: \(text)")
+                guard let parsed = URL(string: text), ["http", "https"].contains(parsed.scheme?.lowercased()) else {
+                    return toolError("Invalid url: \(text). Use an http or https address.")
                 }
                 url = parsed
             }
@@ -380,19 +406,19 @@ public final class MCPServer {
             }
 
             let session = store.start(client: client.name, node: client.node, url: url, capturesContext: context == "window")
-            let state = await store.wait(for: session.id, seconds: waitSeconds)
+            let state = await store.wait(for: session.id, node: client.node, seconds: waitSeconds)
             return toolResult(sessionID: session.id, state: state)
 
         case "wait_for_annotation":
             guard let sessionID = arguments["session_id"] as? String else {
                 return toolError("session_id is required")
             }
-            let state = await store.wait(for: sessionID, seconds: waitSeconds)
+            let state = await store.wait(for: sessionID, node: client.node, seconds: waitSeconds)
             return toolResult(sessionID: sessionID, state: state)
 
         case "get_report":
             let id = arguments["id"] as? String ?? ""
-            guard let saved = savedReport(id) else {
+            guard let saved = savedReport(id, node: client.node) else {
                 return toolError("No Tilde report with id \(id)")
             }
             let images = saved.images.flatMap { [textBlock($0.name), imageBlock($0.data)] }
@@ -467,7 +493,8 @@ public final class MCPServer {
             return false
         }
 
-        guard let origin = request.headers["origin"], origin != "null" else {
+        // A page in a sandboxed frame or from a file sends "null", which is not local.
+        guard let origin = request.headers["origin"] else {
             return true
         }
         let originHost = URL(string: origin)?.host.map { $0 == "::1" ? "[::1]" : $0 } ?? ""

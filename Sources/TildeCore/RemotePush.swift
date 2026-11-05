@@ -54,7 +54,8 @@ public enum RemotePush {
             DispatchQueue.global(qos: .utility).async {
                 continuation.resume(with: Result {
                     let name = folder.lastPathComponent
-                    _ = try run(ssh, options + [host, "mkdir -p ~/.tilde/inbox/\(name)"])
+                    // Only the owner can open the reports there, as on this Mac.
+                    _ = try run(ssh, options + [host, "umask 077 && mkdir -p ~/.tilde/inbox/\(name) && chmod 700 ~/.tilde ~/.tilde/inbox ~/.tilde/inbox/\(name)"])
                     let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).map { folder.appendingPathComponent($0).path }
                     _ = try run(scp, options + files + ["\(host):.tilde/inbox/\(name)/"])
                 })

@@ -19,7 +19,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let browser = BrowserController()
     private lazy var controller = AnnotationController(store: store, browser: browser)
     private lazy var mcp = MCPServer(
-        store: store, clientsFile: SessionArchive.defaultRoot.deletingLastPathComponent().appendingPathComponent("mcp-clients.json")
+        store: store, localToken: LocalToken.load(home: FileManager.default.homeDirectoryForCurrentUser), clientsFile: SessionArchive.defaultRoot.deletingLastPathComponent().appendingPathComponent("mcp-clients.json")
     )
     private var server: HTTPServer?
     private var nodeServer: HTTPServer?
@@ -46,7 +46,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func offerUnfinishedSession() {
         let controller = self.controller
         controller.archive.prune()
-        store.reattach = { id in controller.reattach(id) }
+        store.reattach = { id, node in controller.reattach(id, node: node) }
 
         let prompt = RestorePrompt { record in
             // An agent may have taken its session back meanwhile.
@@ -78,7 +78,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let bridge = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/tilde-mcp").path
         let home = FileManager.default.homeDirectoryForCurrentUser
         let setup = AgentSetup(
-            installer: Installer(environment: .standard(home: home, port: String(port), bridgePath: bridge)),
+            installer: Installer(environment: .local(home: home, port: String(port), bridgePath: bridge)),
             nodes: NodeSetup(nodePort: port + 1)
         )
         setup.nodes.startLinks()
@@ -144,7 +144,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let server = try HTTPServer(port: state.port) { request in
-                await mcp.handle(request)
+                await mcp.handleLocal(request)
             }
             server.start { status in
                 Task { @MainActor in

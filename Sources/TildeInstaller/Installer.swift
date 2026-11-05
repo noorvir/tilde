@@ -41,7 +41,8 @@ public struct InstallEnvironment: Sendable {
     public var mcpURL: String
     /// The `tilde-mcp` stdio bridge, for apps that only start stdio servers.
     public var bridgePath: String
-    /// The `Authorization` header of the MCP entries, on a machine that reaches Tilde by a tunnel.
+    /// The `Authorization` header of the MCP entries: the local token on this Mac, a node's
+    /// token on a machine that reaches Tilde by a tunnel.
     public var authorization: String?
     /// Variables that move an app's folder, such as `CODEX_HOME`.
     public var variables: [String: String] = [:]
@@ -52,6 +53,13 @@ public struct InstallEnvironment: Sendable {
         self.binaries = binaries
         self.mcpURL = mcpURL
         self.bridgePath = bridgePath
+    }
+
+    /// This Mac: `standard`, with the local token that Tilde's listener asks for.
+    public static func local(home: URL, port: String, bridgePath: String, isolated: Bool = false) -> InstallEnvironment {
+        var environment = standard(home: home, port: port, bridgePath: bridgePath, isolated: isolated)
+        environment.authorization = LocalToken.authorization(home: home)
+        return environment
     }
 
     /// The user's real home. With `isolated`, only folders inside `home` are searched, so a

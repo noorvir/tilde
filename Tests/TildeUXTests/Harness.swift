@@ -545,6 +545,9 @@ final class MCPAgent {
         var request = URLRequest(url: endpoint, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Tilde's listener asks agents on this Mac for the token in the owner's private file.
+        let token = try String(contentsOf: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde/local-token"), encoding: .utf8)
+        request.setValue("Bearer \(token.trimmingCharacters(in: .whitespacesAndNewlines))", forHTTPHeaderField: "Authorization")
         if let sessionID {
             request.setValue(sessionID, forHTTPHeaderField: "Mcp-Session-Id")
         }

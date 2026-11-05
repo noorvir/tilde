@@ -78,11 +78,12 @@ public struct ShellFiles: InstallFiles {
         try run("cat \(quoted(file))", nil)
     }
 
+    /// As on this Mac: a link is followed and its target replaced, never written in place, so
+    /// a dropped connection leaves the old file and the new one is 0600 from the start.
     public func write(_ text: String, to file: URL) throws {
-        let path = quoted(file)
-        let temporary = quoted(file.appendingPathExtension("tilde-new"))
         let folder = quoted(file.deletingLastPathComponent())
-        _ = try run("mkdir -p \(folder) && if [ -L \(path) ]; then cat > \(path); else (umask 077 && cat > \(temporary)) && mv \(temporary) \(path); fi", text)
+        let target = "target=\(quoted(file)) && if [ -L \"$target\" ]; then target=$(readlink -f \"$target\"); fi"
+        _ = try run("mkdir -p \(folder) && \(target) && (umask 077 && cat > \"$target.tilde-new\") && mv \"$target.tilde-new\" \"$target\"", text)
     }
 
 

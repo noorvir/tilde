@@ -40,6 +40,12 @@ public final class HTTPServer: @unchecked Sendable {
     private let handler: Handler
     private let queue = DispatchQueue(label: "tilde.http")
     private let maxBodySize = 10 * 1024 * 1024
+    /// Open connections at most; more are closed at once. Long polls keep theirs open.
+    private let maxConnections = 64
+    /// A request must arrive in full this soon after its connection opens.
+    private let readTimeout: TimeInterval = 10
+    // Read and written on `queue` only.
+    private var connections = 0
 
     public init(port: UInt16, handler: @escaping Handler) throws {
         let parameters = NWParameters.tcp
@@ -76,11 +82,35 @@ public final class HTTPServer: @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
+        guard connections < maxConnections else {
+            connection.cancel()
+            return
+        }
+        connections += 1
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .cancelled, .failed:
+                self?.connections -= 1
+            default:
+                break
+            }
+        }
         connection.start(queue: queue)
-        receive(on: connection, buffer: Data())
+        let reading = Reading()
+        queue.asyncAfter(deadline: .now() + readTimeout) {
+            if !reading.isDone {
+                connection.cancel()
+            }
+        }
+        receive(on: connection, buffer: Data(), reading: reading)
     }
 
-    private func receive(on connection: NWConnection, buffer: Data) {
+    /// Whether a connection's request has arrived; read and written on `queue` only.
+    private final class Reading: @unchecked Sendable {
+        var isDone = false
+    }
+
+    private func receive(on connection: NWConnection, buffer: Data, reading: Reading) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
             guard let self else {
                 return
@@ -92,12 +122,14 @@ public final class HTTPServer: @unchecked Sendable {
 
             switch self.parse(buffer) {
             case .incomplete where error == nil && !isComplete:
-                self.receive(on: connection, buffer: buffer)
+                self.receive(on: connection, buffer: buffer, reading: reading)
             case .incomplete:
                 connection.cancel()
             case .invalid(let status):
+                reading.isDone = true
                 self.send(HTTPResponse(status: status), on: connection)
             case .request(let request):
+                reading.isDone = true
                 let handler = self.handler
                 Task {
                     let response = await handler(request)
@@ -139,7 +171,11 @@ public final class HTTPServer: @unchecked Sendable {
         if headers["transfer-encoding"] != nil {
             return .invalid(status: 411)
         }
-        let length = Int(headers["content-length"] ?? "0") ?? 0
+        // Digits only: Int() also takes a sign, and a negative length would end in a crash.
+        let lengthText = headers["content-length"] ?? "0"
+        guard !lengthText.isEmpty, lengthText.allSatisfy(\.isASCII), lengthText.allSatisfy(\.isNumber), let length = Int(lengthText) else {
+            return .invalid(status: 400)
+        }
         if length > maxBodySize {
             return .invalid(status: 413)
         }
@@ -192,11 +228,13 @@ public final class HTTPServer: @unchecked Sendable {
         case 200: return "OK"
         case 202: return "Accepted"
         case 400: return "Bad Request"
+        case 401: return "Unauthorized"
         case 403: return "Forbidden"
         case 404: return "Not Found"
         case 405: return "Method Not Allowed"
         case 411: return "Length Required"
         case 413: return "Payload Too Large"
+        case 415: return "Unsupported Media Type"
         case 431: return "Request Header Fields Too Large"
         default: return "Status"
         }
