@@ -26,10 +26,11 @@ struct ResizeGrip: View {
 }
 
 /// The one resize rule of Tilde's resizable panels: a size kept between the panel's minimum
-/// and the room there is, such as the screen's visible area.
+/// and the room there is, such as the screen's visible area. The room wins: a panel never
+/// leaves the screen, even below its minimum.
 func fitted(_ size: CGSize, min smallest: CGSize, max largest: CGSize) -> CGSize {
     CGSize(
-        width: min(max(size.width, smallest.width), max(largest.width, smallest.width)),
-        height: min(max(size.height, smallest.height), max(largest.height, smallest.height))
+        width: min(max(size.width, smallest.width), largest.width),
+        height: min(max(size.height, smallest.height), largest.height)
     )
 }

@@ -262,7 +262,7 @@ struct PreviewView: View {
                 controller.showAdjacentPreview(1)
             }
             Spacer()
-            CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this annotation") {
+            CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
                 controller.deleteDraft(id)
             }
         }

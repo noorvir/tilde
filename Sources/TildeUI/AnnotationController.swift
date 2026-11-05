@@ -34,6 +34,16 @@ enum PreviewImage {
     case context
 }
 
+/// The short notes in the HUD's subtitle, for a moment. Each fits the pill in full, which the
+/// subtitle test checks for the whole list.
+enum Notice: String, CaseIterable {
+    case windowClosed = "Window closed"
+    case recordingFailed = "Recording failed"
+    case recordingNotSaved = "Recording not saved"
+    case recordingStopped = "Recording stopped"
+    case reportNotSaved = "Report not saved"
+}
+
 @MainActor
 final class HoverHighlight: ObservableObject {
     @Published var picked: Picked?
@@ -186,7 +196,7 @@ final class AnnotationController: ObservableObject {
     /// The source picker under the HUD while choosing.
     let sourcePicker = SourcePickerModel()
     /// A short note in the HUD subtitle, such as that the scoped window closed.
-    @Published private(set) var notice: String?
+    @Published private(set) var notice: Notice?
     /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
     /// when it appears and collapses into it before the panel hides.
     @Published var isHUDShown = false
@@ -1012,9 +1022,9 @@ final class AnnotationController: ObservableObject {
             if case .finishing(let operation, _) = recording {
                 clips.finish(operation: operation)
             }
-        case .showStartFailure: show(notice: "Could not start recording")
-        case .showSaveFailure: show(notice: "Could not save the recording")
-        case .showSourceGone: show(notice: "Recording stopped")
+        case .showStartFailure: show(notice: .recordingFailed)
+        case .showSaveFailure: show(notice: .recordingNotSaved)
+        case .showSourceGone: show(notice: .recordingStopped)
         case .startPicking:
             showsList = false
             hover = nil
@@ -1029,7 +1039,7 @@ final class AnnotationController: ObservableObject {
             hover = nil
             sourcePicker.stopLoading()
         case .startSend: startSend()
-        case .showSendFailure: show(notice: "Could not save the report")
+        case .showSendFailure: show(notice: .reportNotSaved)
         }
     }
 
@@ -1684,6 +1694,8 @@ final class AnnotationController: ObservableObject {
         }
         if isPickingWindow {
             hud.fitPicker()
+        } else {
+            hud.endPicking()
         }
     }
 
@@ -2126,13 +2138,13 @@ final class AnnotationController: ObservableObject {
         // A clip of the window ends with it, at its last frame.
         dispatch(.captureStopped)
         setScope(nil)
-        show(notice: "Window closed")
+        show(notice: .windowClosed)
     }
 
-    private func show(notice text: String) {
-        notice = text
+    private func show(notice: Notice) {
+        self.notice = notice
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            if self?.notice == text {
+            if self?.notice == notice {
                 self?.notice = nil
             }
         }
@@ -2724,7 +2736,7 @@ extension AnnotationController {
         pauseNotice: PauseNotice? = nil,
         restoreRecord: SessionRecord? = nil,
         sentText: String = "",
-        notice: String? = nil,
+        notice: Notice? = nil,
         clipClock: (since: Date, before: TimeInterval) = (Date(), 0)
     ) {
         self.session = session

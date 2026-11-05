@@ -277,7 +277,7 @@ struct CommentView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help("Delete annotation")
+                    .help("Delete note")
                 }
             }
 

@@ -16,6 +16,8 @@ final class HUDPanel {
     let window: NSPanel
     private let hosting: FirstMouseHostingView<HUDView>
     private unowned let controller: AnnotationController
+    /// Where the HUD was before choosing moved it up for the picker's room.
+    private var placeBeforePicking: NSPoint?
     private lazy var zoom = ZoomPresenter(panel: window) { [controller] isShown in
         controller.isHUDShown = isShown
     }
@@ -73,16 +75,34 @@ final class HUDPanel {
     }
 
     /// Tells the source picker how much room it has under the pill (or, in Tilde's browser,
-    /// under the panel's top) on the panel's screen, so it never leaves the screen.
+    /// under the panel's top) on the panel's screen, so it never leaves the screen. A HUD
+    /// dragged too low for the picker goes up to its home while choosing, and back after.
     func fitPicker() {
         guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else {
             return
         }
-        let frame = window.frame
         let pill = controller.isHUDInBrowser ? 0 : HUDMetrics.height + 8
+        var room = room(under: window.frame, pill: pill, in: visible)
+        if room.height < SourcePickerView.sizes.min.height, !controller.isHUDInBrowser, placeBeforePicking == nil {
+            placeBeforePicking = window.frame.origin
+            window.setFrameOrigin(NSPoint(x: window.frame.minX, y: visible.maxY + 4 - window.frame.height))
+            room = self.room(under: window.frame, pill: pill, in: visible)
+        }
+        controller.sourcePicker.space = room
+    }
+
+    /// Back where the HUD was before choosing moved it up.
+    func endPicking() {
+        if let place = placeBeforePicking {
+            window.setFrameOrigin(place)
+            placeBeforePicking = nil
+        }
+    }
+
+    private func room(under frame: NSRect, pill: CGFloat, in visible: NSRect) -> CGSize {
         let top = frame.maxY - 16 - pill
         let halfWidth = min(frame.midX - visible.minX, visible.maxX - frame.midX) - 16
-        controller.sourcePicker.space = CGSize(width: 2 * halfWidth, height: top - visible.minY - 16)
+        return CGSize(width: 2 * halfWidth, height: top - visible.minY - 16)
     }
 
     /// Forgets the dragged positions and moves the HUD back to the top centre.
@@ -96,6 +116,7 @@ final class HUDPanel {
     /// Puts the panel on the screen with the pointer, at the saved position for that screen,
     /// or at `top`.
     private func place(top given: NSPoint? = nil) {
+        placeBeforePicking = nil
         let point = given ?? NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(point) }) ?? NSScreen.screens.first else {
             return
@@ -472,12 +493,12 @@ struct HUDView: View {
         .disabled(!flow.canPick)
 
         Group {
-            HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide annotations" : "Show annotations") {
+            HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide notes" : "Show notes") {
                 controller.showNotes()
             }
             .disabled(count == 0)
 
-            HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all annotations and keep annotating") {
+            HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all notes and keep annotating") {
                 controller.requestClearAll()
             }
             .disabled(count == 0)
@@ -514,11 +535,22 @@ struct HUDView: View {
         return count == 0 ? "the recording" : "\(notes) and the recording"
     }
 
+    /// The cancel question names the session's end, unlike leaving recording mode's.
+    private var cancelQuestion: String {
+        let count = controller.drafts.count
+        switch (count, controller.flow.holdsClip) {
+        case (0, _): return "Close and discard the recording?"
+        case (_, true): return "Close and discard everything?"
+        case (1, false): return "Discard the note and close?"
+        default: return "Discard \(count) notes and close?"
+        }
+    }
+
     /// Replaces the pill's content, at the same size, with a question and two buttons.
     @ViewBuilder
     private func confirmContent(_ confirmation: SessionFlow.Question) -> some View {
         let count = controller.drafts.count
-        let all = count == 1 ? "the annotation" : "all \(count) annotations"
+        let all = count == 1 ? "the note" : "all \(count) notes"
 
         HStack(spacing: HUDMetrics.iconGap) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -528,7 +560,7 @@ struct HUDView: View {
             case .clearAll:
                 Text("Clear \(all)?")
             case .cancelSession:
-                Text("Discard \(lost)?")
+                Text(cancelQuestion)
             case .discardComment:
                 // Asked on the comment box itself.
                 EmptyView()
@@ -553,7 +585,7 @@ struct HUDView: View {
             PillTextButton(title: "Clear", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
-            .tildeTooltip("Delete all annotations")
+            .tildeTooltip("Delete all notes")
         case .cancelSession:
             PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
                 controller.confirm()
@@ -731,10 +763,10 @@ struct HUDView: View {
 
     private var subtitleState: SubtitleState {
         if let notice = controller.notice {
-            return .notice(notice)
+            return .notice(notice.rawValue)
         }
         if controller.isPickingWindow {
-            return .choosingWindow
+            return controller.isSourcePickerOpen ? .inPicker : .choosingWindow
         }
         let pauses = controller.pauses
         if pauses.contains(.user) {
@@ -752,6 +784,8 @@ struct HUDView: View {
     enum SubtitleState: Equatable {
         case annotating
         case choosingWindow
+        /// The picker is open, where Esc goes back one level.
+        case inPicker
         case paused(shortcut: Shortcut?)
         /// Another app is in front of the window being annotated.
         case waitingForWindow
@@ -793,6 +827,8 @@ struct HUDView: View {
             return SubtitlePart(text: "Click the window")
         case .choosingWindow:
             return SubtitlePart(text: "Esc cancels")
+        case .inPicker:
+            return SubtitlePart(text: "Esc goes back")
         // Paused, it still says where the report goes; the button's tooltip has the shortcut.
         case .annotating, .paused:
             break

@@ -22,7 +22,8 @@ struct SourcePickerView: View {
     let onChoose: (RecordingSource) -> Void
     /// The size the user gave it with its corner, saved when the drag ends.
     @AppStorage("SourcePickerWidth") private var savedWidth = 560.0
-    @AppStorage("SourcePickerHeight") private var savedHeight = 340.0
+    /// Two full rows of tiles at the default width.
+    @AppStorage("SourcePickerHeight") private var savedHeight = 390.0
     /// The size while its corner is dragged, and the size when the drag began.
     @State private var resizing: (start: CGSize, size: CGSize)?
 

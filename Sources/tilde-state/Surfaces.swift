@@ -185,7 +185,7 @@ enum Surfaces {
             pauseNotice: notice,
             restoreRecord: state.confirmation == "restore" ? Fixtures.record(notes: 3) : nil,
             sentText: state.sent ?? "",
-            notice: state.notice,
+            notice: state.notice.flatMap(Notice.init(rawValue:)),
             // A clip in progress has run for 12 seconds.
             clipClock: (Date(), 12)
         )
