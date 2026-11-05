@@ -565,7 +565,8 @@ struct BehaviourTests {
             .keys(KeyCombo(keyCode: 35, modifiers: NSEvent.ModifierFlags([.control, .option, .shift, .command]).rawValue, key: "P")),
             .doubleTap(.control), .doubleTap(.command), .doubleTap(.function), nil,
         ]
-        let states: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .waitingForWindow, .notice("Window closed"), .holding("⌥")]
+        let states: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .waitingForWindow, .holding("⌥")]
+            + Notice.allCases.map { .notice($0.rawValue) }
             + shortcuts.map { .paused(shortcut: $0) }
 
         let machine = HUDView.Machine(host: "a-very-long-machine-name.example.com", dot: .green)
