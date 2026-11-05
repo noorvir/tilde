@@ -121,6 +121,9 @@ final class NodeSetup: ObservableObject {
         /// Linked by its socket. A node type with no `tproxy` file is linked by a port,
         /// which every user on the node can reach.
         var isProtected = true
+        /// Linked by the port, as installed by an older Tilde, though its type has `tproxy`: one
+        /// Install moves all its apps to the socket.
+        var needsMove = false
 
         var dot: Dot {
             Dot(status: status, isReachable: isReachable, hasFailed: hasFailed)
@@ -223,12 +226,21 @@ final class NodeSetup: ObservableObject {
 
         let token = token(for: host)
         let url = remoteURL
-        guard let installer = await Task.detached(operation: { try? Self.installer(host, url: url, token: token) }).value else {
+        // A node on the port keeps its URL entries on its page until it moves.
+        let isOnPort = store.load().first { $0.host == host }.map { $0.socket == nil } ?? false
+        guard let (installer, hasProxy) = await Task.detached(operation: { try? Self.installer(host, url: url, token: token, onPort: isOnPort) }).value else {
             update(host, status: rows.first { $0.host == host }?.status ?? .notInstalled, note: "Could not connect by ssh")
             setFailed(host, true)
             return
         }
 
+        if let index = rows.firstIndex(where: { $0.host == host }) {
+            rows[index].needsMove = isOnPort && hasProxy
+        }
+        await show(host, installer)
+    }
+
+    private func show(_ host: String, _ installer: Installer) async {
         let setup = AgentSetup(installer: installer, nodes: self, isRemote: true, iconSource: localSetup)
         setup.onChange = { [weak self, weak setup] in
             if let setup {
@@ -239,6 +251,53 @@ final class NodeSetup: ObservableObject {
         setups[host] = setup
     }
 
+    /// Moves a node from the port to its socket: every app with Tilde gets its stdio entry in
+    /// one Install, and then the link changes. If any app fails, all of them get their URL
+    /// entries back and the node stays on the port, so no app is left on a port that stops.
+    private func moveToSocket(_ host: String) {
+        guard let old = setups[host] else {
+            return
+        }
+
+        update(host, status: .installing, note: nil)
+        let installed = old.foundRows.filter { old.status(of: $0) == .installed }.map(\.harness)
+        let token = token(for: host)
+        let url = remoteURL
+        Task {
+            let moved = await Task.detached { () -> Installer? in
+                guard let (new, _) = try? Self.installer(host, url: url, token: token, onPort: false) else {
+                    return nil
+                }
+                return Self.move(installed, from: old.installer, to: new) ? new : nil
+            }.value
+            guard let moved else {
+                update(host, status: links[host] == nil ? .unreachable : .linked, note: "Could not move it to a private socket; it stays on the port")
+                setFailed(host, true)
+                return
+            }
+
+            if let index = rows.firstIndex(where: { $0.host == host }) {
+                rows[index].needsMove = false
+            }
+            await show(host, moved)
+            if let setup = setups[host] {
+                agentsChanged(host, setup)
+            }
+        }
+    }
+
+    /// Rewrites each app's entry with `new`; when any fails, puts `old`'s back in all of them.
+    nonisolated static func move(_ harnesses: [Harness], from old: Installer, to new: Installer) -> Bool {
+        let failed = harnesses.contains { harness in
+            let report = new.install(harness)
+            return report.changes.contains { if case .failed = $0.action { true } else { false } } || new.status(of: harness) != .installed
+        }
+        if failed {
+            harnesses.forEach { _ = old.install($0) }
+        }
+        return !failed
+    }
+
     /// For the contract: a machine's page without the machine.
     func setSetupForTesting(_ setup: AgentSetup, for host: String) {
         setups[host] = setup
@@ -247,6 +306,10 @@ final class NodeSetup: ObservableObject {
     /// Installs Tilde on the machine's apps that are switched on on this Mac, the same way as on
     /// this Mac; with none switched on, on all of them.
     func install(_ host: String) {
+        if rows.first(where: { $0.host == host })?.needsMove == true {
+            moveToSocket(host)
+            return
+        }
         update(host, status: .installing, note: nil)
         setFailed(host, false)
         Task {
@@ -322,13 +385,14 @@ final class NodeSetup: ObservableObject {
         "http://127.0.0.1:\(remotePort)/mcp"
     }
 
-    /// The machine's installer: its entries start `tproxy` when its type has a file.
-    nonisolated private static func installer(_ host: String, url: String, token: String) throws -> Installer {
+    /// The machine's installer, and whether its type has `tproxy`: its entries start `tproxy`
+    /// when it has, unless the node is still `onPort`.
+    nonisolated private static func installer(_ host: String, url: String, token: String, onPort: Bool) throws -> (Installer, Bool) {
         let run: ShellFiles.Run = { command, input in
             try RemotePush.runOnNode(host, command: command, input: input)
         }
-        let type = try run("uname -sm", nil)
-        return try Installer.remote(mcpURL: url, authorization: "Bearer \(token)", proxied: TProxy.Target(uname: type) != nil, run: run)
+        let hasProxy = TProxy.Target(uname: try run("uname -sm", nil)) != nil
+        return (try Installer.remote(mcpURL: url, authorization: "Bearer \(token)", proxied: hasProxy && !onPort, run: run), hasProxy)
     }
 
     nonisolated static func quoted(_ path: String) -> String {

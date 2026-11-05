@@ -217,7 +217,9 @@ struct MachineLabel: View {
 
     private var subtitle: String {
         var parts = [row.status.text]
-        if row.status.isInstalled, !row.isProtected {
+        if row.needsMove {
+            parts.append("Not protected (linked by a port): Install again to protect it")
+        } else if row.status.isInstalled, !row.isProtected {
             parts.append("Not protected (linked by a port)")
         }
         if let note = row.note {
@@ -255,8 +257,10 @@ struct MachineSettings: View {
                     HStack {
                         MachineLabel(row: row)
                         Spacer(minLength: 16)
+                        // A node to move to its socket has one Install for all its apps.
+                        let removes = row.status.isInstalled && !row.needsMove
                         Button {
-                            if row.status.isInstalled {
+                            if removes {
                                 nodes.uninstall(host)
                             } else {
                                 nodes.install(host)
@@ -264,7 +268,7 @@ struct MachineSettings: View {
                         } label: {
                             // While it works, the button keeps its width and its name.
                             ZStack {
-                                Text(row.status.isInstalled ? "Remove" : "Install")
+                                Text(removes ? "Remove" : "Install")
                                     .opacity(row.status.isWorking ? 0 : 1)
                                 if row.status.isWorking {
                                     ProgressView()
@@ -273,7 +277,7 @@ struct MachineSettings: View {
                             }
                         }
                         .disabled(row.status.isWorking)
-                        .accessibilityLabel("\(row.status.isInstalled ? "Remove" : "Install") \(host)")
+                        .accessibilityLabel("\(removes ? "Remove" : "Install") \(host)")
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 58)
