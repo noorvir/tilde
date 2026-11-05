@@ -34,8 +34,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.delegate = self
         item.menu = menu
 
-        subscription = controller.$mode.sink { [weak self] mode in
-            self?.item.button?.contentTintColor = mode.isOpen ? .tildeBlue : nil
+        subscription = controller.$flow.sink { [weak self] flow in
+            self?.item.button?.contentTintColor = flow.session != nil ? .tildeBlue : nil
         }
     }
 
@@ -50,11 +50,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         if controller.session == nil {
             menu.addItem(action("Start Annotation", #selector(startAnnotation), shortcut: .startAnnotation))
         } else {
-            let title = controller.pauses.contains(.user) ? "Resume Annotation" : "Pause Annotation"
-            menu.addItem(action(title, #selector(togglePause), shortcut: .togglePause))
-            let windowTitle = controller.scope == nil ? "Annotate a Specific Window" : "Annotate All Windows"
-            menu.addItem(action(windowTitle, #selector(toggleWindowScope)))
-            menu.addItem(action("Cancel Annotation", #selector(cancelAnnotation)))
+            // The same commands as the HUD's, named for the mode; a nil action disables an item.
+            let flow = controller.flow
+            let pause = pauseItem
+            menu.addItem(action(pause.title, pause.works ? #selector(togglePause) : nil, shortcut: .togglePause))
+            let windowTitle = controller.recording == nil ? "Annotate a Specific Window" : "Record a Specific Window"
+            menu.addItem(action(windowTitle, flow.canPick && !flow.isPicking ? #selector(chooseWindow) : nil))
+            menu.addItem(action("Cancel Annotation", flow.isPicking ? nil : #selector(cancelAnnotation)))
         }
         menu.addItem(.separator())
 
@@ -250,8 +252,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         controller.togglePause()
     }
 
+    /// The pause command in this mode, and whether it does anything now.
+    private var pauseItem: (title: String, works: Bool) {
+        switch controller.recording {
+        case .recording: ("Pause Recording", true)
+        case .paused: ("Resume Recording", true)
+        case .some: ("Pause Recording", false)
+        case nil: (controller.pauses.contains(.user) ? "Resume Annotation" : "Pause Annotation", controller.flow.mode == .open(controller.flow.session ?? .init()) && !controller.isPickingWindow)
+        }
+    }
+
+    /// Asks in the HUD first, as × and Esc do, when there is something to lose.
     @objc private func cancelAnnotation() {
-        controller.cancel()
+        controller.requestCancel()
     }
 
     /// Opens the browser and annotates only in it.
@@ -259,13 +272,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         controller.annotateInBrowser()
     }
 
-    /// Chooses a window, or lifts the limit to one.
-    @objc private func toggleWindowScope() {
-        if controller.scope != nil {
-            controller.setScope(nil)
-        } else {
-            controller.toggleWindowPick()
-        }
+    /// Chooses a window or screen, as the HUD's window button does.
+    @objc private func chooseWindow() {
+        controller.toggleWindowPick()
     }
 
     /// A `shortcut` shows that global shortcut.

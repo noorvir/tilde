@@ -224,11 +224,6 @@ final class OverlayView: NSView {
             controller.escapePressed()
             return
         }
-        // Choosing a window takes no other key, such as ⌘↩.
-        if controller.isPickingWindow {
-            super.keyDown(with: event)
-            return
-        }
         if controller.confirmation != nil {
             if event.keyCode == 36 {
                 controller.confirm()
@@ -240,16 +235,18 @@ final class OverlayView: NSView {
             controller.navigateHistory(event)
             return
         }
+        // The same action and rule as the Send button, paused too; the flow ignores it while
+        // choosing a window or with nothing to send.
+        if event.keyCode == 36 && event.modifierFlags.contains(.command) {
+            controller.send()
+            return
+        }
         if controller.pauses.contains(.user) {
             super.keyDown(with: event)
             return
         }
         if event.keyCode == 49, let id = hoveredMarker {
             controller.preview(id)
-            return
-        }
-        if event.keyCode == 36 && event.modifierFlags.contains(.command) {
-            controller.send()
             return
         }
         super.keyDown(with: event)

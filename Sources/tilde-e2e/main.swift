@@ -100,7 +100,7 @@ final class Harness {
 
         let session = try require(store.active, "an active session")
         print("session \(session.id) for \(session.client)")
-        try await until("annotate mode is on") { self.controller.mode.isOpen }
+        try await until("annotate mode is on") { self.controller.isOpen }
         if session.url == nil {
             browser.show(URL(string: "http://127.0.0.1:\(pagePort)/"))
         }
@@ -280,7 +280,7 @@ final class Harness {
         }
         controller.dismissConfirmation()
         try check(
-            confirmWidth == annotatingWidth && controller.drafts.count == 1 && controller.mode.isOpen,
+            confirmWidth == annotatingWidth && controller.drafts.count == 1 && controller.isOpen,
             "confirming keeps the pill width and Cancel keeps the annotation"
         )
 
@@ -378,7 +378,7 @@ final class Harness {
         browser.close()
         try await until("the scope ends when the browser closes", timeout: 5) { self.controller.scope == nil }
         try check(controller.notice == "Window closed", "the HUD says the window closed")
-        controller.cancel()
+        controller.requestCancel()
     }
 
     private var isScopedToBrowser: Bool {

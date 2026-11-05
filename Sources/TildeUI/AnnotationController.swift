@@ -29,18 +29,6 @@ struct Draft: Identifiable {
     var id: UUID { annotation.id }
 }
 
-/// HUD actions that discard every annotation, so the pill asks before doing them.
-enum Confirmation: Equatable {
-    case clearAll
-    case cancelSession
-    /// Throw away the comment being written.
-    case discardComment
-    /// Leave recording mode and throw away the clip that is not stopped.
-    case discardRecording
-    /// Replace the notes on screen with a saved session's.
-    case restore(SessionRecord)
-}
-
 enum PreviewImage {
     case closeUp
     case context
@@ -82,61 +70,44 @@ struct Pending {
 /// Owns the overlay, HUD and comment windows; views read its published state.
 @MainActor
 final class AnnotationController: ObservableObject {
-    /// What the session on screen does. Only `annotating`, and choosing a window in any mode,
-    /// put an overlay on screen that takes the pointer; the HUD shows the same mode.
-    enum Mode: Equatable {
-        case idle
-        case annotating
-        /// The user's apps get every click and key; never an empty set.
-        case paused(Set<PauseReason>)
-        /// The HUD records the screen or a window; the user's apps get every click and key.
-        case recording(Recording)
-        /// Shown in the HUD for a moment after Send, such as "Sent to Codex".
-        case sent(confirmation: String)
+    typealias PauseReason = SessionFlow.PauseReason
 
-        /// A session is on screen and not sent yet.
-        var isOpen: Bool {
-            switch self {
-            case .annotating, .paused, .recording: true
-            case .idle, .sent: false
-            }
-        }
-    }
-
-    enum PauseReason: Hashable {
-        /// The pause button, the pause shortcut or Esc.
-        case user
-        /// Another app is in front of a session limited to one window; ends when the window's
-        /// app (or Tilde) comes back to the front.
-        case otherApp
-        /// The hold key is down, so the mouse and keyboard work as usual.
-        case hold
-    }
-
-    @Published private(set) var mode: Mode = .idle {
+    /// What the session on screen does; every change goes through `dispatch(_:)`.
+    @Published private(set) var flow = SessionFlow(mode: .idle) {
         didSet { updateOverlayInput() }
     }
-    /// Why the session is paused; empty unless it is.
+    var mode: SessionFlow.Mode { flow.mode }
+    /// A session is on screen, also while its report is being made.
+    var isOpen: Bool { flow.session != nil }
+    /// Why annotating is paused; empty while annotating and in the other modes.
     var pauses: Set<PauseReason> {
-        if case .paused(let reasons) = mode {
-            return reasons
+        guard let open = flow.session, open.activity == .annotating else {
+            return []
         }
-        return []
+        return open.pauses
     }
-    /// The confirmation after Send, or nil before it.
+    /// The clip of recording mode, or nil in any other mode.
+    var recording: SessionFlow.Clip? { flow.clip }
+    var isPickingWindow: Bool { flow.isPicking }
+    /// While choosing, the source picker is open in full in place of its "Use window picker"
+    /// button, and clicks on screen choose nothing.
+    var isSourcePickerOpen: Bool {
+        if case .picking(_, true) = flow.session?.activity {
+            return true
+        }
+        return false
+    }
+    /// A question in the pill, waiting for the user.
+    var confirmation: SessionFlow.Question? { flow.session?.question }
+    var isDrawing: Bool { flow.session?.isDrawing ?? false }
+    /// The confirmation after Send, such as "Sent to Codex", while it shows.
     var sentConfirmation: String? {
-        if case .sent(let confirmation) = mode {
-            return confirmation
+        if case .sent = mode {
+            return sentText
         }
         return nil
     }
-    /// The HUD's recording mode, or nil in any other mode.
-    var recording: Recording? {
-        if case .recording(let recording) = mode {
-            return recording
-        }
-        return nil
-    }
+    private var sentText = ""
     @Published private(set) var session: SessionStore.Session?
     @Published private(set) var drafts: [Draft] = [] {
         didSet {
@@ -154,6 +125,7 @@ final class AnnotationController: ObservableObject {
         case done, failed
     }
     @Published var sentStatus = SentStatus.done
+    /// The comment box's data while `flow` has it open.
     @Published private(set) var composer: Composer?
     private var holdMonitor: HoldMonitor?
 
@@ -169,44 +141,36 @@ final class AnnotationController: ObservableObject {
     /// floating HUD is hidden. It stays there through the Sent confirmation.
     @Published private(set) var isHUDInBrowser = false
     private var doubleTap: DoubleTapMonitor?
-    /// The draft shown in the preview card; annotate clicks wait while it is open.
+    /// The draft shown in the preview card while `flow` has it open; annotate clicks wait.
     @Published private(set) var previewID: Draft.ID?
-    /// A destructive HUD action waiting for the user to confirm it in the pill.
-    @Published private(set) var confirmation: Confirmation? {
-        didSet { watchConfirmationKeys() }
-    }
+    /// The saved session that the restore question offers.
+    private(set) var restoreRecord: SessionRecord?
     /// Takes ↩ and Esc for the question from any of Tilde's windows, also from a text field.
     private var confirmationKeyMonitor: Any?
+    /// What the session annotates and records: a window (which limits the session to it), a
+    /// screen or a phone; nil until the user chooses, which means everything on screen.
+    @Published private(set) var source: RecordingSource?
     /// The window annotations are limited to; nil means anything on screen.
-    @Published private(set) var scope: ElementPicker.WindowInfo?
-    /// Choosing what to annotate or record: a window or screen clicked on screen, on every
-    /// screen also when the session is limited to a window, or a tile in the source picker
-    /// under the HUD. The mode stays as it is, so the session goes back to it after the choice.
-    @Published private(set) var isPickingWindow = false {
-        didSet {
-            guard isPickingWindow != oldValue else {
-                return
-            }
-            if !isPickingWindow {
-                isSourcePickerOpen = false
-            }
-            if scope != nil, mode.isOpen, !overlays.isEmpty {
-                layoutOverlays()
-                placeHUD()
-            } else {
-                updateOverlayInput()
-            }
+    var scope: ElementPicker.WindowInfo? {
+        if case .window(let window) = source {
+            return window
         }
+        return nil
     }
+    /// The clip in progress, from its start to Stop.
     private var recorder: ScreenRecorder?
-    /// The screen or phone chosen with the window button while the session is not limited to
-    /// a window; nil until the user chooses one. A chosen window is the scope instead.
-    @Published private(set) var screenSource: RecordingSource?
+    /// A recorder or a stopped clip that has just arrived, while `flow` decides whether it is
+    /// still wanted.
+    private var arrivedClip: ArrivedClip?
+    private enum ArrivedClip {
+        case recorder(ScreenRecorder)
+        case clip(Draft)
+    }
+    /// How long the clip in progress has recorded: `before` seconds until `since`, and on
+    /// since then while it records.
+    private(set) var clipClock = (since: Date(), before: TimeInterval(0))
     /// The source picker under the HUD while choosing.
     let sourcePicker = SourcePickerModel()
-    /// While choosing, the source picker is open in full in place of its "Use window picker"
-    /// button, and clicks on screen choose nothing.
-    @Published private(set) var isSourcePickerOpen = false
     /// What the clip in progress shows: its name, such as "Safari window", and its frame.
     private var recordedSource = (name: "", frame: CGRect.zero)
     /// A short note in the HUD subtitle, such as that the scoped window closed.
@@ -315,20 +279,20 @@ final class AnnotationController: ObservableObject {
     }
 
     /// What a double tap of `key` does. The start key brings annotating up: it starts a
-    /// session, or resumes a paused one, and does nothing while annotating. The pause key
-    /// pauses or resumes. One key may do both.
+    /// session, or resumes a paused one, and does nothing while annotating. The pause key is
+    /// the pause command of the mode, as in the HUD and the menu. One key may do both.
     nonisolated static func doubleTapAction(
-        for key: DoubleTapKey, startKey: DoubleTapKey?, pauseKey: DoubleTapKey?, isAnnotating: Bool, isPaused: Bool, hasSession: Bool
+        for key: DoubleTapKey, startKey: DoubleTapKey?, pauseKey: DoubleTapKey?, isPaused: Bool, hasSession: Bool
     ) -> DoubleTapAction? {
         if key == startKey {
             if !hasSession {
                 return .start
             }
-            if isAnnotating, isPaused {
+            if isPaused {
                 return .resume
             }
         }
-        if key == pauseKey, isAnnotating {
+        if key == pauseKey, hasSession {
             return .togglePause
         }
         return nil
@@ -340,7 +304,7 @@ final class AnnotationController: ObservableObject {
         }
         let action = Self.doubleTapAction(
             for: key, startKey: shortcuts.shortcut(for: .startAnnotation)?.doubleTapKey, pauseKey: shortcuts.shortcut(for: .togglePause)?.doubleTapKey,
-            isAnnotating: mode.isOpen, isPaused: pauses.contains(.user), hasSession: session != nil
+            isPaused: pauses.contains(.user), hasSession: session != nil
         )
         switch action {
         case .togglePause, .resume:
@@ -362,8 +326,8 @@ final class AnnotationController: ObservableObject {
 
         if let active {
             begin(active)
-        } else if mode.isOpen {
-            end()
+        } else if isOpen {
+            dispatch(.ended)
         }
     }
 
@@ -372,11 +336,9 @@ final class AnnotationController: ObservableObject {
         drafts = []
         hover = nil
         composer = nil
+        previewID = nil
         showsList = false
-        confirmation = nil
-        screenSource = nil
-        setScope(nil)
-        mode = .annotating
+        setSource(nil)
         PageIdentity.askAppsToDescribeWebContent()
         drawingPanel.prepare()
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
@@ -400,10 +362,10 @@ final class AnnotationController: ObservableObject {
         // first; Annotate in the HUD (or the pause shortcut) starts annotating.
         let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
         scopesNextLocalSessionToBrowser = false
+        dispatch(.begin(inBrowser: isInBrowser))
 
         layoutOverlays()
         if isInBrowser {
-            togglePause()
             // The HUD shows once the browser's window is on screen, in its toolbar.
             openBrowser(at: session.url)
         } else {
@@ -411,12 +373,14 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    /// Closes the session on screen. After Send the HUD shows the confirmation for a moment;
+    /// otherwise it goes at once.
     private func end() {
         stopAnnotating()
         stopCheckpoints()
         session = nil
         drafts = []
-        setScope(nil)
+        setSource(nil)
 
         if let returnApp {
             self.returnApp = nil
@@ -432,25 +396,23 @@ final class AnnotationController: ObservableObject {
             ElementPicker.bringToFront(returnApp)
         }
 
-        if case .sent(let confirmation) = mode {
-            hideConfirmation(confirmation, after: 1.6)
+        if case .sent(let operation) = mode {
+            hideConfirmation(operation, after: 1.6)
         } else {
-            mode = .idle
-            isHUDInBrowser = false
-            hud.hide()
+            hideHUD()
         }
     }
 
     /// Hides the HUD after Send's confirmation, unless another one shows by then.
-    private func hideConfirmation(_ confirmation: String, after seconds: TimeInterval) {
+    private func hideConfirmation(_ operation: Int, after seconds: TimeInterval) {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            guard let self, case .sent(let shown) = self.mode, shown == confirmation else {
-                return
-            }
-            self.mode = .idle
-            self.isHUDInBrowser = false
-            self.hud.hide()
+            self?.dispatch(.sentShown(operation))
         }
+    }
+
+    private func hideHUD() {
+        isHUDInBrowser = false
+        hud.hide()
     }
 
     /// Closes everything that annotates: the overlays, the comment, the preview, the hover and
@@ -458,15 +420,12 @@ final class AnnotationController: ObservableObject {
     private func stopAnnotating() {
         recorder?.discard()
         recorder = nil
-        isPickingWindow = false
         stopHoldMonitor()
         stopOcclusion()
         stopContentChecks()
         pauseNotice = nil
         pauseNoticeTimer?.invalidate()
         stopTracking()
-        confirmation = nil
-        isDrawing = false
         drawingPanel.endSession()
         commentPanel.close()
         previewPanel.close()
@@ -480,30 +439,18 @@ final class AnnotationController: ObservableObject {
         composer = nil
     }
 
-    /// Sends all drafts, including the comment that is still open.
+    /// Sends all drafts, including the comment that is still open and a clip in progress.
     func send() {
-        if recorder != nil {
-            Task {
-                await finishClip()
-                send()
-            }
-            return
-        }
         saveTypedComments()
-        if composer != nil {
-            submitComment(thenSend: true)
+        dispatch(.send)
+    }
+
+    /// Makes the report: waits for the captures, then saves it to the inbox. "Sent" or
+    /// "Copied" shows only once that is done; a failure leaves the session as it was.
+    private func startSend() {
+        guard let session, case .sending(let operation, _) = mode else {
             return
         }
-        guard let session, mode.isOpen, !drafts.isEmpty else {
-            return
-        }
-
-        // Annotating ends at the press; the report is made while the confirmation shows.
-        let machines = session.isLocal ? NodeStore().load().map(\.host) : []
-        sentStatus = .done
-        mode = .sent(confirmation: session.isLocal ? "Copied" : "Sent to \(session.client)")
-        stopAnnotating()
-
         let drafts = self.drafts
         Task {
             var annotations: [Annotation] = []
@@ -517,20 +464,46 @@ final class AnnotationController: ObservableObject {
             }
 
             let feedback = Feedback(annotations: Self.groupedByPage(annotations))
-            var folder: URL?
+            let folder: URL
             do {
-                folder = try saveToInbox(feedback, sessionID: session.id)
+                folder = try await Task.detached { try saveToInbox(feedback, sessionID: session.id) }.value
             } catch {
                 log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
+                dispatch(.sendFailed(operation))
+                return
             }
+            guard dispatch(.sendFinished(operation)).contains(.finishSend) else {
+                return
+            }
+            finishSend(session, feedback: feedback, folder: folder)
+        }
+    }
 
-            log.notice("session \(session.id, privacy: .public) sent with \(annotations.count) annotations")
-            if session.isLocal {
-                copyReport(feedback, folder: folder, to: machines)
+    private func finishSend(_ session: SessionStore.Session, feedback: Feedback, folder: URL) {
+        log.notice("session \(session.id, privacy: .public) sent with \(feedback.annotations.count) annotations")
+        sentStatus = .done
+        if session.isLocal {
+            copyReport(feedback, folder: folder)
+            sentText = "Copied"
+        } else {
+            sentText = "Sent to \(session.client)"
+        }
+        saveSession(state: .sent, reportFolder: folder)
+        store.finish(session.id, with: .sent(feedback, folder: folder))
+        end()
+
+        // A copy's images go to the remote machines in the background, so that one paste
+        // works on any of them; a machine they do not reach gets its own short warning.
+        let machines = session.isLocal ? NodeStore().load().map(\.host) : []
+        guard !machines.isEmpty else {
+            return
+        }
+        Task {
+            let failed = await Self.push(folder, to: machines, log: log)
+            if !failed.isEmpty, dispatch(.pushFailed).contains(.showPushFailure) {
+                sentStatus = .failed
+                sentText = RemotePush.failure(failed)
             }
-            saveSession(state: .sent, reportFolder: folder)
-            store.finish(session.id, with: .sent(feedback, folder: folder))
-            end()
         }
     }
 
@@ -568,12 +541,15 @@ final class AnnotationController: ObservableObject {
 
     /// The HUD's list button: the notes panel in the browser, the list elsewhere.
     func showNotes() {
+        dispatch(.toggleList)
+    }
+
+    private func toggleList() {
         if isInBrowser {
             browser.showsNotes.toggle()
-            return
+        } else {
+            showsList.toggle()
         }
-        cancelWindowPick()
-        showsList.toggle()
     }
 
     /// Starts a session from Tilde itself. Its feedback goes to the clipboard and the inbox.
@@ -601,20 +577,20 @@ final class AnnotationController: ObservableObject {
         _ = store.start(client: "You", url: nil, isLocal: true)
     }
 
-    func cancel() {
-        guard let session, mode.isOpen else {
+    private func cancelSession() {
+        guard let session else {
             return
         }
         log.notice("session \(session.id, privacy: .public) cancelled")
         saveSession(state: .cancelled)
         store.finish(session.id, with: .cancelled)
-        end()
+        dispatch(.ended)
     }
 
     /// Whether the overlay takes the pointer (hover, picks, clicks, the crosshair) and the
     /// keyboard: while annotating, and while choosing a window in any mode.
     var overlayTakesInput: Bool {
-        mode == .annotating || isPickingWindow
+        flow.overlayTakesInput
     }
 
     /// Puts the overlays in step with `overlayTakesInput`; without input, nothing is hovered
@@ -632,15 +608,6 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Ends one reason to pause, such as when the hold key stops being watched.
-    private func endPause(_ reason: PauseReason) {
-        guard case .paused(var reasons) = mode else {
-            return
-        }
-        reasons.remove(reason)
-        mode = reasons.isEmpty ? .annotating : .paused(reasons)
-    }
-
     func togglePause() {
         dispatch(.togglePause)
     }
@@ -649,12 +616,6 @@ final class AnnotationController: ObservableObject {
     /// front.
     func resume() {
         dispatch(.resume)
-    }
-
-    func clearDrafts() {
-        drafts = []
-        commentPanel.close()
-        composer = nil
     }
 
     /// Asks in the pill before clearing all annotations.
@@ -675,10 +636,38 @@ final class AnnotationController: ObservableObject {
         dispatch(.dismissConfirmation)
     }
 
-    /// Esc while Tilde has the keyboard: closes the comment box or preview, ends choosing a
-    /// window, dismisses a question; else pauses, and when paused asks to discard the session.
     func startDrawing() {
         dispatch(.startDrawing)
+    }
+
+    private func showCanvas() {
+        hover = nil
+        drawingPanel.onEscape = { [weak self] in self?.escapePressed() }
+        drawingPanel.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
+        drawingPanel.onEdited = { [weak self] in self?.updateEditedDrawing() }
+        drawingPanel.onClickAway = { [weak self] in
+            self?.dispatch(.clickAway)
+            // The click gave the canvas the keyboard; a question in the comment box needs it.
+            if self?.composer != nil {
+                self?.commentPanel.focus()
+            }
+        }
+        drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
+        drawingPanel.onPress = { [weak self] point in
+            guard let self, let id = self.noteLabel(at: point) else {
+                return false
+            }
+            self.preview(id)
+            return true
+        }
+        // Over Tilde's browser, the canvas would cover tools on its toolbar.
+        if isHUDInBrowser {
+            hud.show()
+        }
+        let pointer = NSEvent.mouseLocation
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
+            drawingPanel.startDrawing(on: screen, tool: drawingTool)
+        }
     }
 
     func finishDrawing() {
@@ -691,11 +680,6 @@ final class AnnotationController: ObservableObject {
         if composer != nil {
             commentPanel.focus()
         }
-    }
-
-    /// For the contract: the HUD while drawing.
-    func setDrawingForTesting(_ isDrawing: Bool) {
-        self.isDrawing = isDrawing
     }
 
     /// Makes a note of what was just drawn, with the window and the whole screen as they are
@@ -889,107 +873,42 @@ final class AnnotationController: ObservableObject {
         dispatch(.escape)
     }
 
-    /// This session's state as the flow knows it.
-    private var flow: SessionFlow {
-        var flow = SessionFlow()
-        switch mode {
-        case .annotating, .paused: flow.isAnnotating = true
-        case .idle, .recording, .sent: flow.isAnnotating = false
-        }
-        flow.hasSession = session != nil
-        // A clip in progress is lost on cancel like a note.
-        flow.notes = drafts.count + (isClipInProgress ? 1 : 0)
-        flow.paused = pauses.contains(.user)
-        flow.autoPaused = pauses.contains(.otherApp)
-        flow.holdPaused = pauses.contains(.hold)
-        flow.drawing = isDrawing
-        flow.commentOpen = composer != nil
-        if case .new(let pending) = composer {
-            flow.commentIsOnDrawing = !pending.drawingIDs.isEmpty
-        }
-        flow.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        flow.previewOpen = previewID != nil
-        flow.pickingWindow = isPickingWindow
-        flow.recording = recording != nil
-        flow.clipInProgress = isClipInProgress
-        switch confirmation {
-        case .clearAll: flow.confirmation = "clearAll"
-        case .cancelSession: flow.confirmation = "cancelSession"
-        case .discardComment: flow.confirmation = "discardComment"
-        case .discardRecording: flow.confirmation = "discardRecording"
-        case .restore: flow.confirmation = "restore"
-        case nil: flow.confirmation = nil
-        }
-        return flow
-    }
-
-    func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = []) {
+    /// The one way the session's mode changes: the flow decides, with the facts it reads kept
+    /// current, then its effects run. Returns the effects, so a caller that holds data for one
+    /// (a comment, a preview, a source, a report, a clip) carries it out when it is there.
+    @discardableResult
+    func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = []) -> [SessionFlow.Effect] {
         var next = flow
-        let asked = confirmation
-        let effects = next.handle(event)
-        if next.isAnnotating {
-            var reasons = Set<PauseReason>()
-            if next.paused {
-                reasons.insert(.user)
-            }
-            if next.autoPaused {
-                reasons.insert(.otherApp)
-            }
-            if next.holdPaused {
-                reasons.insert(.hold)
-            }
-            let annotating = reasons.isEmpty ? Mode.annotating : .paused(reasons)
-            if annotating != mode {
-                mode = annotating
-            }
+        next.notes = drafts.count
+        next.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if case .new(let pending) = composer {
+            next.commentIsOnDrawing = !pending.drawingIDs.isEmpty
+        } else {
+            next.commentIsOnDrawing = false
         }
-        isDrawing = next.drawing
-        switch next.confirmation {
-        case "clearAll": confirmation = .clearAll
-        case "cancelSession": confirmation = .cancelSession
-        case "discardComment": confirmation = .discardComment
-        case "discardRecording": confirmation = .discardRecording
-        case "restore": break
-        default: confirmation = nil
+        let effects = next.handle(event)
+        let questionChanged = next.session?.question != flow.session?.question
+        flow = next
+        if questionChanged {
+            watchConfirmationKeys()
         }
         for effect in effects {
-            run(effect, asked: asked, holdFlag: holdFlag)
+            run(effect, holdFlag: holdFlag)
         }
+        return effects
     }
 
-    private func run(_ effect: SessionFlow.Effect, asked: Confirmation?, holdFlag: NSEvent.ModifierFlags) {
+    private func run(_ effect: SessionFlow.Effect, holdFlag: NSEvent.ModifierFlags) {
         switch effect {
+        // The caller of `dispatch` carries these out with the data it holds.
+        case .showComment, .showPreview, .applySource, .finishSend:
+            break
         case .applyPause: applyPause()
-        case .closeComposer: closeComposer()
-        case .showCanvas:
-            hover = nil
-            drawingPanel.onEscape = { [weak self] in self?.escapePressed() }
-            drawingPanel.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
-            drawingPanel.onEdited = { [weak self] in self?.updateEditedDrawing() }
-            drawingPanel.onClickAway = { [weak self] in
-                self?.dispatch(.clickAway)
-                // The click gave the canvas the keyboard; a question in the comment box needs it.
-                if self?.composer != nil {
-                    self?.commentPanel.focus()
-                }
-            }
-            drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
-            drawingPanel.onPress = { [weak self] point in
-                guard let self, let id = self.noteLabel(at: point) else {
-                    return false
-                }
-                self.preview(id)
-                return true
-            }
-            // Over Tilde's browser, the canvas would cover tools on its toolbar.
-            if isHUDInBrowser {
-                hud.show()
-            }
-            let pointer = NSEvent.mouseLocation
-            if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
-                drawingPanel.startDrawing(on: screen, tool: drawingTool)
-            }
-        case .saveComment: submitComment(thenSend: false)
+        case .closeComposer: discardComposer()
+        case .saveComment: saveComment()
+        case .closePreview: hidePreview()
+        case .toggleList: toggleList()
+        case .showCanvas: showCanvas()
         case .undoShape: undoLastDrawing()
         case .redoShape: redoLastDrawing()
         case .openShapeComment:
@@ -1007,8 +926,6 @@ final class AnnotationController: ObservableObject {
             }
             // The canvas has had the keyboard: Esc and ⌘↩ belong to the overlay again.
             makeOverlayKey()
-        case .closePreview: closePreview()
-        case .cancelWindowPick: cancelWindowPick()
         case .keepKeyboard:
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
             if !isHUDInBrowser {
@@ -1022,10 +939,13 @@ final class AnnotationController: ObservableObject {
         case .showEscapeNotice: showPauseNotice(.escape)
         case .showOtherAppNotice: showPauseNotice(.otherApp)
         case .clearNotice: pauseNotice = nil
-        case .cancelSession: cancel()
-        case .clearDrafts: clearDrafts()
+        case .endSession: end()
+        case .cancelSession: cancelSession()
+        case .clearDrafts:
+            drafts.forEach(Self.deleteVideo)
+            drafts = []
         case .restoreDrafts:
-            if case .restore(let record) = asked {
+            if let record = restoreRecord {
                 replaceDrafts(with: record)
             }
         case .startLocalSession: startLocal()
@@ -1035,39 +955,68 @@ final class AnnotationController: ObservableObject {
             } else {
                 hud.show()
             }
+        case .hideHUD: hideHUD()
         case .plainClicksOn:
             PlainClickTap.start(removing: holdFlag)
         case .plainClicksOff:
             PlainClickTap.stop()
+        case .enterRecording:
+            hover = nil
         case .exitRecording:
             recorder?.discard()
             recorder = nil
             // A phone cannot be annotated: back to everything on screen.
-            if screenSource?.isDrawable == false {
-                screenSource = nil
+            if source?.isDrawable == false {
+                setSource(nil)
             }
-            mode = .annotating
             frontmostAppChanged(to: NSWorkspace.shared.frontmostApplication?.processIdentifier)
+        case .startClip: startClip()
+        case .pauseClip:
+            recorder?.pause()
+            clipClock = (Date(), clipClock.before + Date().timeIntervalSince(clipClock.since))
+        case .resumeClip:
+            recorder?.resume()
+            clipClock = (Date(), clipClock.before)
+        case .finishClip: finishClip()
+        case .keepClip:
+            if case .clip(let draft) = arrivedClip {
+                drafts.append(draft)
+            }
+        case .dropClip:
+            switch arrivedClip {
+            case .recorder(let recorder): recorder.discard()
+            case .clip(let draft): Self.deleteVideo(of: draft)
+            case nil: break
+            }
+        case .showStartFailure: show(notice: "Could not start recording")
+        case .showSaveFailure: show(notice: "Could not save the recording")
+        case .startPicking:
+            showsList = false
+            hover = nil
+            pickingChanged()
+        case .stopPicking:
+            hover = nil
+            sourcePicker.stopLoading()
+            pickingChanged()
+        case .openPicker: openPicker()
+        case .closePicker:
+            hover = nil
+            sourcePicker.stopLoading()
+        case .startSend: startSend()
+        case .showSendFailure: show(notice: "Could not save the report")
+        case .showPushFailure:
+            if case .sent(let operation) = mode {
+                hud.show()
+                hideConfirmation(operation, after: 4)
+            }
         }
     }
 
-    /// Copies the report of a session without an agent, at once, then sends its folder to the
-    /// remote machines in the background, so that one paste works on any of them. A machine
-    /// it does not reach gets its own short warning.
-    private func copyReport(_ feedback: Feedback, folder: URL?, to machines: [String]) {
-        let text = reportText(for: feedback, folder: folder, linkFolder: folder.flatMap { homeRelativePath($0) })
+    /// Copies the report of a session without an agent.
+    private func copyReport(_ feedback: Feedback, folder: URL) {
+        let text = reportText(for: feedback, folder: folder, linkFolder: homeRelativePath(folder))
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-
-        guard let folder, !machines.isEmpty else {
-            return
-        }
-        Task {
-            let failed = await Self.push(folder, to: machines, log: log)
-            if !failed.isEmpty {
-                showPushFailure(failed)
-            }
-        }
     }
 
     /// Sends a report's folder to each machine; the machines it did not reach.
@@ -1090,19 +1039,6 @@ final class AnnotationController: ObservableObject {
                 }
             }
         }
-    }
-
-    /// A copy's images that did not reach a machine: Send's confirmation with a warning, for a
-    /// few seconds, unless a new session is on screen by then.
-    private func showPushFailure(_ failed: [String]) {
-        guard session == nil else {
-            return
-        }
-        let confirmation = RemotePush.failure(failed)
-        sentStatus = .failed
-        mode = .sent(confirmation: confirmation)
-        hud.show()
-        hideConfirmation(confirmation, after: 4)
     }
 
     /// The start shortcut: starts a session, resumes a paused one, or shows the HUD.
@@ -1223,7 +1159,7 @@ final class AnnotationController: ObservableObject {
         holdMonitor?.invalidate()
         holdMonitor = nil
         PlainClickTap.stop()
-        endPause(.hold)
+        dispatch(.holdEnded)
     }
 
     private func holdChanged(_ output: HoldGesture.Output, key: DoubleTapKey) {
@@ -1248,7 +1184,6 @@ final class AnnotationController: ObservableObject {
     private var contentTimer: Timer?
     private var isCheckingContent = false
     let drawingPanel = DrawingPanel()
-    @Published private(set) var isDrawing = false
     @Published private(set) var drawingTool = "arrow"
     @Published private(set) var drawingColor = "#2F76FF"
     private var undoneDrawings: [Draft] = []
@@ -1315,7 +1250,7 @@ final class AnnotationController: ObservableObject {
     }
 
     private func checkContent() {
-        guard !isCheckingContent, mode.isOpen, composer == nil else {
+        guard !isCheckingContent, isOpen, composer == nil else {
             return
         }
         let checks = drafts.compactMap { draft -> ContentCheck? in
@@ -1617,8 +1552,8 @@ final class AnnotationController: ObservableObject {
             if drafts.isEmpty {
                 replaceDrafts(with: record)
             } else {
-                confirmation = .restore(record)
-                placeHUD()
+                restoreRecord = record
+                dispatch(.askRestore)
             }
             return
         }
@@ -1704,7 +1639,7 @@ final class AnnotationController: ObservableObject {
     /// The HUD goes in the browser's toolbar while the session is limited to the browser, and
     /// floats over the screen otherwise.
     private func placeHUD() {
-        guard session != nil, mode.isOpen else {
+        guard session != nil, isOpen else {
             return
         }
         // The picker shows under the floating HUD.
@@ -1835,132 +1770,89 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - Recording
 
-    /// The HUD's recording mode: ready, or a clip in progress.
-    enum Recording: Equatable {
-        case ready
-        /// The recorder is starting or finishing a clip.
-        case busy
-        /// Recording for `before` seconds until `since`, and on since then.
-        case recording(since: Date, before: TimeInterval)
-        case paused(TimeInterval)
-    }
-
-    /// Whether a clip is being recorded or is paused.
-    var isClipInProgress: Bool {
-        switch recording {
-        case .recording, .paused:
-            return true
-        case .ready, .busy, nil:
-            return false
-        }
-    }
-
     /// The HUD's record toggle: into recording mode, or back to annotating, which asks first
     /// when a clip is not stopped (Stop adds it to the list).
     func toggleRecordingMode() {
-        guard recording == nil else {
-            dispatch(.leaveRecording)
-            return
-        }
-
-        if isDrawing {
-            finishDrawing()
-        }
-        mode = .recording(.ready)
+        dispatch(.toggleRecordingMode)
     }
 
-    /// Starts, pauses or resumes recording the scoped window, or else the screen with the HUD.
+    /// The leading button in recording mode: starts a clip, pauses it, resumes it.
     func toggleRecord() {
-        switch recording {
-        case .ready:
-            startClip()
-        case .recording(let since, let before):
-            recorder?.pause()
-            mode = .recording(.paused(before + Date().timeIntervalSince(since)))
-        case .paused(let elapsed):
-            recorder?.resume()
-            mode = .recording(.recording(since: Date(), before: elapsed))
-        case .busy, nil:
-            break
-        }
+        dispatch(.record)
     }
 
     /// Ends the clip in progress and adds it to the list.
     func stopRecording() {
-        Task {
-            await finishClip()
-        }
-    }
-
-    /// What the user chose with the window button: the scoped window, else a screen or phone;
-    /// nil until a choice.
-    var chosenSource: RecordingSource? {
-        if let scope {
-            return .window(scope)
-        }
-        return screenSource
+        dispatch(.stop)
     }
 
     /// Records the chosen source, or the screen with the HUD when there is none.
     private func startClip() {
-        let recordingSource = chosenSource ?? .screen(Self.displayID(of: hud.window.screen) ?? CGMainDisplayID())
-        let source: String
+        guard case .starting(let operation) = recording else {
+            return
+        }
+        let recordingSource = source ?? .screen(Self.displayID(of: hud.window.screen) ?? CGMainDisplayID())
+        let name: String
         let frame: CGRect
         switch recordingSource {
         case .window(let window):
-            source = "\(scopeName ?? window.app) window"
+            name = "\(scopeName ?? window.app) window"
             frame = window.frame
         case .screen(let display):
-            source = SourcePickerModel.name(of: display)
+            name = SourcePickerModel.name(of: display)
             frame = NSScreen.screens.first { Self.displayID(of: $0) == display }?.frame.flipped ?? .zero
         case .phone(let phone):
-            source = phone.name
+            name = phone.name
             frame = .zero
         }
 
-        mode = .recording(.busy)
         Task {
             do {
-                let recorder = try await ScreenRecorder.start(recordingSource)
-                // The session or recording mode may have ended while the recorder started.
-                guard recording == .busy else {
-                    recorder.discard()
+                let started = try await ScreenRecorder.start(recordingSource)
+                arrivedClip = .recorder(started)
+                defer { arrivedClip = nil }
+                guard !dispatch(.clipStarted(operation)).contains(.dropClip) else {
                     return
                 }
-                self.recorder = recorder
-                recordedSource = (source, frame)
-                mode = .recording(.recording(since: Date(), before: 0))
-                log.notice("recording \(source, privacy: .public)")
+                recorder = started
+                recordedSource = (name, frame)
+                clipClock = (Date(), 0)
+                log.notice("recording \(name, privacy: .public)")
             } catch {
                 log.error("could not start recording: \(String(describing: error), privacy: .public)")
-                if recording == .busy {
-                    mode = .recording(.ready)
-                }
-                show(notice: "Could not start recording")
+                dispatch(.clipStartFailed(operation))
             }
         }
     }
 
-    private func finishClip() async {
-        guard let recorder else {
+    /// Saves the clip in progress; `flow` decides whether it still goes to the list.
+    private func finishClip() {
+        guard case .finishing(let operation, _) = recording, let recorder else {
             return
         }
         self.recorder = nil
-        mode = .recording(.busy)
-        do {
-            let clip = try await recorder.stop()
-            let target = Target.recording(video: clip.video, seconds: clip.seconds, source: recordedSource.name)
-            let annotation = Annotation(comment: "", target: target, frame: recordedSource.frame, image: clip.poster, contextImage: nil)
-            let captures = Captures(image: clip.poster, contextImage: nil)
-            drafts.append(Draft(annotation: annotation, marker: .zero, chip: "Recording \(Self.clock(clip.seconds))", capture: Task { captures }))
-            scheduleSave()
-            log.notice("recorded \(Int(clip.seconds), privacy: .public) s")
-        } catch {
-            log.error("could not finish recording: \(String(describing: error), privacy: .public)")
-            show(notice: "Could not save the recording")
+        let source = recordedSource
+        Task {
+            do {
+                let clip = try await recorder.stop()
+                let target = Target.recording(video: clip.video, seconds: clip.seconds, source: source.name)
+                let annotation = Annotation(comment: "", target: target, frame: source.frame, image: clip.poster, contextImage: nil)
+                let captures = Captures(image: clip.poster, contextImage: nil)
+                arrivedClip = .clip(Draft(annotation: annotation, marker: .zero, chip: "Recording \(Self.clock(clip.seconds))", capture: Task { captures }))
+                defer { arrivedClip = nil }
+                dispatch(.clipFinished(operation))
+                log.notice("recorded \(Int(clip.seconds), privacy: .public) s")
+            } catch {
+                log.error("could not finish recording: \(String(describing: error), privacy: .public)")
+                dispatch(.clipFailed(operation))
+            }
         }
-        if recording == .busy {
-            mode = .recording(.ready)
+    }
+
+    /// Deletes the video of a recording's draft; other drafts have no file.
+    nonisolated static func deleteVideo(of draft: Draft) {
+        if case .recording(let video, _, _) = draft.annotation.target {
+            try? FileManager.default.removeItem(at: video)
         }
     }
 
@@ -2016,66 +1908,78 @@ final class AnnotationController: ObservableObject {
     /// The HUD's window button: starts choosing a source on screen, or stops choosing with no
     /// change.
     func toggleWindowPick() {
-        if isPickingWindow {
-            cancelWindowPick()
+        dispatch(.windowButton)
+    }
+
+    /// Esc while choosing: closes the open picker, then stops choosing.
+    func cancelWindowPick() {
+        dispatch(.escape)
+    }
+
+    /// The overlays cover every screen while choosing, and the floating HUD shows the picker.
+    private func pickingChanged() {
+        guard isOpen, !overlays.isEmpty else {
             return
         }
-        showsList = false
-        isPickingWindow = true
-        hover = nil
+        layoutOverlays()
+        placeHUD()
         makeOverlayKey()
     }
 
     /// Opens the source picker in full while choosing, on its screens.
     func openSourcePicker() {
+        dispatch(.openPicker)
+    }
+
+    private func openPicker() {
         sourcePicker.tab = .screens
         sourcePicker.openApp = nil
-        isSourcePickerOpen = true
         hover = nil
-        let browserWindow = browser.windowNumber
-        let drawableOnly = recording == nil
-        Task {
-            await sourcePicker.reload(browserWindow: browserWindow, drawableOnly: drawableOnly)
-        }
+        sourcePicker.load(browserWindow: browser.windowNumber, drawableOnly: recording == nil)
     }
 
-    /// The picker's cross: back to choosing on screen.
+    /// The picker's back button: back to choosing on screen.
     func closeSourcePicker() {
-        isSourcePickerOpen = false
+        dispatch(.closePicker)
     }
 
-    /// Annotates and records `source` from now on: a window limits the session to it, as
-    /// clicking it on screen does; a screen or phone lifts the limit. A phone only records, so
-    /// annotating takes only sources it can draw on.
+    /// The choice: a window limits the session to it, as clicking it on screen does; a screen
+    /// or phone lifts the limit. A phone only records.
     func choose(_ source: RecordingSource) {
-        guard source.isDrawable || recording != nil else {
+        guard dispatch(.choose(drawable: source.isDrawable)).contains(.applySource) else {
             return
         }
         if case .window(let window) = source {
-            setScope(picker.currentWindow(number: window.number) ?? window)
-            return
+            setSource(.window(picker.currentWindow(number: window.number) ?? window))
+        } else {
+            setSource(source)
         }
-        setScope(nil)
-        screenSource = source
     }
 
     static func displayID(of screen: NSScreen?) -> CGDirectDisplayID? {
         (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { CGDirectDisplayID($0.uint32Value) }
     }
 
-    func cancelWindowPick() {
-        isPickingWindow = false
-        hover = nil
-    }
-
     /// Limits annotations to `window`, or lifts the limit with nil.
     func setScope(_ window: ElementPicker.WindowInfo?) {
+        setSource(window.map(RecordingSource.window))
+    }
+
+    /// Annotates and records `source` from now on: a window limits the session to it, a screen
+    /// or a phone lifts the limit; nil is everything on screen.
+    private func setSource(_ source: RecordingSource?) {
+        let window: ElementPicker.WindowInfo?
+        if case .window(let chosen) = source {
+            window = chosen
+        } else {
+            window = nil
+        }
         if window != scope {
             log.notice("scope \(window.map { "window \($0.number) of \($0.app)" } ?? "none", privacy: .public)")
         }
-        scope = window
-        isPickingWindow = false
-        endPause(.otherApp)
+        self.source = source
+        // The front app now counts for the new window.
+        dispatch(.scopeAppInFront)
         hover = nil
         scopeTimer?.invalidate()
         scopeTimer = nil
@@ -2091,7 +1995,7 @@ final class AnnotationController: ObservableObject {
             NotificationCenter.default.removeObserver(pageObserver)
         }
         pageObserver = nil
-        if mode.isOpen, !overlays.isEmpty {
+        if isOpen, !overlays.isEmpty {
             layoutOverlays()
         }
         placeHUD()
@@ -2188,7 +2092,7 @@ final class AnnotationController: ObservableObject {
             current = ElementPicker.WindowInfo(number: current.number, pid: current.pid, app: current.app, title: current.title, frame: frame)
         }
         if current.frame != scope.frame {
-            self.scope = current
+            source = .window(current)
             // The highlighted element moved with its window.
             let delta = CGVector(dx: current.frame.minX - scope.frame.minX, dy: current.frame.minY - scope.frame.minY)
             hover = hover?.moved(by: delta)
@@ -2220,7 +2124,7 @@ final class AnnotationController: ObservableObject {
         let delays = [0.0, 0.3, 0.8]
         for delay in delays {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.mode.isOpen, self.scope == nil else {
+                guard let self, self.isOpen, self.scope == nil else {
                     return
                 }
                 if let number = self.browser.windowNumber, let window = self.picker.currentWindow(number: number) {
@@ -2340,11 +2244,12 @@ final class AnnotationController: ObservableObject {
             guard !isSourcePickerOpen else {
                 return
             }
-            let window = picker.window(at: point)
-            if window == nil {
-                screenSource = Self.displayID(of: NSScreen.screens.first { $0.frame.contains(point.flipped) }).map(RecordingSource.screen)
+            // A window, or outside windows the screen.
+            if let window = picker.window(at: point) {
+                choose(.window(window))
+            } else if let display = Self.displayID(of: NSScreen.screens.first { $0.frame.contains(point.flipped) }) {
+                choose(.screen(display))
             }
-            setScope(window)
             return
         }
         guard allows(point) else {
@@ -2378,8 +2283,8 @@ final class AnnotationController: ObservableObject {
             closePreview()
             return
         }
+        // While choosing, only a click chooses.
         if isPickingWindow {
-            cancelWindowPick()
             return
         }
         guard let rect = Self.clamped(rect, scope: scope?.frame) else {
@@ -2405,6 +2310,11 @@ final class AnnotationController: ObservableObject {
         target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor? = nil,
         tracked: TrackedElement? = nil, pictureArea: CGRect? = nil, captures: Captures? = nil, drawingIDs: [String] = []
     ) {
+        // The session may have moved on while the target was picked.
+        guard dispatch(.openComment).contains(.showComment) else {
+            drawingPanel.remove(drawingIDs)
+            return
+        }
         let closeUpRect = Self.closeUpRect(frame: frame, outline: outline)
         let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
         let browser = self.browser
@@ -2510,18 +2420,31 @@ final class AnnotationController: ObservableObject {
                 return
             }
         }
+        guard dispatch(.openComment).contains(.showComment) else {
+            return
+        }
         hover = nil
         composer = .edit(id)
         commentText = draft.annotation.comment
         commentPanel.show(chip: draft.chip, isEditing: true, near: draft.marker, below: draft.annotation.frame)
     }
 
+    /// The comment box's Return, and ⌘↩ there, which sends the whole report.
     func submitComment(thenSend: Bool) {
+        if thenSend {
+            send()
+        } else {
+            dispatch(.submitComment)
+        }
+    }
+
+    /// Puts the open comment in the list: a new note, or the edited one.
+    private func saveComment() {
         guard let composer else {
             return
         }
         let comment = commentText.trimmingCharacters(in: .whitespacesAndNewlines)
-        log.notice("comment submitted (\(comment.count) characters, send: \(thenSend))")
+        log.notice("comment submitted (\(comment.count) characters)")
 
         switch composer {
         case .edit(let id):
@@ -2569,9 +2492,6 @@ final class AnnotationController: ObservableObject {
         }
 
         hideComposer()
-        if thenSend {
-            send()
-        }
     }
 
     func deleteDraft(_ id: Draft.ID) {
@@ -2581,14 +2501,20 @@ final class AnnotationController: ObservableObject {
                 closePreview()
             }
         }
+        drafts.filter { $0.id == id }.forEach(Self.deleteVideo)
         drafts.removeAll { $0.id == id }
         if case .edit(id) = composer {
             closeComposer()
         }
     }
 
-    /// Discards the open comment, including a new target's capture.
+    /// Discards the open comment.
     func closeComposer() {
+        dispatch(.closeComment)
+    }
+
+    /// Discards the open comment's data, including a new target's capture.
+    private func discardComposer() {
         if case .new(let pending) = composer {
             pending.capture.cancel()
             drawingPanel.remove(pending.drawingIDs)
@@ -2697,6 +2623,9 @@ final class AnnotationController: ObservableObject {
                 return
             }
         }
+        guard dispatch(.openPreview).contains(.showPreview) else {
+            return
+        }
         hover = nil
         previewID = id
         expandedPreviewImage = nil
@@ -2718,6 +2647,10 @@ final class AnnotationController: ObservableObject {
     }
 
     func closePreview() {
+        dispatch(.closePreview)
+    }
+
+    private func hidePreview() {
         saveTypedComments()
         previewID = nil
         expandedPreviewImage = nil
@@ -2770,31 +2703,29 @@ extension AnnotationController {
     func setStateForTesting(
         session: SessionStore.Session?,
         drafts: [Draft] = [],
-        mode: Mode = .annotating,
+        mode: SessionFlow.Mode = .open(SessionFlow.Open()),
         hover: Picked? = nil,
         composer: Composer? = nil,
         previewID: Draft.ID? = nil,
-        confirmation: Confirmation? = nil,
-        scope: ElementPicker.WindowInfo? = nil,
-        isPickingWindow: Bool = false,
-        isSourcePickerOpen: Bool = false,
+        source: RecordingSource? = nil,
         isHUDInBrowser: Bool = false,
         pauseNotice: PauseNotice? = nil,
-        screenSource: RecordingSource? = nil
+        restoreRecord: SessionRecord? = nil,
+        sentText: String = "",
+        clipClock: (since: Date, before: TimeInterval) = (Date(), 0)
     ) {
         self.session = session
         self.drafts = drafts
-        self.mode = mode
-        self.isPickingWindow = isPickingWindow
-        self.isSourcePickerOpen = isSourcePickerOpen
+        flow = SessionFlow(mode: mode, notes: drafts.count)
         self.hover = hover
         self.composer = composer
         self.previewID = previewID
-        self.confirmation = confirmation
-        self.scope = scope
+        self.source = source
         self.isHUDInBrowser = isHUDInBrowser
         self.pauseNotice = pauseNotice
-        self.screenSource = screenSource
+        self.restoreRecord = restoreRecord
+        self.sentText = sentText
+        self.clipClock = clipClock
         isHUDShown = true
     }
 }

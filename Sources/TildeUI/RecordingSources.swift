@@ -60,11 +60,27 @@ final class SourcePickerModel: ObservableObject {
     @Published private(set) var screens: [Tile] = []
     @Published private(set) var apps: [App] = []
 
-    /// Lists the sources on screen now, then takes their pictures. `drawableOnly` leaves out
-    /// sources Tilde cannot draw on, such as a phone, for annotating.
-    func reload(browserWindow: Int?, drawableOnly: Bool) async {
+    private var loading: Task<Void, Never>?
+
+    /// Lists the sources on screen now, then takes their pictures, in place of a load still
+    /// running. `drawableOnly` leaves out sources Tilde cannot draw on, such as a phone, for
+    /// annotating.
+    func load(browserWindow: Int?, drawableOnly: Bool) {
+        loading?.cancel()
+        loading = Task {
+            await reload(browserWindow: browserWindow, drawableOnly: drawableOnly)
+        }
+    }
+
+    /// The picker closed: a load still running writes nothing more.
+    func stopLoading() {
+        loading?.cancel()
+        loading = nil
+    }
+
+    private func reload(browserWindow: Int?, drawableOnly: Bool) async {
         PhoneCapture.allowPhones()
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) else {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true), !Task.isCancelled else {
             return
         }
 
@@ -94,6 +110,10 @@ final class SourcePickerModel: ObservableObject {
                 }
             }
             for await (id, picture) in group {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    return
+                }
                 setPicture(picture, for: id)
             }
         }

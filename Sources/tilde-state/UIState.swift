@@ -39,6 +39,8 @@ struct UIState: Decodable {
     var notes: Int?
     var images: Bool?
     var sent: String?
+    /// Send was pressed and the report is being made.
+    var sending: Bool?
     var paused: Bool?
     var autoPaused: Bool?
     var confirmation: String?
@@ -53,7 +55,7 @@ struct UIState: Decodable {
     var hover: Bool?
     var editing: Bool?
     var drawing: Bool?
-    /// The HUD's recording mode: ready, recording or paused.
+    /// The HUD's recording mode: ready, starting, recording, paused or finishing.
     var recording: String?
     /// What clips record when not scoped to a window: "display" or "phone".
     var source: String?

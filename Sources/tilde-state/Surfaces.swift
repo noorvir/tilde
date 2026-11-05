@@ -114,7 +114,6 @@ enum Surfaces {
         }
         apply(state, drafts: Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true), to: controller)
         controller.showsList = state.list ?? false
-        controller.setDrawingForTesting(state.drawing ?? false)
         controller.sentStatus = state.sentStatus == "failed" ? .failed : .done
         if let color = state.drawingColor {
             controller.setDrawingColor(color)
@@ -124,36 +123,45 @@ enum Surfaces {
     }
 
     private static func apply(_ state: UIState, drafts: [Draft], composer: Composer? = nil, to controller: AnnotationController) {
-        let confirmation: Confirmation? = switch state.confirmation {
-        case "clearAll": .clearAll
-        case "cancelSession": .cancelSession
-        case "discardComment": .discardComment
-        case "discardRecording": .discardRecording
-        case "restore": .restore(Fixtures.record(notes: 3))
-        default: nil
-        }
         let notice: AnnotationController.PauseNotice? = state.pauseNotice == "escape" ? .escape : state.pauseNotice == "otherApp" ? .otherApp : nil
-        // A clip in progress has run for 12 seconds.
-        let recording: AnnotationController.Recording? = switch state.recording {
-        case "ready": .ready
-        case "recording": .recording(since: Date(), before: 12)
-        case "paused": .paused(12)
-        default: nil
-        }
-        var pauses = Set<AnnotationController.PauseReason>()
+        var open = SessionFlow.Open()
         if state.paused == true {
-            pauses.insert(.user)
+            open.pauses.insert(.user)
         }
         if state.autoPaused == true {
-            pauses.insert(.otherApp)
+            open.pauses.insert(.otherApp)
         }
-        var mode = AnnotationController.Mode.annotating
-        if let sent = state.sent {
-            mode = .sent(confirmation: sent)
-        } else if let recording {
-            mode = .recording(recording)
-        } else if !pauses.isEmpty {
-            mode = .paused(pauses)
+        open.isDrawing = state.drawing ?? false
+        open.question = state.confirmation.flatMap(SessionFlow.Question.init(rawValue:))
+        if state.preview != nil {
+            open.panel = .preview
+        } else if composer != nil {
+            open.panel = .comment
+        }
+        let clip: SessionFlow.Clip? = switch state.recording {
+        case "ready": .ready
+        case "starting": .starting(operation: 0)
+        case "recording": .recording
+        case "paused": .paused
+        case "finishing": .finishing(operation: 0, thenSend: false)
+        default: nil
+        }
+        if let clip {
+            open.activity = .recording(clip)
+        }
+        if state.pickingWindow == true {
+            open.activity = .picking(isRecordMode: clip != nil, isPickerOpen: state.sourcePicker != nil)
+        }
+        var mode = SessionFlow.Mode.open(open)
+        if state.sent != nil {
+            mode = .sent(operation: 0)
+        } else if state.sending == true {
+            mode = .sending(operation: 0, returnTo: open)
+        }
+        let source: RecordingSource? = switch state.source {
+        case "phone": .phone(Fixtures.phone)
+        case "display": .screen(Fixtures.display)
+        default: state.scoped == true ? .window(Fixtures.window) : nil
         }
         controller.setStateForTesting(
             session: state.session.map { Fixtures.session(client: $0.client, node: $0.node, isLocal: $0.isLocal ?? false) },
@@ -162,13 +170,13 @@ enum Surfaces {
             hover: state.hover == true ? Fixtures.hover() : nil,
             composer: composer,
             previewID: state.preview.map { drafts[$0].id },
-            confirmation: confirmation,
-            scope: state.scoped == true ? Fixtures.window : nil,
-            isPickingWindow: state.pickingWindow ?? false,
-            isSourcePickerOpen: state.sourcePicker != nil,
+            source: source,
             isHUDInBrowser: state.hudInBrowser ?? false,
             pauseNotice: notice,
-            screenSource: state.source == "phone" ? .phone(Fixtures.phone) : state.source == "display" ? .screen(Fixtures.display) : nil
+            restoreRecord: state.confirmation == "restore" ? Fixtures.record(notes: 3) : nil,
+            sentText: state.sent ?? "",
+            // A clip in progress has run for 12 seconds.
+            clipClock: (Date(), 12)
         )
         if let picker = state.sourcePicker {
             let (screens, apps) = Fixtures.sources()

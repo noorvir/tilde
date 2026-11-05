@@ -132,7 +132,7 @@ struct SourcePickerView: View {
     }
 
     private func tileButton(_ tile: SourcePickerModel.Tile) -> some View {
-        SourceTile(title: tile.title, detail: tile.detail, picture: tile.picture, badge: nil, isSelected: controller.chosenSource?.id == tile.id) {
+        SourceTile(title: tile.title, detail: tile.detail, picture: tile.picture, badge: nil, isSelected: controller.source?.id == tile.id) {
             controller.choose(tile.source)
         }
     }

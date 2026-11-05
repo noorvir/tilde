@@ -215,7 +215,7 @@ struct HUDView: View {
                 PauseToast(notice: notice, controller: controller)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if controller.isHUDShown, controller.mode.isOpen, controller.showsList, !controller.drafts.isEmpty {
+            if controller.isHUDShown, controller.isOpen, controller.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
                     .transition(Self.zoom)
             }
@@ -306,6 +306,7 @@ struct HUDView: View {
                         HStack(spacing: 4) {
                             annotatingContent
                         }
+                        .disabled(isSending)
                         .transition(.opacity)
                     }
                 }
@@ -404,13 +405,15 @@ struct HUDView: View {
     @ViewBuilder
     private var annotatingContent: some View {
         let count = controller.drafts.count
+        let flow = controller.flow
+        let status = Self.status(of: controller)
 
         // While a window is being chosen, only the window button works; the others keep their
-        // places with the disabled look.
+        // places with the disabled look. While the report is made, nothing works.
         Group {
             HStack(spacing: HUDMetrics.iconGap) {
                 // Where the status dot was: in recording mode the record button, else pause and play.
-                HUDButton(image: leadingIcon, size: 26, tint: leadingTint, bounce: recordModeEntries, help: leadingHelp) {
+                HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, help: status.help) {
                     if controller.recording != nil {
                         controller.toggleRecord()
                     } else if !controller.pauses.isEmpty {
@@ -419,7 +422,7 @@ struct HUDView: View {
                         controller.togglePause()
                     }
                 }
-                .disabled(controller.recording == .busy)
+                .disabled(status.isBusy)
                 // The red record button bounces once on the way into recording mode.
                 .onChange(of: controller.recording != nil) { _, isRecordMode in
                     if isRecordMode {
@@ -428,7 +431,7 @@ struct HUDView: View {
                 }
                 .padding(.leading, -4)
                 VStack(alignment: .leading, spacing: 1) {
-                    titleText
+                    titleText(status)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                     subtitle
@@ -445,13 +448,14 @@ struct HUDView: View {
             HUDButton(image: Image(systemName: "record.circle"), isOn: controller.recording != nil, help: controller.recording == nil ? "Record a video" : "Back to annotating (Esc)") {
                 controller.toggleRecordingMode()
             }
+            .disabled(status.isBusy)
 
             // Recording mode puts Stop where Draw is; the other buttons stay.
-            if controller.recording != nil {
+            if let clip = controller.recording {
                 HUDButton(image: Image(systemName: "stop.fill"), help: "Stop and add the recording to the list") {
                     controller.stopRecording()
                 }
-                .disabled(!controller.isClipInProgress)
+                .disabled(clip != .recording && clip != .paused)
             } else {
                 HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, help: "Draw on the screen") {
                     if controller.isDrawing {
@@ -467,6 +471,8 @@ struct HUDView: View {
         HUDButton(image: sourceIcon, isOn: controller.scope != nil, isActive: controller.isPickingWindow, help: windowHelp) {
             controller.toggleWindowPick()
         }
+        // The source of a clip in progress stays until Stop.
+        .disabled(!flow.canPick)
 
         Group {
             HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide annotations" : "Show annotations") {
@@ -481,20 +487,38 @@ struct HUDView: View {
 
             // A session without an agent copies the report.
             SendButton(copies: controller.session?.isLocal == true, action: controller.send)
-                .disabled(!canSend)
+                .disabled(!flow.canSend)
             .tildeTooltip(sendHelp)
             .padding(.leading, 4)
 
-            HUDButton(image: Image(systemName: "xmark"), help: "Cancel and close (Esc)") {
+            // Esc closes the session only while paused; elsewhere it pauses or steps back.
+            HUDButton(image: Image(systemName: "xmark"), help: controller.pauses.contains(.user) ? "Cancel and close (Esc)" : "Cancel and close") {
                 controller.requestCancel()
             }
         }
         .disabled(controller.isPickingWindow)
     }
 
+    private var isSending: Bool {
+        if case .sending = controller.mode {
+            return true
+        }
+        return false
+    }
+
+    /// What a cancel would throw away, such as "2 notes and the recording".
+    private var lost: String {
+        let count = controller.drafts.count
+        let notes = count == 1 ? "the note" : "\(count) notes"
+        guard controller.flow.holdsClip else {
+            return notes
+        }
+        return count == 0 ? "the recording" : "\(notes) and the recording"
+    }
+
     /// Replaces the pill's content, at the same size, with a question and two buttons.
     @ViewBuilder
-    private func confirmContent(_ confirmation: Confirmation) -> some View {
+    private func confirmContent(_ confirmation: SessionFlow.Question) -> some View {
         let count = controller.drafts.count
         let all = count == 1 ? "the annotation" : "all \(count) annotations"
 
@@ -506,14 +530,14 @@ struct HUDView: View {
             case .clearAll:
                 Text("Clear \(all)?")
             case .cancelSession:
-                Text("Discard and close?")
+                Text("Discard \(lost)?")
             case .discardComment:
                 // Asked on the comment box itself.
                 EmptyView()
             case .discardRecording:
                 Text("Discard the recording?")
-            case .restore(let record):
-                Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(record.notes.count) saved?")
+            case .restore:
+                Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(controller.restoreRecord?.notes.count ?? 0) saved?")
             }
         }
         .font(.system(size: 13, weight: .semibold))
@@ -524,7 +548,7 @@ struct HUDView: View {
         PillTextButton(title: "Cancel", key: "esc", isDestructive: false) {
             controller.dismissConfirmation()
         }
-        .tildeTooltip(confirmation == .discardRecording ? "Keep recording" : "Keep the annotations")
+        .tildeTooltip(confirmation == .discardRecording ? "Keep recording" : "Keep everything")
 
         switch confirmation {
         case .clearAll:
@@ -536,7 +560,7 @@ struct HUDView: View {
             PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
-            .tildeTooltip("Discard \(all) and close")
+            .tildeTooltip("Discard \(lost) and close")
         case .discardComment:
             EmptyView()
         case .discardRecording:
@@ -563,11 +587,6 @@ struct HUDView: View {
         return "Send to \(agent)  ⌘↩"
     }
 
-    /// Send has notes, a clip in progress or an open comment to send.
-    private var canSend: Bool {
-        !controller.drafts.isEmpty || controller.isClipInProgress || controller.composer != nil
-    }
-
     private var windowHelp: String {
         let action = controller.recording == nil ? "annotate" : "record"
         if controller.isPickingWindow {
@@ -582,7 +601,7 @@ struct HUDView: View {
     /// The window button's icon: the chosen screen, phone or window, or a pointer on a window
     /// until a choice.
     private var sourceIcon: Image {
-        switch controller.chosenSource {
+        switch controller.source {
         case nil:
             return Image(systemName: "rectangle.inset.filled.and.cursorarrow")
         case .window:
@@ -599,90 +618,102 @@ struct HUDView: View {
         }
     }
 
-    private var recordHelp: String {
-        switch controller.recording {
-        case .recording:
-            return "Pause the recording"
-        case .paused:
-            return "Resume the recording"
-        case .ready, .busy, nil:
-            return controller.scopeName.map { "Start recording \($0)" } ?? "Start recording the screen"
+    /// The title and the leading button of one mode.
+    struct Status: Equatable {
+        var title: String
+        /// The clip's length after the title: running since a date, or stopped.
+        var clock: Clock?
+        var symbol: String
+        var tint: Color?
+        var help: String
+        /// Starting, saving or sending: the leading button and the record toggle wait.
+        var isBusy = false
+
+        enum Clock: Equatable {
+            case running(since: Date, before: TimeInterval)
+            case stopped(TimeInterval)
         }
     }
 
-    /// The leading button: in recording mode red to start or resume a clip and pause while it
-    /// records; else pause, and play while paused.
-    private var leadingIcon: Image {
-        switch controller.recording {
-        case .recording:
-            return Image(systemName: "pause.fill")
-        case .ready, .busy, .paused:
-            return Image(systemName: "circle.fill")
-        case nil:
-            return Image(systemName: controller.pauses.isEmpty ? "pause.fill" : "play.fill")
+    static func status(of controller: AnnotationController) -> Status {
+        let shortcut = controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause)
+        let clock = controller.clipClock
+        switch controller.mode {
+        case .sending(_, let returnTo):
+            var status = status(of: returnTo, scopeName: controller.scopeName, shortcut: shortcut, clock: clock)
+            status.title = "Sending"
+            status.clock = nil
+            status.isBusy = true
+            return status
+        case .open(let open):
+            return status(of: open, scopeName: controller.scopeName, shortcut: shortcut, clock: clock)
+        case .idle, .sent:
+            return status(of: SessionFlow.Open(), scopeName: nil, shortcut: nil, clock: clock)
         }
     }
 
-    private var leadingTint: Color? {
-        switch controller.recording {
-        case .ready, .busy, .paused:
-            return .red
-        case .recording, nil:
-            return nil
+    /// "Pause (Esc)", and when paused "Annotate (Double-tap ⌃)"; in recording mode the record
+    /// button, red to start or resume a clip and pause while it records.
+    static func status(of open: SessionFlow.Open, scopeName: String?, shortcut: Shortcut?, clock: (since: Date, before: TimeInterval)) -> Status {
+        switch open.activity {
+        case .picking(let isRecordMode, _):
+            var back = open
+            back.activity = isRecordMode ? .recording(.ready) : .annotating
+            var status = status(of: back, scopeName: scopeName, shortcut: shortcut, clock: clock)
+            status.title = "Choose a window"
+            return status
+        case .annotating:
+            if open.pauses.isEmpty {
+                return Status(title: "Annotating", symbol: "pause.fill", help: "Pause (Esc)")
+            }
+            return Status(title: "Paused", symbol: "play.fill", help: shortcut.map { "Annotate (\($0.title))" } ?? "Annotate")
+        case .recording(let clip):
+            let start = scopeName.map { "Start recording \($0)" } ?? "Start recording the screen"
+            switch clip {
+            case .ready:
+                return Status(title: "Ready to record", symbol: "circle.fill", tint: .red, help: start)
+            case .starting:
+                return Status(title: "Starting", symbol: "circle.fill", tint: .red, help: start, isBusy: true)
+            case .recording:
+                return Status(title: "Recording", clock: .running(since: clock.since, before: clock.before), symbol: "pause.fill", help: "Pause the recording")
+            case .paused:
+                return Status(title: "Paused", clock: .stopped(clock.before), symbol: "circle.fill", tint: .red, help: "Resume the recording")
+            case .finishing:
+                return Status(title: "Saving", symbol: "circle.fill", tint: .red, help: start, isBusy: true)
+            }
         }
     }
 
-    /// "Pause (Esc)", and when paused "Annotate (Double-tap ⌃)"; the record button's in
-    /// recording mode.
-    private var leadingHelp: String {
-        if controller.recording != nil {
-            return recordHelp
+    /// Every title the HUD shows, with the widest clock, for the width of the title column.
+    static let titles: [String] = {
+        let modes: [SessionFlow.Open] = [
+            SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(isRecordMode: false, isPickerOpen: false)),
+        ] + [SessionFlow.Clip.ready, .starting(operation: 0), .recording, .paused, .finishing(operation: 0, thenSend: false)].map {
+            SessionFlow.Open(activity: .recording($0))
         }
-        guard !controller.pauses.isEmpty else {
-            return "Pause (Esc)"
-        }
-        guard let shortcut = controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause) else {
-            return "Annotate"
-        }
-        return "Annotate (\(shortcut.title))"
-    }
-
-    /// Every title the HUD shows, for the width of the title column.
-    private static let titles = ["Annotating", "Paused", "Choose a window", "Ready to record", "Recording 0:00", "Paused 0:00"]
+        let statuses = modes.map { status(of: $0, scopeName: nil, shortcut: nil, clock: (Date(), 0)) }
+        return statuses.map { $0.clock == nil ? $0.title : "\($0.title) 00:00" } + ["Sending"]
+    }()
 
     /// The title. It takes the space of the widest title in every mode, so the pill keeps its
     /// width and the buttons stay put when the mode changes; the time counts up while recording.
-    private var titleText: some View {
+    private func titleText(_ status: Status) -> some View {
         ZStack(alignment: .leading) {
             ForEach(Self.titles, id: \.self) { title in
                 Text(title).hidden()
             }
-            if case .recording(let since, let before) = controller.recording, !controller.isPickingWindow {
+            switch status.clock {
+            case .running(let since, let before):
                 TimelineView(.periodic(from: since, by: 1)) { context in
-                    Text("Recording \(AnnotationController.clock(before + context.date.timeIntervalSince(since)))")
+                    Text("\(status.title) \(AnnotationController.clock(before + context.date.timeIntervalSince(since)))")
                 }
-            } else {
-                Text(title)
+            case .stopped(let elapsed):
+                Text("\(status.title) \(AnnotationController.clock(elapsed))")
+            case nil:
+                Text(status.title)
             }
         }
         .monospacedDigit()
-    }
-
-    private var title: String {
-        if controller.isPickingWindow {
-            return "Choose a window"
-        }
-        guard let recording = controller.recording else {
-            return controller.pauses.isEmpty ? "Annotating" : "Paused"
-        }
-        switch recording {
-        case .ready:
-            return "Ready to record"
-        case .busy, .recording:
-            return "Recording"
-        case .paused(let elapsed):
-            return "Paused \(AnnotationController.clock(elapsed))"
-        }
     }
 
     /// The subtitle on one line: where the report goes, in full, or what to do now. The window
