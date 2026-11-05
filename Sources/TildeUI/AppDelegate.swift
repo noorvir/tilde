@@ -92,7 +92,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             installer: Installer(environment: (try? .local(home: home, port: String(port), bridgePath: bridge)) ?? .standard(home: home, port: String(port), bridgePath: bridge)),
             nodes: NodeSetup(nodePort: port + 1)
         )
-        setup.nodes.startLinks()
         self.nodes = setup.nodes
         let shortcuts = controller.shortcuts
         let version = SettingsModel.bundleVersion
@@ -132,6 +131,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         startServer()
+        setup.nodes.startLinks()
         offerUnfinishedSession()
 
         if ScreenCapture.isAllowed {
@@ -162,6 +162,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 store: store, localToken: token, clientsFile: SessionArchive.defaultRoot.deletingLastPathComponent().appendingPathComponent("mcp-clients.json")
             )
             self.mcp = mcp
+            nodes?.mcp = mcp
             let server = try HTTPServer(port: state.port) { request in
                 await mcp.handleLocal(request)
             }
@@ -172,8 +173,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.server = server
 
-            // The door for tunnels from other machines: every request needs a node's token, and
-            // one node's long polls cannot take every connection from the others.
+            // The door for tunnels from node types with no tilde-proxy: every request needs the
+            // token of such a node, and one node's long polls cannot take every connection.
             let store = NodeStore()
             let nodeServer = try HTTPServer(port: state.port + 1, maxRequestsPerCaller: 8) { request in
                 await mcp.handleFromNode(request, store: store)

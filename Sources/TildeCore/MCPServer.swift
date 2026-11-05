@@ -63,12 +63,35 @@ public final class MCPServer {
         return await handle(request, node: nil)
     }
 
-    /// A request from a node's tunnel: only with that node's token.
+    /// A request from a node's tunnel: only with that node's token, and only from a node that
+    /// is not linked by its socket.
     public func handleFromNode(_ request: HTTPRequest, store: NodeStore) async -> HTTPResponse {
-        guard let node = store.node(forAuthorization: request.headers["authorization"]) else {
+        guard let node = store.node(forAuthorization: request.headers["authorization"]), node.socket == nil else {
             return HTTPResponse(status: 401)
         }
         return await handle(request, node: node.host)
+    }
+
+    /// A message from a node's socket, in MCP's stdio framing: one JSON-RPC message per line,
+    /// one MCP session per connection. The socket is the node's identity, as its token is on
+    /// the port. Gives each reply line to `reply`, progress before a result for a call that
+    /// waits for the user, and returns the connection's session after the message.
+    public func handleLine(_ line: Data, session: String?, node: String, reply: (Data) -> Void) async -> String? {
+        var headers = ["host": "127.0.0.1", "content-type": "application/json", "accept": "application/json, text/event-stream"]
+        headers["mcp-session-id"] = session
+        let response = await handle(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: line), node: node)
+        if !response.body.isEmpty {
+            reply(response.body)
+        }
+        // Each server-sent event is one message: its data is the line.
+        if let stream = response.stream {
+            for await event in stream {
+                if let data = event.range(of: Data("data: ".utf8)) {
+                    reply(event[data.upperBound...].filter { $0 != 0x0A })
+                }
+            }
+        }
+        return response.headers["Mcp-Session-Id"] ?? session
     }
 
     /// A request whose caller is known: `node` is the machine it came from, nil for this Mac.

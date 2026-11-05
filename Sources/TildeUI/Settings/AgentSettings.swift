@@ -217,6 +217,9 @@ struct MachineLabel: View {
 
     private var subtitle: String {
         var parts = [row.status.text]
+        if row.status.isInstalled, !row.isProtected {
+            parts.append("Not protected (linked by a port)")
+        }
         if let note = row.note {
             parts.append(note)
         }

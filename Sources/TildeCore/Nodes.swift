@@ -1,14 +1,18 @@
 import Foundation
 
-/// Machines that Tilde is installed on, and the token of each. A node's agents reach this Mac only
-/// through the node port, and only with their token.
+/// Machines that Tilde is installed on. A node's agents reach this Mac through `tilde-proxy` and
+/// the node's socket, which its ssh link forwards to a socket of this Mac for that node only; a
+/// node type with no `tilde-proxy` file reaches it through the node port with its token.
 public struct Node: Codable, Equatable, Sendable {
     public let host: String
     public let token: String
+    /// The socket on the node, an absolute path; nil for a node linked by the port.
+    public var socket: String?
 
-    public init(host: String, token: String) {
+    public init(host: String, token: String, socket: String? = nil) {
         self.host = host
         self.token = token
+        self.socket = socket
     }
 }
 

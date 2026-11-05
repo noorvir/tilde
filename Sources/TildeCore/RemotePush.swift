@@ -4,9 +4,16 @@ import os
 /// Copies a saved report to another machine, so that an agent there can open its images. The
 /// host is a name for `ssh`, such as an alias from `~/.ssh/config`.
 public enum RemotePush {
-    public enum Failure: Error {
+    public enum Failure: Error, CustomStringConvertible {
         case invalidHost
         case failed(String)
+
+        public var description: String {
+            switch self {
+            case .invalidHost: "Not a host name for ssh"
+            case .failed(let reason): reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
     }
 
     /// Whether this can be a host for `ssh`: it must not read as an option or a command.
@@ -73,6 +80,14 @@ public enum RemotePush {
         try FileManager.default.createDirectory(at: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde"), withIntermediateDirectories: true)
         shareConnection(to: host)
         return try run(ssh, options + [host, command], input: input)
+    }
+
+    /// Copies a file to `path` on the host, an absolute path.
+    public static func copy(_ file: URL, to host: String, path: String) throws {
+        guard isValid(host: host) else {
+            throw Failure.invalidHost
+        }
+        _ = try run(scp, options + [file.path, "\(host):\(path)"])
     }
 
     private static let ssh = "/usr/bin/ssh"
