@@ -61,7 +61,7 @@ enum Surfaces {
             let browser = BrowserController()
             let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive())
             try await Task.sleep(for: .milliseconds(20))
-            apply(state, drafts: try await drafts(state), to: controller)
+            apply(state, drafts: try drafts(state), to: controller)
             let toolbar = BrowserToolbar(browser: browser, controller: controller).background(Color(white: 0.1))
             return try await hosted(toolbar, size: CGSize(width: BrowserMetrics.minWindowWidth, height: BrowserMetrics.toolbarHeight))
 
@@ -112,7 +112,7 @@ enum Surfaces {
         if let dot = state.machineDot.flatMap(NodeSetup.Dot.init(rawValue:)) {
             controller.machineDot = { _ in dot }
         }
-        apply(state, drafts: try await drafts(state), to: controller)
+        apply(state, drafts: try drafts(state), to: controller)
         controller.showsList = state.list ?? false
         controller.sentStatus = state.sentStatus == "failed" ? .failed : .done
         if let color = state.drawingColor {
@@ -123,14 +123,13 @@ enum Surfaces {
     }
 
     /// The state's notes; with `clip`, the first is a recording.
-    private static func drafts(_ state: UIState) async throws -> [Draft] {
+    private static func drafts(_ state: UIState) throws -> [Draft] {
         let drafts = Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true)
         guard state.clip == true else {
             return drafts
         }
-        // Render workers run at the same time, so each has its own file.
-        let video = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-state-clip-\(ProcessInfo.processInfo.processIdentifier).mp4")
-        return [try await Fixtures.clip(in: video)] + drafts.dropFirst()
+        let video = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-state-clip.mp4")
+        return [try Fixtures.clip(in: video)] + drafts.dropFirst()
     }
 
     private static func apply(_ state: UIState, drafts: [Draft], composer: Composer? = nil, to controller: AnnotationController) {

@@ -93,8 +93,8 @@ struct BehaviourTests {
 
     // MARK: - Recordings on disk
 
-    @Test func deletingARecordingDeletesItsVideo() async throws {
-        let clip = try await Fixtures.clip(in: controller.archive.newClip(in: "a1b2c3d4"))
+    @Test func deletingARecordingDeletesItsVideo() throws {
+        let clip = try Fixtures.clip(in: controller.archive.newClip(in: "a1b2c3d4"))
         open(drafts: [clip])
         controller.deleteDraft(clip.id)
         #expect(!FileManager.default.fileExists(atPath: try #require(Fixtures.video(of: clip)).path))
@@ -102,9 +102,9 @@ struct BehaviourTests {
 
     /// A cancelled session keeps its stopped recordings in History, like its notes, and a
     /// restore of it plays them again.
-    @Test func cancellingKeepsStoppedRecordings() async throws {
+    @Test func cancellingKeepsStoppedRecordings() throws {
         let session = Fixtures.session()
-        let clip = try await Fixtures.clip(in: controller.archive.newClip(in: session.id))
+        let clip = try Fixtures.clip(in: controller.archive.newClip(in: session.id))
         open(drafts: [clip] + Fixtures.drafts(1), session: session)
 
         controller.requestCancel()

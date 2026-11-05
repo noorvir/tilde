@@ -1,5 +1,4 @@
 import AppKit
-import AVKit
 
 /// Renders a view offscreen at a fixed scale, with no animations.
 @MainActor
@@ -27,14 +26,6 @@ enum Renderer {
         view.layoutSubtreeIfNeeded()
         // Lets SwiftUI commit its layers; animations are off, so the result is final.
         try await Task.sleep(for: .milliseconds(150))
-        // A player shows its times only once its video is loaded; wait for that, so the
-        // picture does not depend on how fast this Mac loads it.
-        for player in players(in: view) {
-            for _ in 0..<250 where player.currentItem?.status == .unknown {
-                try await Task.sleep(for: .milliseconds(20))
-            }
-            try await Task.sleep(for: .milliseconds(150))
-        }
         view.layoutSubtreeIfNeeded()
 
         let context = bitmapContext(width: Int(size.width) * scale, height: Int(size.height) * scale)!
@@ -53,11 +44,6 @@ enum Renderer {
         }
         window.contentView = nil
         return context.makeImage()!
-    }
-
-    private static func players(in view: NSView) -> [AVPlayer] {
-        let own = (view as? AVPlayerView)?.player.map { [$0] } ?? []
-        return own + view.subviews.flatMap(players(in:))
     }
 
     static func bitmapContext(width: Int, height: Int) -> CGContext? {
