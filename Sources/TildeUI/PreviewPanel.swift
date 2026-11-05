@@ -265,6 +265,7 @@ struct PreviewView: View {
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
                 controller.deleteDraft(id)
             }
+            .disabled(!controller.canEditNotes)
         }
     }
 
@@ -441,6 +442,7 @@ private struct CommentEditor: View {
             .padding(.vertical, 9)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.1)))
+            .disabled(!controller.canEditNotes)
             .onChange(of: text) {
                 controller.updateCommentSoon(id, text)
             }

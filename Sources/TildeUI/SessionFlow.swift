@@ -118,6 +118,8 @@ struct SessionFlow: Equatable {
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
         /// History's or the menu's Restore, and the menu's Open Browser, while a session is on screen.
         case restore, openBrowser
+        /// A note deleted, or its comment changed, from the list, the preview or the browser.
+        case deleteNote, editNote
         case holdBegan, holdEnded, otherAppInFront, scopeAppInFront
         case openComment, clickAway, submitComment, closeComment, openPreview, closePreview, toggleList
         case startDrawing, finishDrawing, undoDrawing, redoDrawing, shapeFinished
@@ -137,6 +139,9 @@ struct SessionFlow: Equatable {
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case endSession, cancelSession, clearDrafts, restoreDrafts, startLocalSession, showHUD
+        /// Keep the saved session that the restore question asks about.
+        case askRestore
+        case deleteNote, editNote
         case plainClicksOn, plainClicksOff
         /// Into recording mode, and out of it, throwing away a clip in progress.
         case enterRecording, exitRecording
@@ -205,6 +210,14 @@ struct SessionFlow: Equatable {
             return false
         }
         return open.canPick
+    }
+
+    /// Whether the event would do anything now: change the mode or have an effect. A control
+    /// that sends it is enabled only then.
+    func accepts(_ event: Event) -> Bool {
+        var next = self
+        let effects = next.handle(event)
+        return !effects.isEmpty || next != self
     }
 
     /// Send and ⌘↩ have something to send, and nothing is starting or finishing.
@@ -405,8 +418,13 @@ struct SessionFlow: Equatable {
             guard notes > 0 else {
                 return []
             }
+            // A question never opens over a comment: one with text asks about it first.
+            if open.panel == .comment, commentHasText {
+                return leaveComment(&open)
+            }
+            let closes = open.panel == .comment ? closePanel(&open) : []
             open.question = .clearAll
-            return []
+            return closes
 
         case .requestCancel:
             return requestCancel(&open)
@@ -416,18 +434,35 @@ struct SessionFlow: Equatable {
             guard open.canPick else {
                 return []
             }
+            if open.panel == .comment, commentHasText {
+                return leaveComment(&open)
+            }
+            let closes = finishDrawingAndPanel(&open)
             guard notes > 0 else {
-                return closePanel(&open) + [.restoreDrafts]
+                return closes + [.restoreDrafts]
             }
             open.question = .restore
-            return []
+            return closes + [.askRestore]
 
         case .openBrowser:
             // The browser limits the session to its window, as choosing it does.
             guard open.canPick else {
                 return []
             }
-            return [.openBrowser]
+            if open.panel == .comment, commentHasText {
+                return leaveComment(&open)
+            }
+            return finishDrawingAndPanel(&open) + [.openBrowser]
+
+        case .deleteNote:
+            guard notes > 0 else {
+                return []
+            }
+            notes -= 1
+            return [.deleteNote]
+
+        case .editNote:
+            return notes > 0 ? [.editNote] : []
 
         case .confirm:
             return confirm(&open)
@@ -620,11 +655,16 @@ struct SessionFlow: Equatable {
     }
 
     private func requestCancel(_ open: inout Open) -> [Effect] {
+        // A question never opens over a comment: one with text asks about it first.
+        if open.panel == .comment, commentHasText {
+            return leaveComment(&open)
+        }
+        let closes = open.panel == .comment ? closePanel(&open) : []
         guard notes > 0 || open.holdsClip else {
-            return [.clearNotice, .cancelSession]
+            return closes + [.clearNotice, .cancelSession]
         }
         open.question = .cancelSession
-        return [.clearNotice]
+        return closes + [.clearNotice]
     }
 
     private func dismiss(_ open: inout Open) -> [Effect] {

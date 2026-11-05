@@ -277,6 +277,7 @@ struct CommentView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .disabled(!controller.canEditNotes)
                     .help("Delete note")
                 }
             }

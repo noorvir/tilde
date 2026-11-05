@@ -947,7 +947,8 @@ final class AnnotationController: ObservableObject {
     private func run(_ effect: SessionFlow.Effect, holdFlag: NSEvent.ModifierFlags) {
         switch effect {
         // Their data comes with the event that returns them, if at all.
-        case .showComment, .showPreview, .applySource, .finishSend, .adoptClip, .keepClip, .dropClip, .showPushFailure:
+        case .showComment, .showPreview, .applySource, .finishSend, .adoptClip, .keepClip, .dropClip, .showPushFailure,
+             .askRestore, .deleteNote, .editNote:
             break
         case .applyPause: applyPause()
         case .closeComposer: discardComposer()
@@ -1590,10 +1591,19 @@ final class AnnotationController: ObservableObject {
     func restore(_ record: SessionRecord) {
 
         if session != nil {
-            // Notes on screen are replaced only after the HUD asks.
-            restoreRecord = record
-            dispatch(.restore)
-            placeHUD()
+            // Notes on screen are replaced only after the HUD asks; the saved session is kept
+            // only when the flow takes the restore.
+            dispatch(.restore, with: [
+                .askRestore: { [self] in
+                    restoreRecord = record
+                    placeHUD()
+                },
+                .restoreDrafts: { [self] in
+                    restoreRecord = record
+                    replaceDrafts(with: record)
+                    placeHUD()
+                },
+            ])
             return
         }
         markRestored(record)
@@ -2507,29 +2517,26 @@ final class AnnotationController: ObservableObject {
         hideComposer()
     }
 
-    /// Notes change only while the session is on screen and its report is not being made.
+    /// Notes change only when the flow takes it: not under a question, while choosing or while
+    /// the report is made.
     var canEditNotes: Bool {
-        if case .open = mode {
-            return true
-        }
-        return false
+        flow.accepts(.editNote)
     }
 
     func deleteDraft(_ id: Draft.ID) {
-        guard canEditNotes else {
-            return
-        }
-        if previewID == id {
-            showAdjacentPreview(1)
+        dispatch(.deleteNote, with: [.deleteNote: { [self] in
             if previewID == id {
-                closePreview()
+                showAdjacentPreview(1)
+                if previewID == id {
+                    closePreview()
+                }
             }
-        }
-        drafts.filter { $0.id == id }.forEach(ClipRecorder.deleteVideo)
-        drafts.removeAll { $0.id == id }
-        if case .edit(id) = composer {
-            closeComposer()
-        }
+            drafts.filter { $0.id == id }.forEach(ClipRecorder.deleteVideo)
+            drafts.removeAll { $0.id == id }
+            if case .edit(id) = composer {
+                closeComposer()
+            }
+        }])
     }
 
     /// Discards the open comment.
@@ -2709,10 +2716,11 @@ final class AnnotationController: ObservableObject {
     }
 
     func updateComment(_ id: Draft.ID, _ comment: String) {
-        guard canEditNotes, let index = drafts.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-        drafts[index].annotation.comment = comment
+        dispatch(.editNote, with: [.editNote: { [self] in
+            if let index = drafts.firstIndex(where: { $0.id == id }) {
+                drafts[index].annotation.comment = comment
+            }
+        }])
     }
 
     /// Frame and marker of the comment target that is not yet a draft.

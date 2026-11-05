@@ -149,7 +149,7 @@ extension SessionFlow.Event: Codable {
         let operation = Int(value) ?? 0
         let events: [String: SessionFlow.Event] = [
             "begin": .begin(inBrowser: value == "browser"), "ended": .ended, "escape": .escape, "togglePause": .togglePause, "resume": .resume,
-            "startShortcut": .startShortcut, "requestClearAll": .requestClearAll, "requestCancel": .requestCancel, "restore": .restore, "openBrowser": .openBrowser,
+            "startShortcut": .startShortcut, "requestClearAll": .requestClearAll, "requestCancel": .requestCancel, "restore": .restore, "openBrowser": .openBrowser, "deleteNote": .deleteNote, "editNote": .editNote,
             "confirm": .confirm, "dismissConfirmation": .dismissConfirmation, "holdBegan": .holdBegan, "holdEnded": .holdEnded,
             "otherAppInFront": .otherAppInFront, "scopeAppInFront": .scopeAppInFront, "openComment": .openComment, "clickAway": .clickAway,
             "submitComment": .submitComment, "closeComment": .closeComment, "openPreview": .openPreview, "closePreview": .closePreview,
