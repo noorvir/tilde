@@ -27,6 +27,13 @@ struct Draft: Identifiable {
     var pictureArea: CGRect?
 
     var id: UUID { annotation.id }
+
+    var isRecording: Bool {
+        if case .recording = annotation.target {
+            return true
+        }
+        return false
+    }
 }
 
 enum PreviewImage {
@@ -349,7 +356,7 @@ final class AnnotationController: ObservableObject {
             if record.id == session.id {
                 sessionStarted = record.created
             }
-            drafts = Self.drafts(from: record, archive: archive)
+            drafts = Self.drafts(from: record, archive: archive, into: session.id)
         }
         startCheckpoints()
         startHoldMonitor()
@@ -582,6 +589,10 @@ final class AnnotationController: ObservableObject {
             return
         }
         log.notice("session \(session.id, privacy: .public) cancelled")
+        // A cancelled session keeps its notes in History, but not its recordings.
+        let clips = drafts.filter(\.isRecording)
+        clips.forEach(Self.deleteVideo)
+        drafts.removeAll(where: \.isRecording)
         saveSession(state: .cancelled)
         store.finish(session.id, with: .cancelled)
         dispatch(.ended)
@@ -990,6 +1001,7 @@ final class AnnotationController: ObservableObject {
             }
         case .showStartFailure: show(notice: "Could not start recording")
         case .showSaveFailure: show(notice: "Could not save the recording")
+        case .showSourceGone: show(notice: "Recording stopped")
         case .startPicking:
             showsList = false
             hover = nil
@@ -1025,7 +1037,7 @@ final class AnnotationController: ObservableObject {
             for machine in machines {
                 group.addTask {
                     do {
-                        try RemotePush.push(folder, to: machine)
+                        try await RemotePush.push(folder, to: machine)
                         return nil
                     } catch {
                         log.error("could not send feedback to \(machine, privacy: .public): \(String(describing: error), privacy: .public)")
@@ -1527,13 +1539,24 @@ final class AnnotationController: ObservableObject {
     }
 
     /// Notes of a saved session as drafts, with their saved images.
-    static func drafts(from record: SessionRecord, archive: SessionArchive) -> [Draft] {
-        record.notes.map { note in
+    /// A recording comes too while its file is there; into another session, the file is
+    /// linked into that session's folder, so that each session owns its recordings.
+    static func drafts(from record: SessionRecord, archive: SessionArchive, into id: String) -> [Draft] {
+        record.notes.compactMap { note in
+            var target = note.target
+            if case .recording(let video, let seconds, let source) = note.target {
+                guard FileManager.default.fileExists(atPath: video.path) else {
+                    return nil
+                }
+                if record.id != id {
+                    target = .recording(video: archive.adopt(video, into: id), seconds: seconds, source: source)
+                }
+            }
             let images = archive.images(of: note, in: record.id)
             let captures = Captures(image: images.image, contextImage: images.contextImage)
             // The preview and the list show the annotation's own images.
             let annotation = Annotation(
-                id: note.id, comment: note.comment, target: note.target, frame: note.frame, image: images.image, contextImage: images.contextImage
+                id: note.id, comment: note.comment, target: target, frame: note.frame, image: images.image, contextImage: images.contextImage
             )
             var draft = Draft(annotation: annotation, marker: note.marker, chip: note.chip, capture: Task { captures }, anchor: note.anchor)
             draft.isRestored = true
@@ -1577,7 +1600,9 @@ final class AnnotationController: ObservableObject {
     private func replaceDrafts(with record: SessionRecord) {
         markRestored(record)
         closeComposer()
-        drafts = Self.drafts(from: record, archive: archive)
+        if let session {
+            drafts = Self.drafts(from: record, archive: archive, into: session.id)
+        }
         if let page = record.pageURL.flatMap(URL.init(string:)), browser.pageURL != record.pageURL {
             openBrowser(at: page)
         }
@@ -1788,7 +1813,7 @@ final class AnnotationController: ObservableObject {
 
     /// Records the chosen source, or the screen with the HUD when there is none.
     private func startClip() {
-        guard case .starting(let operation) = recording else {
+        guard case .starting(let operation) = recording, let session else {
             return
         }
         let recordingSource = source ?? .screen(Self.displayID(of: hud.window.screen) ?? CGMainDisplayID())
@@ -1806,9 +1831,16 @@ final class AnnotationController: ObservableObject {
             frame = .zero
         }
 
+        // The clip belongs to the session: it is in its folder, and goes with it.
+        let video = archive.newClip(in: session.id)
+        let browserWindow = browser.windowNumber
         Task {
             do {
-                let started = try await ScreenRecorder.start(recordingSource)
+                let started = try await ScreenRecorder.start(recordingSource, to: video, browserWindow: browserWindow) { [weak self] in
+                    Task { @MainActor in
+                        self?.recordedSourceEnded(video)
+                    }
+                }
                 arrivedClip = .recorder(started)
                 defer { arrivedClip = nil }
                 guard !dispatch(.clipStarted(operation)).contains(.dropClip) else {
@@ -1823,6 +1855,14 @@ final class AnnotationController: ObservableObject {
                 dispatch(.clipStartFailed(operation))
             }
         }
+    }
+
+    /// The recorded window, display or phone went away: the clip ends at its last frame.
+    private func recordedSourceEnded(_ video: URL) {
+        guard recorder?.video == video else {
+            return
+        }
+        dispatch(.captureStopped)
     }
 
     /// Saves the clip in progress; `flow` decides whether it still goes to the list.
@@ -2139,6 +2179,8 @@ final class AnnotationController: ObservableObject {
 
     /// The scoped window closed: annotations cover everything again.
     private func endScope() {
+        // A clip of the window ends with it, at its last frame.
+        dispatch(.captureStopped)
         setScope(nil)
         show(notice: "Window closed")
     }
@@ -2373,15 +2415,14 @@ final class AnnotationController: ObservableObject {
         return !inside.isNull && inside.width * inside.height >= 0.8 * region.width * region.height
     }
 
-    /// The target alone: an element from its own window, or a region from the screen.
+    /// The target alone: an element from its own window, or a region from the screen. An
+    /// element whose window cannot be captured, such as one that just closed, has no picture:
+    /// the screen there may show another window.
     nonisolated private static func closeUpImage(
         of rect: CGRect, outline: CGRect?, window: ElementPicker.WindowInfo?, keeping: Set<CGWindowID>
     ) async -> Data? {
         if let outline, let window {
-            let image = await ScreenCapture.png(ofWindow: CGWindowID(window.number), area: rect, outline: outline, maxSide: 1200)
-            if let image {
-                return image
-            }
+            return await ScreenCapture.png(ofWindow: CGWindowID(window.number), area: rect, outline: outline, maxSide: 1200)
         }
         return await ScreenCapture.png(of: rect, outline: outline, keeping: keeping, maxSide: 1200)
     }

@@ -125,13 +125,39 @@ final class SessionArchive: @unchecked Sendable {
         }
     }
 
-    /// Deletes sessions older than `keptDays`, except the newest `keptCount`.
+    /// Deletes sessions older than `keptDays`, except the newest `keptCount`, and recordings
+    /// that no note has, such as one in progress when Tilde quit.
     func prune(now: Date = Date()) {
         queue.async { [self] in
             let limit = now.addingTimeInterval(-Double(Self.keptDays) * 86_400)
-            for record in readAll().dropFirst(Self.keptCount) where record.updated < limit {
+            let records = readAll()
+            for record in records.dropFirst(Self.keptCount) where record.updated < limit {
                 try? FileManager.default.removeItem(at: folder(record.id))
             }
+            for record in records.prefix(Self.keptCount) {
+                removeClips(of: record)
+            }
+        }
+    }
+
+    /// A session's own name for another session's recording: a hard link in its folder, or a
+    /// copy where a link cannot be made.
+    func adopt(_ video: URL, into id: String) -> URL {
+        let own = newClip(in: id)
+        try? linkOrCopy(video, to: own)
+        return own
+    }
+
+    private func removeClips(of record: SessionRecord) {
+        let kept = Set(record.notes.compactMap { note -> String? in
+            if case .recording(let video, _, _) = note.target {
+                return video.lastPathComponent
+            }
+            return nil
+        })
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder(record.id), includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "mp4" && !kept.contains(file.lastPathComponent) {
+            try? FileManager.default.removeItem(at: file)
         }
     }
 
@@ -156,6 +182,14 @@ final class SessionArchive: @unchecked Sendable {
 
     func folder(_ id: String) -> URL {
         root.appendingPathComponent(id, isDirectory: true)
+    }
+
+    /// A new file for a session's recording, in its folder, so that deleting the session or
+    /// pruning History deletes it too.
+    func newClip(in id: String) -> URL {
+        let folder = folder(id)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("clip-\(UUID().uuidString).mp4")
     }
 
     static func imageName(_ id: UUID) -> String {

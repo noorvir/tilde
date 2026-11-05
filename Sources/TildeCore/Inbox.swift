@@ -19,7 +19,7 @@ public func saveToInbox(_ feedback: Feedback, sessionID: String, root: URL = inb
             try contextImage.write(to: folder.appendingPathComponent(contextImageName(index + 1)))
         }
         if case .recording(let video, _, _) = annotation.target {
-            try FileManager.default.copyItem(at: video, to: folder.appendingPathComponent(videoName(index + 1)))
+            try linkOrCopy(video, to: folder.appendingPathComponent(videoName(index + 1)))
         }
     }
 
@@ -51,4 +51,14 @@ public func recentInboxFolders(root: URL = inboxRoot, limit: Int) -> [URL] {
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
             .prefix(limit)
     )
+}
+
+/// A second name for a file, so a report holds a video without a second copy on disk; a copy
+/// where a link cannot be made, such as across volumes.
+public func linkOrCopy(_ file: URL, to destination: URL) throws {
+    do {
+        try FileManager.default.linkItem(at: file, to: destination)
+    } catch {
+        try FileManager.default.copyItem(at: file, to: destination)
+    }
 }

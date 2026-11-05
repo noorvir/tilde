@@ -91,14 +91,16 @@ final class SourcePickerModel: ObservableObject {
         screens = Self.offered(displays + phones, drawableOnly: drawableOnly)
         apps = Self.apps(of: content.windows, browserWindow: browserWindow)
 
+        // Tilde's browser is a window like any other; its other windows are left out.
         let tilde = content.applications.filter { $0.processID == getpid() }
+        let browser = content.windows.filter { Int($0.windowID) == browserWindow }
         let tiles = screens + apps.flatMap(\.windows)
         await withTaskGroup(of: (String, CGImage?).self) { group in
             for tile in tiles {
                 switch tile.source {
                 case .screen(let id):
                     if let display = content.displays.first(where: { $0.displayID == id }) {
-                        let filter = SCContentFilter(display: display, excludingApplications: tilde, exceptingWindows: [])
+                        let filter = SCContentFilter(display: display, excludingApplications: tilde, exceptingWindows: browser)
                         group.addTask { await (tile.id, Self.picture(of: filter, size: display.frame.size)) }
                     }
                 case .window(let info):

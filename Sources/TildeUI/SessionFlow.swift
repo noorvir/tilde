@@ -121,7 +121,7 @@ struct SessionFlow: Equatable {
         /// The clip of a finished stop goes to the list; a result nobody waits for any more
         /// throws its recorder or file away.
         case keepClip, dropClip
-        case showStartFailure, showSaveFailure
+        case showStartFailure, showSaveFailure, showSourceGone
         case startPicking, stopPicking, openPicker, closePicker, applySource
         case startSend, finishSend, showSendFailure, showPushFailure, hideHUD
     }
@@ -498,7 +498,7 @@ struct SessionFlow: Equatable {
                 return []
             }
             open.activity = .recording(.finishing(operation: nextOperation(), thenSend: false))
-            return [.finishClip]
+            return [.finishClip, .showSourceGone]
 
         case .clipFinished(let operation):
             guard case .recording(.finishing(operation, let thenSend)) = open.activity else {

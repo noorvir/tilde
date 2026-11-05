@@ -50,9 +50,14 @@ final class HistoryModel: ObservableObject {
             let images = archive.images(of: note, in: record.id)
             return Annotation(id: note.id, comment: note.comment, target: note.target, frame: note.frame, image: images.image, contextImage: images.contextImage)
         }
-        let folder = record.reportFolder.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? archive.folder(record.id)
+        let feedback = Feedback(annotations: annotations)
+        // An unsent session has no report folder yet; it gets one, as Send makes, so the
+        // report's file names are there.
+        guard let folder = record.reportFolder.map({ URL(fileURLWithPath: $0, isDirectory: true) }) ?? (try? saveToInbox(feedback, sessionID: record.id)) else {
+            return
+        }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(reportText(for: Feedback(annotations: annotations), folder: folder), forType: .string)
+        NSPasteboard.general.setString(reportText(for: feedback, folder: folder), forType: .string)
     }
 
     func canRestore(_ record: SessionRecord) -> Bool {

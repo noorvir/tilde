@@ -43,16 +43,23 @@ public enum RemotePush {
     }
 
     /// Copies the folder to `~/.tilde/inbox/<its name>/` on the host, the same place as on this
-    /// Mac. Waits for the network, so call it away from the main thread.
-    public static func push(_ folder: URL, to host: String) throws {
+    /// Mac. A copy with videos can take minutes, so it waits on a thread of its own, never on
+    /// Swift's shared ones.
+    public static func push(_ folder: URL, to host: String) async throws {
         guard isValid(host: host) else {
             throw Failure.invalidHost
         }
 
-        let name = folder.lastPathComponent
-        _ = try run(ssh, options + [host, "mkdir -p ~/.tilde/inbox/\(name)"])
-        let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).map { folder.appendingPathComponent($0).path }
-        _ = try run(scp, options + files + ["\(host):.tilde/inbox/\(name)/"])
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                continuation.resume(with: Result {
+                    let name = folder.lastPathComponent
+                    _ = try run(ssh, options + [host, "mkdir -p ~/.tilde/inbox/\(name)"])
+                    let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).map { folder.appendingPathComponent($0).path }
+                    _ = try run(scp, options + files + ["\(host):.tilde/inbox/\(name)/"])
+                })
+            }
+        }
     }
 
     /// Runs a command on the host, with `input` as its standard input. Waits for the network.
@@ -67,9 +74,11 @@ public enum RemotePush {
 
     private static let ssh = "/usr/bin/ssh"
     private static let scp = "/usr/bin/scp"
-    // Never waits for a password: there is nobody to type it.
+    // Never waits for a password: there is nobody to type it. A connection that stops
+    // answering for 30 s ends the command, also in the middle of a copy.
     private static let options = [
-        "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ControlMaster=no", "-o", "ControlPath=~/.tilde/ssh-%C",
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3",
+        "-o", "ControlMaster=no", "-o", "ControlPath=~/.tilde/ssh-%C",
     ]
     private static let lastShared = OSAllocatedUnfairLock(initialState: [String: Date]())
 

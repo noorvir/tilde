@@ -9,8 +9,9 @@ struct Phone: Equatable, Sendable {
     let name: String
 }
 
-/// Finds iPhones connected by cable and takes pictures of their screens. The phone must be
-/// unlocked and trust this Mac; Tilde needs the camera permission.
+/// Finds iPhones connected by cable, and captures their screens for the picker's pictures and
+/// for recordings. The phone must be unlocked and trust this Mac; Tilde needs the camera
+/// permission.
 enum PhoneCapture {
     /// Lets macOS offer the screens of iPhones and iPads on a cable as capture devices. They
     /// appear a moment after the first call.
@@ -29,10 +30,6 @@ enum PhoneCapture {
         devices().map { Phone(id: $0.uniqueID, name: $0.localizedName) }
     }
 
-    static func device(for phone: Phone) -> AVCaptureDevice? {
-        devices().first { $0.uniqueID == phone.id }
-    }
-
     /// Whether Tilde may record the phone, asking the user the first time.
     static func isAllowed() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -45,25 +42,37 @@ enum PhoneCapture {
         }
     }
 
-    /// One frame of the phone's screen, or nil when it sends none within two seconds.
-    static func snapshot(of phone: Phone) async -> CGImage? {
-        guard await isAllowed(), let device = device(for: phone), let input = try? AVCaptureDeviceInput(device: device) else {
-            return nil
+    /// A capture session of the phone's screen as BGRA frames, not running yet, with its
+    /// device and its output.
+    static func session(for phone: Phone) async throws -> (session: AVCaptureSession, device: AVCaptureDevice, output: AVCaptureVideoDataOutput) {
+        guard await isAllowed() else {
+            throw ScreenRecorder.Failure.notAllowed
+        }
+        guard let device = devices().first(where: { $0.uniqueID == phone.id }) else {
+            throw ScreenRecorder.Failure.noSource
         }
         let session = AVCaptureSession()
+        let input = try AVCaptureDeviceInput(device: device)
         let output = AVCaptureVideoDataOutput()
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
         guard session.canAddInput(input), session.canAddOutput(output) else {
-            return nil
+            throw ScreenRecorder.Failure.noSource
         }
         session.addInput(input)
         session.addOutput(output)
+        return (session, device, output)
+    }
 
-        let grabber = FrameGrabber()
-        output.setSampleBufferDelegate(grabber, queue: grabber.queue)
-        session.startRunning()
-        defer { session.stopRunning() }
-        return await grabber.firstFrame(timeout: .seconds(2))
+    /// One frame of the phone's screen, or nil when it sends none within two seconds.
+    static func snapshot(of phone: Phone) async -> CGImage? {
+        guard let capture = try? await session(for: phone) else {
+            return nil
+        }
+        let firstFrame = FirstFrame()
+        capture.output.setSampleBufferDelegate(firstFrame, queue: firstFrame.queue)
+        capture.session.startRunning()
+        defer { capture.session.stopRunning() }
+        return try? await firstFrame.image(timeout: 2)
     }
 
     private static func devices() -> [AVCaptureDevice] {
@@ -71,34 +80,38 @@ enum PhoneCapture {
     }
 }
 
-/// Hands out the first frame a capture session sends.
-private final class FrameGrabber: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
-    let queue = DispatchQueue(label: "dev.tilde.phone-snapshot")
+/// Waits for a capture session's first frame: a phone's format says 0 × 0 until it streams,
+/// so the first frame gives its size, and its picture.
+final class FirstFrame: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    let queue = DispatchQueue(label: "dev.tilde.first-frame")
     // Read and written on `queue` only.
-    private var continuation: CheckedContinuation<CGImage?, Never>?
+    private var waiting: CheckedContinuation<CGImage, Error>?
 
-    func firstFrame(timeout: Duration) async -> CGImage? {
-        await withCheckedContinuation { continuation in
+    /// The first frame; `Failure.noFrames` when none comes in time.
+    func image(timeout seconds: TimeInterval) async throws -> CGImage {
+        try await withCheckedThrowingContinuation { continuation in
             queue.async { [self] in
-                self.continuation = continuation
-            }
-            queue.asyncAfter(deadline: .now() + Double(timeout.components.seconds)) { [self] in
-                finish(with: nil)
+                waiting = continuation
+                queue.asyncAfter(deadline: .now() + seconds) { [self] in
+                    finish(with: .failure(ScreenRecorder.Failure.noFrames))
+                }
             }
         }
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput buffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let frame = buffer.imageBuffer else {
-            return
-        }
         var image: CGImage?
-        VTCreateCGImageFromCVPixelBuffer(frame, options: nil, imageOut: &image)
-        finish(with: image)
+        if let frame = buffer.imageBuffer {
+            VTCreateCGImageFromCVPixelBuffer(frame, options: nil, imageOut: &image)
+        }
+        if let image {
+            finish(with: .success(image))
+        }
     }
 
-    private func finish(with image: CGImage?) {
-        continuation?.resume(returning: image)
-        continuation = nil
+    /// Runs on `queue`; only the first result counts.
+    private func finish(with result: Result<CGImage, Error>) {
+        waiting?.resume(with: result)
+        waiting = nil
     }
 }
