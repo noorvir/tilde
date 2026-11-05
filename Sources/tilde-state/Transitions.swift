@@ -18,7 +18,6 @@ enum Transitions {
         var windowFrame: [CGFloat]?
         var labelDistance: CGFloat?
         var pushHost: String?
-        var pushed: [String]?
         var failed: [String]?
         var sshConfig: String?
         var processList: String?
@@ -89,8 +88,8 @@ enum Transitions {
             if let host = row.pushHost {
                 result.hostIsValid = RemotePush.isValid(host: host)
             }
-            if let pushed = row.pushed, let failed = row.failed {
-                result.confirmation = RemotePush.confirmation(pushed: pushed, failed: failed)
+            if let failed = row.failed {
+                result.confirmation = RemotePush.failure(failed)
             }
             if let found = row.foundOnMachine, let mac = row.onThisMac {
                 result.chosen = NodeSetup.chosen(found: found.compactMap { Harness(rawValue: $0) }, onThisMac: mac.compactMap { Harness(rawValue: $0) })

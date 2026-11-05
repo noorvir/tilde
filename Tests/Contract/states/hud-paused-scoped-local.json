@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    600,
+    80
+  ],
+  "session": {
+    "client": "You",
+    "isLocal": true
+  },
+  "paused": true,
+  "scoped": true
+}

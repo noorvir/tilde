@@ -100,14 +100,14 @@ final class Harness {
 
         let session = try require(store.active, "an active session")
         print("session \(session.id) for \(session.client)")
-        try await until("annotate mode is on") { self.controller.phase == .annotating }
+        try await until("annotate mode is on") { self.controller.mode.isOpen }
         if session.url == nil {
             browser.show(URL(string: "http://127.0.0.1:\(pagePort)/"))
         }
         if session.url != nil {
             try await until("the session is limited to the browser window") { self.isScopedToBrowser }
             try check(isScopedToBrowser, "a session that opens a page annotates only the browser window")
-            try check(controller.isPaused, "a session that opens a page starts paused, so the user can browse")
+            try check(controller.pauses.contains(.user), "a session that opens a page starts paused, so the user can browse")
             controller.togglePause()
         }
         try await until("the page is loaded", timeout: 30) { await self.pageIsReady() }
@@ -137,9 +137,9 @@ final class Harness {
 
             // Another app in front pauses the session; the window's app coming back resumes it.
             controller.frontmostAppChanged(to: 1)
-            try check(controller.isAutoPaused && overlay.ignoresMouseEvents, "another app in front pauses the session and lets clicks through")
+            try check(controller.pauses.contains(.otherApp) && overlay.ignoresMouseEvents, "another app in front pauses the session and lets clicks through")
             controller.frontmostAppChanged(to: ProcessInfo.processInfo.processIdentifier)
-            try check(!controller.isAutoPaused && !overlay.ignoresMouseEvents, "the window's app in front again resumes the session")
+            try check(!controller.pauses.contains(.otherApp) && !overlay.ignoresMouseEvents, "the window's app in front again resumes the session")
 
             // A click in the browser, such as on its Annotate button, raises it over the
             // overlay; the overlay goes back above it, also after pause and resume.
@@ -280,7 +280,7 @@ final class Harness {
         }
         controller.dismissConfirmation()
         try check(
-            confirmWidth == annotatingWidth && controller.drafts.count == 1 && controller.phase == .annotating,
+            confirmWidth == annotatingWidth && controller.drafts.count == 1 && controller.mode.isOpen,
             "confirming keeps the pill width and Cancel keeps the annotation"
         )
 
@@ -309,7 +309,7 @@ final class Harness {
 
         key("\r", code: 36, modifiers: .command)
         try await until("the feedback is sent") {
-            if case .sent = self.controller.phase {
+            if case .sent = self.controller.mode {
                 return true
             }
             return false
@@ -374,7 +374,7 @@ final class Harness {
         try await until("the first session is over") { self.controller.session == nil }
         controller.annotateInBrowser()
         try await until("Open Browser limits the session to the browser") { self.isScopedToBrowser }
-        try check(controller.isPaused, "Open Browser starts paused")
+        try check(controller.pauses.contains(.user), "Open Browser starts paused")
         browser.close()
         try await until("the scope ends when the browser closes", timeout: 5) { self.controller.scope == nil }
         try check(controller.notice == "Window closed", "the HUD says the window closed")

@@ -406,6 +406,34 @@
   }
  },
  {
+  "name": "Esc stops choosing a source in recording mode too",
+  "state": {
+   "isAnnotating": false,
+   "recording": true,
+   "pickingWindow": true,
+   "notes": 1
+  },
+  "event": "escape",
+  "expect": {
+   "effects": [
+    "cancelWindowPick"
+   ]
+  }
+ },
+ {
+  "name": "Another app in front does not pause recording mode",
+  "state": {
+   "isAnnotating": false
+  },
+  "event": "otherAppInFront",
+  "expect": {
+   "state": {
+    "autoPaused": false
+   },
+   "effects": []
+  }
+ },
+ {
   "name": "Its app in front again resumes",
   "state": {
    "autoPaused": true
@@ -808,6 +836,238 @@
     "giveKeyboardBack",
     "takeKeyboard"
    ]
+  }
+ },
+ {
+  "name": "Esc in recording mode goes back to annotating",
+  "state": {
+   "isAnnotating": false,
+   "recording": true
+  },
+  "event": "escape",
+  "expect": {
+   "effects": [
+    "exitRecording"
+   ]
+  }
+ },
+ {
+  "name": "Esc in recording mode with a clip not stopped asks to discard it",
+  "state": {
+   "isAnnotating": false,
+   "recording": true,
+   "clipInProgress": true,
+   "notes": 1
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": "discardRecording"
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "The record toggle goes back to annotating",
+  "state": {
+   "isAnnotating": false,
+   "recording": true
+  },
+  "event": "leaveRecording",
+  "expect": {
+   "effects": [
+    "exitRecording"
+   ]
+  }
+ },
+ {
+  "name": "The record toggle asks first with a clip not stopped",
+  "state": {
+   "isAnnotating": false,
+   "recording": true,
+   "clipInProgress": true,
+   "notes": 1
+  },
+  "event": "leaveRecording",
+  "expect": {
+   "state": {
+    "confirmation": "discardRecording"
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Yes to discard the recording goes back to annotating",
+  "state": {
+   "isAnnotating": false,
+   "recording": true,
+   "clipInProgress": true,
+   "notes": 1,
+   "confirmation": "discardRecording"
+  },
+  "event": "confirm",
+  "expect": {
+   "state": {
+    "confirmation": null
+   },
+   "effects": [
+    "exitRecording"
+   ]
+  }
+ },
+ {
+  "name": "Esc keeps recording when asked to discard it",
+  "state": {
+   "isAnnotating": false,
+   "recording": true,
+   "clipInProgress": true,
+   "notes": 1,
+   "confirmation": "discardRecording"
+  },
+  "event": "escape",
+  "expect": {
+   "state": {
+    "confirmation": null
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "Leaving recording mode does nothing while annotating",
+  "state": {},
+  "event": "leaveRecording",
+  "expect": {
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the pause button and the pause shortcut does nothing",
+  "state": {
+   "pickingWindow": true,
+   "notes": 2
+  },
+  "event": "togglePause",
+  "expect": {
+   "state": {
+    "pickingWindow": true,
+    "notes": 2
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the play button does nothing",
+  "state": {
+   "pickingWindow": true,
+   "notes": 2,
+   "paused": true
+  },
+  "event": "resume",
+  "expect": {
+   "state": {
+    "pickingWindow": true,
+    "notes": 2,
+    "paused": true
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the start shortcut does nothing",
+  "state": {
+   "pickingWindow": true,
+   "notes": 2,
+   "paused": true
+  },
+  "event": "startShortcut",
+  "expect": {
+   "state": {
+    "pickingWindow": true,
+    "notes": 2,
+    "paused": true
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the trash button does nothing",
+  "state": {
+   "pickingWindow": true,
+   "notes": 2
+  },
+  "event": "requestClearAll",
+  "expect": {
+   "state": {
+    "pickingWindow": true,
+    "notes": 2
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the close button does nothing",
+  "state": {
+   "pickingWindow": true,
+   "notes": 2
+  },
+  "event": "requestCancel",
+  "expect": {
+   "state": {
+    "pickingWindow": true,
+    "notes": 2
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the draw button does nothing",
+  "state": {
+   "pickingWindow": true,
+   "notes": 2
+  },
+  "event": "startDrawing",
+  "expect": {
+   "state": {
+    "pickingWindow": true,
+    "notes": 2
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the hold key does nothing",
+  "state": {
+   "pickingWindow": true,
+   "notes": 2
+  },
+  "event": "holdBegan",
+  "expect": {
+   "state": {
+    "pickingWindow": true,
+    "notes": 2
+   },
+   "effects": []
+  }
+ },
+ {
+  "name": "While choosing a window, the record toggle in recording mode does nothing",
+  "state": {
+   "isAnnotating": false,
+   "recording": true,
+   "clipInProgress": true,
+   "pickingWindow": true,
+   "notes": 1
+  },
+  "event": "leaveRecording",
+  "expect": {
+   "state": {
+    "isAnnotating": false,
+    "recording": true,
+    "clipInProgress": true,
+    "pickingWindow": true,
+    "notes": 1
+   },
+   "effects": []
   }
  }
 ]

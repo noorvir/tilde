@@ -37,6 +37,8 @@ public enum Target: Sendable, Codable {
     case element(Element)
     /// Shapes the user drew on the screen, as JSON.
     case drawing(shapes: String)
+    /// A screen recording: the video file, its length, and what it shows, such as "Safari window".
+    case recording(video: URL, seconds: Double, source: String)
 }
 
 public enum Element: Sendable, Codable {

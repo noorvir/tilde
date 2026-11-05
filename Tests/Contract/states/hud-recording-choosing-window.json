@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    600,
+    136
+  ],
+  "session": {
+    "client": "You",
+    "isLocal": true
+  },
+  "notes": 1,
+  "recording": "ready",
+  "pickingWindow": true
+}

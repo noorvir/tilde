@@ -10,6 +10,19 @@ final class OverlayWindow: NSPanel {
     /// On one window, ordered just above it, instead of on a whole screen.
     let isWindowSized: Bool
 
+    /// Whether the overlay takes the pointer; without it, clicks and moves go to the windows
+    /// under it, and it only draws.
+    var takesInput = true {
+        didSet {
+            guard takesInput != oldValue else {
+                return
+            }
+            ignoresMouseEvents = !takesInput
+            acceptsMouseMovedEvents = takesInput
+            contentView?.updateTrackingAreas()
+        }
+    }
+
     convenience init(screen: NSScreen, controller: AnnotationController) {
         self.init(frame: screen.frame, level: Self.overlayLevel, isWindowSized: false, controller: controller)
     }
@@ -76,6 +89,10 @@ final class OverlayView: NSView {
         super.updateTrackingAreas()
         for area in trackingAreas {
             removeTrackingArea(area)
+        }
+        // Without input the overlay only draws: no hover, cursor or enter and exit.
+        guard (window as? OverlayWindow)?.takesInput == true else {
+            return
         }
         addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect, .cursorUpdate], owner: self))
     }
@@ -207,6 +224,11 @@ final class OverlayView: NSView {
             controller.escapePressed()
             return
         }
+        // Choosing a window takes no other key, such as ⌘↩.
+        if controller.isPickingWindow {
+            super.keyDown(with: event)
+            return
+        }
         if controller.confirmation != nil {
             if event.keyCode == 36 {
                 controller.confirm()
@@ -218,7 +240,7 @@ final class OverlayView: NSView {
             controller.navigateHistory(event)
             return
         }
-        if controller.isPaused {
+        if controller.pauses.contains(.user) {
             super.keyDown(with: event)
             return
         }

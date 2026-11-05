@@ -116,12 +116,73 @@ enum Fixtures {
     }
 
     private static func image(width: Int, height: Int, draw: (CGContext, CGSize) -> Void) -> Data {
+        NSBitmapImageRep(cgImage: picture(width: width, height: height, draw: draw)).representation(using: .png, properties: [:])!
+    }
+
+    private static func picture(width: Int, height: Int, draw: (CGContext, CGSize) -> Void) -> CGImage {
         let context = CGContext(
             data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
             space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )!
         draw(context, CGSize(width: width, height: height))
-        return NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
+        return context.makeImage()!
+    }
+
+    // MARK: - Recording sources
+
+    /// A screen or window: a coloured backdrop with a light window on it.
+    static func sourcePicture(width: Int, height: Int, seed: Int) -> CGImage {
+        picture(width: width, height: height) { context, size in
+            let hues: [(CGFloat, CGFloat, CGFloat)] = [(0.22, 0.36, 0.62), (0.45, 0.30, 0.55), (0.20, 0.50, 0.45), (0.62, 0.42, 0.25)]
+            let (red, green, blue) = hues[seed % hues.count]
+            context.setFillColor(CGColor(red: red, green: green, blue: blue, alpha: 1))
+            context.fill(CGRect(origin: .zero, size: size))
+            let window = CGRect(x: size.width * 0.12, y: size.height * 0.12, width: size.width * 0.7, height: size.height * 0.72)
+            context.setFillColor(CGColor(gray: 0.97, alpha: 1))
+            context.fill(window)
+            context.setFillColor(CGColor(gray: 0.86, alpha: 1))
+            context.fill(CGRect(x: window.minX, y: window.maxY - size.height * 0.08, width: window.width, height: size.height * 0.08))
+        }
+    }
+
+    /// A phone's screen: tall, with rows like a list.
+    static func phonePicture() -> CGImage {
+        picture(width: 118, height: 256) { context, size in
+            context.setFillColor(CGColor(gray: 0.98, alpha: 1))
+            context.fill(CGRect(origin: .zero, size: size))
+            for row in 0..<8 {
+                context.setFillColor(CGColor(gray: 0.88, alpha: 1))
+                context.fill(CGRect(x: 10, y: size.height - 48 - CGFloat(row) * 26, width: size.width - 20, height: 18))
+            }
+        }
+    }
+
+    static let phone = Phone(id: "phone", name: "iPhone")
+    static let display: CGDirectDisplayID = 9002
+
+    /// Two screens and a phone; Safari (with `window`), Xcode, Terminal, Notes and Finder.
+    static func sources() -> (screens: [SourcePickerModel.Tile], apps: [SourcePickerModel.App]) {
+        let screens = [
+            SourcePickerModel.Tile(source: .screen(9001), title: "Built-in Retina Display", detail: "3024 × 1964", picture: sourcePicture(width: 302, height: 196, seed: 0)),
+            SourcePickerModel.Tile(source: .screen(display), title: "Studio Display", detail: "5120 × 2880", picture: sourcePicture(width: 320, height: 180, seed: 1)),
+            SourcePickerModel.Tile(source: .phone(phone), title: phone.name, detail: "Cable", picture: phonePicture()),
+        ]
+        let windows: [(pid: pid_t, app: String, titles: [String])] = [
+            (window.pid, "Safari", [window.title ?? "", "Pull request", "Downloads"]),
+            (2, "Xcode", ["Tilde", "Preview"]),
+            (3, "Terminal", ["zsh"]),
+            (4, "Notes", ["Ideas"]),
+            (5, "Finder", ["Desktop", "Documents"]),
+        ]
+        let apps = windows.enumerated().map { appIndex, entry in
+            let tiles = entry.titles.enumerated().map { index, title in
+                let number = entry.pid == window.pid && index == 0 ? window.number : 5000 + appIndex * 10 + index
+                let info = ElementPicker.WindowInfo(number: number, pid: entry.pid, app: entry.app, title: title, frame: CGRect(x: 0, y: 0, width: 1200, height: 800))
+                return SourcePickerModel.Tile(source: .window(info), title: title, detail: "1200 × 800", picture: sourcePicture(width: 300, height: 200, seed: appIndex + index))
+            }
+            return SourcePickerModel.App(pid: entry.pid, name: entry.app, icon: appIcon, windows: tiles)
+        }
+        return (screens, apps)
     }
 
     /// A window that annotations can be limited to.

@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 import Testing
 
@@ -107,14 +108,52 @@ struct UXSpecs {
         }
     }
 
+    /// The pill moves the HUD; within 40 pt of home it snaps back, and dragged home again it
+    /// forgets the place.
+    @Test func theHUDMovesAndSnapsBackHome() async throws {
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            // The title's place with the pill at rest: with the pointer off the pill, which
+            // grows under it, and once its zoom and snap animations have ended.
+            func title() async throws -> CGRect {
+                try await app.hover(over: CGPoint(x: 100, y: 600))
+                var frame = try await app.waitToSee("Annotating").frame
+                for _ in 0..<20 {
+                    try await Task.sleep(for: .milliseconds(150))
+                    let next = try await app.waitToSee("Annotating").frame
+                    if next == frame {
+                        break
+                    }
+                    frame = next
+                }
+                return frame
+            }
+            let home = try await title()
+            let pill = CGPoint(x: home.midX, y: home.midY)
+            try await app.drag(from: pill, to: CGPoint(x: pill.x + 20, y: pill.y + 15))
+            let snapped = try await title()
+            #expect(abs(snapped.minX - home.minX) < 2 && abs(snapped.minY - home.minY) < 2, "\(home), then \(snapped)")
+
+            try await app.drag(from: pill, to: CGPoint(x: pill.x - 200, y: pill.y + 80))
+            let moved = try await title()
+            #expect(abs(moved.minX - (home.minX - 200)) < 3 && abs(moved.minY - (home.minY + 80)) < 3, "\(home), then \(moved)")
+
+            let away = CGPoint(x: moved.midX, y: moved.midY)
+            try await app.drag(from: away, to: CGPoint(x: away.x + 200, y: away.y - 80))
+            let back = try await title()
+            #expect(abs(back.minX - home.minX) < 2 && abs(back.minY - home.minY) < 2, "\(home), then \(back)")
+        }
+    }
+
     @Test func aTooltipStaysWholeInsideTheHUD() async throws {
         try await withApp { app in
             try await app.doubleTap("control")
-            let button = try await app.waitToSee("Pause (Esc)")
-            try await app.hover(over: CGPoint(x: button.frame.midX, y: button.frame.midY))
-            // The pointer rests on it, also if the HUD was still appearing when it first moved.
-            // Off the button and back once the HUD has settled, so that the HUD sees it enter.
+            try await app.waitToSee("Pause (Esc)")
+            // Its frame once the HUD's zoom has ended; then off the button and back, so that
+            // the HUD sees the pointer enter.
             try await Task.sleep(for: .milliseconds(600))
+            let button = try await app.waitToSee("Pause (Esc)")
             try await app.hover(over: CGPoint(x: button.frame.midX, y: button.frame.maxY + 200))
             try await Task.sleep(for: .milliseconds(100))
             try await app.hover(over: CGPoint(x: button.frame.midX, y: button.frame.midY))
@@ -959,7 +998,9 @@ struct UXSpecs {
             try await app.key(.enter)
             try await app.waitToSeeText(containing: "1 note")
             try await app.key(.enter, command: true)
-            try await app.waitToSee("Copied, images on localhost", timeout: 20)
+            // "Copied" at once, and gone again while the images go to the machine.
+            try await app.waitToSee("Copied", timeout: 5)
+            try await app.waitNotToSee("Copied", timeout: 5)
             step("sent")
 
             // Its folder is on the machine, under the same name as here.
@@ -967,12 +1008,16 @@ struct UXSpecs {
             let saved = try #require(text.components(separatedBy: "Saved to: ").last?.prefix { $0 != "\n" })
             let name = URL(fileURLWithPath: String(saved)).lastPathComponent
             let remote = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde/inbox/\(name)")
+            let pushed = Date().addingTimeInterval(20)
+            while !FileManager.default.fileExists(atPath: remote.appendingPathComponent("feedback.md").path), Date() < pushed {
+                try await Task.sleep(for: .milliseconds(200))
+            }
             #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("annotation-1.png").path))
             #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("feedback.md").path))
 
-            // A machine that cannot be reached: the report still copies, with local paths.
+            // A machine that cannot be reached: the report still copies, with local paths, and
+            // a warning names the machine.
             try app.setNodes(["no-such-host.invalid"])
-            try await app.waitNotToSee("Copied, images on localhost", timeout: 5)
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
             try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
@@ -982,7 +1027,8 @@ struct UXSpecs {
             try await app.key(.enter)
             try await app.waitToSeeText(containing: "1 note")
             try await app.key(.enter, command: true)
-            try await app.waitToSee("Copied, no-such-host.invalid failed", timeout: 20)
+            try await app.waitToSee("Copied", timeout: 5)
+            try await app.waitToSee("Could not send the images to no-such-host.invalid", timeout: 20)
             let local = try #require(NSPasteboard.general.string(forType: .string))
             #expect(local.contains("Stays local"), "\(local)")
             step("unreachable machine")
@@ -1127,10 +1173,192 @@ struct UXSpecs {
         try await withApp { app in
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
-            try await app.press("Annotate a specific window")
+            try await app.press("Choose a screen or window to annotate")
             try await app.waitToSee("Choose a window")
+            try await app.press("Use window picker")
+            try await app.waitToSee("Screens")
+            try await app.key(.escape)
+            try await app.waitNotToSee("Screens")
+            try await app.waitNotToSee("Use window picker")
+            try await app.waitToSee("Annotating")
+        }
+    }
+
+    // MARK: - Recording
+
+    /// The window button picks on screen, with a "Use window picker" button that opens the picker
+    /// and a cross that closes it again; a window clicked on screen, a screen tile or the tile
+    /// of an app with one window each choose and close everything.
+    @Test func theSourcePickerChoosesAWindowToRecord() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Codex")
+            let reply = try await agent.call("start_annotation", ["wait_seconds": 0])
+            let session = try #require(reply.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0 != "." && $0 != " " && $0 != "\n" }))
+            try await app.waitToSee("Annotating")
+
+            try await app.press("Record a video")
+            try await app.waitToSeeText(containing: "Ready to record")
+            try await app.press("Choose a screen or window to record")
+            try await app.waitToSee("Choose a window")
+            try await app.press("Use window picker")
+            try await app.waitToSee("Screens")
+            try await app.press("Back to clicking on screen")
+            try await app.waitNotToSee("Screens")
+
+            // A click on the window itself.
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.minX + 20, y: frame.maxY - 20))
+            try await app.waitNotToSee("Use window picker")
+            try await app.waitToSee("Start recording tilde-ux-fixture")
+
+            // Limited to the window, the button chooses again; the screen's tile lifts the limit.
+            try await app.press("Only tilde-ux-fixture. Choose another window or the whole screen")
+            try await app.press("Use window picker")
+            try await app.waitToSee("Screens")
+            try await app.press(try #require(NSScreen.main?.localizedName))
+            try await app.waitNotToSee("Screens")
+            try await app.waitToSee("Start recording the screen")
+
+            // Clicks in the picker choose in it, not on screen.
+            try await app.press("Choose a screen or window to record")
+            try await app.press("Use window picker")
+            try await app.press("Windows")
+            // The fixture has one window, so its app tile chooses it.
+            try await app.press("tilde-ux-fixture")
+            try await app.waitNotToSee("Screens")
+            // The subtitle does not name the source; the window button shows it.
+            try await app.waitToSeeText(containing: "for Codex")
+
+            try await app.press("Start recording tilde-ux-fixture")
+            try await app.waitToSeeText(containing: "Recording 0:0")
+            try await Task.sleep(for: .seconds(1))
+            try await app.key(.enter, command: true)
+
+            let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
+            #expect(report.text.contains("Recorded: tilde-ux-fixture window"), "\(report.text)")
+        }
+    }
+
+    @Test func twoRecordingsOfTheScreenGoToTheAgentAsVideos() async throws {
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Codex")
+            let reply = try await agent.call("start_annotation", ["wait_seconds": 0])
+            let session = try #require(reply.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0 != "." && $0 != " " && $0 != "\n" }))
+            try await app.waitToSee("Annotating")
+
+            try await app.press("Record a video")
+            try await app.waitToSeeText(containing: "Ready to record")
+            let started = Date()
+            try await app.press("Start recording the screen")
+            try await app.waitToSeeText(containing: "Recording 0:0")
+            try await Task.sleep(for: .seconds(2))
+            try await app.press("Pause the recording")
+            try await app.waitToSeeText(containing: "Paused 0:0")
+            try await Task.sleep(for: .seconds(2))
+            try await app.press("Resume the recording")
+            try await Task.sleep(for: .seconds(1))
+            try await app.press("Stop and add the recording to the list")
+            let firstClipTime = Date().timeIntervalSince(started)
+            try await app.waitToSeeText(containing: "Ready to record")
+
+            // The clip waits in the preview's native player; Esc closes the preview.
+            try await app.press("Show annotations")
+            try await app.press("No comment")
+            try await app.waitToSee("1 of 1")
+            try await app.waitToSee("play/pause")
+            try await app.waitToSee("timeline")
+
+            // Its edge resizes it, and the next preview opens at that size.
+            func height() async throws -> CGFloat {
+                let close = try await app.waitToSee("Close")
+                let delete = try await app.waitToSee("Delete")
+                return delete.frame.maxY - close.frame.minY
+            }
+            let before = try await height()
+            let delete = try await app.waitToSee("Delete")
+            // The bottom edge, away from the rounded corner.
+            let edge = CGPoint(x: delete.frame.minX - 100, y: delete.frame.maxY + 16)
+            try await app.drag(from: edge, to: CGPoint(x: edge.x, y: edge.y + 80))
+            try await Task.sleep(for: .milliseconds(300))
+            let edgeResized = try await height()
+            #expect(edgeResized > before + 60, "\(before) pt, then \(edgeResized) pt")
+
+            // So does the grip in its corner.
+            let grip = CGPoint(x: delete.frame.maxX + 10, y: try await app.waitToSee("Delete").frame.maxY + 10)
+            try await app.drag(from: grip, to: CGPoint(x: grip.x + 60, y: grip.y + 40))
+            try await Task.sleep(for: .milliseconds(300))
+            let resized = try await height()
+            #expect(resized > edgeResized + 25, "\(edgeResized) pt, then \(resized) pt")
+            try await app.key(.escape)
+            try await app.waitNotToSee("1 of 1")
+            try await app.press("No comment")
+            try await app.waitToSee("1 of 1")
+            let reopened = try await height()
+            #expect(abs(reopened - resized) < 2, "\(resized) pt, then \(reopened) pt")
+
+            // The strip above the pictures moves it like the HUD's pill, from its top margin
+            // too. A place away from home stays, with the size, also the next time.
+            let home = try await app.waitToSee("1 of 1").frame
+            let margin = CGPoint(x: home.minX - 80, y: home.midY - 22)
+            try await app.slowDrag(from: margin, to: CGPoint(x: margin.x - 200, y: margin.y + 60))
+            try await Task.sleep(for: .milliseconds(300))
+            let moved = try await app.waitToSee("1 of 1").frame
+            #expect(abs(moved.minX - (home.minX - 200)) < 3 && abs(moved.minY - (home.minY + 60)) < 3, "\(home), then \(moved)")
+            try await app.press("Close")
+            try await app.waitNotToSee("1 of 1")
+            try await app.press("No comment")
+            let again = try await app.waitToSee("1 of 1").frame
+            #expect(abs(again.minX - moved.minX) < 2 && abs(again.minY - moved.minY) < 2, "\(moved), then \(again)")
+            #expect(abs(try await height() - resized) < 2)
+
+            // Resized, it still snaps to the centre, 30 pt short of it, and keeps its size; it
+            // opens there next time.
+            let header = CGPoint(x: again.minX - 80, y: again.midY)
+            try await app.drag(from: header, to: CGPoint(x: header.x + home.midX - again.midX - 20, y: header.y + home.minY - again.minY + 20))
+            try await Task.sleep(for: .milliseconds(400))
+            let centred = try await app.waitToSee("1 of 1").frame
+            #expect(abs(centred.minX - home.minX) < 2 && abs(centred.minY - home.minY) < 2, "\(home), then \(centred)")
+            #expect(abs(try await height() - resized) < 2)
+            try await app.key(.escape)
+            try await app.waitNotToSee("1 of 1")
+            try await app.press("No comment")
+            let reopenedAtHome = try await app.waitToSee("1 of 1").frame
+            #expect(abs(reopenedAtHome.minX - home.minX) < 2 && abs(reopenedAtHome.minY - home.minY) < 2)
+            #expect(abs(try await height() - resized) < 2)
+            try await app.key(.escape)
+            try await app.waitNotToSee("1 of 1")
+
+            // Esc goes back to annotating.
             try await app.key(.escape)
             try await app.waitToSee("Annotating")
+            try await app.press("Record a video")
+            try await app.waitToSeeText(containing: "Ready to record")
+
+            // Send while a clip is in progress keeps that clip too. Before that, Esc asks to
+            // discard the clip, and Esc again keeps it.
+            try await app.press("Start recording the screen")
+            try await app.waitToSeeText(containing: "Recording 0:0")
+            try await app.key(.escape)
+            try await app.waitToSee("Discard the recording?")
+            try await app.key(.escape)
+            try await app.waitNotToSee("Discard the recording?")
+            try await Task.sleep(for: .seconds(1))
+            try await app.key(.enter, command: true)
+
+            let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
+            #expect(report.text.contains("Screen recording"))
+            let folder = try #require(report.text.components(separatedBy: "\n").first { $0.hasPrefix("Saved to: ") }?.dropFirst("Saved to: ".count))
+            // The first clip leaves out its 2 s pause.
+            for (number, shortest, longest) in [(1, 2.5, firstClipTime - 1.5), (2, 0.5, 4.0)] {
+                let asset = AVURLAsset(url: URL(fileURLWithPath: "\(folder)/annotation-\(number).mp4"))
+                let seconds = try await asset.load(.duration).seconds
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                step("recording \(number): \(seconds) s of \(longest + 1.5) s, \(tracks.count) video track")
+                #expect(tracks.count == 1)
+                #expect(seconds >= shortest && seconds <= longest)
+            }
         }
     }
 }

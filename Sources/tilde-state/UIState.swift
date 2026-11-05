@@ -53,6 +53,14 @@ struct UIState: Decodable {
     var hover: Bool?
     var editing: Bool?
     var drawing: Bool?
+    /// The HUD's recording mode: ready, recording or paused.
+    var recording: String?
+    /// What clips record when not scoped to a window: "display" or "phone".
+    var source: String?
+    /// The source picker's page when it is open in full while choosing (`pickingWindow`):
+    /// "screens", "windows", or "app" for Safari's windows. Without it the picker is its
+    /// "Use window picker" button.
+    var sourcePicker: String?
     var sentStatus: String?
     var drawingColor: String?
     var commentText: String?

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    640,
+    560
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "notes": 2,
+  "pickingWindow": true,
+  "sourcePicker": "screens"
+}

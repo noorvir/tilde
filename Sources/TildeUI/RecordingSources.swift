@@ -1,0 +1,181 @@
+import AppKit
+import ScreenCaptureKit
+
+/// What a clip records.
+enum RecordingSource: Equatable {
+    case screen(CGDirectDisplayID)
+    case window(ElementPicker.WindowInfo)
+    case phone(Phone)
+
+    /// A screen or window of this Mac, where Tilde can draw notes; a phone is for recording only.
+    var isDrawable: Bool {
+        if case .phone = self {
+            return false
+        }
+        return true
+    }
+
+    /// The same while a window moves or resizes.
+    var id: String {
+        switch self {
+        case .screen(let display): "screen-\(display)"
+        case .window(let window): "window-\(window.number)"
+        case .phone(let phone): "phone-\(phone.id)"
+        }
+    }
+}
+
+/// The recording source picker under the HUD: the screens and a phone on a cable, and the
+/// apps' windows, each with a picture taken when the picker opens.
+@MainActor
+final class SourcePickerModel: ObservableObject {
+    enum Tab: Hashable {
+        case screens
+        case windows
+    }
+
+    struct Tile: Identifiable {
+        let source: RecordingSource
+        let title: String
+        /// The smaller grey line under the title, such as the pixel size.
+        let detail: String
+        var picture: CGImage?
+
+        var id: String { source.id }
+    }
+
+    struct App: Identifiable {
+        let pid: pid_t
+        let name: String
+        let icon: NSImage?
+        /// Front to back.
+        var windows: [Tile]
+
+        var id: pid_t { pid }
+    }
+
+    @Published var tab = Tab.screens
+    /// The app whose windows are shown, or nil for the list of apps.
+    @Published var openApp: pid_t?
+    @Published private(set) var screens: [Tile] = []
+    @Published private(set) var apps: [App] = []
+
+    /// Lists the sources on screen now, then takes their pictures. `drawableOnly` leaves out
+    /// sources Tilde cannot draw on, such as a phone, for annotating.
+    func reload(browserWindow: Int?, drawableOnly: Bool) async {
+        PhoneCapture.allowPhones()
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true) else {
+            return
+        }
+
+        let displays = content.displays.map { display in
+            Tile(source: .screen(display.displayID), title: Self.name(of: display.displayID), detail: Self.pixelSize(of: display.displayID))
+        }
+        let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: "Cable") }
+        screens = Self.offered(displays + phones, drawableOnly: drawableOnly)
+        apps = Self.apps(of: content.windows, browserWindow: browserWindow)
+
+        let tilde = content.applications.filter { $0.processID == getpid() }
+        let tiles = screens + apps.flatMap(\.windows)
+        await withTaskGroup(of: (String, CGImage?).self) { group in
+            for tile in tiles {
+                switch tile.source {
+                case .screen(let id):
+                    if let display = content.displays.first(where: { $0.displayID == id }) {
+                        let filter = SCContentFilter(display: display, excludingApplications: tilde, exceptingWindows: [])
+                        group.addTask { await (tile.id, Self.picture(of: filter, size: display.frame.size)) }
+                    }
+                case .window(let info):
+                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }) {
+                        group.addTask { await (tile.id, Self.picture(of: SCContentFilter(desktopIndependentWindow: window), size: window.frame.size)) }
+                    }
+                case .phone(let phone):
+                    group.addTask { await (tile.id, PhoneCapture.snapshot(of: phone)) }
+                }
+            }
+            for await (id, picture) in group {
+                setPicture(picture, for: id)
+            }
+        }
+    }
+
+    /// The screens and phones to offer: only those Tilde can draw on, for annotating.
+    private static func offered(_ tiles: [Tile], drawableOnly: Bool) -> [Tile] {
+        tiles.filter { !drawableOnly || $0.source.isDrawable }
+    }
+
+    func setForTesting(screens: [Tile], apps: [App], tab: Tab, openApp: pid_t? = nil, drawableOnly: Bool) {
+        self.screens = Self.offered(screens, drawableOnly: drawableOnly)
+        self.apps = apps
+        self.tab = tab
+        self.openApp = openApp
+    }
+
+    private func setPicture(_ picture: CGImage?, for id: String) {
+        if let index = screens.firstIndex(where: { $0.id == id }) {
+            screens[index].picture = picture
+        }
+        for appIndex in apps.indices {
+            if let index = apps[appIndex].windows.firstIndex(where: { $0.id == id }) {
+                apps[appIndex].windows[index].picture = picture
+            }
+        }
+    }
+
+    /// Apps with normal or floating windows on screen, front to back; Tilde's only with its
+    /// browser.
+    private static func apps(of windows: [SCWindow], browserWindow: Int?) -> [App] {
+        let order = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
+            .compactMap { $0[kCGWindowNumber as String] as? Int }
+        let shown = windows
+            .filter { window in
+                let isOwn = window.owningApplication?.processID == getpid()
+                return (0...Int(CGWindowLevelForKey(.floatingWindow))).contains(window.windowLayer) && window.frame.width >= 100 && window.frame.height >= 60
+                    && (!isOwn || Int(window.windowID) == browserWindow)
+            }
+            .sorted { (order.firstIndex(of: Int($0.windowID)) ?? .max) < (order.firstIndex(of: Int($1.windowID)) ?? .max) }
+
+        var apps: [App] = []
+        for window in shown {
+            guard let owner = window.owningApplication else {
+                continue
+            }
+            let info = ElementPicker.WindowInfo(
+                number: Int(window.windowID), pid: owner.processID, app: owner.applicationName, title: window.title.flatMap { $0.isEmpty ? nil : $0 }, frame: window.frame
+            )
+            let tile = Tile(source: .window(info), title: info.title ?? owner.applicationName, detail: "\(Int(window.frame.width)) × \(Int(window.frame.height))")
+            if let index = apps.firstIndex(where: { $0.pid == owner.processID }) {
+                apps[index].windows.append(tile)
+            } else {
+                let icon = NSRunningApplication(processIdentifier: owner.processID)?.icon
+                apps.append(App(pid: owner.processID, name: owner.applicationName, icon: icon, windows: [tile]))
+            }
+        }
+        return apps
+    }
+
+    nonisolated private static func picture(of filter: SCContentFilter, size: CGSize) async -> CGImage? {
+        guard size.width > 0, size.height > 0 else {
+            return nil
+        }
+        let configuration = SCStreamConfiguration()
+        // Twice a tile's width, for Retina screens.
+        let scale = min(1, 360 / max(size.width, size.height * 1.6))
+        configuration.width = Int(size.width * scale)
+        configuration.height = Int(size.height * scale)
+        configuration.showsCursor = false
+        return try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
+    }
+
+    static func name(of display: CGDirectDisplayID) -> String {
+        let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == display }
+        return screen?.localizedName ?? "Display"
+    }
+
+    private static func pixelSize(of display: CGDirectDisplayID) -> String {
+        guard let mode = CGDisplayCopyDisplayMode(display) else {
+            return ""
+        }
+        return "\(mode.pixelWidth) × \(mode.pixelHeight)"
+    }
+}

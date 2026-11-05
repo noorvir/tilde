@@ -34,8 +34,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.delegate = self
         item.menu = menu
 
-        subscription = controller.$phase.sink { [weak self] phase in
-            self?.item.button?.contentTintColor = phase == .annotating ? .tildeBlue : nil
+        subscription = controller.$mode.sink { [weak self] mode in
+            self?.item.button?.contentTintColor = mode.isOpen ? .tildeBlue : nil
         }
     }
 
@@ -50,7 +50,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         if controller.session == nil {
             menu.addItem(action("Start Annotation", #selector(startAnnotation), shortcut: .startAnnotation))
         } else {
-            let title = controller.isPaused ? "Resume Annotation" : "Pause Annotation"
+            let title = controller.pauses.contains(.user) ? "Resume Annotation" : "Pause Annotation"
             menu.addItem(action(title, #selector(togglePause), shortcut: .togglePause))
             let windowTitle = controller.scope == nil ? "Annotate a Specific Window" : "Annotate All Windows"
             menu.addItem(action(windowTitle, #selector(toggleWindowScope)))
@@ -259,8 +259,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         controller.annotateInBrowser()
     }
 
+    /// Chooses a window, or lifts the limit to one.
     @objc private func toggleWindowScope() {
-        controller.toggleWindowScope()
+        if controller.scope != nil {
+            controller.setScope(nil)
+        } else {
+            controller.toggleWindowPick()
+        }
     }
 
     /// A `shortcut` shows that global shortcut.

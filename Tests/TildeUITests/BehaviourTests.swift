@@ -1,6 +1,8 @@
 @testable import TildeUI
 import TildeCore
+import TildeInstaller
 import AppKit
+import SwiftUI
 import Testing
 
 /// Rules of the annotate UI that do not need pixels: confirmations, keys, capture rects and
@@ -20,7 +22,7 @@ struct BehaviourTests {
         controller.setStateForTesting(session: Fixtures.session())
         controller.requestCancel()
         #expect(controller.confirmation == nil)
-        #expect(controller.phase == .idle)
+        #expect(controller.mode == .idle)
         #expect(controller.session == nil)
     }
 
@@ -28,7 +30,7 @@ struct BehaviourTests {
         controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2))
         controller.requestCancel()
         #expect(controller.confirmation == .cancelSession)
-        #expect(controller.phase == .annotating)
+        #expect(controller.mode == .annotating)
 
         controller.dismissConfirmation()
         #expect(controller.confirmation == nil)
@@ -36,7 +38,7 @@ struct BehaviourTests {
 
         controller.requestCancel()
         controller.confirm()
-        #expect(controller.phase == .idle)
+        #expect(controller.mode == .idle)
         #expect(controller.drafts.isEmpty)
     }
 
@@ -50,7 +52,7 @@ struct BehaviourTests {
         #expect(controller.confirmation == .clearAll)
         controller.confirm()
         #expect(controller.drafts.isEmpty)
-        #expect(controller.phase == .annotating)
+        #expect(controller.mode == .annotating)
         #expect(controller.session != nil)
     }
 
@@ -75,6 +77,161 @@ struct BehaviourTests {
         #expect(controller.drafts.map(\.id) == [drafts[0].id, drafts[2].id])
     }
 
+    // MARK: - Send
+
+    /// A session without an agent says only "Copied", done, also with remote machines; the
+    /// images go to them in the background. (The report waits here, so nothing is copied.)
+    @Test func aCopySaysOnlyCopied() {
+        let unfinished = Task { () -> Captures in
+            try? await Task.sleep(for: .seconds(3600))
+            return Captures(image: nil, contextImage: nil)
+        }
+        let draft = Fixtures.drafts(1)[0]
+        let drafts = [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)]
+        controller.setStateForTesting(session: Fixtures.session(isLocal: true), drafts: drafts)
+
+        controller.send()
+        #expect(controller.mode == .sent(confirmation: "Copied"))
+        #expect(controller.sentStatus == .done)
+    }
+
+    @Test func sendStopsPickingBeforeTheReportIsReady() {
+        // A screenshot that is still being taken keeps the report from being made.
+        let unfinished = Task { () -> Captures in
+            try? await Task.sleep(for: .seconds(3600))
+            return Captures(image: nil, contextImage: nil)
+        }
+        let draft = Fixtures.drafts(1)[0]
+        let drafts = [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)]
+        controller.setStateForTesting(session: Fixtures.session(), drafts: drafts, hover: Fixtures.hover())
+
+        controller.send()
+        #expect(controller.mode == .sent(confirmation: "Sent to Codex"))
+        #expect(!controller.overlayTakesInput)
+        #expect(controller.hover == nil)
+
+        controller.cancel()
+        #expect(controller.session != nil)
+    }
+
+    @Test func recordingModeTakesNoInputExceptToChooseAWindow() {
+        controller.setStateForTesting(session: Fixtures.session(), hover: Fixtures.hover())
+        #expect(controller.overlayTakesInput)
+
+        controller.toggleRecordingMode()
+        #expect(controller.mode == .recording(.ready))
+        #expect(!controller.overlayTakesInput)
+        #expect(controller.hover == nil)
+
+        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready), isPickingWindow: true)
+        #expect(controller.overlayTakesInput)
+        controller.cancelWindowPick()
+        #expect(controller.mode == .recording(.ready))
+        #expect(!controller.overlayTakesInput)
+    }
+
+    /// A source with no size, as an iPhone reports before it streams, is an error, not the
+    /// exception that crashed Tilde; a phone's screen in portrait is fine.
+    @Test func aRecordingNeedsASizeItCanWrite() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-writer-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        #expect(throws: ScreenRecorder.Failure.badSize) {
+            _ = try ScreenRecorder.makeWriter(width: 0, height: 0, in: folder)
+        }
+        let (writer, _) = try ScreenRecorder.makeWriter(width: 1290, height: 2796, in: folder)
+        writer.cancelWriting()
+    }
+
+    /// The record toggle and Esc go back to annotating; with a clip not stopped they ask first.
+    @Test func leavingRecordingModeAsksToDiscardAClipNotStopped() {
+        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready))
+        controller.escapePressed()
+        #expect(controller.mode == .annotating)
+
+        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.paused(3)))
+        controller.toggleRecordingMode()
+        #expect(controller.confirmation == .discardRecording)
+        #expect(controller.mode == .recording(.paused(3)))
+        controller.escapePressed()
+        #expect(controller.confirmation == nil)
+        #expect(controller.mode == .recording(.paused(3)))
+
+        controller.escapePressed()
+        controller.confirm()
+        #expect(controller.mode == .annotating)
+        #expect(controller.drafts.isEmpty)
+    }
+
+    /// Annotating takes only sources Tilde can draw on. A phone chosen for recording goes when
+    /// recording mode ends, back to everything on screen.
+    @Test func aPhoneIsARecordingSourceOnly() {
+        let phone = Phone(id: "phone", name: "iPhone")
+        #expect(!RecordingSource.phone(phone).isDrawable)
+        #expect(RecordingSource.screen(1).isDrawable)
+        #expect(RecordingSource.window(Fixtures.window).isDrawable)
+
+        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true)
+        controller.choose(.phone(phone))
+        #expect(controller.chosenSource == nil)
+
+        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready), isPickingWindow: true)
+        controller.choose(.phone(phone))
+        #expect(controller.chosenSource == .phone(phone))
+        controller.toggleRecordingMode()
+        #expect(controller.mode == .annotating)
+        #expect(controller.chosenSource == nil)
+    }
+
+    @Test func aChosenSourceIsWhatTheNextClipRecords() {
+        let phone = Phone(id: "phone", name: "iPhone")
+        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready))
+        #expect(controller.chosenSource == nil)
+
+        controller.setStateForTesting(session: Fixtures.session(), mode: .recording(.ready), scope: Fixtures.window, isPickingWindow: true)
+        #expect(controller.chosenSource == .window(Fixtures.window))
+
+        controller.choose(.phone(phone))
+        #expect(controller.chosenSource == .phone(phone))
+        #expect(controller.scope == nil)
+        #expect(!controller.isPickingWindow)
+
+        // A window limits the session to it, as choosing it on screen does.
+        controller.choose(.window(Fixtures.window))
+        #expect(controller.scope == Fixtures.window)
+        #expect(controller.chosenSource == .window(Fixtures.window))
+    }
+
+    /// While a window is being chosen, ⌘↩ does not send; the overlay takes only Esc.
+    @Test func choosingAWindowTakesNoOtherKey() throws {
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(1), isPickingWindow: true)
+        let overlay = OverlayWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200), level: .normal, isWindowSized: true, controller: controller)
+        defer { overlay.close() }
+        let view = try #require(overlay.contentView)
+        let send = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: overlay.windowNumber, context: nil,
+            characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
+        ))
+
+        view.keyDown(with: send)
+
+        #expect(controller.mode == .annotating)
+        #expect(controller.drafts.count == 1)
+    }
+
+    @Test func anOverlayWithoutInputGetsNoPointerEvents() throws {
+        let overlay = OverlayWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200), level: .normal, isWindowSized: true, controller: controller)
+        defer { overlay.close() }
+        let view = try #require(overlay.contentView)
+        view.updateTrackingAreas()
+        #expect(!view.trackingAreas.isEmpty)
+
+        overlay.takesInput = false
+        #expect(overlay.ignoresMouseEvents)
+        #expect(!overlay.acceptsMouseMovedEvents)
+        #expect(view.trackingAreas.isEmpty)
+    }
+
     // MARK: - Captures
 
     @Test func closeUpIsTheElementPlusFourPoints() {
@@ -95,6 +252,45 @@ struct BehaviourTests {
 
     // MARK: - HUD placement
 
+    /// The pill keeps one width in every mode: the widest title and a two-digit note count fit
+    /// in it, and a long subtitle drops words instead of widening it, so changing the mode or
+    /// adding notes never moves a button.
+    @Test(arguments: [
+        AnnotationController.Mode.annotating, .paused([.user]), .recording(.ready), .recording(.recording(since: Date(), before: 0)), .recording(.paused(599)),
+    ])
+    func everyModeFitsThePillWidth(mode: AnnotationController.Mode) {
+        for isPickingWindow in [false, true] {
+            controller.setStateForTesting(
+                session: Fixtures.session(isLocal: true), drafts: Fixtures.drafts(3), mode: mode, scope: Fixtures.window, isPickingWindow: isPickingWindow
+            )
+            let width = NSHostingView(rootView: HUDView(controller: controller, isEmbedded: true)).fittingSize.width
+            #expect(width <= HUDView.embeddedWidth, "\(mode) needs \(width) pt, the pill has \(HUDView.embeddedWidth)")
+            // The floating pill, inside the panel's 16 pt padding.
+            let floating = NSHostingView(rootView: HUDView(controller: controller)).fittingSize.width - 32
+            #expect(floating == HUDView.width, "\(mode) makes the floating pill \(floating) pt wide")
+        }
+    }
+
+    /// The preview opens at the size it was last resized to, inside the screen and no smaller
+    /// than its minimum; at home it is centred, and a dropped place keeps it on the screen.
+    @Test func thePreviewOpensAtItsSavedSize() throws {
+        let suite = "tilde-preview-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let visible = NSRect(x: 0, y: 25, width: 1800, height: 1100)
+
+        #expect(PreviewPanel.size(on: visible, defaults: defaults) == NSSize(width: 1000, height: 640))
+
+        PreviewPanel.save(NSSize(width: 1400, height: 900), to: defaults)
+        let size = PreviewPanel.size(on: visible, defaults: defaults)
+        #expect(size == NSSize(width: 1400, height: 900))
+        #expect(PreviewPanel.homeTop(of: size, on: visible) == NSPoint(x: 900, y: 1025))
+        #expect(PreviewPanel.clamped(NSPoint(x: 1700, y: 1200), size: size, in: visible) == NSPoint(x: 1100, y: 1125))
+
+        PreviewPanel.save(NSSize(width: 3000, height: 100), to: defaults)
+        #expect(PreviewPanel.size(on: visible, defaults: defaults) == NSSize(width: 1800, height: PreviewPanel.minSize.height))
+    }
+
     @Test func homeIsTheTopCentreOfTheVisibleArea() {
         let screen = NSRect(x: 1800, y: 0, width: 2560, height: 1440)
         let visible = NSRect(x: 1800, y: 0, width: 2560, height: 1415)
@@ -103,8 +299,8 @@ struct BehaviourTests {
 
     @Test func dragSnapsHomeWithinFortyPoints() {
         let home = NSPoint(x: 900, y: 1134)
-        #expect(HUDPanel.snapsHome(NSPoint(x: 930, y: 1110), home: home))
-        #expect(!HUDPanel.snapsHome(NSPoint(x: 940, y: 1100), home: home))
+        #expect(SnapDrag.snapsHome(NSPoint(x: 930, y: 1110), home: home))
+        #expect(!SnapDrag.snapsHome(NSPoint(x: 940, y: 1100), home: home))
     }
 
     @Test func positionsStayOnScreen() {
@@ -189,23 +385,55 @@ struct BehaviourTests {
         #expect(AnnotationController.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: nil) == CGRect(x: 0, y: 0, width: 50, height: 50))
     }
 
-    @Test func windowButtonChoosesAndClearsTheScope() {
+    /// The window button picks on screen, with the picker closed to its button; a second click
+    /// stops with no change.
+    @Test func windowButtonChoosesAgainAndTheScreenTileLiftsTheScope() {
+        let elsewhere = CGPoint(x: -5000, y: -5000)
         controller.setStateForTesting(session: Fixtures.session())
-
-        controller.toggleWindowScope()
+        controller.toggleWindowPick()
         #expect(controller.isPickingWindow)
-        controller.cancelWindowPick()
+        #expect(!controller.isSourcePickerOpen)
+        controller.toggleWindowPick()
         #expect(!controller.isPickingWindow)
 
-        controller.toggleWindowScope()
+        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true)
         controller.setScope(Fixtures.window)
         #expect(controller.scope == Fixtures.window)
         #expect(!controller.isPickingWindow)
         #expect(controller.scopeName == "Safari")
+        #expect(!controller.allows(elsewhere))
 
-        controller.toggleWindowScope()
+        // Limited to a window, choosing takes the other windows too, and Esc keeps the limit.
+        controller.setStateForTesting(session: Fixtures.session(), scope: Fixtures.window, isPickingWindow: true)
+        #expect(controller.allows(elsewhere))
+        controller.cancelWindowPick()
+        #expect(controller.scope == Fixtures.window)
+        #expect(!controller.allows(elsewhere))
+
+        controller.setStateForTesting(session: Fixtures.session(), scope: Fixtures.window, isPickingWindow: true)
+        controller.choose(.screen(1))
         #expect(controller.scope == nil)
         #expect(!controller.isPickingWindow)
+        #expect(controller.chosenSource == .screen(1))
+    }
+
+    /// The open picker stops choosing on screen (opening it loads the screens' pictures, so the
+    /// test starts in that state). Its cross goes back to choosing on screen; Esc ends both.
+    @Test func theOpenPickerTakesNoClicksOnScreen() {
+        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true, isSourcePickerOpen: true)
+        controller.click(at: CGPoint(x: -5000, y: -5000))
+        #expect(controller.isPickingWindow)
+        #expect(controller.scope == nil)
+        #expect(controller.chosenSource == nil)
+
+        controller.closeSourcePicker()
+        #expect(controller.isPickingWindow)
+        #expect(!controller.isSourcePickerOpen)
+
+        controller.setStateForTesting(session: Fixtures.session(), isPickingWindow: true, isSourcePickerOpen: true)
+        controller.cancelWindowPick()
+        #expect(!controller.isPickingWindow)
+        #expect(!controller.isSourcePickerOpen)
     }
 
     @Test func scopeEndsWhenTheWindowIsGone() {
@@ -220,50 +448,41 @@ struct BehaviourTests {
 
     // MARK: - HUD subtitle
 
-    /// Every subtitle has a candidate that fits the fixed pill, so it never truncates.
+    /// Every agent's name and every notice fits the fixed pill in full, so nothing is cut.
     @Test func everySubtitleFitsWithoutTruncating() {
         let icon = Fixtures.appIcon
-        let variants: [(client: String?, scope: String?, state: HUDView.SubtitleState)] = [
-            (nil, nil, .annotating),
-            ("Codex", nil, .annotating),
-            ("Claude Code", "Google Chrome", .annotating),
-            (nil, "Tilde Browser", .annotating),
-            ("Windsurf", nil, .choosingWindow),
-            (nil, nil, .paused(shortcut: .keys(KeyCombo(keyCode: 35, modifiers: NSEvent.ModifierFlags([.control, .option, .shift, .command]).rawValue, key: "P")))),
-            (nil, nil, .paused(shortcut: nil)),
-            (nil, nil, .notice("Window closed")),
-            (nil, "Google Chrome", .waitingForWindow),
-            (nil, nil, .paused(shortcut: .doubleTap(.control))),
-            (nil, nil, .paused(shortcut: .doubleTap(.command))),
-            (nil, nil, .paused(shortcut: .doubleTap(.function))),
+        let shortcuts: [Shortcut?] = [
+            .keys(KeyCombo(keyCode: 35, modifiers: NSEvent.ModifierFlags([.control, .option, .shift, .command]).rawValue, key: "P")),
+            .doubleTap(.control), .doubleTap(.command), .doubleTap(.function), nil,
         ]
+        let states: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .waitingForWindow, .notice("Window closed"), .holding("⌥")]
+            + shortcuts.map { .paused(shortcut: $0) }
 
-        for variant in variants {
-            let candidates = HUDView.subtitleCandidates(
-                client: variant.client, clientIcon: icon, machine: nil, scopeName: variant.scope, scopeIcon: icon, state: variant.state
-            )
-            let shortest = try! #require(candidates.last)
-            #expect(HUDView.width(of: shortest) <= HUDView.subtitleWidth, "\(variant) is \(HUDView.width(of: shortest)) pt")
+        let machine = HUDView.Machine(host: "a-very-long-machine-name.example.com", dot: .green)
+        for client in ["Clipboard"] + Harness.allCases.map(\.name) {
+            for state in states {
+                let part = HUDView.subtitlePart(client: client, clientIcon: icon, machine: machine, state: state)
+                #expect(HUDView.width(of: part) <= HUDView.subtitleWidth, "\(client) \(state) is \(HUDView.width(of: part)) pt")
+            }
         }
     }
 
+    /// The subtitle says where the report goes in full, in every mode; the window the session is
+    /// limited to is on the window button instead.
     @Test func subtitlesSayWhereTheReportGoesInBothStates() {
-        let local = HUDView.subtitleCandidates(client: "Clipboard", clientIcon: nil, machine: nil, scopeName: "Google Chrome", scopeIcon: nil, state: .annotating)
-        #expect(local.first == [HUDView.SubtitlePart(prefix: "for", text: "Clipboard"), HUDView.SubtitlePart(prefix: "in", text: "Google Chrome")])
+        let local = HUDView.subtitlePart(client: "Clipboard", clientIcon: nil, machine: nil, state: .annotating)
+        #expect(local == HUDView.SubtitlePart(prefix: "for", text: "Clipboard"))
 
-        let paused = HUDView.subtitleCandidates(client: "Codex", clientIcon: nil, machine: nil, scopeName: nil, scopeIcon: nil, state: .paused(shortcut: .doubleTap(.control)))
-        #expect(paused.first == [HUDView.SubtitlePart(prefix: "for", text: "Codex")])
+        let paused = HUDView.subtitlePart(client: "Codex", clientIcon: nil, machine: nil, state: .paused(shortcut: .doubleTap(.control)))
+        #expect(paused == HUDView.SubtitlePart(prefix: "for", text: "Codex"))
     }
 
-    @Test func aRemoteSubtitleNamesTheMachineAndKeepsItWhenWordsDrop() {
+    @Test func aRemoteSubtitleNamesTheMachine() {
         let icon = Fixtures.appIcon
         let machine = HUDView.Machine(host: "mac-mini-ts", dot: .green)
-        let candidates = HUDView.subtitleCandidates(
-            client: "Claude Code", clientIcon: icon, machine: machine, scopeName: nil, scopeIcon: nil, state: .annotating
-        )
+        let part = HUDView.subtitlePart(client: "Claude Code", clientIcon: icon, machine: machine, state: .annotating)
 
-        #expect(candidates.first == [HUDView.SubtitlePart(prefix: "for", icon: icon, text: "Claude Code", machine: machine)])
-        #expect(candidates.last == [HUDView.SubtitlePart(icon: icon, machine: machine)])
+        #expect(part == HUDView.SubtitlePart(prefix: "for", icon: icon, text: "Claude Code", machine: machine))
     }
 
     @Test func tooltipsStayInsideTheAreaThatDrawsThem() {
@@ -286,11 +505,11 @@ struct BehaviourTests {
 
     @Test func annotateResumesAWindowSessionThatPausedByItself() async throws {
         let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), isPaused: true, isAutoPaused: true)
+        controller.setStateForTesting(session: Fixtures.session(), mode: .paused([.user, .otherApp]))
 
         controller.togglePause()
 
-        #expect(!controller.isEffectivelyPaused)
+        #expect(controller.mode == .annotating)
     }
 
     // MARK: - Double-tap
@@ -392,7 +611,7 @@ struct BehaviourTests {
         controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2))
 
         controller.escapePressed()
-        #expect(controller.isPaused)
+        #expect(controller.pauses == [.user])
         #expect(controller.confirmation == nil)
 
         controller.escapePressed()
@@ -405,7 +624,7 @@ struct BehaviourTests {
 
     @Test func theQuestionTakesReturnAndEscFromAnyOfTildesWindows() async throws {
         let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), isPaused: true, confirmation: .clearAll)
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), mode: .paused([.user]), confirmation: .clearAll)
 
         // Other keys pass on, such as to a focused text field.
         #expect(controller.handleConfirmationKey(0) == false)
@@ -416,7 +635,7 @@ struct BehaviourTests {
         // Paused in a popped-out session: Esc asks, ↩ answers.
         controller.escapePressed()
         #expect(controller.confirmation == .cancelSession)
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), isPaused: true, confirmation: .clearAll)
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(2), mode: .paused([.user]), confirmation: .clearAll)
         #expect(controller.handleConfirmationKey(36))
         #expect(controller.drafts.isEmpty)
         #expect(controller.handleConfirmationKey(36) == false)
@@ -434,7 +653,7 @@ struct BehaviourTests {
 
     @Test func escWhilePausedAlsoAsksToCancel() async throws {
         let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(1), isPaused: true)
+        controller.setStateForTesting(session: Fixtures.session(), drafts: Fixtures.drafts(1), mode: .paused([.user]))
 
         controller.escapePressed()
 

@@ -43,7 +43,7 @@ enum Surfaces {
             let model = HomeOutline.Model()
             model.isSnapped = state.snapped ?? false
             let size = CGSize(width: HUDView.width, height: HUDMetrics.height)
-            return try await hosted(OutlineView(model: model).frame(width: size.width, height: size.height), size: size)
+            return try await hosted(OutlineView(model: model, cornerRadius: HUDMetrics.height / 2).frame(width: size.width, height: size.height), size: size)
 
         case "notesPanel":
             let controller = try await controller(state)
@@ -115,7 +115,7 @@ enum Surfaces {
         apply(state, drafts: Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true), to: controller)
         controller.showsList = state.list ?? false
         controller.setDrawingForTesting(state.drawing ?? false)
-        controller.sentStatus = state.sentStatus == "working" ? .working : state.sentStatus == "failed" ? .failed : .done
+        controller.sentStatus = state.sentStatus == "failed" ? .failed : .done
         if let color = state.drawingColor {
             controller.setDrawingColor(color)
         }
@@ -128,25 +128,55 @@ enum Surfaces {
         case "clearAll": .clearAll
         case "cancelSession": .cancelSession
         case "discardComment": .discardComment
+        case "discardRecording": .discardRecording
         case "restore": .restore(Fixtures.record(notes: 3))
         default: nil
         }
         let notice: AnnotationController.PauseNotice? = state.pauseNotice == "escape" ? .escape : state.pauseNotice == "otherApp" ? .otherApp : nil
+        // A clip in progress has run for 12 seconds.
+        let recording: AnnotationController.Recording? = switch state.recording {
+        case "ready": .ready
+        case "recording": .recording(since: Date(), before: 12)
+        case "paused": .paused(12)
+        default: nil
+        }
+        var pauses = Set<AnnotationController.PauseReason>()
+        if state.paused == true {
+            pauses.insert(.user)
+        }
+        if state.autoPaused == true {
+            pauses.insert(.otherApp)
+        }
+        var mode = AnnotationController.Mode.annotating
+        if let sent = state.sent {
+            mode = .sent(confirmation: sent)
+        } else if let recording {
+            mode = .recording(recording)
+        } else if !pauses.isEmpty {
+            mode = .paused(pauses)
+        }
         controller.setStateForTesting(
             session: state.session.map { Fixtures.session(client: $0.client, node: $0.node, isLocal: $0.isLocal ?? false) },
             drafts: drafts,
-            phase: state.sent.map { .sent(confirmation: $0) } ?? .annotating,
+            mode: mode,
             hover: state.hover == true ? Fixtures.hover() : nil,
             composer: composer,
-            isPaused: state.paused ?? false,
             previewID: state.preview.map { drafts[$0].id },
             confirmation: confirmation,
             scope: state.scoped == true ? Fixtures.window : nil,
             isPickingWindow: state.pickingWindow ?? false,
+            isSourcePickerOpen: state.sourcePicker != nil,
             isHUDInBrowser: state.hudInBrowser ?? false,
-            isAutoPaused: state.autoPaused ?? false,
-            pauseNotice: notice
+            pauseNotice: notice,
+            screenSource: state.source == "phone" ? .phone(Fixtures.phone) : state.source == "display" ? .screen(Fixtures.display) : nil
         )
+        if let picker = state.sourcePicker {
+            let (screens, apps) = Fixtures.sources()
+            controller.sourcePicker.setForTesting(
+                screens: screens, apps: apps, tab: picker == "screens" ? .screens : .windows, openApp: picker == "app" ? Fixtures.window.pid : nil,
+                drawableOnly: state.recording == nil
+            )
+        }
     }
 
     private static func settings(_ state: UIState.Settings) throws -> SettingsModel {

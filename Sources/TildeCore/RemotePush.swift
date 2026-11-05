@@ -37,15 +37,9 @@ public enum RemotePush {
         return sshHosts(inConfig: (try? String(contentsOf: config, encoding: .utf8)) ?? "")
     }
 
-    public static func sending(to hosts: [String]) -> String {
-        "Copied, sending to \(hosts.joined(separator: ", "))"
-    }
-
-    public static func confirmation(pushed: [String], failed: [String]) -> String {
-        if failed.isEmpty {
-            return "Copied, images on \(pushed.joined(separator: ", "))"
-        }
-        return "Copied, \(failed.joined(separator: ", ")) failed"
+    /// The warning when a copy's images did not reach some machines.
+    public static func failure(_ hosts: [String]) -> String {
+        "Could not send the images to \(hosts.joined(separator: ", "))"
     }
 
     /// Copies the folder to `~/.tilde/inbox/<its name>/` on the host, the same place as on this

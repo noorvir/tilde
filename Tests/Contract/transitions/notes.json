@@ -284,26 +284,13 @@
   }
  },
  {
-  "name": "A push to every machine says where the images are",
-  "pushed": [
+  "name": "A push that fails names its machines",
+  "failed": [
    "mac-mini",
    "devbox"
   ],
-  "failed": [],
   "expect": {
-   "confirmation": "Copied, images on mac-mini, devbox"
-  }
- },
- {
-  "name": "A failed push names the machine",
-  "pushed": [
-   "devbox"
-  ],
-  "failed": [
-   "mac-mini"
-  ],
-  "expect": {
-   "confirmation": "Copied, mac-mini failed"
+   "confirmation": "Could not send the images to mac-mini, devbox"
   }
  },
  {

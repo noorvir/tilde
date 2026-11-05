@@ -41,6 +41,10 @@ public func reportText(for feedback: Feedback, folder: URL?, linkFolder: String?
             lines.append("\(contextLabel(number)), \(sizeText(contextImage)):")
             lines.append("![annotation \(number) in context](\(imagePrefix)\(contextImageName(number)))")
         }
+        if case .recording = annotation.target {
+            lines.append("")
+            lines.append("Video: [\(videoName(number))](\(imagePrefix)\(videoName(number)))")
+        }
         if case .element(.web(let element)) = annotation.target, !element.html.isEmpty {
             lines.append("")
             lines.append("```html")
@@ -72,12 +76,19 @@ public func contextImageName(_ number: Int) -> String {
     "annotation-\(number)-context.png"
 }
 
+/// File name of the video of the recording with this 1-based number.
+public func videoName(_ number: Int) -> String {
+    "annotation-\(number).mp4"
+}
+
 private func heading(for target: Target) -> String {
     switch target {
     case .region:
         return "Screen region"
     case .drawing:
         return "Drawing on the screen"
+    case .recording:
+        return "Screen recording"
     case .element(.web(let element)):
         return "Web element on \(element.url)"
     case .element(.native(let element)):
@@ -95,6 +106,9 @@ private func details(for target: Target) -> [String] {
 
     case .drawing(let shapes):
         return ["- Shapes, in points from the `origin` (the top left of the window, or of the screen, in screen points): `\(shapes)`"]
+
+    case .recording(_, let seconds, let source):
+        return ["- Recorded: \(source)", "- Length: \(Int(seconds.rounded())) s"]
 
     case .element(.web(let element)):
         var lines = [

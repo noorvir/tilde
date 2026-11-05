@@ -16,13 +16,8 @@ final class HUDPanel {
     private let hosting: FirstMouseHostingView<HUDView>
     private unowned let controller: AnnotationController
     private var pendingHide: DispatchWorkItem?
-    /// Pointer and panel origin when a drag of the pill started.
-    private var dragStart: (pointer: NSPoint, origin: NSPoint)?
-    /// Whether the dragged pill is snapped to its home position.
-    private var isSnappedHome = false
-    private let homeOutline = HomeOutline()
-    /// How close to home, in points, the dragged pill snaps there.
-    private static let snapDistance: CGFloat = 40
+    /// Drags the pill, snapping it home, and remembers where it was dropped on each screen.
+    private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: HUDMetrics.height / 2, positionsKey: "HUDPositions")
     /// The visible content (pill, message, list) in the panel's SwiftUI coordinates, which
     /// have a top-left origin. The hosting view has no sizing options, so its fitting size
     /// is zero and cannot give this.
@@ -31,7 +26,6 @@ final class HUDPanel {
 
     /// The widest pill, with room around it for its shadow and the list below it.
     private static let width: CGFloat = HUDView.maxWidth + 98
-    private static let positionsKey = "HUDPositions"
 
     init(controller: AnnotationController) {
         self.controller = controller
@@ -53,8 +47,8 @@ final class HUDPanel {
             }
             return event
         }
-        hosting.rootView = HUDView(controller: controller) { [weak self] ended in
-            self?.dragPill(ended: ended)
+        hosting.rootView = HUDView(controller: controller) { [weak self] in
+            self?.dragPill()
         } onContentFrame: { [weak self] frame in
             self?.contentFrame = frame
         }
@@ -92,7 +86,7 @@ final class HUDPanel {
 
     /// Forgets the dragged positions and moves the HUD back to the top centre.
     func resetPosition() {
-        UserDefaults.standard.removeObject(forKey: Self.positionsKey)
+        snapDrag.forgetAll()
         if window.isVisible {
             place()
         }
@@ -106,68 +100,28 @@ final class HUDPanel {
         }
 
         let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
-        let top = Self.clamped(savedTop(on: screen) ?? home, in: screen.visibleFrame)
+        let top = Self.clamped(snapDrag.savedTop(on: screen) ?? home, in: screen.visibleFrame)
         let height = screen.visibleFrame.height + 4
         window.setFrame(NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height), display: true)
     }
 
-    /// Moves the panel with the pointer while the pill is dragged, showing the home position
-    /// and snapping to it when close. At the end, a snapped pill goes back to home; any other
-    /// is kept on its screen and its position saved.
-    private func dragPill(ended: Bool) {
-        let pointer = NSEvent.mouseLocation
-        let start = dragStart ?? (pointer, window.frame.origin)
-        dragStart = start
-
+    /// Moves the panel with the pointer while the pill is dragged; it snaps to home within
+    /// 40 pt, where the outline of the pill shows (below the 16 pt content padding).
+    private func dragPill() {
         let height = window.frame.height
-        var top = NSPoint(x: start.origin.x + pointer.x - start.pointer.x + Self.width / 2, y: start.origin.y + pointer.y - start.pointer.y + height)
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(top) }) ?? NSScreen.screens.first(where: { $0.frame.contains(pointer) }) else {
-            return
+        snapDrag.begin { screen in
+            let top = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
+            return NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height)
+        } outlineFrame: { home in
+            NSRect(x: home.midX - HUDView.width / 2, y: home.maxY - 16 - HUDMetrics.height, width: HUDView.width, height: HUDMetrics.height)
+        } clamped: { top, visible in
+            Self.clamped(top, in: visible)
         }
-
-        let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
-        let isNearHome = Self.snapsHome(top, home: home)
-        if isNearHome {
-            top = home
-        }
-        let frame = NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height)
-        if isNearHome && !isSnappedHome {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.15
-                window.animator().setFrame(frame, display: true)
-            }
-        } else if !isNearHome || !isSnappedHome {
-            window.setFrameOrigin(frame.origin)
-        }
-        isSnappedHome = isNearHome
-
-        // The outline matches the pill: below the 16 pt content padding, at the pill's width.
-        let outline = NSRect(x: home.x - HUDView.width / 2, y: home.y - 16 - HUDMetrics.height, width: HUDView.width, height: HUDMetrics.height)
-        homeOutline.show(outline, isSnapped: isNearHome, below: window.windowNumber)
-        guard ended else {
-            return
-        }
-
-        dragStart = nil
-        isSnappedHome = false
-        homeOutline.hide()
-        if isNearHome {
-            forgetTop(on: screen)
-            return
-        }
-        let kept = Self.clamped(top, in: screen.visibleFrame)
-        window.setFrameOrigin(NSPoint(x: kept.x - Self.width / 2, y: kept.y - height))
-        saveTop(kept, on: screen)
     }
 
     /// Top centre of the panel at home: the top centre of the screen's visible area.
     static func homeTop(screenFrame: NSRect, visibleFrame: NSRect) -> NSPoint {
         NSPoint(x: screenFrame.midX, y: visibleFrame.maxY + 4)
-    }
-
-    /// Whether a dragged panel top centre is close enough to home to snap there.
-    static func snapsHome(_ top: NSPoint, home: NSPoint) -> Bool {
-        hypot(top.x - home.x, top.y - home.y) < snapDistance
     }
 
     /// Keeps the pill's top centre inside the screen's visible area, at any width.
@@ -176,32 +130,6 @@ final class HUDPanel {
         let x = min(max(top.x, visible.minX + halfWidth), visible.maxX - halfWidth)
         let y = min(max(top.y, visible.minY + HUDMetrics.height + 32), visible.maxY + 4)
         return NSPoint(x: x, y: y)
-    }
-
-    /// Saved positions are offsets from each screen's top-left corner, keyed by display ID.
-    private func savedTop(on screen: NSScreen) -> NSPoint? {
-        let positions = UserDefaults.standard.dictionary(forKey: Self.positionsKey) as? [String: [Double]]
-        guard let offset = positions?[Self.key(for: screen)], offset.count == 2 else {
-            return nil
-        }
-        return NSPoint(x: screen.frame.minX + offset[0], y: screen.frame.maxY + offset[1])
-    }
-
-    private func saveTop(_ top: NSPoint, on screen: NSScreen) {
-        var positions = UserDefaults.standard.dictionary(forKey: Self.positionsKey) as? [String: [Double]] ?? [:]
-        positions[Self.key(for: screen)] = [top.x - screen.frame.minX, top.y - screen.frame.maxY]
-        UserDefaults.standard.set(positions, forKey: Self.positionsKey)
-    }
-
-    private func forgetTop(on screen: NSScreen) {
-        var positions = UserDefaults.standard.dictionary(forKey: Self.positionsKey) as? [String: [Double]] ?? [:]
-        positions[Self.key(for: screen)] = nil
-        UserDefaults.standard.set(positions, forKey: Self.positionsKey)
-    }
-
-    private static func key(for screen: NSScreen) -> String {
-        let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-        return number?.stringValue ?? screen.localizedName
     }
 
     /// Whether an AppKit screen point is over the visible HUD content.
@@ -244,19 +172,24 @@ func insertNewlineOnShiftReturn(_ event: NSEvent, in window: NSWindow) -> Bool {
 
 struct HUDView: View {
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
-    /// The usual width of the pill, and the most it grows for a long subtitle.
-    static let width: CGFloat = 462
+    /// The width of the pill in every mode, and the most it grows for a long subtitle. The widest
+    /// title and a two-digit note count fit in it (the HUD reserves their space with hidden
+    /// labels), so changing the mode or adding notes never moves a button;
+    /// `everyModeFitsThePillWidth` checks it.
+    static let width: CGFloat = 513
     static let maxWidth = width * 1.4
 
     @ObservedObject var controller: AnnotationController
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
     /// does not move, and tooltips drawn by the browser.
     var isEmbedded = false
-    /// Called while the pill is dragged; `true` when the drag ends.
-    var onDrag: (_ ended: Bool) -> Void = { _ in }
+    /// Called when a drag of the pill moves.
+    var onDrag: () -> Void = {}
     /// Reports the frame of the visible content in the window, top-left origin.
     var onContentFrame: (CGRect) -> Void = { _ in }
     @State private var isPillHovered = false
+    /// How often recording mode began, which bounces the record button.
+    @State private var recordModeEntries = 0
 
     var body: some View {
         if isEmbedded {
@@ -270,7 +203,9 @@ struct HUDView: View {
         VStack(spacing: 8) {
             // In Tilde's browser the main bar is on the toolbar, below the canvas.
             if !controller.isHUDInBrowser {
+                // Its own width, also above the wider source picker.
                 pill
+                    .fixedSize()
             }
             if controller.isDrawing {
                 drawingBar
@@ -280,8 +215,12 @@ struct HUDView: View {
                 PauseToast(notice: notice, controller: controller)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if controller.isHUDShown, controller.phase == .annotating, controller.showsList, !controller.drafts.isEmpty {
+            if controller.isHUDShown, controller.mode.isOpen, controller.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
+                    .transition(Self.zoom)
+            }
+            if controller.isHUDShown, controller.isPickingWindow {
+                SourcePickerView(model: controller.sourcePicker, controller: controller)
                     .transition(Self.zoom)
             }
         }
@@ -291,9 +230,11 @@ struct HUDView: View {
         .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: controller.showsList)
+        .animation(.spring(duration: 0.28), value: controller.isPickingWindow)
+        .animation(.spring(duration: 0.3, bounce: 0), value: controller.isSourcePickerOpen)
         .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
-        .animation(HUDPanel.motion, value: controller.phase)
+        .animation(HUDPanel.motion, value: controller.sentConfirmation)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
         .animation(.easeOut(duration: 0.15), value: controller.pauseNotice)
     }
@@ -312,7 +253,7 @@ struct HUDView: View {
     /// up to `maxWidth`: the extra goes to the title column, and the buttons keep their sizes.
     /// After Send it shrinks to fit the confirmation.
     private var pillContentWidth: ClosedRange<CGFloat>? {
-        if case .sent = controller.phase {
+        if controller.sentConfirmation != nil {
             return nil
         }
         return Self.width...Self.maxWidth
@@ -326,7 +267,7 @@ struct HUDView: View {
     private var pill: some View {
         if isEmbedded {
             pillContent
-                .frame(width: pillContentWidth.map { _ in Self.embeddedWidth }, height: 30)
+                .frame(minWidth: pillContentWidth.map { _ in Self.embeddedWidth }, minHeight: 30, maxHeight: 30)
                 .environment(\.isHUDEmbedded, true)
         } else {
             floatingPill
@@ -337,17 +278,13 @@ struct HUDView: View {
     /// toolbar's corners.
     private var pillContent: some View {
         HStack(spacing: 4) {
-            switch controller.phase {
-            case .sent(let confirmation):
+            if let confirmation = controller.sentConfirmation {
                 HStack(spacing: HUDMetrics.iconGap) {
                     switch controller.sentStatus {
                     case .done:
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.tildeBlue)
-                    case .working:
-                        ProgressView()
-                            .controlSize(.small)
+                            .foregroundStyle(.green)
                     case .failed:
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -357,7 +294,7 @@ struct HUDView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                 }
-            case .annotating, .idle:
+            } else {
                 // Stacked, so the crossfade between the two never lays them out side by side.
                 ZStack {
                     if let confirmation = controller.confirmation, confirmation != .discardComment {
@@ -439,8 +376,7 @@ struct HUDView: View {
         .onHover { isPillHovered = $0 }
         .gesture(
             DragGesture(minimumDistance: 4, coordinateSpace: .global)
-                .onChanged { _ in onDrag(false) }
-                .onEnded { _ in onDrag(true) }
+                .onChanged { _ in onDrag() }
         )
     }
 
@@ -449,8 +385,7 @@ struct HUDView: View {
             .opacity(controller.isHUDShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
-                    .onChanged { _ in onDrag(false) }
-                    .onEnded { _ in onDrag(true) }
+                    .onChanged { _ in onDrag() }
             )
     }
 
@@ -470,80 +405,91 @@ struct HUDView: View {
     private var annotatingContent: some View {
         let count = controller.drafts.count
 
-        HStack(spacing: HUDMetrics.iconGap) {
-            // Where the status dot was: pause while annotating, Annotate (blue) while paused.
-            HUDButton(
-                image: controller.isEffectivelyPaused ? Image(nsImage: TildeMark.annotateIcon) : Image(systemName: "pause.fill"),
-                size: 26, tint: controller.isEffectivelyPaused ? .tildeBlue : nil, help: pauseHelp
-            ) {
-                if controller.isEffectivelyPaused {
-                    controller.resume()
-                } else {
-                    controller.togglePause()
+        // While a window is being chosen, only the window button works; the others keep their
+        // places with the disabled look.
+        Group {
+            HStack(spacing: HUDMetrics.iconGap) {
+                // Where the status dot was: in recording mode the record button, else pause and play.
+                HUDButton(image: leadingIcon, size: 26, tint: leadingTint, bounce: recordModeEntries, help: leadingHelp) {
+                    if controller.recording != nil {
+                        controller.toggleRecord()
+                    } else if !controller.pauses.isEmpty {
+                        controller.resume()
+                    } else {
+                        controller.togglePause()
+                    }
+                }
+                .disabled(controller.recording == .busy)
+                // The red record button bounces once on the way into recording mode.
+                .onChange(of: controller.recording != nil) { _, isRecordMode in
+                    if isRecordMode {
+                        recordModeEntries += 1
+                    }
+                }
+                .padding(.leading, -4)
+                VStack(alignment: .leading, spacing: 1) {
+                    titleText
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    subtitle
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .lineLimit(1)
+            }
+            .padding(.trailing, HUDMetrics.iconGap)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
+
+            HUDButton(image: Image(systemName: "record.circle"), isOn: controller.recording != nil, help: controller.recording == nil ? "Record a video" : "Back to annotating (Esc)") {
+                controller.toggleRecordingMode()
+            }
+
+            // Recording mode puts Stop where Draw is; the other buttons stay.
+            if controller.recording != nil {
+                HUDButton(image: Image(systemName: "stop.fill"), help: "Stop and add the recording to the list") {
+                    controller.stopRecording()
+                }
+                .disabled(!controller.isClipInProgress)
+            } else {
+                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, help: "Draw on the screen") {
+                    if controller.isDrawing {
+                        controller.finishDrawing()
+                    } else {
+                        controller.startDrawing()
+                    }
                 }
             }
-            .padding(.leading, -4)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                subtitle
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.5))
+        }
+        .disabled(controller.isPickingWindow)
+
+        HUDButton(image: sourceIcon, isOn: controller.scope != nil, isActive: controller.isPickingWindow, help: windowHelp) {
+            controller.toggleWindowPick()
+        }
+
+        Group {
+            HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide annotations" : "Show annotations") {
+                controller.showNotes()
             }
-            .lineLimit(1)
-        }
-        .padding(.trailing, HUDMetrics.iconGap)
-        .frame(maxWidth: .infinity, alignment: .leading)
+            .disabled(count == 0)
 
-        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
+            HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all annotations and keep annotating") {
+                controller.requestClearAll()
+            }
+            .disabled(count == 0)
 
-        HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, help: "Draw on the screen") {
-            if controller.isDrawing {
-                controller.finishDrawing()
-            } else {
-                controller.startDrawing()
+            // A session without an agent copies the report.
+            SendButton(copies: controller.session?.isLocal == true, action: controller.send)
+                .disabled(!canSend)
+            .tildeTooltip(sendHelp)
+            .padding(.leading, 4)
+
+            HUDButton(image: Image(systemName: "xmark"), help: "Cancel and close (Esc)") {
+                controller.requestCancel()
             }
         }
-
-        HUDButton(image: Image(systemName: "macwindow"), isOn: controller.scope != nil || controller.isPickingWindow, help: windowHelp) {
-            controller.toggleWindowScope()
-        }
-
-        HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide annotations" : "Show annotations") {
-            controller.showNotes()
-        }
-        .disabled(count == 0)
-
-        HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all annotations and keep annotating") {
-            controller.requestClearAll()
-        }
-        .disabled(count == 0)
-
-        // A session without an agent copies the report. Both labels take the space of the wider
-        // one, so the pill never shifts.
-        let copies = controller.session?.isLocal == true
-        Button(action: controller.send) {
-            ZStack {
-                sendLabel("Send", symbol: "arrow.up").hidden()
-                sendLabel("Copy", symbol: "doc.on.doc").hidden()
-                sendLabel(copies ? "Copy" : "Send", symbol: copies ? "doc.on.doc" : "arrow.up")
-            }
-            .font(.system(size: 12.5, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .frame(height: 28)
-            .background(HUDShape(height: 28, isHUDEmbedded: isHUDEmbedded).fill(Color.tildeBlue))
-            .opacity(count == 0 && controller.composer == nil ? 0.4 : 1)
-        }
-        .buttonStyle(.plain)
-        .disabled(count == 0 && controller.composer == nil)
-        .tildeTooltip(sendHelp)
-        .padding(.leading, 4)
-
-        HUDButton(image: Image(systemName: "xmark"), help: "Cancel and close (Esc)") {
-            controller.requestCancel()
-        }
+        .disabled(controller.isPickingWindow)
     }
 
     /// Replaces the pill's content, at the same size, with a question and two buttons.
@@ -564,6 +510,8 @@ struct HUDView: View {
             case .discardComment:
                 // Asked on the comment box itself.
                 EmptyView()
+            case .discardRecording:
+                Text("Discard the recording?")
             case .restore(let record):
                 Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(record.notes.count) saved?")
             }
@@ -576,7 +524,7 @@ struct HUDView: View {
         PillTextButton(title: "Cancel", key: "esc", isDestructive: false) {
             controller.dismissConfirmation()
         }
-        .tildeTooltip("Keep the annotations")
+        .tildeTooltip(confirmation == .discardRecording ? "Keep recording" : "Keep the annotations")
 
         switch confirmation {
         case .clearAll:
@@ -591,20 +539,16 @@ struct HUDView: View {
             .tildeTooltip("Discard \(all) and close")
         case .discardComment:
             EmptyView()
+        case .discardRecording:
+            PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
+                controller.confirm()
+            }
+            .tildeTooltip("Throw the recording away and go back to annotating")
         case .restore:
             PillTextButton(title: "Replace", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
             .tildeTooltip("Replace the notes with the saved session's")
-        }
-    }
-
-    /// Icon first, then the label, as in macOS buttons.
-    private func sendLabel(_ title: String, symbol: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: symbol)
-                .font(.system(size: 10.5, weight: .bold))
-            Text(title)
         }
     }
 
@@ -619,19 +563,82 @@ struct HUDView: View {
         return "Send to \(agent)  ⌘↩"
     }
 
-    private var windowHelp: String {
-        if let name = controller.scopeName {
-            return "Annotating only \(name). Click to annotate all windows"
-        }
-        if controller.isPickingWindow {
-            return "Click a window to annotate only it, or Esc"
-        }
-        return "Annotate a specific window"
+    /// Send has notes, a clip in progress or an open comment to send.
+    private var canSend: Bool {
+        !controller.drafts.isEmpty || controller.isClipInProgress || controller.composer != nil
     }
 
-    /// "Pause (Esc)", and when paused "Annotate (Double-tap ⌃)".
-    private var pauseHelp: String {
-        guard controller.isEffectivelyPaused else {
+    private var windowHelp: String {
+        let action = controller.recording == nil ? "annotate" : "record"
+        if controller.isPickingWindow {
+            return "Click a window or screen to \(action), or Esc"
+        }
+        if let name = controller.scopeName {
+            return "Only \(name). Choose another window or the whole screen"
+        }
+        return "Choose a screen or window to \(action)"
+    }
+
+    /// The window button's icon: the chosen screen, phone or window, or a pointer on a window
+    /// until a choice.
+    private var sourceIcon: Image {
+        switch controller.chosenSource {
+        case nil:
+            return Image(systemName: "rectangle.inset.filled.and.cursorarrow")
+        case .window:
+            // The app's icon at the size of the other buttons' symbols.
+            guard let icon = controller.scopeIcon?.copy() as? NSImage else {
+                return Image(systemName: "macwindow")
+            }
+            icon.size = NSSize(width: 16, height: 16)
+            return Image(nsImage: icon)
+        case .screen(let display):
+            return Image(systemName: CGDisplayIsBuiltin(display) != 0 ? "laptopcomputer" : "display")
+        case .phone:
+            return Image(systemName: "iphone")
+        }
+    }
+
+    private var recordHelp: String {
+        switch controller.recording {
+        case .recording:
+            return "Pause the recording"
+        case .paused:
+            return "Resume the recording"
+        case .ready, .busy, nil:
+            return controller.scopeName.map { "Start recording \($0)" } ?? "Start recording the screen"
+        }
+    }
+
+    /// The leading button: in recording mode red to start or resume a clip and pause while it
+    /// records; else pause, and play while paused.
+    private var leadingIcon: Image {
+        switch controller.recording {
+        case .recording:
+            return Image(systemName: "pause.fill")
+        case .ready, .busy, .paused:
+            return Image(systemName: "circle.fill")
+        case nil:
+            return Image(systemName: controller.pauses.isEmpty ? "pause.fill" : "play.fill")
+        }
+    }
+
+    private var leadingTint: Color? {
+        switch controller.recording {
+        case .ready, .busy, .paused:
+            return .red
+        case .recording, nil:
+            return nil
+        }
+    }
+
+    /// "Pause (Esc)", and when paused "Annotate (Double-tap ⌃)"; the record button's in
+    /// recording mode.
+    private var leadingHelp: String {
+        if controller.recording != nil {
+            return recordHelp
+        }
+        guard !controller.pauses.isEmpty else {
             return "Pause (Esc)"
         }
         guard let shortcut = controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause) else {
@@ -640,48 +647,77 @@ struct HUDView: View {
         return "Annotate (\(shortcut.title))"
     }
 
-    private var title: String {
-        if controller.isEffectivelyPaused {
-            return "Paused"
+    /// Every title the HUD shows, for the width of the title column.
+    private static let titles = ["Annotating", "Paused", "Choose a window", "Ready to record", "Recording 0:00", "Paused 0:00"]
+
+    /// The title. It takes the space of the widest title in every mode, so the pill keeps its
+    /// width and the buttons stay put when the mode changes; the time counts up while recording.
+    private var titleText: some View {
+        ZStack(alignment: .leading) {
+            ForEach(Self.titles, id: \.self) { title in
+                Text(title).hidden()
+            }
+            if case .recording(let since, let before) = controller.recording, !controller.isPickingWindow {
+                TimelineView(.periodic(from: since, by: 1)) { context in
+                    Text("Recording \(AnnotationController.clock(before + context.date.timeIntervalSince(since)))")
+                }
+            } else {
+                Text(title)
+            }
         }
-        return controller.isPickingWindow ? "Choose a window" : "Annotating"
+        .monospacedDigit()
     }
 
-    /// The subtitle: the first candidate that fits the pill, so words drop out, and "…" only
-    /// when even the shortest is too long.
+    private var title: String {
+        if controller.isPickingWindow {
+            return "Choose a window"
+        }
+        guard let recording = controller.recording else {
+            return controller.pauses.isEmpty ? "Annotating" : "Paused"
+        }
+        switch recording {
+        case .ready:
+            return "Ready to record"
+        case .busy, .recording:
+            return "Recording"
+        case .paused(let elapsed):
+            return "Paused \(AnnotationController.clock(elapsed))"
+        }
+    }
+
+    /// The subtitle on one line: where the report goes, in full, or what to do now. The window
+    /// the session is limited to is on the window button, not here. It never widens the pill:
+    /// every agent's name fits, and a longer one is cut.
     private var subtitle: some View {
-        let candidates = Self.subtitleCandidates(
+        let part = Self.subtitlePart(
             // A local session's report goes to the clipboard, like an agent's goes to the agent.
             client: controller.session.map { $0.isLocal ? "Clipboard" : $0.client },
             clientIcon: controller.session.flatMap { $0.isLocal ? Self.clipboardIcon : controller.clientIcon($0.client) },
             machine: controller.session?.node.map { Machine(host: $0, dot: controller.machineDot($0)) },
-            // The browser's own toolbar needs no "in Tilde Browser".
-            scopeName: isEmbedded ? nil : controller.scopeName,
-            scopeIcon: controller.scopeIcon,
             state: subtitleState
         )
-        return ViewThatFits(in: .horizontal) {
-            ForEach(Array(candidates.enumerated()), id: \.offset) { _, parts in
-                SubtitleLine(parts: parts)
-            }
-            SubtitleLine(parts: candidates.last ?? [], truncates: true)
-        }
+        return SubtitleLine(part: part)
+            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
     private var subtitleState: SubtitleState {
         if let notice = controller.notice {
             return .notice(notice)
         }
-        if controller.isPaused {
+        if controller.isPickingWindow {
+            return .choosingWindow
+        }
+        let pauses = controller.pauses
+        if pauses.contains(.user) {
             return .paused(shortcut: controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause))
         }
-        if controller.isHoldPaused, let key = controller.shortcuts.holdKey {
+        if pauses.contains(.hold), let key = controller.shortcuts.holdKey {
             return .holding(key.symbol)
         }
-        if controller.isAutoPaused {
+        if pauses.contains(.otherApp) {
             return .waitingForWindow
         }
-        return controller.isPickingWindow ? .choosingWindow : .annotating
+        return .annotating
     }
 
     enum SubtitleState: Equatable {
@@ -695,12 +731,13 @@ struct HUDView: View {
         case notice(String)
     }
 
-    /// One piece of the subtitle: an optional word, an optional app icon, and a name or text.
+    /// The subtitle: an optional word, an optional app icon, a name or text, and a remote
+    /// agent's machine.
     struct SubtitlePart: Equatable {
         var prefix: String?
         var icon: NSImage?
         var text: String?
-        /// A remote agent's machine, after its name: "on <machine> host".
+        /// A remote agent's machine, as its icon after the name; its host is in the tooltip.
         var machine: Machine?
     }
 
@@ -710,121 +747,96 @@ struct HUDView: View {
         let dot: NodeSetup.Dot
     }
 
-    /// The width the title column has in the fixed pill, for the narrowest layout (the paused
-    /// state with its badge). Every subtitle's shortest candidate fits it.
-    static let subtitleWidth: CGFloat = 120
+    /// The width the title column has in the fixed pill. Every agent's name fits it in full.
+    static let subtitleWidth: CGFloat = 140
     static let clipboardIcon = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: "Clipboard")
     static let subtitleFont = NSFont.systemFont(ofSize: 10.5, weight: .medium)
 
-    /// Subtitles from fullest to shortest, such as "for Codex on mac-mini · in Chrome", then
-    /// without the words, then without the names, keeping the icons and the machine.
-    static func subtitleCandidates(
-        client: String?, clientIcon: NSImage?, machine: Machine?, scopeName: String?, scopeIcon: NSImage?, state: SubtitleState
-    ) -> [[SubtitlePart]] {
+    /// What the subtitle says: a notice or what to do now, else where the report goes, such as
+    /// "for Codex" and the remote machine's icon.
+    static func subtitlePart(client: String?, clientIcon: NSImage?, machine: Machine?, state: SubtitleState) -> SubtitlePart {
         switch state {
         case .notice(let text):
-            return [[SubtitlePart(text: text)]]
+            return SubtitlePart(text: text)
         case .holding(let key):
-            return [[SubtitlePart(text: "Release \(key) to annotate")], [SubtitlePart(text: "Release \(key)")]]
+            return SubtitlePart(text: "Release \(key) to annotate")
         case .waitingForWindow:
-            return [[SubtitlePart(text: "Click the window to continue")], [SubtitlePart(text: "Click the window")]]
+            return SubtitlePart(text: "Click the window")
         case .choosingWindow:
-            return [[SubtitlePart(text: "Esc cancels")]]
+            return SubtitlePart(text: "Esc cancels")
         // Paused, it still says where the report goes; the button's tooltip has the shortcut.
         case .annotating, .paused:
             break
         }
 
-        let full = [
-            client.map { SubtitlePart(prefix: "for", icon: clientIcon, text: $0, machine: machine) },
-            scopeName.map { SubtitlePart(prefix: "in", icon: scopeIcon, text: $0) },
-        ].compactMap { $0 }
-
-        // Each step drops more: the words, then the names behind icons.
-        let steps: [(SubtitlePart) -> SubtitlePart?] = [
-            { $0.icon == nil ? $0 : SubtitlePart(icon: $0.icon, machine: $0.machine) },
-        ]
-        var candidates = [full]
-        for step in steps {
-            let next = candidates[candidates.count - 1].compactMap(step)
-            if next != candidates.last, !next.isEmpty {
-                candidates.append(next)
-            }
+        guard let client else {
+            return SubtitlePart()
         }
-        return candidates
+        return SubtitlePart(prefix: "for", icon: clientIcon, text: client, machine: machine)
     }
 
-    /// The width of a subtitle candidate in the HUD's subtitle font.
-    static func width(of parts: [SubtitlePart]) -> CGFloat {
+    /// The width of a subtitle in the HUD's subtitle font.
+    static func width(of part: SubtitlePart) -> CGFloat {
         let attributes: [NSAttributedString.Key: Any] = [.font: subtitleFont]
         func width(_ words: [String]) -> CGFloat {
             words.map { ($0 as NSString).size(withAttributes: attributes).width }.reduce(0, +)
         }
 
-        let separator = width([" · "])
-        let widths = parts.map { part -> CGFloat in
-            let words = [part.prefix, part.text].compactMap { $0 }
-            let icon: CGFloat = part.icon == nil ? 0 : 14
-            let gaps = CGFloat(max(words.count + (part.icon == nil ? 0 : 1) - 1, 0)) * 3
-            // "on", the machine icon and its host, each after a 3 pt gap.
-            var machine: CGFloat = 0
-            if let host = part.machine?.host {
-                machine = width(["on", host]) + 14 + 3 * 3
-            }
-            return width(words) + icon + gaps + machine
-        }
-        return widths.reduce(0, +) + CGFloat(max(parts.count - 1, 0)) * separator
+        let words = [part.prefix, part.text].compactMap { $0 }
+        let icon: CGFloat = part.icon == nil ? 0 : 14
+        let gaps = CGFloat(max(words.count + (part.icon == nil ? 0 : 1) - 1, 0)) * 3
+        // The machine's icon, after a 3 pt gap.
+        let machine: CGFloat = part.machine == nil ? 0 : 3 + 14
+        return width(words) + icon + gaps + machine
     }
 }
 
-/// A subtitle candidate on one line, laid out at its ideal width so ViewThatFits can measure it;
-/// with `truncates`, cut to the space there is.
+/// The subtitle on one line, cut to the space there is.
 private struct SubtitleLine: View {
-    let parts: [HUDView.SubtitlePart]
-    var truncates = false
+    let part: HUDView.SubtitlePart
 
     var body: some View {
         HStack(spacing: 3) {
-            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                if index > 0 {
-                    Text("·")
-                }
-                if let prefix = part.prefix {
-                    Text(prefix)
-                }
-                if let icon = part.icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 14, height: 14)
-                }
-                if let text = part.text {
-                    Text(text)
-                }
-                if let machine = part.machine {
-                    Text("on")
-                    MachineIcon(dot: machine.dot, size: 14)
-                    // A long host name is the first to give way.
-                    Text(machine.host)
-                        .layoutPriority(-1)
-                }
+            if let prefix = part.prefix {
+                Text(prefix)
+            }
+            if let icon = part.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 14, height: 14)
+            }
+            if let text = part.text {
+                Text(text)
+            }
+            // A remote machine as its icon with the status dot; there is no room for its name.
+            if let machine = part.machine {
+                MachineIcon(dot: machine.dot, size: 14)
+                    .tildeTooltip("On \(machine.host)")
+                    .accessibilityLabel("on \(machine.host)")
             }
         }
         .lineLimit(1)
-        .fixedSize(horizontal: !truncates, vertical: false)
     }
 }
 
-private struct HUDButton: View {
-    /// An SF Symbol, or a template image such as `TildeMark.annotateIcon`.
+struct HUDButton: View {
+    /// An SF Symbol, or an image such as an app icon.
     let image: Image
-    var badge: Int = 0
+    /// A count after the icon, such as the number of notes; nil for no count. A button with a
+    /// count keeps the width of two digits, so the buttons stay put as the count changes.
+    var badge: Int?
     /// The smallest width and the height.
     var size: CGFloat = 30
+    /// Selected, such as the window the session is limited to: a grey fill.
     var isOn = false
+    /// Doing what it started, such as choosing a window: a Tilde-blue fill.
+    var isActive = false
     var isDestructive = false
     /// The icon's colour, such as Tilde blue for the main action.
     var tint: Color?
+    /// Bounces the symbol once each time it changes, to draw the eye; the frame stays.
+    var bounce = 0
     let help: String
     let action: () -> Void
 
@@ -839,6 +851,9 @@ private struct HUDButton: View {
         if let tint {
             return tint.opacity(isEnabled ? 1 : 0.4)
         }
+        if isActive {
+            return .white
+        }
         return .white.opacity(isEnabled ? 0.9 : 0.3)
     }
 
@@ -846,21 +861,22 @@ private struct HUDButton: View {
         if isDestructive {
             return Color.red.opacity(isHovered && isEnabled ? 0.28 : 0.16)
         }
+        if isActive {
+            return Color.tildeBlue.opacity(isHovered ? 0.85 : 1)
+        }
         return .white.opacity(isOn ? 0.16 : (isHovered && isEnabled ? 0.09 : 0))
     }
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
-                image
-                    .font(.system(size: 12, weight: .semibold))
-                if badge > 0 {
-                    Text("\(badge)")
-                        .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+            ZStack {
+                if badge != nil {
+                    label(count: "88").hidden()
                 }
+                label(count: badge.flatMap { $0 > 0 ? "\($0)" : nil })
             }
             .foregroundStyle(foreground)
-            .padding(.horizontal, badge > 0 ? 9 : 0)
+            .padding(.horizontal, badge == nil ? 0 : 9)
             .frame(minWidth: size, minHeight: size)
             .background(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9).fill(background))
             .contentShape(Rectangle())
@@ -869,6 +885,53 @@ private struct HUDButton: View {
         .onHover { isHovered = $0 }
         .tildeTooltip(help)
         .accessibilityLabel(help)
+    }
+
+    private func label(count: String?) -> some View {
+        HStack(spacing: 4) {
+            image
+                .font(.system(size: 12, weight: .semibold))
+                .symbolEffect(.bounce, value: bounce)
+            if let count {
+                Text(count)
+                    .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+            }
+        }
+    }
+}
+
+/// Send, or Copy for a session without an agent, in Tilde blue; faded when disabled. Both
+/// labels take the space of the wider one, so the pill never shifts.
+private struct SendButton: View {
+    let copies: Bool
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.isHUDEmbedded) private var isHUDEmbedded
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                label("Send", symbol: "arrow.up").hidden()
+                label("Copy", symbol: "doc.on.doc").hidden()
+                label(copies ? "Copy" : "Send", symbol: copies ? "doc.on.doc" : "arrow.up")
+            }
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .frame(height: 28)
+            .background(HUDShape(height: 28, isHUDEmbedded: isHUDEmbedded).fill(Color.tildeBlue))
+            .opacity(isEnabled ? 1 : 0.4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Icon first, then the label, as in macOS buttons.
+    private func label(_ title: String, symbol: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.system(size: 10.5, weight: .bold))
+            Text(title)
+        }
     }
 }
 

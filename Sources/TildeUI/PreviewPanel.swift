@@ -1,5 +1,6 @@
 import TildeCore
 import AppKit
+import AVKit
 import SwiftUI
 
 /// Centred card that shows one annotation's close-up large and its context screenshot as a
@@ -7,14 +8,26 @@ import SwiftUI
 /// image area, with a Back button. ← and → cycle through the annotations; Esc goes back from
 /// an enlarged image, then closes.
 /// While the comment is being edited, those keys edit the text; ↩ or Esc ends editing.
-/// The panel keeps one size so nothing moves while cycling.
+/// The panel keeps one size so nothing moves while cycling. Its edges and its corner grip
+/// resize it, and Tilde remembers the size for the next preview; the pictures take the extra
+/// space. Its header moves it like the HUD's pill: it snaps back to the centre within 40 pt,
+/// and a place elsewhere is remembered for that screen.
 @MainActor
 final class PreviewPanel {
     let window: NSPanel
-    private static let size = NSSize(width: 1000, height: 640)
+    private static let defaultSize = NSSize(width: 1000, height: 640)
+    /// Room for the header, a picture, the comment box and the buttons.
+    static let minSize = NSSize(width: 560, height: 420)
+    private static let sizeKey = "PreviewSize"
+    private let defaults: UserDefaults
+    private var resizeObserver: Any?
+    private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: 18, positionsKey: "PreviewPositions")
+    /// The frame when a drag of the corner grip began.
+    private var resizeStart: NSRect?
 
-    init(controller: AnnotationController) {
-        let panel = KeyPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+    init(controller: AnnotationController, defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let panel = KeyPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: true)
         panel.onKey = { [unowned panel] event in
             let isEditing = panel.firstResponder is NSTextView
             switch event.keyCode {
@@ -42,13 +55,58 @@ final class PreviewPanel {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.backgroundColor = .clear
         window.isOpaque = false
-        window.hasShadow = false
+        // The window's own shadow, from the card's shape, so the card reaches its edges and
+        // they resize it.
+        window.hasShadow = true
+        window.minSize = Self.minSize
         window.isReleasedWhenClosed = false
         window.contentView = hosting
+        hosting.rootView = PreviewView(controller: controller) { [weak self] in
+            self?.drag()
+        } onResize: { [weak self] distance in
+            self?.resize(by: distance)
+        } onResizeEnded: { [weak self] in
+            self?.resizeStart = nil
+        }
+        resizeObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else {
+                    return
+                }
+                self.window.invalidateShadow()
+                Self.save(self.window.frame.size, to: self.defaults)
+            }
+        }
     }
 
-    /// Shows the card centred on the screen that has the pointer, with no text field focused
-    /// so the arrow keys navigate.
+    /// The card's size on a screen: the remembered size, or the default, kept inside the
+    /// screen and above the minimum.
+    static func size(on visible: NSRect, defaults: UserDefaults) -> NSSize {
+        let saved = defaults.string(forKey: sizeKey).map(NSSizeFromString)
+        let size = saved ?? defaultSize
+        let width = min(max(size.width, minSize.width), visible.width)
+        let height = min(max(size.height, minSize.height), visible.height)
+        return NSSize(width: width, height: height)
+    }
+
+    /// The top centre of a card of this size centred in the screen's visible area.
+    static func homeTop(of size: NSSize, on visible: NSRect) -> NSPoint {
+        NSPoint(x: visible.midX, y: visible.midY + size.height / 2)
+    }
+
+    /// Keeps the card's top centre where the whole card is inside the visible area.
+    static func clamped(_ top: NSPoint, size: NSSize, in visible: NSRect) -> NSPoint {
+        let x = min(max(top.x, visible.minX + size.width / 2), visible.maxX - size.width / 2)
+        let y = min(max(top.y, visible.minY + size.height), visible.maxY)
+        return NSPoint(x: x, y: y)
+    }
+
+    static func save(_ size: NSSize, to defaults: UserDefaults) {
+        defaults.set(NSStringFromSize(size), forKey: sizeKey)
+    }
+
+    /// Shows the card on the screen that has the pointer, centred or where it was dropped
+    /// there, with no text field focused so the arrow keys navigate.
     func show() {
         let pointer = NSEvent.mouseLocation
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.screens.first else {
@@ -56,9 +114,9 @@ final class PreviewPanel {
         }
 
         let visible = screen.visibleFrame
-        let size = Self.size
-        let origin = NSPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2)
-        window.setFrame(NSRect(origin: origin, size: size), display: true)
+        let size = Self.size(on: visible, defaults: defaults)
+        let top = Self.clamped(snapDrag.savedTop(on: screen) ?? Self.homeTop(of: size, on: visible), size: size, in: visible)
+        window.setFrame(NSRect(x: top.x - size.width / 2, y: top.y - size.height, width: size.width, height: size.height), display: true)
         window.makeKeyAndOrderFront(nil)
         // Without this, Esc and the arrows would go to the app in front.
         if !window.isKeyWindow {
@@ -70,6 +128,29 @@ final class PreviewPanel {
 
     func close() {
         window.orderOut(nil)
+    }
+
+    /// Moves the card with the pointer while its header is dragged. Home is the card centred
+    /// at its size now; a snap never resizes it.
+    private func drag() {
+        let size = window.frame.size
+        snapDrag.begin { screen in
+            let top = Self.homeTop(of: size, on: screen.visibleFrame)
+            return NSRect(x: top.x - size.width / 2, y: top.y - size.height, width: size.width, height: size.height)
+        } outlineFrame: { home in
+            home
+        } clamped: { top, visible in
+            Self.clamped(top, size: size, in: visible)
+        }
+    }
+
+    /// Resizes the card from its corner grip; the top left corner stays.
+    private func resize(by distance: CGSize) {
+        let start = resizeStart ?? window.frame
+        resizeStart = start
+        let width = max(start.width + distance.width, Self.minSize.width)
+        let height = max(start.height + distance.height, Self.minSize.height)
+        window.setFrame(NSRect(x: start.minX, y: start.maxY - height, width: width, height: height), display: true)
     }
 }
 
@@ -89,6 +170,11 @@ private final class KeyPanel: NSPanel {
 
 struct PreviewView: View {
     @ObservedObject var controller: AnnotationController
+    /// Called when a drag of the header moves.
+    var onDrag: () -> Void = {}
+    /// The corner grip's drag, by its distance since it began, and its end.
+    var onResize: (CGSize) -> Void = { _ in }
+    var onResizeEnded: () -> Void = {}
 
     var body: some View {
         Group {
@@ -97,7 +183,6 @@ struct PreviewView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(20)
         .tildeTooltipHost()
         .environment(\.colorScheme, .dark)
     }
@@ -105,7 +190,7 @@ struct PreviewView: View {
     private func card(index: Int, draft: Draft) -> some View {
         let annotation = draft.annotation
 
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Text("\(index + 1)")
                     .font(.system(size: 11, weight: .bold))
@@ -125,21 +210,36 @@ struct PreviewView: View {
                     controller.closePreview()
                 }
             }
+            // The whole strip above the pictures moves the card, margins included, like the
+            // HUD's pill; a drag that starts on Close moves it and does not press it.
+            .padding([.horizontal, .top], 18)
+            .padding(.bottom, 14)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                    .onChanged { _ in onDrag() }
+            )
 
-            images(of: annotation)
+            VStack(alignment: .leading, spacing: 14) {
+                images(of: annotation)
 
-            // An enlarged screenshot gets the whole card below the header.
-            if controller.expandedPreviewImage == nil {
-                CommentEditor(controller: controller, id: draft.id, initial: annotation.comment)
-                    .id(draft.id)
-                footer(id: draft.id)
+                // An enlarged screenshot gets the whole card below the header.
+                if controller.expandedPreviewImage == nil {
+                    CommentEditor(controller: controller, id: draft.id, initial: annotation.comment)
+                        .id(draft.id)
+                    footer(id: draft.id)
+                }
             }
+            .padding([.horizontal, .bottom], 18)
         }
-        .padding(18)
         // Opaque, unlike the HUD: a large see-through card would mix with the page behind it.
+        // It fills the window, which draws the shadow.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(RoundedRectangle(cornerRadius: 18).fill(Color(white: 0.1)))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.3), radius: 18, y: 6)
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.1)).allowsHitTesting(false))
+        .overlay(alignment: .bottomTrailing) {
+            ResizeGrip(onChanged: onResize, onEnded: onResizeEnded)
+        }
     }
 
     private func footer(id: Draft.ID) -> some View {
@@ -157,8 +257,9 @@ struct PreviewView: View {
         }
     }
 
-    /// The close-up fills the image area and the context sits beside it as a tile. An
-    /// enlarged screenshot replaces both, under a Back button.
+    /// The close-up fills the image area, or a recording's clip in the native player, and the
+    /// context, when there is one, sits beside it as a tile; a recording has none. An enlarged
+    /// screenshot replaces both, under a Back button.
     @ViewBuilder
     private func images(of annotation: Annotation) -> some View {
         switch controller.expandedPreviewImage {
@@ -168,13 +269,26 @@ struct PreviewView: View {
             enlarged(title: "Context", data: annotation.contextImage)
         case nil:
             HStack(alignment: .top, spacing: 12) {
-                Screenshot(title: "Close-up", data: annotation.image) {
-                    controller.expandedPreviewImage = .closeUp
+                if case .recording(let video, _, _) = annotation.target {
+                    VStack(alignment: .leading, spacing: 6) {
+                        SlotTitle(text: "Recording")
+                        // A new player for each clip, so the last one stops.
+                        ClipPlayer(url: video)
+                            .id(video)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1)).allowsHitTesting(false))
+                    }
+                } else {
+                    Screenshot(title: "Close-up", data: annotation.image) {
+                        controller.expandedPreviewImage = .closeUp
+                    }
                 }
-                Screenshot(title: "Context", data: annotation.contextImage) {
-                    controller.expandedPreviewImage = .context
+                if annotation.contextImage != nil {
+                    Screenshot(title: "Context", data: annotation.contextImage) {
+                        controller.expandedPreviewImage = .context
+                    }
+                    .frame(width: 240, height: 180)
                 }
-                .frame(width: 240, height: 180)
             }
         }
     }
@@ -197,6 +311,8 @@ struct PreviewView: View {
         switch annotation.target {
         case .drawing:
             return "Drawing"
+        case .recording(_, let seconds, let source):
+            return "Recording of \(source), \(Int(seconds.rounded())) s"
         case .region:
             return "Region \(Int(annotation.frame.width))×\(Int(annotation.frame.height))"
         case .element(.web(let element)):
@@ -216,9 +332,7 @@ private struct Screenshot: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
+            SlotTitle(text: title)
             ImageSlot(data: data)
                 .overlay(alignment: .topTrailing) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
@@ -232,6 +346,37 @@ private struct Screenshot: View {
                 .onTapGesture(perform: enlarge)
                 .tildeTooltip("Enlarge")
         }
+    }
+}
+
+/// The small grey title above a screenshot or a clip.
+private struct SlotTitle: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.5))
+    }
+}
+
+/// A recording's clip in the native player with its standard controls. It waits on the first
+/// frame until Play, and stops when the preview closes or shows another note.
+private struct ClipPlayer: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = AVPlayer(url: url)
+        view.controlsStyle = .inline
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {}
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player?.pause()
+        view.player = nil
     }
 }
 

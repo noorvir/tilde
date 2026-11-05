@@ -2,9 +2,9 @@
   "version": 1,
   "surface": "hud",
   "size": [
-    520,
+    600,
     80
   ],
-  "sent": "Copied, mac-mini failed",
+  "sent": "Could not send the images to mac-mini",
   "sentStatus": "failed"
 }

@@ -6,6 +6,7 @@ struct SessionFlow: Codable, Equatable {
     enum Event: String, Codable {
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
         case holdBegan, holdEnded, otherAppInFront, scopeAppInFront, clickAway, startDrawing, finishDrawing, undoDrawing, redoDrawing, shapeFinished
+        case leaveRecording
     }
 
     enum Effect: String, Codable {
@@ -15,6 +16,8 @@ struct SessionFlow: Codable, Equatable {
         case cancelSession, clearDrafts, restoreDrafts
         case startLocalSession, showHUD
         case plainClicksOn, plainClicksOff
+        /// Back to annotating from recording mode, throwing away a clip in progress.
+        case exitRecording
     }
 
     var isAnnotating = true
@@ -29,11 +32,16 @@ struct SessionFlow: Codable, Equatable {
     var commentIsOnDrawing = false
     var previewOpen = false
     var pickingWindow = false
-    /// "clearAll", "cancelSession", "discardComment" or "restore".
+    /// In recording mode.
+    var recording = false
+    /// A clip is being recorded or is paused, not yet stopped.
+    var clipInProgress = false
+    /// "clearAll", "cancelSession", "discardComment", "discardRecording" or "restore".
     var confirmation: String?
 
     private enum CodingKeys: String, CodingKey {
-        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, drawing, commentOpen, commentHasText, commentIsOnDrawing, previewOpen, pickingWindow, confirmation
+        case isAnnotating, hasSession, notes, paused, autoPaused, holdPaused, drawing, commentOpen, commentHasText, commentIsOnDrawing, previewOpen, pickingWindow
+        case recording, clipInProgress, confirmation
     }
 
     init() {}
@@ -52,6 +60,8 @@ struct SessionFlow: Codable, Equatable {
         commentIsOnDrawing = try values.decodeIfPresent(Bool.self, forKey: .commentIsOnDrawing) ?? false
         previewOpen = try values.decodeIfPresent(Bool.self, forKey: .previewOpen) ?? false
         pickingWindow = try values.decodeIfPresent(Bool.self, forKey: .pickingWindow) ?? false
+        recording = try values.decodeIfPresent(Bool.self, forKey: .recording) ?? false
+        clipInProgress = try values.decodeIfPresent(Bool.self, forKey: .clipInProgress) ?? false
         confirmation = try values.decodeIfPresent(String.self, forKey: .confirmation)
     }
 
@@ -72,7 +82,14 @@ struct SessionFlow: Codable, Equatable {
         return [.applyPause]
     }
 
+    /// While choosing a window, only Esc (which stops choosing), a hold key let go, and other
+    /// apps coming to the front count; every control and shortcut waits for the choice.
+    private static let whilePicking: Set<Event> = [.escape, .holdEnded, .otherAppInFront, .scopeAppInFront]
+
     mutating func handle(_ event: Event) -> [Effect] {
+        if pickingWindow, !Self.whilePicking.contains(event) {
+            return []
+        }
         switch event {
         case .escape:
             if commentOpen {
@@ -90,6 +107,9 @@ struct SessionFlow: Codable, Equatable {
             if confirmation != nil {
                 confirmation = nil
                 return []
+            }
+            if recording {
+                return handle(.leaveRecording)
             }
             if isAnnotating, !paused {
                 paused = true
@@ -154,6 +174,7 @@ struct SessionFlow: Codable, Equatable {
             case "discardComment":
                 paused = false
                 return [.closeComposer, .applyPause]
+            case "discardRecording": return [.exitRecording]
             default: return [.restoreDrafts]
             }
 
@@ -221,11 +242,23 @@ struct SessionFlow: Codable, Equatable {
             return leaveComment()
 
         case .otherAppInFront:
-            guard !autoPaused else {
+            // Recording mode records whatever app is in front.
+            guard isAnnotating, !autoPaused else {
                 return []
             }
             autoPaused = true
             return [.applyPause, .showOtherAppNotice]
+
+        case .leaveRecording:
+            guard recording else {
+                return []
+            }
+            // A clip that is not stopped is lost, so that asks first.
+            guard clipInProgress else {
+                return [.exitRecording]
+            }
+            confirmation = "discardRecording"
+            return []
 
         case .scopeAppInFront:
             guard autoPaused else {

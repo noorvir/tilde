@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Dashed outline of the pill at its home position, shown while the HUD is dragged. It turns
-/// blue while the dragged pill is snapped to home.
+/// Dashed outline of a dragged panel at its home position, such as the HUD's pill. It turns
+/// blue while the dragged panel is snapped to home.
 @MainActor
 final class HomeOutline {
     private let window: NSPanel
@@ -12,7 +12,7 @@ final class HomeOutline {
         @Published var isSnapped = false
     }
 
-    init() {
+    init(cornerRadius: CGFloat) {
         window = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         window.level = .screenSaver
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
@@ -21,7 +21,7 @@ final class HomeOutline {
         window.isOpaque = false
         window.hasShadow = false
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: OutlineView(model: model))
+        window.contentView = NSHostingView(rootView: OutlineView(model: model, cornerRadius: cornerRadius))
     }
 
     /// Shows the outline as `frame` (AppKit screen coordinates), just below the window
@@ -48,12 +48,14 @@ final class HomeOutline {
 
 struct OutlineView: View {
     @ObservedObject var model: HomeOutline.Model
+    let cornerRadius: CGFloat
 
     var body: some View {
-        Capsule()
+        let shape = RoundedRectangle(cornerRadius: cornerRadius)
+        shape
             .fill(Color.tildeBlue.opacity(model.isSnapped ? 0.24 : 0.12))
             .overlay(
-                Capsule().strokeBorder(
+                shape.strokeBorder(
                     Color.tildeBlue.opacity(model.isSnapped ? 0.95 : 0.6),
                     style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [0.5, 5])
                 )

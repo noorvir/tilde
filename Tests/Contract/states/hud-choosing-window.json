@@ -2,8 +2,8 @@
   "version": 1,
   "surface": "hud",
   "size": [
-    520,
-    80
+    600,
+    136
   ],
   "session": {
     "client": "Codex"

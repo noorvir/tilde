@@ -1,7 +1,8 @@
 import Foundation
 
 /// Writes a sent feedback batch to `~/.tilde/inbox/<time>_<session>/` as
-/// `feedback.md` plus the close-up and context PNGs of each annotation, and returns the folder.
+/// `feedback.md` plus the close-up and context PNGs of each annotation and the video of each
+/// recording, and returns the folder.
 public func saveToInbox(_ feedback: Feedback, sessionID: String, root: URL = inboxRoot) throws -> URL {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -16,6 +17,9 @@ public func saveToInbox(_ feedback: Feedback, sessionID: String, root: URL = inb
         }
         if let contextImage = annotation.contextImage {
             try contextImage.write(to: folder.appendingPathComponent(contextImageName(index + 1)))
+        }
+        if case .recording(let video, _, _) = annotation.target {
+            try FileManager.default.copyItem(at: video, to: folder.appendingPathComponent(videoName(index + 1)))
         }
     }
 

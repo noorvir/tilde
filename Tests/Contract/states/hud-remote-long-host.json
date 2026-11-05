@@ -2,7 +2,7 @@
   "version": 1,
   "surface": "hud",
   "size": [
-    720,
+    800,
     80
   ],
   "session": {
