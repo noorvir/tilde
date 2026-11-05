@@ -116,7 +116,10 @@ final class SourcePickerModel: ObservableObject {
         let displays = content.displays.map { display in
             Tile(source: .screen(display.displayID), title: Self.name(of: display.displayID), detail: Self.pixelSize(of: display.displayID))
         }
-        let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: "Cable") }
+        // A phone's picture needs the Camera permission, which is asked for only when the user
+        // chooses the phone to record.
+        let mayFilmPhones = PhoneCapture.hasCameraAccess
+        let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: mayFilmPhones ? "Cable" : "Needs Camera access") }
         screens = Self.offered(displays + phones, drawableOnly: drawableOnly)
         apps = Self.apps(of: content.windows, browserWindow: browserWindow)
 
@@ -138,7 +141,9 @@ final class SourcePickerModel: ObservableObject {
                         group.addTask { await (tile.id, Self.picture(of: SCContentFilter(desktopIndependentWindow: window), size: window.frame.size)) }
                     }
                 case .phone(let phone):
-                    group.addTask { await (tile.id, PhoneCapture.snapshot(of: phone)) }
+                    if mayFilmPhones {
+                        group.addTask { await (tile.id, PhoneCapture.snapshot(of: phone)) }
+                    }
                 }
             }
             for await (id, picture) in group {

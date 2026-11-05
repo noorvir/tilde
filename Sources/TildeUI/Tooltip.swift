@@ -4,7 +4,8 @@ extension View {
     /// Shows `text` in a dark tooltip under this view after 500 ms of hover. A view up the
     /// tree must call `tildeTooltipHost()` to draw it. Used instead of `.help`, which has a
     /// fixed delay and does not show reliably in Tilde's non-activating panels.
-    func tildeTooltip(_ text: String) -> some View {
+    /// A nil `text` shows none.
+    func tildeTooltip(_ text: String?) -> some View {
         modifier(TooltipSource(text: text))
     }
 
@@ -51,7 +52,8 @@ private struct TooltipKey: PreferenceKey {
 }
 
 private struct TooltipSource: ViewModifier {
-    let text: String
+    /// Nil for no tooltip.
+    let text: String?
     @State private var isShown = false
     @State private var delay: Task<Void, Never>?
 
@@ -73,7 +75,10 @@ private struct TooltipSource: ViewModifier {
                 }
             }
             .anchorPreference(key: TooltipKey.self, value: .bounds) { anchor in
-                isShown ? Tooltip(text: text, anchor: anchor) : nil
+                guard isShown, let text else {
+                    return nil
+                }
+                return Tooltip(text: text, anchor: anchor)
             }
     }
 }

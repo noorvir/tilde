@@ -123,6 +123,8 @@ public struct InstallReport: Sendable {
                 return dryRun ? "Would remove \(file)" : "Removed \(file)"
             case .unchanged:
                 return "Already set: \(file)"
+            case .unchangedNotPrivate(let message):
+                return "Already set: \(file), but others may read it: \(message)"
             case .failed(let message):
                 return "Could not change \(file): \(message)"
             }
@@ -140,6 +142,8 @@ public struct FileChange: Sendable {
         case updated
         case removed
         case unchanged
+        /// The right text, in a file that could not be made private, such as a read-only one.
+        case unchangedNotPrivate(String)
         case failed(String)
 
         public var isChange: Bool {
@@ -263,9 +267,14 @@ public struct Installer: Sendable {
             let old = exists ? try files.read(file) : ""
             let new = try change(old)
             guard new != old || !exists else {
-                // The right text, maybe from an older Tilde that left it readable by others.
+                // The right text, maybe from an older Tilde that left it readable by others. A
+                // file that cannot change, such as one linked into a read-only store, is left.
                 if !dryRun {
-                    try files.makePrivate(file)
+                    do {
+                        try files.makePrivate(file)
+                    } catch {
+                        return FileChange(file: file, action: .unchangedNotPrivate(String(describing: error)))
+                    }
                 }
                 return FileChange(file: file, action: .unchanged)
             }

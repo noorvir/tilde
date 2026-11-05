@@ -47,10 +47,13 @@ public final class HTTPServer: @unchecked Sendable {
     /// request this soon.
     private let headerTimeout: TimeInterval = 2
     private let readTimeout: TimeInterval = 10
+    /// Requests one caller (one `Authorization` value) may have open at once, such as long
+    /// polls, so one caller cannot take every connection; nil for no limit.
+    private let maxRequestsPerCaller: Int?
     // Read and written on `queue` only: the open connections, oldest first.
     private var connections: [Reading] = []
 
-    public init(port: UInt16, handler: @escaping Handler) throws {
+    public init(port: UInt16, maxRequestsPerCaller: Int? = nil, handler: @escaping Handler) throws {
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .loopback
         parameters.allowLocalEndpointReuse = true
@@ -59,6 +62,7 @@ public final class HTTPServer: @unchecked Sendable {
             throw URLError(.badURL)
         }
         listener = try NWListener(using: parameters, on: endpointPort)
+        self.maxRequestsPerCaller = maxRequestsPerCaller
         self.handler = handler
     }
 
@@ -119,6 +123,8 @@ public final class HTTPServer: @unchecked Sendable {
         let connection: NWConnection
         var hasHeader = false
         var isDone = false
+        /// The `Authorization` of a request being handled, when callers are limited.
+        var caller: String?
 
         init(connection: NWConnection) {
             self.connection = connection
@@ -148,6 +154,13 @@ public final class HTTPServer: @unchecked Sendable {
                 self.send(HTTPResponse(status: status), on: connection)
             case .request(let request):
                 reading.isDone = true
+                if let limit = self.maxRequestsPerCaller, let caller = request.headers["authorization"] {
+                    guard self.connections.filter({ $0.caller == caller }).count < limit else {
+                        self.send(HTTPResponse(status: 429), on: connection)
+                        return
+                    }
+                    reading.caller = caller
+                }
                 let handler = self.handler
                 Task {
                     let response = await handler(request)
@@ -256,6 +269,7 @@ public final class HTTPServer: @unchecked Sendable {
         case 411: return "Length Required"
         case 413: return "Payload Too Large"
         case 415: return "Unsupported Media Type"
+        case 429: return "Too Many Requests"
         case 431: return "Request Header Fields Too Large"
         default: return "Status"
         }

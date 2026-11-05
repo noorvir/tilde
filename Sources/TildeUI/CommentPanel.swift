@@ -355,27 +355,41 @@ struct CommentView: View {
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(.white)
             Spacer(minLength: 4)
+            // The answers as the pill's questions show them: the label, then its key.
             Button(action: controller.dismissConfirmation) {
-                hint("esc", "cancel")
+                answer("Cancel", key: "esc", color: .white.opacity(0.9))
             }
             .buttonStyle(.plain)
             Button(action: controller.confirm) {
-                hint("↩", "discard", color: .red)
+                answer("Discard", key: "↩", color: .red)
             }
             .buttonStyle(.plain)
         }
     }
 
-    private func hint(_ key: String, _ label: String, color: Color = .secondary) -> some View {
+    private func hint(_ key: String, _ label: String) -> some View {
         HStack(spacing: 4) {
-            Text(key)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.1)))
+            keyCap(key)
             Text(label)
                 .font(.system(size: 10.5))
         }
+        .foregroundStyle(.secondary)
+    }
+
+    private func answer(_ label: String, key: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10.5, weight: .semibold))
+            keyCap(key)
+        }
         .foregroundStyle(color)
+    }
+
+    private func keyCap(_ key: String) -> some View {
+        Text(key)
+            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.1)))
     }
 }

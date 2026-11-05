@@ -47,6 +47,11 @@ public enum LocalToken {
             throw Failure.notSaved("cannot write in \(folder.path)")
         }
         defer { try? FileManager.default.removeItem(at: temporary) }
+        // An empty file, such as one left by a full disk, is replaced; a token that another
+        // process has just made is never empty, so it stays.
+        if (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int == 0 {
+            try? FileManager.default.removeItem(at: file)
+        }
         if link(temporary.path, file.path) != 0, errno != EEXIST {
             throw Failure.notSaved(String(cString: strerror(errno)))
         }

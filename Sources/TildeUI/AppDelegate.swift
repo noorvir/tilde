@@ -172,9 +172,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.server = server
 
-            // The door for tunnels from other machines: every request needs a node's token.
+            // The door for tunnels from other machines: every request needs a node's token, and
+            // one node's long polls cannot take every connection from the others.
             let store = NodeStore()
-            let nodeServer = try HTTPServer(port: state.port + 1) { request in
+            let nodeServer = try HTTPServer(port: state.port + 1, maxRequestsPerCaller: 8) { request in
                 await mcp.handleFromNode(request, store: store)
             }
             nodeServer.start { _ in }

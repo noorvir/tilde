@@ -30,6 +30,11 @@ enum PhoneCapture {
         devices().map { Phone(id: $0.uniqueID, name: $0.localizedName) }
     }
 
+    /// Whether Tilde may film phones already, without asking.
+    static var hasCameraAccess: Bool {
+        AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+    }
+
     /// Whether Tilde may record the phone, asking the user the first time.
     static func isAllowed() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .video) {

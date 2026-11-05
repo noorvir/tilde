@@ -46,23 +46,35 @@ public func pruneInbox(root: URL = inboxRoot, now: Date = Date(), keptDays: Int 
     }
 }
 
-/// The same on another machine, in its `~/.tilde/inbox`, as a shell command.
-public let pruneInboxCommand = """
-    cd ~/.tilde/inbox 2>/dev/null && ls -1 | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9a-f]{8}$' | sort -r | tail -n +101 | \
+/// The same on another machine, in its `~/.tilde/inbox`, as a shell command. It runs in `sh`,
+/// whatever the login shell there is, such as fish.
+public let pruneInboxCommand = "sh -c '" + """
+    cd ~/.tilde/inbox 2>/dev/null && ls -1 | grep -E "^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9a-f]{8}$" | sort -r | tail -n +101 | \
     while IFS= read -r folder; do [ -n "$(find "$folder" -maxdepth 0 -mtime +30)" ] && rm -rf -- "$folder"; done; true
-    """
+    """ + "'"
 
 /// Makes a folder, the folders in it and their files for the owner only, such as reports
-/// saved by an older Tilde with the default 0755 and 0644.
+/// saved by an older Tilde with the default 0755 and 0644. Links are left alone, as are items
+/// that are private already, so their change times stay.
 public func makePrivate(tree root: URL) {
     guard FileManager.default.fileExists(atPath: root.path) else {
         return
     }
-    try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
-    let items = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])
+    makePrivate(root.path, mode: 0o700)
+    let items = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
     while let item = items?.nextObject() as? URL {
-        let isFolder = (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-        try? FileManager.default.setAttributes([.posixPermissions: isFolder ? 0o700 : 0o600], ofItemAtPath: item.path)
+        let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values?.isSymbolicLink != true else {
+            continue
+        }
+        makePrivate(item.path, mode: values?.isDirectory == true ? 0o700 : 0o600)
+    }
+}
+
+private func makePrivate(_ path: String, mode: Int) {
+    let current = (try? FileManager.default.attributesOfItem(atPath: path))?[.posixPermissions] as? Int
+    if current != mode {
+        try? FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: path)
     }
 }
 

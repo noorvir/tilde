@@ -520,7 +520,8 @@ struct HUDView: View {
         }
         .disabled(controller.isPickingWindow)
 
-        HUDButton(image: sourceIcon, isOn: controller.scope != nil, isActive: controller.isPickingWindow, help: windowHelp) {
+        // While choosing, its tooltip would cover "Use window picker" under the pill.
+        HUDButton(image: sourceIcon, isOn: controller.scope != nil, isActive: controller.isPickingWindow, showsTooltip: !controller.isPickingWindow, help: windowHelp) {
             controller.toggleWindowPick()
         }
         // The source of a clip in progress stays until Stop.
@@ -936,6 +937,8 @@ struct HUDButton: View {
     var tint: Color?
     /// Bounces the symbol once each time it changes, to draw the eye; the frame stays.
     var bounce = 0
+    /// Off while the tooltip would cover what the button opened under it.
+    var showsTooltip = true
     let help: String
     let action: () -> Void
 
@@ -977,7 +980,7 @@ struct HUDButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .tildeTooltip(help)
+        .tildeTooltip(showsTooltip ? help : nil)
         .accessibilityLabel(help)
     }
 
