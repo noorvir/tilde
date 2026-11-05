@@ -2,6 +2,7 @@
 import TildeCore
 import TildeInstaller
 import AppKit
+import AVFoundation
 
 /// Fixed data for UI tests: sessions, drafts and generated screenshots that look the same on
 /// every run and every Mac.
@@ -78,12 +79,41 @@ enum Fixtures {
     }
 
     /// The hover highlight on the first draft's web element.
-    /// A stopped clip of the Safari window, 12 s long, with its video file at `video`.
-    static func clip(in video: URL) throws -> Draft {
-        try Data([0, 0, 0, 0x18]).write(to: video)
+    /// A stopped clip of the Safari window, 12 s long, with its video file at `video`: a real
+    /// H.264 file of one black frame, so AVKit plays it and shows the same picture on every Mac.
+    static func clip(in video: URL) async throws -> Draft {
+        try await writeBlackVideo(to: video, seconds: 12)
         let target = Target.recording(video: video, seconds: 12, source: "Safari window")
         let annotation = Annotation(id: id(90), comment: "", target: target, frame: window.frame, image: closeUp(0), contextImage: nil)
         return Draft(annotation: annotation, marker: .zero, chip: "Recording \(clipLength(12))", capture: Task { Captures(image: closeUp(0), contextImage: nil) })
+    }
+
+    private static func writeBlackVideo(to video: URL, seconds: Int64) async throws {
+        try? FileManager.default.removeItem(at: video)
+        let writer = try AVAssetWriter(outputURL: video, fileType: .mp4)
+        let settings: [String: Any] = [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 40]
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: nil)
+        writer.add(input)
+        writer.startWriting()
+        writer.startSession(atSourceTime: .zero)
+
+        var frame: CVPixelBuffer?
+        CVPixelBufferCreate(nil, 64, 40, kCVPixelFormatType_32BGRA, nil, &frame)
+        guard let frame else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        CVPixelBufferLockBaseAddress(frame, [])
+        memset(CVPixelBufferGetBaseAddress(frame), 0, CVPixelBufferGetDataSize(frame))
+        CVPixelBufferUnlockBaseAddress(frame, [])
+        adaptor.append(frame, withPresentationTime: .zero)
+
+        input.markAsFinished()
+        writer.endSession(atSourceTime: CMTime(value: seconds, timescale: 1))
+        await writer.finishWriting()
+        guard writer.status == .completed else {
+            throw writer.error ?? CocoaError(.fileWriteUnknown)
+        }
     }
 
     static func video(of draft: Draft) -> URL? {

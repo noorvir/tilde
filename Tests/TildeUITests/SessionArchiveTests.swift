@@ -173,9 +173,9 @@ struct SessionArchiveTests {
 
     /// A session owns its recordings: restored into another session, a clip is linked into
     /// that session's folder; one gone with its session is left out.
-    @Test func aRestoredRecordingBelongsToTheNewSession() throws {
+    @Test func aRestoredRecordingBelongsToTheNewSession() async throws {
         let archive = Fixtures.archive()
-        let clip = try Fixtures.clip(in: archive.newClip(in: "a1b2c3d4"))
+        let clip = try await Fixtures.clip(in: archive.newClip(in: "a1b2c3d4"))
         var record = Fixtures.record(notes: 0, pageURL: nil)
         record.notes = [SessionRecord.Note(
             id: clip.id, comment: "", target: clip.annotation.target, frame: clip.annotation.frame, marker: .zero, chip: clip.chip, anchor: nil
@@ -208,11 +208,11 @@ struct SessionArchiveTests {
 
     /// Recordings an older Tilde kept in ~/.tilde/recordings move into their sessions, and
     /// that folder goes.
-    @Test func olderRecordingsMoveIntoTheirSessions() throws {
+    @Test func olderRecordingsMoveIntoTheirSessions() async throws {
         let archive = Fixtures.archive()
         let older = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recordings-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
-        let clip = try Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
+        let clip = try await Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
         var record = Fixtures.record(notes: 0, pageURL: nil)
         record.notes = [SessionRecord.Note(id: clip.id, comment: "", target: clip.annotation.target, frame: .zero, marker: .zero, chip: clip.chip, anchor: nil)]
         archive.save(record)
@@ -233,11 +233,11 @@ struct SessionArchiveTests {
 
     /// Two sessions that share an older recording each get their own; the older folder goes
     /// only then.
-    @Test func sessionsSharingAnOlderRecordingEachGetIt() throws {
+    @Test func sessionsSharingAnOlderRecordingEachGetIt() async throws {
         let archive = Fixtures.archive()
         let older = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recordings-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
-        let clip = try Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
+        let clip = try await Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
         let note = SessionRecord.Note(id: clip.id, comment: "", target: clip.annotation.target, frame: .zero, marker: .zero, chip: clip.chip, anchor: nil)
         let ids = ["a1b2c3d4", "b1b2c3d4"]
         for id in ids {
@@ -264,11 +264,11 @@ struct SessionArchiveTests {
 
     /// When a session cannot get its own recording, the older one stays where it was, and so
     /// does the folder, for the next launch.
-    @Test func anOlderRecordingThatCannotMoveStays() throws {
+    @Test func anOlderRecordingThatCannotMoveStays() async throws {
         let archive = Fixtures.archive()
         let older = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recordings-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
-        let clip = try Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
+        let clip = try await Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
         var record = Fixtures.record(notes: 0, pageURL: nil)
         record.notes = [SessionRecord.Note(id: clip.id, comment: "", target: clip.annotation.target, frame: .zero, marker: .zero, chip: clip.chip, anchor: nil)]
         archive.save(record)
