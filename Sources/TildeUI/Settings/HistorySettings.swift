@@ -38,8 +38,9 @@ final class HistoryModel: ObservableObject {
         reload()
     }
 
+    /// Every session but the one on screen, whose notes and recordings are still in use.
     func clear() {
-        archive.deleteAll()
+        archive.deleteAll(except: currentID())
         archive.flush()
         reload()
     }

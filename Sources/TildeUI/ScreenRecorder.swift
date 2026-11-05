@@ -41,6 +41,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
 
     /// Set once, right after the recorder exists, as the stream needs it as its delegate.
     private var capture: Capture?
+    /// What a stream records, to take a picture of it at Resume; a phone streams all the time.
+    private var stillSource: (filter: SCContentFilter, configuration: SCStreamConfiguration)?
     /// The clock of the frame times, which pauses are measured on.
     private let clock: CMClock
     private let writer: AVAssetWriter
@@ -53,11 +55,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// The time of the last frame written, in the video's time.
     private var lastTime: CMTime?
     private var lastFrame: CVPixelBuffer?
-    /// The pauses, in frame time; the last one is open while paused.
+    /// The pauses, in frame time; the last one is open while paused. A frame captured during
+    /// a pause is never written.
     private var pauses: [(start: CMTime, end: CMTime?)] = []
-    /// The newest frame that came during the pause, written at Resume so the video shows the
-    /// source as it is then, also when it does not change.
-    private var heldFrame: CMSampleBuffer?
     private var hasSourceEnded = false
 
     /// Starts recording a source into `video`. `browserWindow`, Tilde's browser, stays in a
@@ -102,6 +102,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: onSourceEnded)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: recorder)
         recorder.capture = .stream(stream)
+        recorder.stillSource = (filter, configuration)
         try stream.addStreamOutput(recorder, type: .screen, sampleHandlerQueue: recorder.queue)
         do {
             try await stream.startCapture()
@@ -212,12 +213,44 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             guard let open = pauses.last, open.end == nil else {
                 return
             }
-            let resumedAt = now
-            pauses[pauses.count - 1].end = resumedAt
-            if let held = heldFrame, let time = videoTime(of: resumedAt) {
-                write(held, at: time)
+            pauses[pauses.count - 1].end = now
+            writeStill()
+        }
+    }
+
+    /// A screen sends frames only when it changes: after Resume, a picture taken now shows it
+    /// as it is, also when it does not change.
+    private func writeStill() {
+        guard let stillSource else {
+            return
+        }
+        Task { [self] in
+            guard let buffer = try? await SCScreenshotManager.captureSampleBuffer(contentFilter: stillSource.filter, configuration: stillSource.configuration) else {
+                return
             }
-            heldFrame = nil
+            let still = Still(buffer: buffer)
+            queue.async { [self] in
+                writeUntilAccepted(still, takenAt: now, tries: 20)
+            }
+        }
+    }
+
+    /// A picture handed to the recorder's queue; a sample buffer does not change once made.
+    private struct Still: @unchecked Sendable {
+        let buffer: CMSampleBuffer
+    }
+
+    /// A busy encoder can refuse the picture; it is offered again until it is written, a newer
+    /// frame is, or a pause began after it was taken.
+    private func writeUntilAccepted(_ still: Still, takenAt: CMTime, tries: Int) {
+        guard let time = videoTime(of: takenAt), lastTime.map({ time > $0 }) ?? true, tries > 0 else {
+            return
+        }
+        guard write(still.buffer, at: time) else {
+            queue.asyncAfter(deadline: .now() + 0.05) { [self] in
+                writeUntilAccepted(still, takenAt: takenAt, tries: tries - 1)
+            }
+            return
         }
     }
 
@@ -293,14 +326,10 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         onSourceEnded()
     }
 
-    /// A frame captured during a pause waits for Resume; others are written, moved back by
-    /// the time spent paused before them.
+    /// Writes a frame moved back by the time spent paused before it; one captured during a
+    /// pause, also one that arrives late, is dropped.
     private func append(_ buffer: CMSampleBuffer) {
-        guard buffer.isValid, buffer.imageBuffer != nil else {
-            return
-        }
-        guard let time = videoTime(of: buffer.presentationTimeStamp) else {
-            heldFrame = buffer
+        guard buffer.isValid, buffer.imageBuffer != nil, let time = videoTime(of: buffer.presentationTimeStamp) else {
             return
         }
         write(buffer, at: time)
@@ -320,17 +349,18 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     }
 
     /// Writes a frame at a video time after the last one; AVAssetWriter refuses a time that
-    /// goes back, and the whole clip with it.
-    private func write(_ buffer: CMSampleBuffer, at time: CMTime) {
+    /// goes back, and the whole clip with it. Returns false when the encoder is busy.
+    @discardableResult
+    private func write(_ buffer: CMSampleBuffer, at time: CMTime) -> Bool {
         guard lastTime.map({ time > $0 }) ?? true, let frame = buffer.imageBuffer else {
-            return
+            return true
         }
         if startTime == nil {
             startTime = time
             writer.startSession(atSourceTime: time)
         }
         guard input.isReadyForMoreMediaData else {
-            return
+            return false
         }
 
         var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
@@ -342,10 +372,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             if writer.status == .failed {
                 sourceEnded()
             }
-            return
+            return true
         }
         lastTime = time
         lastFrame = frame
+        return true
     }
 
     /// Where the clip ends: a source that went away at its last frame; else now (a still

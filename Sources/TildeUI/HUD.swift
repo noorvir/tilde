@@ -222,7 +222,7 @@ struct HUDView: View {
             if controller.isHUDShown, controller.isPickingWindow {
                 SourcePickerView(
                     model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
-                    selectedID: controller.recording == nil ? controller.source?.id : controller.clipSource.id,
+                    selectedID: controller.isRecordMode ? controller.clipSource.id : controller.source?.id,
                     onOpen: controller.openSourcePicker, onBack: controller.stepBackInSourcePicker, onChoose: controller.choose
                 )
                     .transition(Self.zoom)
@@ -411,7 +411,7 @@ struct HUDView: View {
             HStack(spacing: HUDMetrics.iconGap) {
                 // Where the status dot was: in recording mode the record button, else pause and play.
                 HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, help: status.help) {
-                    if controller.recording != nil {
+                    if controller.isRecordMode {
                         controller.toggleRecord()
                     } else if !controller.pauses.isEmpty {
                         controller.resume()
@@ -421,7 +421,7 @@ struct HUDView: View {
                 }
                 .disabled(status.isBusy)
                 // The red record button bounces once on the way into recording mode.
-                .onChange(of: controller.recording != nil) { _, isRecordMode in
+                .onChange(of: controller.isRecordMode) { _, isRecordMode in
                     if isRecordMode {
                         recordModeEntries += 1
                     }
@@ -442,17 +442,17 @@ struct HUDView: View {
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
-            HUDButton(image: Image(systemName: "record.circle"), isOn: controller.recording != nil, help: controller.recording == nil ? "Record a video" : "Back to annotating (Esc)") {
+            HUDButton(image: Image(systemName: "record.circle"), isOn: controller.isRecordMode, help: controller.isRecordMode ? "Back to annotating (Esc)" : "Record a video") {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)
 
             // Recording mode puts Stop where Draw is; the other buttons stay.
-            if let clip = controller.recording {
+            if controller.isRecordMode {
                 HUDButton(image: Image(systemName: "stop.fill"), help: "Stop and add the recording to the list") {
                     controller.stopRecording()
                 }
-                .disabled(clip != .recording && clip != .paused)
+                .disabled(controller.recording != .recording && controller.recording != .paused)
             } else {
                 HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, help: "Draw on the screen") {
                     if controller.isDrawing {
@@ -586,7 +586,7 @@ struct HUDView: View {
     }
 
     private var windowHelp: String {
-        let action = controller.recording == nil ? "annotate" : "record"
+        let action = controller.isRecordMode ? "record" : "annotate"
         if controller.isPickingWindow {
             return "Click a window or screen to \(action), or Esc"
         }

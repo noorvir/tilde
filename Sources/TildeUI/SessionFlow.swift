@@ -155,6 +155,14 @@ struct SessionFlow: Equatable {
         return nil
     }
 
+    /// Recording mode, also while choosing the source of its next clip.
+    var isRecordMode: Bool {
+        switch session?.activity {
+        case .recording, .picking(isRecordMode: true, _): true
+        default: false
+        }
+    }
+
     var isPicking: Bool {
         if case .open(let open) = mode, case .picking = open.activity {
             return true

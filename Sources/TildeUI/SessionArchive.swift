@@ -118,9 +118,9 @@ final class SessionArchive: @unchecked Sendable {
         }
     }
 
-    func deleteAll() {
+    func deleteAll(except kept: String? = nil) {
         queue.async { [self] in
-            for record in readAll() {
+            for record in readAll() where record.id != kept {
                 try? FileManager.default.removeItem(at: folder(record.id))
             }
         }

@@ -73,12 +73,21 @@ final class SourcePickerModel: ObservableObject {
     @Published private(set) var apps: [App] = []
 
     private var loading: Task<Void, Never>?
+    /// Sources offered in place of the screen's, such as fixtures for pictures and tests; a
+    /// load treats them as it treats the screen's.
+    var injected: (screens: [Tile], apps: [App], phase: Phase)?
 
     /// Lists the sources on screen now, then takes their pictures, in place of a load still
     /// running. `drawableOnly` leaves out sources Tilde cannot draw on, such as a phone, for
     /// annotating.
     func load(browserWindow: Int?, drawableOnly: Bool) {
         loading?.cancel()
+        if let injected {
+            screens = Self.offered(injected.screens, drawableOnly: drawableOnly)
+            apps = injected.apps
+            phase = injected.phase
+            return
+        }
         phase = .listing
         loading = Task {
             await reload(browserWindow: browserWindow, drawableOnly: drawableOnly)
@@ -148,14 +157,6 @@ final class SourcePickerModel: ObservableObject {
     /// The screens and phones to offer: only those Tilde can draw on, for annotating.
     private static func offered(_ tiles: [Tile], drawableOnly: Bool) -> [Tile] {
         tiles.filter { !drawableOnly || $0.source.isDrawable }
-    }
-
-    func setForTesting(screens: [Tile], apps: [App], tab: Tab, openApp: pid_t? = nil, drawableOnly: Bool, phase: Phase = .done) {
-        self.phase = phase
-        self.screens = Self.offered(screens, drawableOnly: drawableOnly)
-        self.apps = apps
-        self.tab = tab
-        self.openApp = openApp
     }
 
     private func setPicture(_ picture: CGImage?, for id: String) {

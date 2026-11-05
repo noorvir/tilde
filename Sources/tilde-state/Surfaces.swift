@@ -196,10 +196,11 @@ enum Surfaces {
             case "failed": .failed
             default: .done
             }
-            controller.sourcePicker.setForTesting(
-                screens: screens, apps: apps, tab: picker == "screens" ? .screens : .windows, openApp: picker == "app" ? Fixtures.window.pid : nil,
-                drawableOnly: state.recording == nil, phase: phase
-            )
+            // Opened as the app opens it, so it offers what the app would.
+            controller.sourcePicker.injected = (screens, apps, phase)
+            controller.openSourcePicker()
+            controller.sourcePicker.tab = picker == "screens" ? .screens : .windows
+            controller.sourcePicker.openApp = picker == "app" ? Fixtures.window.pid : nil
         }
     }
 

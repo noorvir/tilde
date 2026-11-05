@@ -27,13 +27,6 @@ struct Draft: Identifiable {
     var pictureArea: CGRect?
 
     var id: UUID { annotation.id }
-
-    var isRecording: Bool {
-        if case .recording = annotation.target {
-            return true
-        }
-        return false
-    }
 }
 
 enum PreviewImage {
@@ -101,6 +94,8 @@ final class AnnotationController: ObservableObject {
     /// The clip of recording mode, or nil in any other mode.
     var recording: SessionFlow.Clip? { flow.clip }
     var isPickingWindow: Bool { flow.isPicking }
+    /// Recording mode, also while choosing its next clip's source.
+    var isRecordMode: Bool { flow.isRecordMode }
     /// While choosing, the source picker is open in full in place of its "Use window picker"
     /// button, and clicks on screen choose nothing.
     var isSourcePickerOpen: Bool {
@@ -123,6 +118,8 @@ final class AnnotationController: ObservableObject {
     @Published private(set) var session: SessionStore.Session?
     @Published private(set) var drafts: [Draft] = [] {
         didSet {
+            // Send and the questions read the count; it changes with the notes, not later.
+            flow.notes = drafts.count
             if let session, drafts.count != oldValue.count {
                 store.updateNoteCount(drafts.count, for: session.id)
             }
@@ -597,10 +594,8 @@ final class AnnotationController: ObservableObject {
             return
         }
         log.notice("session \(session.id, privacy: .public) cancelled")
-        // A cancelled session keeps its notes in History, but not its recordings.
-        let clips = drafts.filter(\.isRecording)
-        clips.forEach(ClipRecorder.deleteVideo)
-        drafts.removeAll(where: \.isRecording)
+        // A cancelled session keeps its notes in History, stopped recordings included; only a
+        // clip still in progress goes, with the session's end.
         saveSession(state: .cancelled)
         store.finish(session.id, with: .cancelled)
         dispatch(.ended)
@@ -1932,7 +1927,7 @@ final class AnnotationController: ObservableObject {
         sourcePicker.tab = .screens
         sourcePicker.openApp = nil
         hover = nil
-        sourcePicker.load(browserWindow: browser.windowNumber, drawableOnly: recording == nil)
+        sourcePicker.load(browserWindow: browser.windowNumber, drawableOnly: !isRecordMode)
     }
 
     /// The choice: a window limits the session to it, as clicking it on screen does; a screen

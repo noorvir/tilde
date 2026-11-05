@@ -54,7 +54,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let flow = controller.flow
             let pause = pauseItem
             menu.addItem(action(pause.title, pause.works ? #selector(togglePause) : nil, shortcut: .togglePause))
-            let windowTitle = controller.recording == nil ? "Annotate a Specific Window" : "Record a Specific Window"
+            let windowTitle = controller.isRecordMode ? "Record a Specific Window" : "Annotate a Specific Window"
             menu.addItem(action(windowTitle, flow.canPick && !flow.isPicking ? #selector(chooseWindow) : nil))
             menu.addItem(action("Cancel Annotation", flow.isPicking ? nil : #selector(cancelAnnotation)))
         }
@@ -254,11 +254,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// The pause command in this mode, and whether it does anything now.
     private var pauseItem: (title: String, works: Bool) {
+        let isOpen = if case .open = controller.mode { true } else { false }
+        guard controller.isRecordMode else {
+            return (controller.pauses.contains(.user) ? "Resume Annotation" : "Pause Annotation", isOpen && !controller.isPickingWindow)
+        }
         switch controller.recording {
-        case .recording: ("Pause Recording", true)
-        case .paused: ("Resume Recording", true)
-        case .some: ("Pause Recording", false)
-        case nil: (controller.pauses.contains(.user) ? "Resume Annotation" : "Pause Annotation", controller.flow.mode == .open(controller.flow.session ?? .init()) && !controller.isPickingWindow)
+        case .recording: return ("Pause Recording", true)
+        case .paused: return ("Resume Recording", true)
+        default: return ("Pause Recording", false)
         }
     }
 
