@@ -6,6 +6,7 @@
 #   tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:latest tilde-ux
 #   scripts/ux-vm.sh [test name filter]     TILDE_UX_RECORD=1 records the window baselines
 #                                           TILDE_UX_RELEASE=1 runs the release check
+#                                           TILDE_UX_NODE=<ssh host> links that machine
 set -eu
 PATH="$HOME/tools/tart-dl/tart.app/Contents/MacOS:$PATH"
 
@@ -29,9 +30,11 @@ fi
 ip=$(tart ip "$vm" --wait 180)
 until in_vm true 2>/dev/null; do sleep 3; done
 
-# This checkout as it is, committed or not; the VM keeps its build folders between runs.
+# This checkout as it is, committed or not, with tproxy built here, as the VM has no Go; the
+# VM keeps its build folders between runs.
+proxy/build.sh
 in_vm "mkdir -p tilde && find tilde -mindepth 1 -maxdepth 1 ! -name .build ! -name build -exec rm -rf {} +"
-(git ls-files; git ls-files -o --exclude-standard) | COPYFILE_DISABLE=1 tar czf - -T - | in_vm "tar xzf - -C tilde"
+(git ls-files; git ls-files -o --exclude-standard; ls proxy/dist/* 2>/dev/null) | COPYFILE_DISABLE=1 tar czf - -T - | in_vm "tar xzf - -C tilde"
 
 # The specs need the logged-in GUI session, which ssh does not give: launchd runs them there.
 in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*(N) /tmp/tilde-ux.log; cat > /tmp/dev.tilde.ux.plist" <<PLIST
@@ -46,6 +49,7 @@ in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*(N) /tmp/tilde-u
 <key>EnvironmentVariables</key><dict>
     <key>TILDE_UX_RECORD</key><string>${TILDE_UX_RECORD:-0}</string>
     <key>TILDE_UX_RELEASE</key><string>${TILDE_UX_RELEASE:-}</string>
+    <key>TILDE_UX_NODE</key><string>${TILDE_UX_NODE:-vmself}</string>
 </dict>
 <key>LimitLoadToSessionType</key><string>Aqua</string>
 <key>RunAtLoad</key><true/>

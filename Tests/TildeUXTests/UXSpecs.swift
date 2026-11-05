@@ -937,48 +937,112 @@ struct UXSpecs {
         return Double(String(rest.prefix { $0.isNumber || $0 == "." || $0 == "-" }))
     }
 
-    /// This machine's own ssh is the node: the setup of the VM has `vmself` in its ssh config, and
-    /// a `~/.claude.json` file and a `~/.codex` folder.
-    @Test func aNodeIsInstalledFromSettingsLinkedWithAToken() async throws {
+    /// A machine is installed from Settings and linked by its socket: its agents start
+    /// tproxy, which Tilde copied from its own app, as a stdio server, and reach Tilde as that
+    /// machine. `TILDE_UX_NODE` names the machine in the ssh config, with a `~/.claude.json`
+    /// file and a `~/.codex` folder: "vmself", this Mac's own ssh (a macOS node), or a Linux VM.
+    @Test func aNodeIsInstalledFromSettingsAndLinkedByItsSocket() async throws {
+        let host = ProcessInfo.processInfo.environment["TILDE_UX_NODE"] ?? "vmself"
+        let dist = URL(fileURLWithPath: "proxy/dist").standardizedFileURL
+        let home = try onNode(host, "echo $HOME").trimmingCharacters(in: .whitespacesAndNewlines)
+        let proxy = "\(home)/.tilde/bin/tproxy"
+        let socket = "\(home)/.tilde/tilde.sock"
+        let type = try onNode(host, "uname -sm").trimmingCharacters(in: .whitespacesAndNewlines)
+        let names = ["Darwin arm64": "darwin-arm64", "Darwin x86_64": "darwin-amd64", "Linux x86_64": "linux-amd64", "Linux aarch64": "linux-arm64"]
+        let name = try #require(names[type], "No tproxy for \(type)")
+        let sums = try String(contentsOf: dist.appendingPathComponent("SHA256SUMS"), encoding: .utf8)
+        let expected = try #require(sums.split(separator: "\n").first { $0.hasSuffix("tproxy-\(name)") }?.prefix(64)).description
+        let hash = "{ sha256sum || shasum -a 256; } 2>/dev/null < \(proxy) | cut -c1-64"
+        _ = try? onNode(host, "rm -f \(proxy) \(socket)")
+
+        let window = try ChangingWindow()
+        defer { window.close() }
         try await withApp { app in
             try await app.menu("Settings")
             try await app.waitToSee("Apps on this Mac")
             try await Task.sleep(for: .seconds(1))
             let apps = try await app.waitToSee("Apps on this Mac")
             try await app.scroll(at: CGPoint(x: apps.frame.midX, y: apps.frame.maxY + 200), by: -10)
-            try await app.waitToSee("vmself", timeout: 15)
-            try await app.press("vmself")
-            try await app.waitToSee("Install vmself", timeout: 20)
-            try await app.press("Install vmself")
-            try await app.waitToSeeText(containing: "Installed and linked", timeout: 30)
+            try await app.waitToSee(host, timeout: 15)
+            try await app.press(host)
+            try await app.waitToSee("Install \(host)", timeout: 20)
+            try await app.press("Install \(host)")
+            try await app.waitToSeeText(containing: "Installed and linked", timeout: 60)
             step("installed")
 
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            let config = try String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8)
-            let token = try #require(config.components(separatedBy: "Bearer ").last?.prefix { $0 != "\"" })
-            #expect(try String(contentsOf: home.appendingPathComponent(".claude.json"), encoding: .utf8).contains("Bearer \(token)"))
-            #expect(FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/tilde/SKILL.md").path))
+            // The entries start the proxy with the socket, and hold no token; the proxy is the
+            // checked file, and only the user can open the folder and the socket.
+            let configs = try onNode(host, "cat ~/.codex/config.toml ~/.claude.json")
+            #expect(configs.contains("command = \"\(proxy)\""), "\(configs)")
+            #expect(configs.contains("\"type\": \"stdio\""), "\(configs)")
+            #expect(!configs.contains("Bearer"))
+            #expect(try onNode(host, hash).hasPrefix(expected))
+            let modes = try onNode(host, "ls -ld ~/.tilde ~/.tilde/bin \(proxy) \(socket) | cut -c1-10")
+            #expect(modes.split(separator: "\n") == ["drwx------", "drwx------", "-rwx------", "srw-------"], "\(modes)")
+            #expect(try onNode(host, "(ss -ltn 2>/dev/null || netstat -an -p tcp) | grep -c '[.:]7319 ' || true").hasPrefix("0"))
+            print("NODE \(type), tproxy \(try onNode(host, hash))\(modes)\(configs)")
+            step("files")
 
-            // Through the tunnel, a request needs the token.
-            func status(_ header: String?) async throws -> Int {
-                var request = URLRequest(url: URL(string: "http://127.0.0.1:7319/mcp")!)
-                request.httpMethod = "POST"
-                request.httpBody = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8)
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue(header, forHTTPHeaderField: "Authorization")
-                let (_, response) = try await URLSession.shared.data(for: request)
-                return (response as? HTTPURLResponse)?.statusCode ?? 0
+            // An agent there, through the proxy, as Codex.
+            var agent = try NodeAgent(host: host, command: "\(proxy) \(socket)")
+            let hello = try await agent.call("initialize", ["protocolVersion": "2025-06-18", "capabilities": [:], "clientInfo": ["name": "codex-mcp-client", "version": "1"]])
+            #expect(hello["result"] != nil, "\(hello)")
+            try agent.notify("notifications/initialized")
+            let tools = try await agent.call("tools/list", [:])
+            #expect("\(tools)".contains("wait_for_annotation"))
+            let started = try await agent.call("tools/call", ["name": "start_annotation", "arguments": ["wait_seconds": 0]])
+            let session = try #require("\(started)".components(separatedBy: "session_id: ").last?.prefix { $0 != "." }).description
+            try await app.waitToSee("Annotating", timeout: 15)
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
+            try await app.waitToSee("add")
+            try await app.type("From the node")
+            try await app.waitToSee("From the node", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitToSeeText(containing: "1 note")
+            try await app.key(.enter, command: true)
+            let report = try await agent.call("tools/call", ["name": "wait_for_annotation", "arguments": ["session_id": session, "wait_seconds": 30]], timeout: 40)
+            #expect("\(report)".contains("From the node"), "\(report)")
+            print("NODE report: \(String("\(report)".prefix(300)))")
+            agent.close()
+            step("agent")
+
+            // Another user there can open neither the folder nor the socket.
+            if (try? onNode(host, "id other")) != nil {
+                let other = "sudo -n -u other python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect(\"\(socket)\")' 2>&1; sudo -n -u other ls \(home)/.tilde 2>&1"
+                let refused = (try? onNode(host, other + "; true")) ?? ""
+                #expect(refused.components(separatedBy: "Permission denied").count == 3, "\(refused)")
+                print("NODE other user: \(refused)")
+                step("other user")
             }
-            #expect(try await status(nil) == 401)
-            #expect(try await status("Bearer wrong") == 401)
-            #expect(try await status("Bearer \(token)") == 200)
-            step("token")
 
-            try await app.press("Remove vmself")
-            try await app.waitToSee("Install vmself", timeout: 30)
-            #expect(try !String(contentsOf: home.appendingPathComponent(".codex/config.toml"), encoding: .utf8).contains("Bearer"))
-            #expect(try !String(contentsOf: home.appendingPathComponent(".claude.json"), encoding: .utf8).contains("Bearer"))
-            #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/tilde").path))
+            // A dropped tunnel comes back on the same socket, and a changed proxy is replaced,
+            // with the entries as they were.
+            try onNode(host, "printf x >> \(proxy)")
+            let tunnel = Process()
+            tunnel.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            tunnel.arguments = ["-f", "tilde\\.sock:/"]
+            try tunnel.run()
+            tunnel.waitUntilExit()
+            let back = Date().addingTimeInterval(60)
+            var linked = false
+            while !linked, Date() < back {
+                try await Task.sleep(for: .seconds(2))
+                if try onNode(host, hash).hasPrefix(expected), let again = try? NodeAgent(host: host, command: "\(proxy) \(socket)") {
+                    agent = again
+                    linked = (try? await agent.call("ping", [:], timeout: 5))?["result"] != nil
+                    agent.close()
+                }
+            }
+            #expect(linked)
+            #expect(try onNode(host, "cat ~/.codex/config.toml ~/.claude.json") == configs)
+            step("relinked")
+
+            try await app.press("Remove \(host)")
+            try await app.waitToSee("Install \(host)", timeout: 30)
+            #expect(try !onNode(host, "cat ~/.codex/config.toml ~/.claude.json").contains("tproxy"))
+            try await Task.sleep(for: .seconds(2))
+            #expect(try onNode(host, "ls ~/.tilde/bin ~/.tilde").contains("tproxy") == false)
             step("removed")
         }
     }
@@ -1396,6 +1460,99 @@ struct UXSpecs {
             #expect(abs(try await height() - resized) < 2)
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
+        }
+    }
+}
+
+/// Runs a command on a node through ssh, as Tilde does, and gives its output.
+@discardableResult
+private func onNode(_ host: String, _ command: String) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+    process.arguments = ["-o", "BatchMode=yes", host, command]
+    let output = Pipe()
+    process.standardOutput = output
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw POSIXError(.EIO)
+    }
+    return String(decoding: data, as: UTF8.self)
+}
+
+/// An agent on a node: its stdio MCP server is `command` (tproxy), started through ssh.
+private final class NodeAgent: @unchecked Sendable {
+    private let process = Process()
+    private let input = Pipe()
+    private let output = Pipe()
+    private var buffer = Data()
+    private var nextID = 1
+
+    init(host: String, command: String) throws {
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.arguments = ["-o", "BatchMode=yes", host, command]
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+    }
+
+    func notify(_ method: String) throws {
+        try write(["jsonrpc": "2.0", "method": method])
+    }
+
+    /// Sends a request and gives its answer, past notifications such as progress.
+    func call(_ method: String, _ params: [String: Any], timeout: Double = 15) async throws -> [String: Any] {
+        let id = nextID
+        nextID += 1
+        try write(["jsonrpc": "2.0", "id": id, "method": method, "params": params])
+        let process = process
+        return try await withThrowingTaskGroup(of: [String: Any]?.self) { group in
+            group.addTask { [self] in
+                while true {
+                    let message = try readMessage()
+                    if message["id"] as? Int == id {
+                        return message
+                    }
+                }
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeout))
+                process.terminate()
+                return nil
+            }
+            let answer = try await group.next() ?? nil
+            group.cancelAll()
+            return try #require(answer, "No answer to \(method) in \(timeout) s")
+        }
+    }
+
+    func close() {
+        try? input.fileHandleForWriting.close()
+        process.terminate()
+    }
+
+    private func write(_ message: [String: Any]) throws {
+        try input.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: message) + Data("\n".utf8))
+    }
+
+    private func readMessage() throws -> [String: Any] {
+        while true {
+            if let end = buffer.firstIndex(of: 0x0A) {
+                let line = Data(buffer[..<end])
+                buffer = Data(buffer[buffer.index(after: end)...])
+                if let message = try? JSONSerialization.jsonObject(with: line) as? [String: Any] {
+                    return message
+                }
+                continue
+            }
+            let data = output.fileHandleForReading.availableData
+            guard !data.isEmpty else {
+                throw POSIXError(.ECONNRESET)
+            }
+            buffer.append(data)
         }
     }
 }
