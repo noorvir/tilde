@@ -214,6 +214,46 @@ struct BehaviourTests {
         #expect(controller.drafts.first?.annotation.comment == draft.annotation.comment)
     }
 
+    /// Under a question, notes are neither deleted nor edited, and their controls are off.
+    @Test func notesStayAsTheyAreUnderAQuestion() {
+        let drafts = Fixtures.drafts(2)
+        open(drafts: drafts)
+        controller.requestClearAll()
+        #expect(!controller.canEditNotes)
+
+        controller.deleteDraft(drafts[0].id)
+        controller.updateComment(drafts[0].id, "changed")
+        #expect(controller.drafts.count == 2)
+        #expect(controller.drafts[0].annotation.comment == drafts[0].annotation.comment)
+        #expect(controller.confirmation == .clearAll)
+    }
+
+    /// A second Restore under the restore question changes nothing: ↩ restores the session
+    /// it asked about.
+    @Test func aSecondRestoreUnderTheQuestionKeepsTheFirst() {
+        open(drafts: Fixtures.drafts(1))
+        let first = Fixtures.record(id: "a1b2c3d4", notes: 2)
+        controller.restore(first)
+        #expect(controller.confirmation == .restore)
+
+        controller.restore(Fixtures.record(id: "b1b2c3d4", notes: 3))
+        #expect(controller.restoreRecord?.id == first.id)
+    }
+
+    /// The menu and History read the flow: a command it would drop is off.
+    @Test func commandsTheFlowWouldDropAreOff() {
+        open(drafts: Fixtures.drafts(1), activity: .recording(.recording))
+        #expect(!controller.flow.accepts(.openBrowser))
+        #expect(!controller.flow.accepts(.restore))
+        #expect(controller.flow.accepts(.togglePause))
+
+        open(drafts: Fixtures.drafts(1))
+        controller.requestCancel()
+        for event: SessionFlow.Event in [.togglePause, .requestCancel, .openBrowser, .restore, .windowButton, .deleteNote, .editNote] {
+            #expect(!controller.flow.accepts(event), "\(event)")
+        }
+    }
+
     // MARK: - Send
 
     /// "Copied" shows only once the report is saved and on the clipboard; while a screenshot
@@ -386,6 +426,43 @@ struct BehaviourTests {
         #expect(HUDPanel.homeTop(screenFrame: screen, visibleFrame: visible) == NSPoint(x: 3080, y: 1419))
     }
 
+    /// Record without a chosen source records the screen the HUD is on, also after a drag
+    /// took it to another screen.
+    @Test func recordFollowsTheHUDToItsScreen() throws {
+        let screen = try #require(NSScreen.screens.first)
+        let panel = HUDPanel(controller: controller)
+        panel.window.setFrame(NSRect(x: screen.frame.midX - 50, y: screen.frame.midY, width: 100, height: 100), display: false)
+        open(activity: .recording(.ready))
+        controller.hudDisplay = 999
+
+        NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: panel.window)
+
+        let display = try #require(AnnotationController.displayID(of: screen))
+        #expect(controller.hudDisplay == display)
+        #expect(controller.clipSource == .screen(display))
+    }
+
+    /// A HUD too low for the picker goes to its home (x and y) while choosing, and back after.
+    @Test func aLowHUDGoesHomeForThePickerAndBack() throws {
+        let screen = try #require(NSScreen.screens.first)
+        let panel = HUDPanel(controller: controller)
+        let height = screen.visibleFrame.height + 4
+        let low = NSPoint(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 120 - height)
+        panel.window.setFrame(NSRect(origin: low, size: NSSize(width: 800, height: height)), display: false)
+        open()
+        controller.toggleWindowPick()
+
+        panel.fitPicker()
+
+        let home = HUDPanel.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
+        #expect(panel.window.frame.midX == home.x)
+        #expect(panel.window.frame.maxY == home.y)
+        #expect(controller.sourcePicker.space.height >= SourcePickerView.sizes.min.height)
+
+        panel.endPicking()
+        #expect(panel.window.frame.origin == low)
+    }
+
     @Test func dragSnapsHomeWithinFortyPoints() {
         let home = NSPoint(x: 900, y: 1134)
         #expect(SnapDrag.snapsHome(NSPoint(x: 930, y: 1110), home: home))
@@ -519,9 +596,11 @@ struct BehaviourTests {
     /// The window button does nothing while a clip is in progress: a clip keeps its source.
     @Test func aClipKeepsItsSource() {
         for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, thenSend: false)] {
-            open(activity: .recording(clip))
+            open(activity: .recording(clip), source: .window(Fixtures.window))
             controller.toggleWindowPick()
+            controller.annotateInBrowser()
             #expect(!controller.isPickingWindow, "\(clip)")
+            #expect(controller.clipSource == .window(Fixtures.window), "\(clip)")
         }
     }
 
@@ -565,9 +644,17 @@ struct BehaviourTests {
             .keys(KeyCombo(keyCode: 35, modifiers: NSEvent.ModifierFlags([.control, .option, .shift, .command]).rawValue, key: "P")),
             .doubleTap(.control), .doubleTap(.command), .doubleTap(.function), nil,
         ]
-        let states: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .waitingForWindow, .holding("⌥")]
-            + Notice.allCases.map { .notice($0.rawValue) }
-            + shortcuts.map { .paused(shortcut: $0) }
+        // One of each state, then every value it can have; a new state does not compile here
+        // until it has its values.
+        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice("")]
+        let states = kinds.flatMap { kind -> [HUDView.SubtitleState] in
+            switch kind {
+            case .annotating, .choosingWindow, .inPicker, .waitingForWindow: [kind]
+            case .paused: shortcuts.map { .paused(shortcut: $0) }
+            case .holding: DoubleTapKey.allCases.map { .holding($0.symbol) }
+            case .notice: Notice.allCases.map { .notice($0.rawValue) }
+            }
+        }
 
         let machine = HUDView.Machine(host: "a-very-long-machine-name.example.com", dot: .green)
         for client in ["Clipboard"] + Harness.allCases.map(\.name) {

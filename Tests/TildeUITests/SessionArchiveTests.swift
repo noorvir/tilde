@@ -231,6 +231,65 @@ struct SessionArchiveTests {
         #expect(!FileManager.default.fileExists(atPath: older.path))
     }
 
+    /// Two sessions that share an older recording each get their own; the older folder goes
+    /// only then.
+    @Test func sessionsSharingAnOlderRecordingEachGetIt() throws {
+        let archive = Fixtures.archive()
+        let older = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recordings-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
+        let clip = try Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
+        let note = SessionRecord.Note(id: clip.id, comment: "", target: clip.annotation.target, frame: .zero, marker: .zero, chip: clip.chip, anchor: nil)
+        let ids = ["a1b2c3d4", "b1b2c3d4"]
+        for id in ids {
+            var record = Fixtures.record(id: id, notes: 0, pageURL: nil)
+            record.notes = [note]
+            archive.save(record)
+        }
+        archive.flush()
+
+        archive.prune(olderClips: older)
+        archive.flush()
+
+        for id in ids {
+            let target = try #require(archive.record(id)?.notes.first?.target)
+            guard case .recording(let video, _, _) = target else {
+                Issue.record("not a recording")
+                return
+            }
+            #expect(video.deletingLastPathComponent() == archive.folder(id))
+            #expect(FileManager.default.fileExists(atPath: video.path))
+        }
+        #expect(!FileManager.default.fileExists(atPath: older.path))
+    }
+
+    /// When a session cannot get its own recording, the older one stays where it was, and so
+    /// does the folder, for the next launch.
+    @Test func anOlderRecordingThatCannotMoveStays() throws {
+        let archive = Fixtures.archive()
+        let older = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recordings-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
+        let clip = try Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
+        var record = Fixtures.record(notes: 0, pageURL: nil)
+        record.notes = [SessionRecord.Note(id: clip.id, comment: "", target: clip.annotation.target, frame: .zero, marker: .zero, chip: clip.chip, anchor: nil)]
+        archive.save(record)
+        archive.flush()
+        // A session folder that cannot take a file, as on a full disk.
+        let folder = archive.folder(record.id)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: folder.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: folder.path) }
+
+        archive.prune(olderClips: older)
+        archive.flush()
+
+        let target = try #require(archive.record(record.id)?.notes.first?.target)
+        guard case .recording(let video, _, _) = target else {
+            Issue.record("not a recording")
+            return
+        }
+        #expect(video == older.appendingPathComponent("old.mp4"))
+        #expect(FileManager.default.fileExists(atPath: video.path))
+    }
+
     /// Only the owner can open a saved session.
     @Test func savedSessionsArePrivate() throws {
         let archive = Fixtures.archive()

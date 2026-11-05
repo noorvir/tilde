@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    600,
+    330
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "notes": 3,
+  "list": true,
+  "confirmation": "clearAll"
+}

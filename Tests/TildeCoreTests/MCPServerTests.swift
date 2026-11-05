@@ -344,6 +344,55 @@ struct MCPServerTests {
         #expect(try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int == 0o600)
     }
 
+    /// Links in the inbox are left alone, and items that are private already keep their
+    /// change time.
+    @Test func makingReportsPrivateLeavesLinksAndPrivateItems() throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            try? FileManager.default.removeItem(at: inbox)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let folder = inbox.appendingPathComponent("2026-01-01_00-00-00_a1b2c3d4")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let file = folder.appendingPathComponent("annotation-1.png")
+        FileManager.default.createFile(atPath: file.path, contents: Data([1]), attributes: [.posixPermissions: 0o600])
+        try FileManager.default.createSymbolicLink(at: inbox.appendingPathComponent("synced"), withDestinationURL: outside)
+        let changed = try #require(try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date)
+        var before = stat()
+        stat(file.path, &before)
+
+        makePrivate(tree: inbox)
+
+        var after = stat()
+        stat(file.path, &after)
+        #expect(after.st_ctimespec.tv_sec == before.st_ctimespec.tv_sec && after.st_ctimespec.tv_nsec == before.st_ctimespec.tv_nsec)
+        #expect(try FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date == changed)
+        #expect(try FileManager.default.attributesOfItem(atPath: outside.path)[.posixPermissions] as? Int == 0o755)
+    }
+
+    /// The node's prune runs in sh, whatever the login shell: zsh here, as fish would.
+    @Test func theNodePruneRunsInSh() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let inbox = home.appendingPathComponent(".tilde/inbox")
+        let old = Date(timeIntervalSinceNow: -40 * 86_400)
+        for number in 1...102 {
+            let folder = inbox.appendingPathComponent(String(format: "2026-01-01_00-%02d-%02d_a1b2c%03d", number / 60, number % 60, number))
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: folder.path)
+        }
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        shell.arguments = ["-c", pruneInboxCommand]
+        shell.environment = ["HOME": home.path, "PATH": "/usr/bin:/bin"]
+        try shell.run()
+        shell.waitUntilExit()
+
+        #expect(try FileManager.default.contentsOfDirectory(atPath: inbox.path).count == 100)
+    }
+
     @Test func aRequestLengthIsDigitsOnly() {
         func status(_ length: String) -> Int? {
             let request = Data("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: \(length)\r\n\r\n{}".utf8)
@@ -412,6 +461,35 @@ struct HTTPServerTests {
         request.httpMethod = "POST"
         let (data, _) = try await URLSession.shared.data(for: request)
         #expect(String(data: data, encoding: .utf8) == "one two three")
+    }
+
+    /// One caller may have 8 requests open on a limited listener, such as long polls; another
+    /// caller still gets through.
+    @Test func oneCallerCannotTakeEveryConnection() async throws {
+        let server = try HTTPServer(port: 0, maxRequestsPerCaller: 8) { request in
+            if request.headers["authorization"] == "Bearer busy" {
+                try? await Task.sleep(for: .seconds(2))
+            }
+            return HTTPResponse(status: 200)
+        }
+        let port = try await start(server)
+        defer { server.stop() }
+
+        func status(_ token: String) async throws -> Int {
+            var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp")!)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (_, response) = try await URLSession(configuration: .ephemeral).data(for: request)
+            return (response as? HTTPURLResponse)?.statusCode ?? 0
+        }
+        let polls = (0..<8).map { _ in Task { try await status("busy") } }
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(try await status("busy") == 429)
+        #expect(try await status("other") == 200)
+        for poll in polls {
+            #expect(try await poll.value == 200)
+        }
     }
 
     private func start(_ server: HTTPServer) async throws -> UInt16 {

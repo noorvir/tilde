@@ -41,6 +41,19 @@ struct InstallerTests {
         #expect(try LocalToken.load(home: home) == tokens.withLock { $0.first })
     }
 
+    /// An empty token file, such as one left by a full disk, is replaced by a token.
+    @Test func anEmptyTokenFileIsReplaced() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-home-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let file = LocalToken.file(home: home)
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: file.path, contents: Data())
+
+        let token = try LocalToken.load(home: home)
+        #expect(token.count == 64)
+        #expect(try LocalToken.load(home: home) == token)
+    }
+
     @Test func aConfigItWritesIsForItsOwnerOnly() throws {
         try write(".cursor/mcp.json", "{}")
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: home.appendingPathComponent(".cursor/mcp.json").path)
@@ -49,6 +62,22 @@ struct InstallerTests {
 
         let attributes = try FileManager.default.attributesOfItem(atPath: home.appendingPathComponent(".cursor/mcp.json").path)
         #expect(attributes[.posixPermissions] as? Int == 0o600)
+    }
+
+    /// A config with Tilde's entry that cannot be made private, such as one linked into a
+    /// read-only store, gives a warning, not a failure.
+    @Test func anUnchangedConfigThatCannotChangeIsAWarning() throws {
+        try write(".cursor/mcp.json", "{}")
+        _ = installer.install(.cursor)
+        let config = home.appendingPathComponent(".cursor/mcp.json").path
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: config)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: config)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: config) }
+
+        let report = installer.install(.cursor)
+
+        #expect(report.changes.contains { if case .unchangedNotPrivate = $0.action { true } else { false } })
+        #expect(!report.changes.contains { if case .failed = $0.action { true } else { false } })
     }
 
     @Test func detectsOnlyAppsWithTheirFolders() throws {
