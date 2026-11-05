@@ -733,8 +733,13 @@ struct SessionFlow: Equatable {
     private func leaveRecording(_ open: inout Open) -> [Effect] {
         switch open.activity {
         case .recording(.recording), .recording(.paused):
+            // A question never opens over a comment: one with text asks about it first.
+            if open.panel == .comment, commentHasText {
+                return leaveComment(&open)
+            }
+            let closes = open.panel == .comment ? closePanel(&open) : []
             open.question = .discardRecording
-            return []
+            return closes
         case .recording(.ready), .recording(.starting):
             return exitRecording(&open)
         default:
