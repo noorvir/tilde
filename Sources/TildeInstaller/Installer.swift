@@ -56,9 +56,9 @@ public struct InstallEnvironment: Sendable {
     }
 
     /// This Mac: `standard`, with the local token that Tilde's listener asks for.
-    public static func local(home: URL, port: String, bridgePath: String, isolated: Bool = false) -> InstallEnvironment {
+    public static func local(home: URL, port: String, bridgePath: String, isolated: Bool = false) throws -> InstallEnvironment {
         var environment = standard(home: home, port: port, bridgePath: bridgePath, isolated: isolated)
-        environment.authorization = LocalToken.authorization(home: home)
+        environment.authorization = try LocalToken.authorization(home: home)
         return environment
     }
 
@@ -263,6 +263,10 @@ public struct Installer: Sendable {
             let old = exists ? try files.read(file) : ""
             let new = try change(old)
             guard new != old || !exists else {
+                // The right text, maybe from an older Tilde that left it readable by others.
+                if !dryRun {
+                    try files.makePrivate(file)
+                }
                 return FileChange(file: file, action: .unchanged)
             }
             if dryRun {

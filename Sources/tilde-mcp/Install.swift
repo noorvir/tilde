@@ -45,12 +45,18 @@ func runInstall(_ arguments: [String]) -> Int32 {
     }
 
     let bridge = Bundle.main.executableURL?.resolvingSymlinksInPath().path ?? CommandLine.arguments[0]
-    let environment = InstallEnvironment.local(
-        home: home ?? FileManager.default.homeDirectoryForCurrentUser,
-        port: ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "7311",
-        bridgePath: bridge,
-        isolated: home != nil
-    )
+    let environment: InstallEnvironment
+    do {
+        environment = try InstallEnvironment.local(
+            home: home ?? FileManager.default.homeDirectoryForCurrentUser,
+            port: ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "7311",
+            bridgePath: bridge,
+            isolated: home != nil
+        )
+    } catch {
+        FileHandle.standardError.write(Data("tilde-mcp install: \(error)\n".utf8))
+        return 1
+    }
     var installer = Installer(environment: environment)
     installer.dryRun = dryRun
 

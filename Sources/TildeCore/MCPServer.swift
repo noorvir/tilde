@@ -87,7 +87,8 @@ public final class MCPServer {
                 return HTTPResponse(status: 415)
             }
         case "DELETE":
-            if let sessionID = request.headers["mcp-session-id"] {
+            // Only the machine that made a session can end it.
+            if let sessionID = request.headers["mcp-session-id"], clients[sessionID]?.node == node {
                 clients.removeValue(forKey: sessionID)
                 savedClients.removeAll { $0.id == sessionID }
                 saveClients()
@@ -448,8 +449,10 @@ public final class MCPServer {
 
     // MARK: - Helpers
 
+    /// Who calls: the session's saved client, only for the machine whose token it came with,
+    /// as the machine comes from the listener and never from the caller.
     private func client(for sessionID: String?, userAgent: String?, node: String?) -> Client {
-        if let sessionID, let client = clients[sessionID] {
+        if let sessionID, let client = clients[sessionID], client.node == node {
             return client
         }
         // An unknown session: the request may still say who sent it.

@@ -40,12 +40,15 @@ public final class HTTPServer: @unchecked Sendable {
     private let handler: Handler
     private let queue = DispatchQueue(label: "tilde.http")
     private let maxBodySize = 10 * 1024 * 1024
-    /// Open connections at most; more are closed at once. Long polls keep theirs open.
+    /// Open connections at most. A new one past it closes the oldest that has not sent its
+    /// request yet, so idle sockets cannot lock agents out; long polls keep theirs.
     private let maxConnections = 64
-    /// A request must arrive in full this soon after its connection opens.
+    /// A request's header must arrive this soon after its connection opens, and the whole
+    /// request this soon.
+    private let headerTimeout: TimeInterval = 2
     private let readTimeout: TimeInterval = 10
-    // Read and written on `queue` only.
-    private var connections = 0
+    // Read and written on `queue` only: the open connections, oldest first.
+    private var connections: [Reading] = []
 
     public init(port: UInt16, handler: @escaping Handler) throws {
         let parameters = NWParameters.tcp
@@ -82,21 +85,27 @@ public final class HTTPServer: @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
-        guard connections < maxConnections else {
-            connection.cancel()
-            return
+        if connections.count >= maxConnections {
+            guard let oldest = connections.first(where: { !$0.isDone }) else {
+                connection.cancel()
+                return
+            }
+            oldest.connection.cancel()
         }
-        connections += 1
+        let reading = Reading(connection: connection)
+        connections.append(reading)
         connection.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .cancelled, .failed:
-                self?.connections -= 1
-            default:
-                break
+            // A failed connection is cancelled too, so it counts down once, here.
+            if case .cancelled = state {
+                self?.connections.removeAll { $0 === reading }
             }
         }
         connection.start(queue: queue)
-        let reading = Reading()
+        queue.asyncAfter(deadline: .now() + headerTimeout) {
+            if !reading.hasHeader {
+                connection.cancel()
+            }
+        }
         queue.asyncAfter(deadline: .now() + readTimeout) {
             if !reading.isDone {
                 connection.cancel()
@@ -105,9 +114,15 @@ public final class HTTPServer: @unchecked Sendable {
         receive(on: connection, buffer: Data(), reading: reading)
     }
 
-    /// Whether a connection's request has arrived; read and written on `queue` only.
+    /// A connection and how far its request has arrived; read and written on `queue` only.
     private final class Reading: @unchecked Sendable {
+        let connection: NWConnection
+        var hasHeader = false
         var isDone = false
+
+        init(connection: NWConnection) {
+            self.connection = connection
+        }
     }
 
     private func receive(on connection: NWConnection, buffer: Data, reading: Reading) {
@@ -118,6 +133,9 @@ public final class HTTPServer: @unchecked Sendable {
             var buffer = buffer
             if let data {
                 buffer.append(data)
+            }
+            if buffer.range(of: Data("\r\n\r\n".utf8)) != nil {
+                reading.hasHeader = true
             }
 
             switch Self.parse(buffer, maxBodySize: self.maxBodySize) {
@@ -156,7 +174,8 @@ public final class HTTPServer: @unchecked Sendable {
 
         let lines = head.components(separatedBy: "\r\n")
         let requestLine = lines[0].split(separator: " ")
-        guard requestLine.count >= 2 else {
+        // The target is a path, such as /mcp, with an optional query.
+        guard requestLine.count >= 2, requestLine[1].hasPrefix("/") else {
             return .invalid(status: 400)
         }
 
@@ -187,7 +206,8 @@ public final class HTTPServer: @unchecked Sendable {
         }
 
         let body = buffer.subdata(in: bodyStart..<(bodyStart + length))
-        let path = String(requestLine[1].split(separator: "?", maxSplits: 1)[0])
+        let target = requestLine[1]
+        let path = String(target[..<(target.firstIndex(of: "?") ?? target.endIndex)])
         return .request(HTTPRequest(method: String(requestLine[0]), path: path, headers: headers, body: body))
     }
 

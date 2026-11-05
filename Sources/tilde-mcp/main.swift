@@ -13,7 +13,8 @@ if CommandLine.arguments.dropFirst().first == "install" {
 
 let port = ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "7311"
 let endpoint = URL(string: "http://127.0.0.1:\(port)/mcp")!
-let authorization = LocalToken.authorization(home: FileManager.default.homeDirectoryForCurrentUser)
+// Without the token, Tilde answers 401, which the agent shows.
+let authorization = (try? LocalToken.authorization(home: FileManager.default.homeDirectoryForCurrentUser)) ?? ""
 let output = DispatchQueue(label: "tilde-mcp.stdout")
 let session: URLSession = {
     let configuration = URLSessionConfiguration.ephemeral

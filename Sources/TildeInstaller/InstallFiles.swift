@@ -7,6 +7,9 @@ public protocol InstallFiles: Sendable {
     /// Writes through symbolic links, creating the folders on the way. A file it replaces is
     /// for its owner only (0600): agents' configs hold tokens, such as Tilde's on a machine.
     func write(_ text: String, to file: URL) throws
+    /// Makes a file, or the target of a link, for its owner only (0600), such as a config
+    /// written by an older Tilde that already has the right text.
+    func makePrivate(_ file: URL) throws
     func remove(_ file: URL) throws
     /// The names in a folder; none if it is not there.
     func names(in folder: URL) -> [String]
@@ -38,6 +41,9 @@ public struct LocalFiles: InstallFiles {
         }
     }
 
+    public func makePrivate(_ file: URL) throws {
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.resolvingSymlinksInPath().path)
+    }
 
     public func remove(_ file: URL) throws {
         try FileManager.default.removeItem(at: file.resolvingSymlinksInPath())
@@ -84,6 +90,10 @@ public struct ShellFiles: InstallFiles {
         let folder = quoted(file.deletingLastPathComponent())
         let target = "target=\(quoted(file)) && if [ -L \"$target\" ]; then target=$(readlink -f \"$target\"); fi"
         _ = try run("mkdir -p \(folder) && \(target) && (umask 077 && cat > \"$target.tilde-new\") && mv \"$target.tilde-new\" \"$target\"", text)
+    }
+
+    public func makePrivate(_ file: URL) throws {
+        _ = try run("target=\(quoted(file)) && if [ -L \"$target\" ]; then target=$(readlink -f \"$target\"); fi && chmod 600 \"$target\"", nil)
     }
 
 

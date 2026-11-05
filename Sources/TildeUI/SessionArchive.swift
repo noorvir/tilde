@@ -127,9 +127,14 @@ final class SessionArchive: @unchecked Sendable {
     }
 
     /// Deletes sessions older than `keptDays`, except the newest `keptCount`, and recordings
-    /// that no note has, such as one in progress when Tilde quit.
-    func prune(now: Date = Date()) {
+    /// that no note has, such as one in progress when Tilde quit. Recordings that older builds
+    /// kept in `olderClips` (`~/.tilde/recordings`) move into their sessions first, and that
+    /// folder goes.
+    func prune(now: Date = Date(), olderClips: URL? = nil) {
         queue.async { [self] in
+            if let olderClips {
+                moveClips(from: olderClips)
+            }
             let limit = now.addingTimeInterval(-Double(Self.keptDays) * 86_400)
             let records = readAll()
             for record in records.dropFirst(Self.keptCount) where record.updated < limit {
@@ -147,6 +152,31 @@ final class SessionArchive: @unchecked Sendable {
         let own = newClip(in: id)
         try? linkOrCopy(video, to: own)
         return own
+    }
+
+    private func moveClips(from olderClips: URL) {
+        for var record in readAll() {
+            var isMoved = false
+            record.notes = record.notes.map { note in
+                guard case .recording(let video, let seconds, let source) = note.target,
+                      video.deletingLastPathComponent().standardizedFileURL == olderClips.standardizedFileURL,
+                      FileManager.default.fileExists(atPath: video.path)
+                else {
+                    return note
+                }
+                let own = newClip(in: record.id)
+                guard (try? FileManager.default.moveItem(at: video, to: own)) != nil else {
+                    return note
+                }
+                isMoved = true
+                let target = Target.recording(video: own, seconds: seconds, source: source)
+                return SessionRecord.Note(id: note.id, comment: note.comment, target: target, frame: note.frame, marker: note.marker, chip: note.chip, anchor: note.anchor)
+            }
+            if isMoved {
+                write(record)
+            }
+        }
+        try? FileManager.default.removeItem(at: olderClips)
     }
 
     private func removeClips(of record: SessionRecord) {

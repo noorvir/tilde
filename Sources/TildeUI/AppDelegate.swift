@@ -18,9 +18,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = SessionStore()
     private let browser = BrowserController()
     private lazy var controller = AnnotationController(store: store, browser: browser)
-    private lazy var mcp = MCPServer(
-        store: store, localToken: LocalToken.load(home: FileManager.default.homeDirectoryForCurrentUser), clientsFile: SessionArchive.defaultRoot.deletingLastPathComponent().appendingPathComponent("mcp-clients.json")
-    )
+
+    private var mcp: MCPServer?
     private var server: HTTPServer?
     private var nodeServer: HTTPServer?
     private var nodes: NodeSetup?
@@ -45,7 +44,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// notes; the newest other unfinished session with notes is offered to restore.
     private func offerUnfinishedSession() {
         let controller = self.controller
-        controller.archive.prune()
+        let tilde = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde")
+        controller.archive.prune(olderClips: tilde.appendingPathComponent("recordings"))
+        // Reports and sessions saved by older builds become private too, and old reports go
+        // as old sessions do.
+        let sessions = controller.archive.root
+        DispatchQueue.global(qos: .utility).async {
+            makePrivate(tree: inboxRoot)
+            pruneInbox()
+            makePrivate(tree: sessions)
+        }
         store.reattach = { id, node in controller.reattach(id, node: node) }
 
         let prompt = RestorePrompt { record in
@@ -78,7 +86,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let bridge = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/tilde-mcp").path
         let home = FileManager.default.homeDirectoryForCurrentUser
         let setup = AgentSetup(
-            installer: Installer(environment: .local(home: home, port: String(port), bridgePath: bridge)),
+            // Without the token the listener does not start, so entries without it change nothing.
+            installer: Installer(environment: (try? .local(home: home, port: String(port), bridgePath: bridge)) ?? .standard(home: home, port: String(port), bridgePath: bridge)),
             nodes: NodeSetup(nodePort: port + 1)
         )
         setup.nodes.startLinks()
@@ -139,10 +148,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startServer() {
-        let mcp = self.mcp
         let state = serverState
 
         do {
+            let token = try LocalToken.load(home: FileManager.default.homeDirectoryForCurrentUser)
+            let mcp = MCPServer(
+                store: store, localToken: token, clientsFile: SessionArchive.defaultRoot.deletingLastPathComponent().appendingPathComponent("mcp-clients.json")
+            )
+            self.mcp = mcp
             let server = try HTTPServer(port: state.port) { request in
                 await mcp.handleLocal(request)
             }
@@ -161,7 +174,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             nodeServer.start { _ in }
             self.nodeServer = nodeServer
         } catch {
-            state.status = .failed(error.localizedDescription)
+            state.status = .failed((error as? LocalToken.Failure)?.description ?? error.localizedDescription)
         }
     }
 }

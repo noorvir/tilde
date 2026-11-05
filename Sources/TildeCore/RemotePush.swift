@@ -58,6 +58,8 @@ public enum RemotePush {
                     _ = try run(ssh, options + [host, "umask 077 && mkdir -p ~/.tilde/inbox/\(name) && chmod 700 ~/.tilde ~/.tilde/inbox ~/.tilde/inbox/\(name)"])
                     let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).map { folder.appendingPathComponent($0).path }
                     _ = try run(scp, options + files + ["\(host):.tilde/inbox/\(name)/"])
+                    // Reports there are kept as here: 30 days, and always the last 100.
+                    _ = try? run(ssh, options + [host, pruneInboxCommand])
                 })
             }
         }
