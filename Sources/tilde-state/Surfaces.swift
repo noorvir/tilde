@@ -190,11 +190,25 @@ enum Surfaces {
             clipClock: (Date(), 12)
         )
         if let picker = state.sourcePicker {
-            let (screens, apps) = state.pickerPhase == nil ? Fixtures.sources() : ([], [])
-            let phase: SourcePickerModel.Phase = switch state.pickerPhase {
-            case "listing": .listing
-            case "failed": .failed
-            default: .done
+            var (screens, apps) = Fixtures.sources()
+            let phase: SourcePickerModel.Phase
+            switch state.pickerPhase {
+            case "listing":
+                (screens, apps) = ([], [])
+                phase = .listing
+            case "failed":
+                (screens, apps) = ([], [])
+                phase = .failed
+            case "empty":
+                (screens, apps) = ([], [])
+                phase = .done
+            case "picturing", "noPictures":
+                // The tiles are listed, and their pictures are coming, or could not be taken.
+                screens = screens.map { tile in var tile = tile; tile.picture = nil; return tile }
+                apps = apps.map { app in var app = app; app.windows = app.windows.map { tile in var tile = tile; tile.picture = nil; return tile }; return app }
+                phase = state.pickerPhase == "picturing" ? .picturing : .done
+            default:
+                phase = .done
             }
             // Opened as the app opens it, so it offers what the app would.
             controller.sourcePicker.injected = (screens, apps, phase)
