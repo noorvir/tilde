@@ -128,11 +128,11 @@ final class SessionArchive: @unchecked Sendable {
 
     /// Deletes sessions older than `keptDays`, except the newest `keptCount`, and recordings
     /// that no note has, such as one in progress when Tilde quit. Recordings that older builds
-    /// kept in `olderClips` (`~/.tilde/recordings`) move into their sessions first, and that
-    /// folder goes.
+    /// kept in `olderClips` (`~/.tilde/recordings`) go into their sessions first, and that
+    /// folder goes once every one is in place.
     func prune(now: Date = Date(), olderClips: URL? = nil) {
         queue.async { [self] in
-            if let olderClips {
+            if let olderClips, FileManager.default.fileExists(atPath: olderClips.path) {
                 moveClips(from: olderClips)
             }
             let limit = now.addingTimeInterval(-Double(Self.keptDays) * 86_400)
@@ -154,9 +154,13 @@ final class SessionArchive: @unchecked Sendable {
         return own
     }
 
+    /// Gives each session its own link (or copy) of the older recordings its notes have, also
+    /// when two sessions share one, and saves it. The older folder goes only when all of them
+    /// are in place; otherwise it stays, with every original, for the next launch.
     private func moveClips(from olderClips: URL) {
+        var isComplete = true
         for var record in readAll() {
-            var isMoved = false
+            var isChanged = false
             record.notes = record.notes.map { note in
                 guard case .recording(let video, let seconds, let source) = note.target,
                       video.deletingLastPathComponent().standardizedFileURL == olderClips.standardizedFileURL,
@@ -165,18 +169,23 @@ final class SessionArchive: @unchecked Sendable {
                     return note
                 }
                 let own = newClip(in: record.id)
-                guard (try? FileManager.default.moveItem(at: video, to: own)) != nil else {
+                do {
+                    try linkOrCopy(video, to: own)
+                } catch {
+                    isComplete = false
                     return note
                 }
-                isMoved = true
+                isChanged = true
                 let target = Target.recording(video: own, seconds: seconds, source: source)
                 return SessionRecord.Note(id: note.id, comment: note.comment, target: target, frame: note.frame, marker: note.marker, chip: note.chip, anchor: note.anchor)
             }
-            if isMoved {
-                write(record)
+            if isChanged, !write(record) {
+                isComplete = false
             }
         }
-        try? FileManager.default.removeItem(at: olderClips)
+        if isComplete {
+            try? FileManager.default.removeItem(at: olderClips)
+        }
     }
 
     private func removeClips(of record: SessionRecord) {
@@ -234,7 +243,9 @@ final class SessionArchive: @unchecked Sendable {
 
     // MARK: - Files
 
-    private func write(_ record: SessionRecord) {
+    /// Saves a session's record; false when it could not.
+    @discardableResult
+    private func write(_ record: SessionRecord) -> Bool {
         let folder = folder(record.id)
         do {
             try createPrivateFolder(root)
@@ -244,8 +255,10 @@ final class SessionArchive: @unchecked Sendable {
             encoder.dateEncodingStrategy = .iso8601
             // Atomic: a crash mid-write leaves the previous file.
             try writePrivate(encoder.encode(record), to: folder.appendingPathComponent("session.json"))
+            return true
         } catch {
             NSLog("Tilde could not save session \(record.id): \(error.localizedDescription)")
+            return false
         }
     }
 
