@@ -2605,16 +2605,18 @@ final class AnnotationController: ObservableObject {
             let keyCode = event.keyCode
             let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
             let isAnswer = MainActor.assumeIsolated {
-                self?.handleConfirmationKey(keyCode, modifiers: modifiers) == true
+                self?.handleConfirmationKey(keyCode, modifiers: modifiers, in: event.window) == true
             }
             return isAnswer ? nil : event
         }
     }
 
-    /// Returns whether the key answered the question on screen: Esc, or ↩ alone. ⌘↩ is Send
-    /// and never answers.
-    func handleConfirmationKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) -> Bool {
-        guard confirmation != nil, modifiers.isEmpty else {
+    /// Returns whether the key answered the question on screen: Esc, or ↩ alone, typed in one of
+    /// the session's windows (its panels or Tilde's browser), never in Settings. ⌘↩ is Send and
+    /// never answers.
+    func handleConfirmationKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [], in window: NSWindow?) -> Bool {
+        let isSessionWindow = window is NSPanel || (window != nil && window === browser.window)
+        guard confirmation != nil, modifiers.isEmpty, isSessionWindow else {
             return false
         }
         switch keyCode {

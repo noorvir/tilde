@@ -182,7 +182,7 @@ struct BehaviourTests {
         open(drafts: Fixtures.drafts(2), question: .cancelSession)
 
         view.keyDown(with: commandReturn)
-        #expect(!controller.handleConfirmationKey(36, modifiers: .command))
+        #expect(!controller.handleConfirmationKey(36, modifiers: .command, in: overlay))
         #expect(controller.confirmation == .cancelSession)
         #expect(controller.session != nil)
         #expect(HUDView.status(of: controller).title == "Annotating")
@@ -848,12 +848,20 @@ struct BehaviourTests {
         #expect(controller.drafts.count == 2)
     }
 
-    @Test func theQuestionTakesReturnAndEscFromAnyOfTildesWindows() async throws {
+    @Test func theQuestionTakesReturnAndEscFromTheSessionsWindows() async throws {
+        let panel = NSPanel()
+        let settings = NSWindow()
         open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)
 
+        // Keys typed in Settings are Settings' own, and leave the session as it is.
+        #expect(controller.handleConfirmationKey(36, in: settings) == false)
+        #expect(controller.handleConfirmationKey(53, in: settings) == false)
+        #expect(controller.confirmation == .clearAll)
+        #expect(controller.drafts.count == 2)
+
         // Other keys pass on, such as to a focused text field.
-        #expect(controller.handleConfirmationKey(0) == false)
-        #expect(controller.handleConfirmationKey(53))
+        #expect(controller.handleConfirmationKey(0, in: panel) == false)
+        #expect(controller.handleConfirmationKey(53, in: panel))
         #expect(controller.confirmation == nil)
         #expect(controller.drafts.count == 2)
 
@@ -861,9 +869,9 @@ struct BehaviourTests {
         controller.escapePressed()
         #expect(controller.confirmation == .cancelSession)
         open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)
-        #expect(controller.handleConfirmationKey(36))
+        #expect(controller.handleConfirmationKey(36, in: panel))
         #expect(controller.drafts.isEmpty)
-        #expect(controller.handleConfirmationKey(36) == false)
+        #expect(controller.handleConfirmationKey(36, in: panel) == false)
     }
 
     @Test func escEndsChoosingAWindowFirst() async throws {
