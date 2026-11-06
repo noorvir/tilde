@@ -4,7 +4,8 @@
 // socket. Calls that Tilde had not answered get an error at once that says to call again; lines
 // the agent writes while the link is down wait up to holdFor (at most maxHeld lines), then each
 // request among them gets an error. Each connection starts with tproxy's own id, so that Tilde
-// gives the agent back its MCP session.
+// gives the agent back its MCP session. A new link puts a new socket at the path, so a missing or
+// other file there is a drop too: the old connection may never see one when the Mac went away.
 package main
 
 import (
@@ -22,12 +23,13 @@ import (
 	"time"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 var (
-	holdFor  = 30 * time.Second
-	maxHeld  = 100
-	maxRetry = 2 * time.Second
+	holdFor    = 30 * time.Second
+	maxHeld    = 100
+	maxRetry   = 2 * time.Second
+	watchEvery = time.Second
 )
 
 const (
@@ -54,7 +56,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		socket = args[0]
 	}
 
-	conn, err := net.Dial("unix", socket)
+	conn, file, err := dial(socket)
 	if err != nil {
 		fmt.Fprintf(stderr, "tproxy: Tilde is not linked to this machine (%v). Open Tilde on the Mac.\n", err)
 		return 1
@@ -69,12 +71,15 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	var held []heldLine
 	for {
-		if pipe(conn, hello, held, lines, agent) {
+		var closed bool
+		closed, held = pipe(conn, socket, file, hello, held, lines, agent)
+		if closed {
 			return 0
 		}
-		held = nil
 
+		// One timer for each try, so that input while the link is down never puts a try off.
 		retry := 100 * time.Millisecond
+		wait := time.NewTimer(retry)
 		for conn = nil; conn == nil; {
 			select {
 			case line, ok := <-lines:
@@ -86,16 +91,31 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 				} else {
 					held = append(held, heldLine{line, time.Now()})
 				}
-			case <-time.After(retry):
+			case <-wait.C:
 				for len(held) > 0 && time.Since(held[0].at) > holdFor {
 					agent.fail(held[0].line, unreachable)
 					held = held[1:]
 				}
-				conn, _ = net.Dial("unix", socket)
+				conn, file, _ = dial(socket)
 				retry = min(retry*2, maxRetry)
+				wait.Reset(retry)
 			}
 		}
+		wait.Stop()
 	}
+}
+
+// dial connects to the socket and returns the file it was, which pipe watches.
+func dial(socket string) (net.Conn, os.FileInfo, error) {
+	file, err := os.Stat(socket)
+	if err != nil {
+		return nil, nil, err
+	}
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return nil, nil, err
+	}
+	return conn, file, nil
 }
 
 type heldLine struct {
@@ -104,8 +124,9 @@ type heldLine struct {
 }
 
 // pipe sends the hello and the held lines, then copies lines both ways until the agent closes
-// its input (true) or the link drops (false), when the calls Tilde has not answered get an error.
-func pipe(conn net.Conn, hello []byte, held []heldLine, lines <-chan []byte, agent *agent) bool {
+// its input (true) or the link drops (false). On a drop, the calls Tilde has not answered get an
+// error, and the held lines not yet written come back to be sent on the next connection.
+func pipe(conn net.Conn, socket string, file os.FileInfo, hello []byte, held []heldLine, lines <-chan []byte, agent *agent) (bool, []heldLine) {
 	defer conn.Close()
 
 	open := &calls{ids: map[string][]byte{}}
@@ -125,24 +146,32 @@ func pipe(conn net.Conn, hello []byte, held []heldLine, lines <-chan []byte, age
 		}
 	}()
 
+	// A line counts as open before it is written: a failed write may still have reached Tilde.
 	send := func(line []byte) bool {
 		open.add(line)
 		_, err := conn.Write(line)
 		return err == nil
 	}
 	sent := send(hello)
-	for _, h := range held {
-		sent = sent && send(h.line)
+	for sent && len(held) > 0 {
+		sent = send(held[0].line)
+		held = held[1:]
 	}
+
+	watch := time.NewTicker(watchEvery)
+	defer watch.Stop()
 	for sent {
 		select {
 		case line, ok := <-lines:
 			if !ok {
-				return true
+				return true, nil
 			}
 			sent = send(line)
 		case <-tildeDone:
 			sent = false
+		case <-watch.C:
+			now, err := os.Stat(socket)
+			sent = err == nil && os.SameFile(file, now)
 		}
 	}
 
@@ -151,7 +180,7 @@ func pipe(conn net.Conn, hello []byte, held []heldLine, lines <-chan []byte, age
 	for _, line := range open.all() {
 		agent.fail(line, dropped)
 	}
-	return false
+	return false, held
 }
 
 func readLines(stdin io.Reader, lines chan<- []byte) {

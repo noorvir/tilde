@@ -86,6 +86,26 @@ func listen(t *testing.T, socket string) net.Listener {
 	return listener
 }
 
+// start runs tproxy on the socket until the test ends, and returns the agent's end of its input.
+func start(t *testing.T, socket string, stdout io.Writer) *io.PipeWriter {
+	t.Helper()
+	stdin, agentIn := io.Pipe()
+	exit := make(chan int)
+	go func() { exit <- run([]string{socket}, stdin, stdout, io.Discard) }()
+	t.Cleanup(func() {
+		agentIn.Close()
+		<-exit
+	})
+	return agentIn
+}
+
+// set changes a setting for one test, after its tproxy has ended.
+func set[T any](t *testing.T, setting *T, value T) {
+	was := *setting
+	*setting = value
+	t.Cleanup(func() { *setting = was })
+}
+
 // Lines go both ways, each connection starts with tproxy's id, and the agent closing its
 // input ends tproxy with success.
 func TestCopiesBothWaysAfterItsID(t *testing.T) {
@@ -124,11 +144,9 @@ func TestADropAnswersOpenCallsAndHoldsNewLines(t *testing.T) {
 	socket := shortSocket(t)
 	listener := listen(t, socket)
 
-	stdin, agentIn := io.Pipe()
-	defer agentIn.Close()
 	agentOut, stdout := io.Pipe()
 	read := lines(agentOut)
-	go run([]string{socket}, stdin, stdout, io.Discard)
+	agentIn := start(t, socket, stdout)
 
 	first := accept(t, listener)
 	hello := first.line(t)
@@ -160,16 +178,13 @@ func TestADropAnswersOpenCallsAndHoldsNewLines(t *testing.T) {
 
 // A request that waits too long for the link gets an error; a notification gets nothing.
 func TestAHeldRequestTimesOut(t *testing.T) {
-	holdFor = 200 * time.Millisecond
-	defer func() { holdFor = 30 * time.Second }()
+	set(t, &holdFor, 200*time.Millisecond)
 	socket := shortSocket(t)
 	listener := listen(t, socket)
 
-	stdin, agentIn := io.Pipe()
-	defer agentIn.Close()
 	agentOut, stdout := io.Pipe()
 	read := lines(agentOut)
-	go run([]string{socket}, stdin, stdout, io.Discard)
+	agentIn := start(t, socket, stdout)
 	accept(t, listener).conn.Close()
 	listener.Close()
 
@@ -177,6 +192,135 @@ func TestAHeldRequestTimesOut(t *testing.T) {
 	agentIn.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"))
 	agentIn.Write([]byte(`{"jsonrpc":"2.0","id":"a","method":"ping"}` + "\n"))
 	if got := next(t, read); !strings.Contains(got, `"id":"a","error"`) || !strings.Contains(got, "not reachable") {
+		t.Errorf("the agent got %q", got)
+	}
+}
+
+// failsWrite is a connection whose second write fails, as when the link drops again while
+// tproxy sends what it held.
+type failsWrite struct {
+	net.Conn
+	writes int
+}
+
+func (c *failsWrite) Write(b []byte) (int, error) {
+	c.writes++
+	if c.writes == 2 {
+		return 0, io.ErrClosedPipe
+	}
+	return c.Conn.Write(b)
+}
+
+// A drop while the held lines are sent: the line being written may have reached Tilde, so it
+// gets the error to call again; the lines after it stay held, with the time they came.
+func TestASecondDropKeepsTheLinesNotSent(t *testing.T) {
+	socket := shortSocket(t)
+	listener := listen(t, socket)
+	defer listener.Close()
+	file, err := os.Stat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac, near := net.Pipe()
+	go io.Copy(io.Discard, mac)
+	agentOut, stdout := io.Pipe()
+	read := lines(agentOut)
+
+	came := time.Now().Add(-time.Second)
+	held := []heldLine{
+		{[]byte(`{"jsonrpc":"2.0","id":"a","method":"ping"}` + "\n"), came},
+		{[]byte(`{"jsonrpc":"2.0","id":"b","method":"ping"}` + "\n"), came},
+		{[]byte(`{"jsonrpc":"2.0","id":"c","method":"ping"}` + "\n"), came},
+	}
+	closed, kept := pipe(&failsWrite{Conn: near}, socket, file, []byte("hello\n"), held, make(chan []byte), &agent{out: stdout})
+
+	if closed || len(kept) != 2 || !strings.Contains(string(kept[0].line), `"b"`) || !strings.Contains(string(kept[1].line), `"c"`) || kept[0].at != came {
+		t.Errorf("closed %v, kept %d lines", closed, len(kept))
+	}
+	if got := next(t, read); !strings.Contains(got, `"id":"a","error"`) || !strings.Contains(got, "Call again") {
+		t.Errorf("the agent got %q", got)
+	}
+}
+
+// Input while the link is down does not put off the next try to connect.
+func TestInputDoesNotPutOffATry(t *testing.T) {
+	set(t, &maxRetry, 200*time.Millisecond)
+	socket := shortSocket(t)
+	listener := listen(t, socket)
+
+	agentIn := start(t, socket, io.Discard)
+	accept(t, listener).conn.Close()
+	listener.Close()
+
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(20 * time.Millisecond):
+				agentIn.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/progress"}` + "\n"))
+			}
+		}
+	}()
+	time.Sleep(500 * time.Millisecond)
+
+	listener = listen(t, socket)
+	defer listener.Close()
+	listener.(*net.UnixListener).SetDeadline(time.Now().Add(2 * time.Second))
+	accept(t, listener)
+}
+
+// A link that comes back puts a new socket at the path, while the old connection may never
+// see a drop: tproxy takes the new socket as a drop, and connects to it.
+func TestANewSocketAtThePathIsADrop(t *testing.T) {
+	set(t, &watchEvery, 50*time.Millisecond)
+	socket := shortSocket(t)
+	old := listen(t, socket)
+	old.(*net.UnixListener).SetUnlinkOnClose(false)
+	defer old.Close()
+
+	agentOut, stdout := io.Pipe()
+	read := lines(agentOut)
+	agentIn := start(t, socket, stdout)
+	first := accept(t, old)
+	first.line(t)
+	agentIn.Write([]byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call"}` + "\n"))
+	first.line(t)
+
+	renewed := listen(t, socket+".new")
+	defer renewed.Close()
+	if err := os.Rename(socket+".new", socket); err != nil {
+		t.Fatal(err)
+	}
+	if got := next(t, read); !strings.Contains(got, `"id":4,"error"`) || !strings.Contains(got, "Call again") {
+		t.Errorf("the agent got %q", got)
+	}
+	second := accept(t, renewed)
+	if hello := second.line(t); !strings.Contains(hello, "tproxy/connect") {
+		t.Errorf("first line %q", hello)
+	}
+}
+
+// A socket that is gone is a drop too.
+func TestAMissingSocketIsADrop(t *testing.T) {
+	set(t, &watchEvery, 50*time.Millisecond)
+	socket := shortSocket(t)
+	listener := listen(t, socket)
+	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	defer listener.Close()
+
+	agentOut, stdout := io.Pipe()
+	read := lines(agentOut)
+	agentIn := start(t, socket, stdout)
+	mac := accept(t, listener)
+	mac.line(t)
+	agentIn.Write([]byte(`{"jsonrpc":"2.0","id":5,"method":"tools/call"}` + "\n"))
+	mac.line(t)
+
+	os.Remove(socket)
+	if got := next(t, read); !strings.Contains(got, `"id":5,"error"`) || !strings.Contains(got, "Call again") {
 		t.Errorf("the agent got %q", got)
 	}
 }
