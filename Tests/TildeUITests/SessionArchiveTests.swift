@@ -290,6 +290,23 @@ struct SessionArchiveTests {
         #expect(FileManager.default.fileExists(atPath: video.path))
     }
 
+    /// A session that cannot be read may have an older recording: the older folder stays.
+    @Test func anUnreadableSessionKeepsTheOlderRecordings() throws {
+        let archive = Fixtures.archive()
+        let older = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recordings-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: older, withIntermediateDirectories: true)
+        _ = try Fixtures.clip(in: older.appendingPathComponent("old.mp4"))
+        let record = Fixtures.record(notes: 0, pageURL: nil)
+        archive.save(record)
+        archive.flush()
+        try Data("{".utf8).write(to: archive.folder(record.id).appendingPathComponent("session.json"))
+
+        archive.prune(olderClips: older)
+        archive.flush()
+
+        #expect(FileManager.default.fileExists(atPath: older.appendingPathComponent("old.mp4").path))
+    }
+
     /// Only the owner can open a saved session.
     @Test func savedSessionsArePrivate() throws {
         let archive = Fixtures.archive()

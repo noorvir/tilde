@@ -156,10 +156,16 @@ final class SessionArchive: @unchecked Sendable {
 
     /// Gives each session its own link (or copy) of the older recordings its notes have, also
     /// when two sessions share one, and saves it. The older folder goes only when all of them
-    /// are in place; otherwise it stays, with every original, for the next launch.
+    /// are in place; otherwise it stays, with every original, for the next launch. A session
+    /// that cannot be read may have one, so it keeps the folder too.
     private func moveClips(from olderClips: URL) {
         var isComplete = true
-        for var record in readAll() {
+        let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)) ?? []
+        for folder in folders {
+            guard var record = read(folder.lastPathComponent) else {
+                isComplete = false
+                continue
+            }
             var isChanged = false
             record.notes = record.notes.map { note in
                 guard case .recording(let video, let seconds, let source) = note.target,
