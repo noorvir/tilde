@@ -442,6 +442,18 @@ struct BehaviourTests {
         #expect(controller.clipSource == .screen(display))
     }
 
+    /// With one display above the other, the pill near the upper one's lower edge is on the
+    /// upper display, though most of its tall clear panel is on the lower one.
+    @Test func thePillsScreenIsTheOneWithThePill() {
+        let lower = NSRect(x: 0, y: 0, width: 2560, height: 1440)
+        let upper = NSRect(x: 0, y: 1440, width: 2560, height: 1440)
+        let height = upper.height - 21
+        let panel = NSRect(x: 900, y: upper.minY + 120 - height, width: 1200, height: height)
+
+        #expect(HUDPanel.pillScreen(of: panel, among: [lower, upper]) == 1)
+        #expect(HUDPanel.pillScreen(of: panel.offsetBy(dx: 0, dy: -200), among: [lower, upper]) == 0)
+    }
+
     /// A HUD too low for the picker goes to its home (x and y) while choosing, and back after.
     @Test func aLowHUDGoesHomeForThePickerAndBack() throws {
         let screen = try #require(NSScreen.screens.first)

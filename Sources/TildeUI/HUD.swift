@@ -86,7 +86,7 @@ final class HUDPanel {
     /// under the panel's top) on the panel's screen, so it never leaves the screen. A HUD
     /// too low for the picker goes up to its home while choosing, and back after.
     func fitPicker() {
-        guard let screen = window.screen ?? NSScreen.main else {
+        guard let screen = screen ?? NSScreen.main else {
             return
         }
         if pickerRoom(on: screen).height < SourcePickerView.sizes.min.height, !controller.isHUDInBrowser, placeBeforePicking == nil {
@@ -114,7 +114,8 @@ final class HUDPanel {
     /// While choosing, the picker's room follows a drag of the pill; a drop too low for it
     /// moves the HUD home until choosing ends, then back to the drop.
     private func pillMoved(ended: Bool) {
-        guard controller.isPickingWindow, let screen = window.screen else {
+        screenChanged()
+        guard controller.isPickingWindow, let screen else {
             return
         }
         if ended {
@@ -125,9 +126,22 @@ final class HUDPanel {
     }
 
     private func screenChanged() {
-        if let display = AnnotationController.displayID(of: window.screen) {
+        if let display = AnnotationController.displayID(of: screen), display != controller.hudDisplay {
             controller.hudDisplay = display
         }
+    }
+
+    /// The screen with the pill. The clear panel is about a screen tall, so most of it can be
+    /// on another screen, which `window.screen` would give.
+    private var screen: NSScreen? {
+        let screens = NSScreen.screens
+        return Self.pillScreen(of: window.frame, among: screens.map(\.frame)).map { screens[$0] }
+    }
+
+    /// The index of the screen frame with the pill of a panel at `frame`.
+    static func pillScreen(of frame: NSRect, among screens: [NSRect]) -> Int? {
+        let pill = NSPoint(x: frame.midX, y: frame.maxY - 16 - HUDMetrics.height / 2)
+        return screens.firstIndex { $0.contains(pill) }
     }
 
     private func room(under frame: NSRect, pill: CGFloat, in visible: NSRect) -> CGSize {
