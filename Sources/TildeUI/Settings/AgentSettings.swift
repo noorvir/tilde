@@ -315,6 +315,7 @@ private struct MachineAgents: View {
         SettingsSection("Agents") {
             if let setup = nodes.setups[host] {
                 MachineAgentRows(setup: setup, host: host, expanded: $expanded)
+                    .disabled(nodes.isWorking(host))
             } else {
                 SettingsRow(title: "Looking for agents", subtitle: "Over ssh") {
                     ProgressView()

@@ -133,7 +133,7 @@ final class AgentSetup: ObservableObject {
     private func run(_ rows: [Row], action: InstallResult.Action) -> InstallResult {
         let found = rows.filter { status(of: $0) != .notFound }
         if isRemote {
-            apply(found.map(\.harness), action: action)
+            nodes.apply(found.map(\.harness), action: action, by: self)
             return InstallResult(action: action, apps: [])
         }
 

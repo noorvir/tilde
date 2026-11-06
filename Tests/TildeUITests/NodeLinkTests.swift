@@ -94,6 +94,35 @@ struct NodeLinkTests {
 
     /// A node with an older Tilde's URL entries in several apps moves to its socket in one
     /// Install: all its apps start tproxy, or, when one cannot change, all keep their URL.
+    /// A machine takes one change at a time: while one is under way (here the move), an app's
+    /// switch changes nothing, and a page that no longer speaks for the machine changes nothing.
+    @MainActor @Test func aMachineTakesOneChangeAtATime() async throws {
+        let local = try Fixtures.agentSetup()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("nodes-\(UUID().uuidString).json")
+        let nodes = NodeSetup(store: NodeStore(file: file), nodePort: 7312)
+        let page = AgentSetup(installer: local.installer, placeholderIcon: Fixtures.appIcon, nodes: nodes, isRemote: true)
+        await page.load()
+        nodes.setSetupForTesting(page, for: "box")
+        let codex = try #require(AgentSetup.rows.first { $0.harness == .codex })
+
+        nodes.setRowsForTesting([NodeSetup.Row(host: "box", status: .installing)])
+        _ = page.install([codex])
+        let replaced = AgentSetup(installer: local.installer, placeholderIcon: Fixtures.appIcon, nodes: nodes, isRemote: true)
+        await replaced.load()
+        nodes.setRowsForTesting([NodeSetup.Row(host: "box", status: .linked)])
+        _ = replaced.install([codex])
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(local.installer.status(of: .codex) != .installed)
+
+        _ = page.install([codex])
+        #expect(nodes.isWorking("box"))
+        _ = page.uninstall([codex])
+        for _ in 0..<50 where local.installer.status(of: .codex) != .installed {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(local.installer.status(of: .codex) == .installed)
+    }
+
     @Test func aNodeMovesAllItsAppsToTheSocketOrNone() throws {
         let home = try home()
         defer {

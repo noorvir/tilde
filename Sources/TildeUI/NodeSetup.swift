@@ -247,9 +247,10 @@ final class NodeSetup: ObservableObject {
 
     private func show(_ host: String, _ installer: Installer) async {
         let setup = AgentSetup(installer: installer, nodes: self, isRemote: true, iconSource: localSetup)
+        // A page that the move replaced may still finish a change: it no longer speaks for the machine.
         setup.onChange = { [weak self, weak setup] in
-            if let setup {
-                self?.agentsChanged(host, setup)
+            if let self, let setup, setups[host] === setup {
+                agentsChanged(host, setup)
             }
         }
         await setup.load()
@@ -310,9 +311,27 @@ final class NodeSetup: ObservableObject {
         setups[host] = setup
     }
 
+    /// Whether a change to the machine is under way: install, remove, the move, or an app's
+    /// switch. A machine takes one change at a time, and its controls are off meanwhile.
+    func isWorking(_ host: String) -> Bool {
+        rows.first { $0.host == host }?.status.isWorking == true
+    }
+
+    /// Installs or removes Tilde in some of the apps on the machine whose page `setup` is.
+    func apply(_ harnesses: [Harness], action: InstallResult.Action, by setup: AgentSetup) {
+        guard let host = setups.first(where: { $0.value === setup })?.key, !isWorking(host) else {
+            return
+        }
+        update(host, status: action == .installed ? .installing : .removing, note: nil)
+        setup.apply(harnesses, action: action)
+    }
+
     /// Installs Tilde on the machine's apps that are switched on on this Mac, the same way as on
     /// this Mac; with none switched on, on all of them.
     func install(_ host: String) {
+        guard !isWorking(host) else {
+            return
+        }
         if rows.first(where: { $0.host == host })?.needsMove == true {
             moveToSocket(host)
             return
@@ -338,10 +357,10 @@ final class NodeSetup: ObservableObject {
 
     /// Removes Tilde from all of the machine's apps, the same way as on this Mac.
     func uninstall(_ host: String) {
-        update(host, status: .removing, note: nil)
-        guard let setup = setups[host] else {
+        guard !isWorking(host), let setup = setups[host] else {
             return
         }
+        update(host, status: .removing, note: nil)
         setup.apply(setup.foundRows.map(\.harness), action: .removed)
     }
 
