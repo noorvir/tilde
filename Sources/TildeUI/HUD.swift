@@ -290,7 +290,7 @@ struct HUDView: View {
             }
             if controller.isHUDShown, controller.isPickingWindow {
                 SourcePickerView(
-                    model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
+                    model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen, isRecordMode: controller.isRecordMode,
                     selectedID: controller.isRecordMode ? controller.clipSource.id : controller.source?.id,
                     onOpen: controller.openSourcePicker, onBack: controller.stepBackInSourcePicker, onChoose: controller.choose
                 )
@@ -474,8 +474,9 @@ struct HUDView: View {
         let flow = controller.flow
         let status = Self.status(of: controller)
 
-        // While a window is being chosen, only the window button works; the others keep their
-        // places with the disabled look. While the report is made, nothing works.
+        // While a window is being chosen, only the window button, the record toggle and Draw
+        // work; the others keep their places with the disabled look. While the report is made,
+        // nothing works.
         Group {
             HStack(spacing: HUDMetrics.iconGap) {
                 // Where the status dot was: in recording mode the record button, else pause and play.
@@ -488,7 +489,7 @@ struct HUDView: View {
                         controller.togglePause()
                     }
                 }
-                .disabled(status.isBusy)
+                .disabled(status.isBusy || controller.isPickingWindow)
                 // The red record button bounces once on the way into recording mode.
                 .onChange(of: controller.isRecordMode) { _, isRecordMode in
                     if isRecordMode {
@@ -511,7 +512,7 @@ struct HUDView: View {
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
-            HUDButton(image: Image(systemName: "record.circle"), isOn: controller.isRecordMode, help: controller.isRecordMode ? "Back to annotating (Esc)" : "Record a video") {
+            HUDButton(image: Image(systemName: "record.circle"), isOn: controller.isRecordMode, help: recordToggleHelp) {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)
@@ -532,7 +533,6 @@ struct HUDView: View {
                 }
             }
         }
-        .disabled(controller.isPickingWindow)
 
         // While choosing, its tooltip would cover "Use window picker" under the pill.
         HUDButton(image: sourceIcon, isOn: controller.scope != nil, isActive: controller.isPickingWindow, showsTooltip: !controller.isPickingWindow, help: windowHelp) {
@@ -565,6 +565,14 @@ struct HUDView: View {
             }
         }
         .disabled(controller.isPickingWindow)
+    }
+
+    /// Esc leaves recording mode only outside choosing, where it steps back instead.
+    private var recordToggleHelp: String {
+        guard controller.isRecordMode else {
+            return "Record a video"
+        }
+        return controller.isPickingWindow ? "Back to annotating" : "Back to annotating (Esc)"
     }
 
     private var isSending: Bool {

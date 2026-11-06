@@ -78,19 +78,18 @@ final class SourcePickerModel: ObservableObject {
     var injected: (screens: [Tile], apps: [App], phase: Phase)?
 
     /// Lists the sources on screen now, then takes their pictures, in place of a load still
-    /// running. `drawableOnly` leaves out sources Tilde cannot draw on, such as a phone, for
-    /// annotating.
-    func load(browserWindow: Int?, drawableOnly: Bool) {
+    /// running. It lists a phone in both modes; the picker offers it only for recording.
+    func load(browserWindow: Int?) {
         loading?.cancel()
         if let injected {
-            screens = Self.offered(injected.screens, drawableOnly: drawableOnly)
+            screens = injected.screens
             apps = injected.apps
             phase = injected.phase
             return
         }
         phase = .listing
         loading = Task {
-            await reload(browserWindow: browserWindow, drawableOnly: drawableOnly)
+            await reload(browserWindow: browserWindow)
         }
     }
 
@@ -100,7 +99,7 @@ final class SourcePickerModel: ObservableObject {
         loading = nil
     }
 
-    private func reload(browserWindow: Int?, drawableOnly: Bool) async {
+    private func reload(browserWindow: Int?) async {
         PhoneCapture.allowPhones()
         let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         guard !Task.isCancelled else {
@@ -120,7 +119,7 @@ final class SourcePickerModel: ObservableObject {
         // chooses the phone to record.
         let mayFilmPhones = PhoneCapture.hasCameraAccess
         let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: mayFilmPhones ? "Cable" : "Needs Camera access") }
-        screens = Self.offered(displays + phones, drawableOnly: drawableOnly)
+        screens = displays + phones
         apps = Self.apps(of: content.windows, browserWindow: browserWindow)
 
         // Tilde's browser is a window like any other; its other windows are left out.
@@ -157,11 +156,6 @@ final class SourcePickerModel: ObservableObject {
         if !Task.isCancelled {
             phase = .done
         }
-    }
-
-    /// The screens and phones to offer: only those Tilde can draw on, for annotating.
-    private static func offered(_ tiles: [Tile], drawableOnly: Bool) -> [Tile] {
-        tiles.filter { !drawableOnly || $0.source.isDrawable }
     }
 
     private func setPicture(_ picture: CGImage?, for id: String) {

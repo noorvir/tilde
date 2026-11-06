@@ -139,15 +139,15 @@ struct SessionFlowTests {
         }
     }
 
-    /// While choosing, only the window button, Esc, the picker, a choice, the hold key, the
-    /// front app and the session's end act.
+    /// While choosing, only the window button, Esc, the picker, a choice, the record toggle,
+    /// Draw, the hold key, the front app and the session's end act.
     @Test func choosingTakesOnlyItsEvents() {
         everyTransition { state, event, next, effects in
             guard case .open(let open) = state.mode, open.activity.isPicking else {
                 return
             }
             switch event {
-            case .escape, .windowButton, .openPicker, .choose, .holdEnded, .otherAppInFront, .scopeAppInFront, .ended:
+            case .escape, .windowButton, .openPicker, .choose, .toggleRecordingMode, .startDrawing, .holdEnded, .otherAppInFront, .scopeAppInFront, .ended:
                 return
             case .clipStarted, .clipFinished:
                 #expect(next == state && effects == [.dropClip], "\(event) gave \(effects)")

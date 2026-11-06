@@ -138,7 +138,8 @@ struct BehaviourTests {
         #expect(!controller.flow.canSend)
     }
 
-    /// Choosing in recording mode offers a phone, and the HUD stays in recording mode.
+    /// The picker lists a phone in both modes, and the HUD stays in its mode; the record toggle
+    /// changes the mode with the picker open, and a phone is taken only in recording mode.
     @Test func choosingInRecordingModeOffersAPhone() {
         let (screens, apps) = Fixtures.sources()
         controller.sourcePicker.injected = (screens, apps, .done)
@@ -153,7 +154,16 @@ struct BehaviourTests {
         controller.toggleWindowPick()
         controller.openSourcePicker()
         #expect(!controller.isRecordMode)
-        #expect(!controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) })
+        #expect(controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) })
+        controller.choose(.phone(Fixtures.phone))
+        #expect(controller.isSourcePickerOpen)
+
+        controller.toggleRecordingMode()
+        #expect(controller.isRecordMode)
+        #expect(controller.isSourcePickerOpen)
+        controller.choose(.phone(Fixtures.phone))
+        #expect(!controller.isPickingWindow)
+        #expect(controller.clipSource == .phone(Fixtures.phone))
     }
 
     /// Clear History keeps the session on screen, whose notes and recordings are in use.

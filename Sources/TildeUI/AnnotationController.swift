@@ -1934,7 +1934,7 @@ final class AnnotationController: ObservableObject {
         sourcePicker.tab = .screens
         sourcePicker.openApp = nil
         hover = nil
-        sourcePicker.load(browserWindow: browser.windowNumber, drawableOnly: !isRecordMode)
+        sourcePicker.load(browserWindow: browser.windowNumber)
     }
 
     /// The choice: a window limits the session to it, as clicking it on screen does; a screen

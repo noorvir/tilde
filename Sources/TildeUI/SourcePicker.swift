@@ -3,7 +3,8 @@ import SwiftUI
 /// Under the HUD while choosing a source: a "Use window picker" button that grows into the picker,
 /// in the style of the HUD's list, with screens and a phone on a cable in one tab, apps and
 /// then their windows in the other. "‹ Back" and Esc step back one level: from an app's
-/// windows to the apps, then to the button.
+/// windows to the apps, then to the button. A phone shows in both modes, and can be chosen only
+/// in recording mode, as Tilde cannot draw on it.
 struct SourcePickerView: View {
     /// As many columns as fit; tiles past the picker's height scroll.
     private static let columns = [GridItem(.adaptive(minimum: 150), spacing: 12, alignment: .top)]
@@ -13,6 +14,7 @@ struct SourcePickerView: View {
     @ObservedObject var model: SourcePickerModel
     /// Open in full, or only its "Use window picker" button.
     let isOpen: Bool
+    let isRecordMode: Bool
     /// The source that shows as chosen: in recording mode what Record records, else the
     /// chosen one.
     let selectedID: String?
@@ -150,12 +152,17 @@ struct SourcePickerView: View {
     }
 
     private func tileButton(_ tile: SourcePickerModel.Tile) -> some View {
-        SourceTile(
+        let isOffered = isRecordMode || tile.source.isDrawable
+        let reason = isOffered ? nil : "Only for recordings, not for notes"
+        return SourceTile(
             title: tile.title, detail: tile.detail, picture: tile.picture, isLoading: model.phase == .picturing, badge: nil,
             isSelected: selectedID == tile.id
         ) {
             onChoose(tile.source)
         }
+        .disabled(!isOffered)
+        .tildeTooltip(reason)
+        .accessibilityHint(reason ?? "")
     }
 
     /// The tiles in the rest of the picker, scrolling when they do not fit.
@@ -180,6 +187,7 @@ private struct SourceTile: View {
     let isSelected: Bool
     let action: () -> Void
     @State private var isHovered = false
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
@@ -213,7 +221,7 @@ private struct SourceTile: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(isSelected ? Color.tildeBlue : .white.opacity(isHovered ? 0.24 : 0.1), lineWidth: isSelected ? 2 : 1)
+                            .strokeBorder(isSelected ? Color.tildeBlue : .white.opacity(isHovered && isEnabled ? 0.24 : 0.1), lineWidth: isSelected ? 2 : 1)
                     )
                     .padding(.bottom, 4)
                 Text(title)
@@ -224,6 +232,7 @@ private struct SourceTile: View {
                     .foregroundStyle(.white.opacity(0.5))
             }
             .lineLimit(1)
+            .opacity(isEnabled ? 1 : 0.4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

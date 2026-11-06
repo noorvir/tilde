@@ -348,9 +348,9 @@ struct SessionFlow: Equatable {
         }
     }
 
-    /// While choosing, only the window button, Esc (or the picker's Back), the picker and a
-    /// choice act, and the front app and hold key keep the pause the session goes back to;
-    /// nothing else does anything.
+    /// While choosing, only the window button, Esc (or the picker's Back), the picker, a
+    /// choice, the record toggle and Draw act, and the front app and hold key keep the pause
+    /// the session goes back to; nothing else does anything.
     private mutating func handlePicking(_ event: Event, isRecordMode: Bool, isPickerOpen: Bool, _ open: inout Open) -> [Effect] {
         let back: Activity = isRecordMode ? .recording(.ready) : .annotating
         switch event {
@@ -368,6 +368,17 @@ struct SessionFlow: Equatable {
         case .openPicker:
             open.activity = .picking(isRecordMode: isRecordMode, isPickerOpen: true)
             return [.openPicker]
+        case .toggleRecordingMode:
+            // Choosing goes on, for the other mode: a phone is offered only for recording.
+            open.activity = .picking(isRecordMode: !isRecordMode, isPickerOpen: isPickerOpen)
+            return isRecordMode ? [.exitRecording] : [.enterRecording]
+        case .startDrawing:
+            // The canvas takes the clicks: choosing ends with no change, and drawing starts.
+            guard !isRecordMode else {
+                return []
+            }
+            open.activity = .annotating
+            return [.stopPicking] + handleOpen(.startDrawing, &open)
         case .choose(let drawable):
             // A phone only records; annotating takes only what it can draw on.
             guard drawable || isRecordMode else {
