@@ -465,7 +465,6 @@ final class AnnotationController: ObservableObject {
 
     /// Sends all drafts, including the comment that is still open and a clip in progress.
     func send() {
-        saveTypedComments()
         dispatch(.send)
     }
 
@@ -921,6 +920,11 @@ final class AnnotationController: ObservableObject {
     /// what to do for them, such as showing the comment box that the caller built; one the
     /// flow does not return is dropped.
     func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = [], with data: [SessionFlow.Effect: () -> Void] = [:]) {
+        // A comment typed in the preview is saved first: the event may open a question or a
+        // mode in which notes cannot be edited.
+        if event != .editNote {
+            saveTypedComments()
+        }
         var next = flow
         next.notes = drafts.count
         next.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -2698,7 +2702,6 @@ final class AnnotationController: ObservableObject {
     }
 
     private func hidePreview() {
-        saveTypedComments()
         previewID = nil
         expandedPreviewImage = nil
         previewPanel.close()

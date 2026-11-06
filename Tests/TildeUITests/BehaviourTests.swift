@@ -228,6 +228,21 @@ struct BehaviourTests {
         #expect(controller.confirmation == .clearAll)
     }
 
+    /// A comment typed in the preview just before a question or choosing a window is kept:
+    /// it is saved before the note can no longer be edited.
+    @Test func aTypedCommentIsKeptWhenAQuestionOrThePickerComesAtOnce() {
+        let drafts = Fixtures.drafts(2)
+        open(drafts: drafts)
+        controller.updateCommentSoon(drafts[0].id, "typed")
+        controller.requestClearAll()
+        controller.dismissConfirmation()
+        #expect(controller.drafts[0].annotation.comment == "typed")
+
+        controller.updateCommentSoon(drafts[1].id, "typed too")
+        controller.toggleWindowPick()
+        #expect(controller.drafts[1].annotation.comment == "typed too")
+    }
+
     /// A second Restore under the restore question changes nothing: ↩ restores the session
     /// it asked about.
     @Test func aSecondRestoreUnderTheQuestionKeepsTheFirst() {
