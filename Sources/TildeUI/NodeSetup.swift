@@ -228,8 +228,13 @@ final class NodeSetup: ObservableObject {
         let url = remoteURL
         // A node on the port keeps its URL entries on its page until it moves.
         let isOnPort = store.load().first { $0.host == host }.map { $0.socket == nil } ?? false
-        guard let (installer, hasProxy) = await Task.detached(operation: { try? Self.installer(host, url: url, token: token, onPort: isOnPort) }).value else {
-            update(host, status: rows.first { $0.host == host }?.status ?? .notInstalled, note: "Could not connect by ssh")
+        let installer: Installer
+        let hasProxy: Bool
+        do {
+            (installer, hasProxy) = try await Task.detached { try await Self.installer(host, url: url, token: token, onPort: isOnPort) }.value
+        } catch {
+            let note = error is TProxy.Failure ? "Could not get tproxy for it" : "Could not connect by ssh"
+            update(host, status: rows.first { $0.host == host }?.status ?? .notInstalled, note: note, detail: String(describing: error))
             setFailed(host, true)
             return
         }
@@ -264,14 +269,16 @@ final class NodeSetup: ObservableObject {
         let token = token(for: host)
         let url = remoteURL
         Task {
-            let moved = await Task.detached { () -> Installer? in
-                guard let (new, _) = try? Self.installer(host, url: url, token: token, onPort: false) else {
-                    return nil
-                }
+            let result = await Task.detached { () throws -> Installer? in
+                let (new, _) = try await Self.installer(host, url: url, token: token, onPort: false)
                 return Self.move(installed, from: old.installer, to: new) ? new : nil
-            }.value
-            guard let moved else {
-                update(host, status: links[host] == nil ? .unreachable : .linked, note: "Could not move it to a private socket; it stays on the port")
+            }.result
+            guard case .success(let moved?) = result else {
+                var detail: String?
+                if case .failure(let error) = result {
+                    detail = String(describing: error)
+                }
+                update(host, status: links[host] == nil ? .unreachable : .linked, note: "Could not move it to a private socket; it stays on the port", detail: detail)
                 setFailed(host, true)
                 return
             }
@@ -315,7 +322,7 @@ final class NodeSetup: ObservableObject {
         Task {
             await loadSetup(host)
             guard let setup = setups[host] else {
-                update(host, status: .notInstalled, note: "Could not connect by ssh")
+                update(host, status: .notInstalled, note: rows.first { $0.host == host }?.note)
                 return
             }
             let found = setup.foundRows.map(\.harness)
@@ -386,13 +393,17 @@ final class NodeSetup: ObservableObject {
     }
 
     /// The machine's installer, and whether its type has `tproxy`: its entries start `tproxy`
-    /// when it has, unless the node is still `onPort`.
-    nonisolated private static func installer(_ host: String, url: String, token: String, onPort: Bool) throws -> (Installer, Bool) {
+    /// when it has, unless the node is still `onPort`. Such an installer exists only once Tilde
+    /// has the machine's `tproxy`, so no entry starts a file that Tilde cannot give it.
+    nonisolated private static func installer(_ host: String, url: String, token: String, onPort: Bool) async throws -> (Installer, Bool) {
         let run: ShellFiles.Run = { command, input in
             try RemotePush.runOnNode(host, command: command, input: input)
         }
-        let hasProxy = TProxy.Target(uname: try run("uname -sm", nil)) != nil
-        return (try Installer.remote(mcpURL: url, authorization: "Bearer \(token)", proxied: hasProxy && !onPort, run: run), hasProxy)
+        let target = TProxy.Target(uname: try run("uname -sm", nil))
+        if let target, !onPort {
+            _ = try await TProxy.file(for: target)
+        }
+        return (try Installer.remote(mcpURL: url, authorization: "Bearer \(token)", proxied: target != nil && !onPort, run: run), target != nil)
     }
 
     nonisolated static func quoted(_ path: String) -> String {
