@@ -17,6 +17,7 @@ let stateTool = ProcessInfo.processInfo.environment["TILDE_STATE"].map(URL.init(
 let isRecording = CommandLine.arguments.contains("--record")
 let filter = CommandLine.arguments.dropFirst().first { !$0.hasPrefix("--") }
 
+// Only for pictures made on another setup: on the same one they must match exactly.
 let channelTolerance = 2
 let maxDifferentRatio = 0.001
 
@@ -79,11 +80,13 @@ func toolSDK() -> String {
 let version = ProcessInfo.processInfo.operatingSystemVersion
 let setup = "macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion), \(toolSDK())\n"
 let setupFile = pictures.appendingPathComponent("recorded-on.txt")
+let recorded = try? String(contentsOf: setupFile, encoding: .utf8)
+let isExact = recorded == setup
 if isRecording {
     try FileManager.default.createDirectory(at: pictures, withIntermediateDirectories: true)
     try setup.write(to: setupFile, atomically: true, encoding: .utf8)
-} else if let recorded = try? String(contentsOf: setupFile, encoding: .utf8), recorded != setup {
-    print("WARNING pictures were recorded on \(recorded.dropLast()), this is \(setup.dropLast())")
+} else if hasPictures, !isExact {
+    print("WARNING pictures were recorded on \((recorded ?? "an unknown setup\n").dropLast()), this is \(setup.dropLast()): pixels approximate")
 }
 for name in names {
     let base = String(name.dropLast(5))
@@ -110,6 +113,10 @@ for name in names {
         continue
     }
     if now.bytes == then.bytes {
+        continue
+    }
+    guard !isExact else {
+        failures.append("\(base): pixels differ: \(actual.path)")
         continue
     }
     var different = 0
