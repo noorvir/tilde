@@ -65,20 +65,23 @@ final class HistoryModel: ObservableObject {
         }
     }
 
-    private nonisolated static func report(of record: SessionRecord, archive: SessionArchive) -> String? {
+    /// The report saved with the session's report folder, whose file names it has. An unsent
+    /// session, or one whose report the inbox has pruned, gets a new report folder, as Send makes.
+    nonisolated static func report(of record: SessionRecord, archive: SessionArchive) -> String? {
+        let saved = record.reportFolder.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let kept = saved.flatMap { FileManager.default.fileExists(atPath: $0.appendingPathComponent("feedback.md").path) ? $0 : nil }
+        guard let folder = kept ?? (try? saveToInbox(feedback(of: record, archive: archive), sessionID: record.id, node: record.node)) else {
+            return nil
+        }
+        return try? String(contentsOf: folder.appendingPathComponent("feedback.md"), encoding: .utf8)
+    }
+
+    private nonisolated static func feedback(of record: SessionRecord, archive: SessionArchive) -> Feedback {
         let annotations = record.notes.map { note in
             let images = archive.images(of: note, in: record.id)
             return Annotation(id: note.id, comment: note.comment, target: note.target, frame: note.frame, image: images.image, contextImage: images.contextImage)
         }
-        let feedback = Feedback(annotations: annotations)
-        // An unsent session, or one whose report the inbox has pruned, gets a new report
-        // folder, as Send makes, so the report's file names are there.
-        let saved = record.reportFolder.map { URL(fileURLWithPath: $0, isDirectory: true) }
-        let kept = saved.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
-        guard let folder = kept ?? (try? saveToInbox(feedback, sessionID: record.id, node: record.node)) else {
-            return nil
-        }
-        return reportText(for: feedback, folder: folder)
+        return Feedback(annotations: annotations)
     }
 
     func canRestore(_ record: SessionRecord) -> Bool {

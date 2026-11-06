@@ -5,8 +5,30 @@ import Foundation
 public struct Feedback: Sendable {
     public var annotations: [Annotation]
 
+    /// The annotations in report order: the numbers in the report and its file names follow it.
     public init(annotations: [Annotation]) {
-        self.annotations = annotations
+        self.annotations = Self.groupedByPage(annotations)
+    }
+
+    /// Annotations on the same web page next to each other, pages in the order they were
+    /// first annotated; others keep their place.
+    private static func groupedByPage(_ annotations: [Annotation]) -> [Annotation] {
+        var pages: [String] = []
+        for annotation in annotations {
+            if case .element(.web(let element)) = annotation.target, !pages.contains(element.url) {
+                pages.append(element.url)
+            }
+        }
+        return annotations.enumerated().sorted { first, second in
+            let page = { (annotation: Annotation) -> Int in
+                if case .element(.web(let element)) = annotation.target {
+                    return pages.firstIndex(of: element.url) ?? 0
+                }
+                return Int.max
+            }
+            let firstPage = page(first.element), secondPage = page(second.element)
+            return firstPage == secondPage ? first.offset < second.offset : firstPage < secondPage
+        }.map(\.element)
     }
 }
 

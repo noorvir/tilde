@@ -307,6 +307,19 @@ struct SessionArchiveTests {
         #expect(FileManager.default.fileExists(atPath: older.appendingPathComponent("old.mp4").path))
     }
 
+    /// History's Copy Report of a sent session is the report it was sent with, whose image
+    /// numbers match its folder's files.
+    @Test func copyReportReusesTheSentReport() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-report-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data("# The sent report".utf8).write(to: folder.appendingPathComponent("feedback.md"))
+        var record = Fixtures.record(notes: 2, pageURL: nil)
+        record.reportFolder = folder.path
+
+        #expect(HistoryModel.report(of: record, archive: Fixtures.archive()) == "# The sent report")
+    }
+
     /// Only the owner can open a saved session.
     @Test func savedSessionsArePrivate() throws {
         let archive = Fixtures.archive()
