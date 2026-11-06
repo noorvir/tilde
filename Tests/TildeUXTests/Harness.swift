@@ -471,6 +471,13 @@ final class ChangingWindow {
         Thread.sleep(forTimeInterval: 0.2)
     }
 
+    /// The window's frame with its title bar, as the window server has it.
+    var bounds: CGRect? {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let info = list.first { $0[kCGWindowOwnerPID as String] as? Int32 == process.processIdentifier }
+        return (info?[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) }
+    }
+
     private static func isOnScreen(_ pid: Int32) -> Bool {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
         return list.contains { $0[kCGWindowOwnerPID as String] as? Int32 == pid }

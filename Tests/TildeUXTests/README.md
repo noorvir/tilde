@@ -16,8 +16,8 @@ rewrite:
 
 1. **An agent opens a page, the user notes it, and the agent gets a report with images**
    (`anAgentOpens…`): the menu's items before a session; `start_annotation` with a url opens
-   Tilde's browser, paused; a note on the page; ⌘↩; `wait_for_annotation` returns the comment
-   and an image.
+   Tilde's browser, paused; a click while paused, and one with ⌥ held while annotating, reach
+   the page; a note on the page; ⌘↩; `wait_for_annotation` returns the comment and an image.
 2. **A machine is installed from Settings and linked by its socket** (`aNodeIsInstalled…`):
    Install in Settings; the entries start `tproxy` with the socket and hold no token; modes and
    hashes; another user is refused; one agent process lives through two tunnel drops (a
@@ -31,8 +31,9 @@ rewrite:
    its other page and follows the window; the app killed once the session is saved; Restore
    brings the note back.
 5. **Two clips reach the agent as videos** (`twoClipsReachTheAgentAsVideos`): record, pause,
-   resume, stop; the clip in the preview's player; Esc asks before it drops a clip; Send while
-   recording; both videos play, and the first leaves out its pause.
+   resume, stop; the clip in the preview's player; Esc asks before it drops a clip; a click on
+   a window chooses it; Send while recording; both videos play, the first leaves out its pause,
+   and the second has the window's shape.
 
 ## Where the other stories are
 
@@ -63,7 +64,7 @@ rewrite:
 | An arrow is edited and leaves a label that follows its element | rows "A finished shape opens its comment", "Esc in a shape's comment…", "Undo in draw mode", "A click away keeps a shape's comment…", "Esc in draw mode keeps the drawings"; `hud-drawing*`; flow 4 draws on the canvas |
 | Shift-Return adds a line; Esc closes the preview | `comment-editing`; rows "↩ in the comment saves it", "Esc closes the preview" |
 | Choosing a window can be cancelled with Esc | rows "Esc in the open picker goes back…", "Esc ends choosing"; `hud-source-picker-*` |
-| The source picker chooses a window to record | rows "In recording mode it chooses the next clip's source", "A choice ends choosing", "Use window picker opens the picker"; `hud-source-picker-*`, `hud-recording-window` |
+| The source picker chooses a window to record | flow 5 (a click on a window); rows "In recording mode it chooses the next clip's source", "A choice ends choosing", "Use window picker opens the picker"; `hud-source-picker-*`, `hud-recording-window` |
 | The preview resizes, moves and snaps to the centre | rows "…within 40 pt of home snaps there", "The preview is never resized below 560 × 420", "The preview never grows past the room…"; `preview-*` |
 
 ## Not covered by an automatic test

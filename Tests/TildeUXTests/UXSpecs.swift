@@ -50,15 +50,25 @@ struct UXSpecs {
             let started = try await agent.call("start_annotation", ["url": page.url, "wait_seconds": 0])
             let session = try #require(started.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0 != "." && $0 != " " && $0 != "\n" }))
 
-            // The browser opens paused, so the user can browse first.
+            // The browser opens paused, so the user can browse first: a click reaches the page.
             try await app.waitToSee("Paused")
             try await app.waitToSeeText(containing: "Codex")
+            try await app.waitToSee("Welcome page", timeout: 20)
+            try await app.clickText("Other page")
+            try await app.waitToSee("Other page heading", timeout: 20)
+            try await app.key(.leftBracket, command: true)
             try await app.waitToSee("Welcome page", timeout: 20)
 
             try await annotate(app)
             try await app.waitToSee("Annotating")
             try await addNote(app, on: "Welcome page", comment: "Make this bigger")
             try await app.waitToSeeText(containing: "1 note")
+
+            // With the hold key down, a click reaches the page while annotating.
+            try await app.hold("option", down: true)
+            try await app.clickText("Other page")
+            try await app.hold("option", down: false)
+            try await app.waitToSee("Other page heading", timeout: 20)
 
             try await app.key(.enter, command: true)
             let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 5])
@@ -332,9 +342,12 @@ struct UXSpecs {
 
     // MARK: - Recording
 
-    /// Two clips reach the agent as videos: the first without its 2 s pause, and the second
-    /// sent while it records. Esc asks before it drops a clip that is not stopped.
+    /// Two clips reach the agent as videos: the first of the screen without its 2 s pause, and
+    /// the second of a chosen window, sent while it records. Esc asks before it drops a clip
+    /// that is not stopped.
     @Test func twoClipsReachTheAgentAsVideos() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
         try await withApp { app in
             let agent = try await MCPAgent(port: app.port, name: "Codex")
             let reply = try await agent.call("start_annotation", ["wait_seconds": 0])
@@ -371,9 +384,16 @@ struct UXSpecs {
             try await app.press("Record a video")
             try await app.waitToSeeText(containing: "Ready to record")
 
+            // A click on the fixture's window chooses it for the next clip.
+            try await app.press("Choose a screen or window to record")
+            try await app.waitToSee("Choose a window")
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.minX + 20, y: frame.maxY - 20))
+            try await app.waitToSee("Start recording tilde-ux-fixture")
+
             // Send while a clip is in progress keeps that clip too. Before that, Esc asks to
             // discard the clip, and Esc again keeps it.
-            try await app.press("Start recording the screen")
+            try await app.press("Start recording tilde-ux-fixture")
             try await app.waitToSeeText(containing: "Recording 0:0")
             try await app.key(.escape)
             try await app.waitToSee("Discard the recording?")
@@ -384,6 +404,7 @@ struct UXSpecs {
 
             let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
             #expect(report.text.contains("Screen recording"))
+            #expect(report.text.contains("Recorded: tilde-ux-fixture window"))
             let folder = try #require(report.text.components(separatedBy: "\n").first { $0.hasPrefix("Saved to: ") }?.dropFirst("Saved to: ".count))
             // The first clip leaves out its 2 s pause.
             for (number, shortest, longest) in [(1, 2.5, firstClipTime - 1.5), (2, 0.5, 4.0)] {
@@ -394,6 +415,13 @@ struct UXSpecs {
                 #expect(tracks.count == 1)
                 #expect(seconds >= shortest && seconds <= longest)
             }
+            // The second clip is the window, not the screen: it has the window's shape.
+            let windowClip = AVURLAsset(url: URL(fileURLWithPath: "\(folder)/annotation-2.mp4"))
+            let track = try #require(try await windowClip.loadTracks(withMediaType: .video).first)
+            let size = try await track.load(.naturalSize)
+            let bounds = try #require(window.bounds)
+            step("window clip \(size.width) × \(size.height), window \(bounds.width) × \(bounds.height)")
+            #expect(abs(size.width / size.height - bounds.width / bounds.height) < 0.02)
         }
     }
 }
