@@ -2,21 +2,31 @@
 # Builds build/Tilde.app (menu-bar app plus the tilde-mcp stdio shim) and signs it ad hoc.
 # TILDE_BUNDLE_TPROXY=1 (dev builds) puts the tproxy files in it, built with Go, or the ones in
 # proxy/dist where there is no Go; without it, Tilde downloads them from its version's release.
+# TILDE_UNIVERSAL=1 (the release) builds Tilde and tilde-mcp for Apple silicon and Intel Macs;
+# without it, for this Mac only.
 set -eu
 
 cd "$(dirname "$0")/.."
 configuration="${1:-release}"
 
-swift build -c "$configuration" --product Tilde
-swift build -c "$configuration" --product tilde-mcp
+archs=$(uname -m)
+if [ "${TILDE_UNIVERSAL:-}" = 1 ]; then
+    archs="arm64 x86_64"
+fi
+for arch in $archs; do
+    swift build -c "$configuration" --arch "$arch" --product Tilde
+    swift build -c "$configuration" --arch "$arch" --product tilde-mcp
+    scripts/stamp-sdk.sh "$(swift build -c "$configuration" --arch "$arch" --show-bin-path)/Tilde"
+done
 swift build -c "$configuration" --product tilde-icon
 bin="$(swift build -c "$configuration" --show-bin-path)"
 
 app="build/Tilde.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "$bin/Tilde" "$bin/tilde-mcp" "$app/Contents/MacOS/"
-scripts/stamp-sdk.sh "$app/Contents/MacOS/Tilde"
+for tool in Tilde tilde-mcp; do
+    lipo -create -output "$app/Contents/MacOS/$tool" $(for arch in $archs; do echo "$(swift build -c "$configuration" --arch "$arch" --show-bin-path)/$tool"; done)
+done
 cp Sources/TildeUI/DrawingWeb/* "$app/Contents/Resources/"
 if [ "${TILDE_BUNDLE_TPROXY:-}" = 1 ]; then
     if command -v go >/dev/null; then
