@@ -13,6 +13,11 @@ public final class NodeSocket: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "tilde.node-socket")
     private let maxLine = 10 * 1024 * 1024
+    /// Calls handled at once for the node, across its connections, as on the port.
+    private let maxCalls = 8
+    /// Reply bytes a connection may have waiting to go; a reader further behind is cut off.
+    private let maxQueued = 64 * 1024 * 1024
+    @MainActor private var openCalls = 0
 
     /// The socket for a node: named for the host, as the host is in no other place on the Mac.
     public static func path(for host: String, folder: URL = defaultFolder) -> String {
@@ -54,11 +59,14 @@ public final class NodeSocket: @unchecked Sendable {
         unlink(path)
     }
 
-    /// One agent's MCP session, from `initialize` on; read and written on the main actor.
+    /// One connection: the agent's MCP session, from `initialize` on, its calls being handled,
+    /// and its replies not yet sent; read and written on the main actor.
     @MainActor private final class Session {
         var id: String?
         /// The id of the agent's tproxy, which it sends first on each connection.
         var proxy: String?
+        var calls: [UUID: Task<Void, Never>] = [:]
+        var queued = 0
     }
 
     /// The MCP session of each tproxy, newest last, so that an agent whose link dropped gets
@@ -103,21 +111,55 @@ public final class NodeSocket: @unchecked Sendable {
                         session.id = self.proxySessions.last { $0.proxy == proxy }?.session
                         continue
                     }
-                    Task { @MainActor in
+                    guard self.openCalls < self.maxCalls else {
+                        self.refuse(line, on: connection, session: session)
+                        continue
+                    }
+                    self.openCalls += 1
+                    let call = UUID()
+                    session.calls[call] = Task { @MainActor in
                         let id = await self.mcp.handleLine(line, session: session.id, node: self.node) { reply in
-                            connection.send(content: reply + Data("\n".utf8), completion: .idempotent)
+                            self.send(reply, on: connection, session: session)
                         }
                         session.id = id ?? session.id
                         self.remember(session)
+                        session.calls[call] = nil
+                        self.openCalls -= 1
                     }
                 }
 
                 if isComplete || error != nil || buffer.count > self.maxLine {
                     connection.cancel()
+                    session.calls.values.forEach { $0.cancel() }
                 } else {
                     self.receive(on: connection, buffer: buffer, session: session)
                 }
             }
+        }
+    }
+
+    @MainActor private func send(_ reply: Data, on connection: NWConnection, session: Session) {
+        let data = reply + Data("\n".utf8)
+        guard session.queued == 0 || session.queued + data.count <= maxQueued else {
+            connection.cancel()
+            return
+        }
+        session.queued += data.count
+        connection.send(content: data, completion: .contentProcessed { _ in
+            Task { @MainActor in
+                session.queued -= data.count
+            }
+        })
+    }
+
+    /// A call over the limit gets an error at once; a notification over it is dropped.
+    @MainActor private func refuse(_ line: Data, on connection: NWConnection, session: Session) {
+        guard let message = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], let id = message["id"], !(id is NSNull) else {
+            return
+        }
+        let error: [String: Any] = ["code": -32000, "message": "Too many calls at once from this machine. Call again when one has returned."]
+        if let reply = try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "error": error]) {
+            send(reply, on: connection, session: session)
         }
     }
 }

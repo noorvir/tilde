@@ -77,6 +77,37 @@ struct NodeSocketTests {
         #expect(store.active?.client == "Agent")
     }
 
+    /// A node has at most 8 calls at once, across its connections; one more gets an error at
+    /// once. A connection that ends ends its waits, so they no longer count.
+    @Test func aNodeHasEightCallsAtOnceAndADropEndsItsWaits() async throws {
+        let folder = folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let socket = try NodeSocket(node: "box", mcp: MCPServer(store: store, localToken: "test"), folder: folder)
+        socket.start()
+        defer { socket.stop() }
+        let first = try await LineClient(path: socket.path)
+        try first.send(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"start_annotation","arguments":{"wait_seconds":0}}}"#)
+        _ = try await first.reply()
+        let session = try #require(store.active)
+
+        for id in 10..<18 {
+            try first.send(#"{"jsonrpc":"2.0","id":\#(id),"method":"tools/call","params":{"name":"wait_for_annotation","arguments":{"session_id":"\#(session.id)","wait_seconds":600}}}"#)
+        }
+        let second = try await LineClient(path: socket.path)
+        try second.send(#"{"jsonrpc":"2.0","id":18,"method":"ping"}"#)
+        let refused = try await second.reply()
+        #expect(refused["id"] as? Int == 18)
+        #expect("\(refused)".contains("Too many calls"))
+
+        first.close()
+        try await Task.sleep(for: .milliseconds(300))
+        try second.send(#"{"jsonrpc":"2.0","id":19,"method":"ping"}"#)
+        let answered = try await second.reply()
+        #expect(answered["id"] as? Int == 19)
+        #expect(answered["result"] != nil)
+        store.finish(session.id, with: .cancelled)
+    }
+
     @Test func eachNodeHasItsOwnSocket() {
         #expect(NodeSocket.path(for: "box") != NodeSocket.path(for: "other"))
         #expect(NodeSocket.path(for: "box") == NodeSocket.path(for: "box"))

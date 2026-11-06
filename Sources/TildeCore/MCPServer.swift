@@ -216,11 +216,16 @@ public final class MCPServer {
                 try? await Task.sleep(for: .seconds(2))
             }
         }
-        Task {
+        let call = Task {
             let content = await callTool(params: params, client: client)
             ticker.cancel()
             continuation.yield(event(result(id: id, content)))
             continuation.finish()
+        }
+        // A reader that stops, such as a connection that ended, ends the wait.
+        continuation.onTermination = { _ in
+            ticker.cancel()
+            call.cancel()
         }
 
         return HTTPResponse(status: 200, headers: ["Content-Type": "text/event-stream", "Cache-Control": "no-cache"], stream: stream)

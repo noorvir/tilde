@@ -89,17 +89,27 @@ public final class SessionStore: ObservableObject {
             return session.state
         }
 
+        // The wait ends at the session's end, after `seconds`, or when the caller is cancelled,
+        // such as when its connection ends; each returns the state then.
         let token = UUID()
-        return await withCheckedContinuation { continuation in
-            waiters[id, default: [:]][token] = continuation
-
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(seconds))
-                guard let waiter = self.waiters[id]?.removeValue(forKey: token) else {
-                    return
-                }
-                waiter.resume(returning: self.session(id)?.state ?? .cancelled)
+        let endWait = { @MainActor [weak self] in
+            guard let self, let waiter = self.waiters[id]?.removeValue(forKey: token) else {
+                return
             }
+            waiter.resume(returning: self.session(id)?.state ?? .cancelled)
+        }
+        let timer = Task { @MainActor in
+            if (try? await Task.sleep(for: .seconds(seconds))) != nil {
+                endWait()
+            }
+        }
+        defer { timer.cancel() }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                waiters[id, default: [:]][token] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor in endWait() }
         }
     }
 
