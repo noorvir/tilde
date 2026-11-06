@@ -16,6 +16,9 @@ guard arguments.count >= 4, arguments[1] == "render" else {
     exit(2)
 }
 
+// A caret that blinks would be in some pictures and not in others: it stays on.
+UserDefaults.standard.register(defaults: ["NSTextInsertionPointBlinkPeriodOn": 1_000_000_000.0, "NSTextInsertionPointBlinkPeriodOff": 1.0])
+
 Task { @MainActor in
     // Before any view exists: the first state in a process would otherwise get other scrollers,
     // and so another layout, depending only on the order in which states are drawn.
