@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    920,
+    805
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "agents",
+    "nodes": [
+      {
+        "host": "mac-mini",
+        "status": "installing",
+        "isReachable": true,
+        "isProtected": false,
+        "needsMove": true,
+        "agents": [
+          "claude-code",
+          "codex"
+        ]
+      }
+    ],
+    "machine": "mac-mini",
+    "expandedAgents": []
+  }
+}
