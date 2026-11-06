@@ -250,7 +250,7 @@ enum Surfaces {
             model.setup.nodes.setSetupForTesting(machine, for: host)
             model.machinePath = [host]
         }
-        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status), isReachable: $0.isReachable, hasFailed: $0.hasFailed ?? false, isProtected: $0.isProtected ?? true, needsMove: $0.needsMove ?? false) })
+        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status), isReachable: $0.isReachable, hasFailed: $0.hasFailed ?? false, isProtected: $0.isProtected ?? true, needsMove: $0.needsMove ?? false, isWorking: $0.isWorking ?? false) })
         if state.recording == true {
             model.recordingShortcut = .togglePause
         }

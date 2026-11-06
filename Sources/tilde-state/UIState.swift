@@ -19,6 +19,7 @@ struct UIState: Decodable {
         var hasFailed: Bool?
         var isProtected: Bool?
         var needsMove: Bool?
+        var isWorking: Bool?
         var agents: [String]?
         var agentsOff: [String]?
     }

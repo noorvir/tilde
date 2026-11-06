@@ -30,6 +30,7 @@ enum Transitions {
         var onThisMac: [String]?
         var isReachable: Bool?
         var hasFailed: Bool?
+        var isWorking: Bool?
         var keys: [KeyEvent]?
         var watching: [String]?
         var tapped: String?
@@ -132,7 +133,7 @@ enum Transitions {
             }
             if let status = row.nodeStatus {
                 result.dot = NodeSetup.Dot(status: NodeSetup.Status(name: status), isReachable: row.isReachable, hasFailed: row.hasFailed ?? false).name
-                let machine = NodeSetup.Row(host: "box", status: NodeSetup.Status(name: status), isReachable: row.isReachable, hasFailed: row.hasFailed ?? false)
+                let machine = NodeSetup.Row(host: "box", status: NodeSetup.Status(name: status), isReachable: row.isReachable, hasFailed: row.hasFailed ?? false, isWorking: row.isWorking ?? false)
                 result.reachable = Self.name(NodeSetup.reachableState(of: machine))
                 result.link = Self.name(NodeSetup.linkState(of: machine))
             }

@@ -8,22 +8,18 @@ import os
 /// socket for that node. A node type with no `tproxy` file is linked by a port instead.
 @MainActor
 final class NodeSetup: ObservableObject {
+    /// The machine's link. A change under way leaves it as it is: see `Row.isWorking`.
     enum Status: Equatable {
-        case notInstalled, installing, removing, linked, unreachable
+        case notInstalled, linked, unreachable
 
         var isInstalled: Bool {
-            self == .linked || self == .unreachable || self == .removing
-        }
-
-        var isWorking: Bool {
-            self == .installing || self == .removing
+            self == .linked || self == .unreachable
         }
 
         init(name: String) {
             switch name {
             case "linked": self = .linked
             case "unreachable": self = .unreachable
-            case "installing": self = .installing
             default: self = .notInstalled
             }
         }
@@ -31,7 +27,6 @@ final class NodeSetup: ObservableObject {
         var text: String {
             switch self {
             case .notInstalled: "Not installed"
-            case .installing, .removing: "Working on it"
             case .linked: "Installed and linked"
             case .unreachable: "Installed, not linked"
             }
@@ -124,6 +119,12 @@ final class NodeSetup: ObservableObject {
         /// Linked by the port, as installed by an older Tilde, though its type has `tproxy`: one
         /// Install moves all its apps to the socket.
         var needsMove = false
+        /// A change is under way: install, remove, the move, or an app's switch.
+        var isWorking = false
+
+        var text: String {
+            isWorking ? "Working on it" : status.text
+        }
 
         var dot: Dot {
             Dot(status: status, isReachable: isReachable, hasFailed: hasFailed)
@@ -234,7 +235,7 @@ final class NodeSetup: ObservableObject {
             (installer, hasProxy) = try await Task.detached { try await Self.installer(host, url: url, token: token, onPort: isOnPort) }.value
         } catch {
             let note = error is TProxy.Failure ? "Could not get tproxy for it" : "Could not connect by ssh"
-            update(host, status: rows.first { $0.host == host }?.status ?? .notInstalled, note: note, detail: String(describing: error))
+            update(host, note: note, detail: String(describing: error))
             setFailed(host, true)
             return
         }
@@ -265,7 +266,8 @@ final class NodeSetup: ObservableObject {
             return
         }
 
-        update(host, status: .installing, note: nil)
+        update(host, note: nil)
+        setWorking(host, true)
         let installed = old.foundRows.filter { old.status(of: $0) == .installed }.map(\.harness)
         let token = token(for: host)
         let url = remoteURL
@@ -279,8 +281,9 @@ final class NodeSetup: ObservableObject {
                 if case .failure(let error) = result {
                     detail = String(describing: error)
                 }
-                update(host, status: links[host] == nil ? .unreachable : .linked, note: "Could not move it to a private socket; it stays on the port", detail: detail)
+                update(host, note: "Could not move it to a private socket; it stays on the port", detail: detail)
                 setFailed(host, true)
+                setWorking(host, false)
                 return
             }
 
@@ -314,7 +317,7 @@ final class NodeSetup: ObservableObject {
     /// Whether a change to the machine is under way: install, remove, the move, or an app's
     /// switch. A machine takes one change at a time, and its controls are off meanwhile.
     func isWorking(_ host: String) -> Bool {
-        rows.first { $0.host == host }?.status.isWorking == true
+        rows.first { $0.host == host }?.isWorking == true
     }
 
     /// Installs or removes Tilde in some of the apps on the machine whose page `setup` is.
@@ -322,7 +325,8 @@ final class NodeSetup: ObservableObject {
         guard let host = setups.first(where: { $0.value === setup })?.key, !isWorking(host) else {
             return
         }
-        update(host, status: action == .installed ? .installing : .removing, note: nil)
+        update(host, note: nil)
+        setWorking(host, true)
         setup.apply(harnesses, action: action)
     }
 
@@ -336,19 +340,21 @@ final class NodeSetup: ObservableObject {
             moveToSocket(host)
             return
         }
-        update(host, status: .installing, note: nil)
+        update(host, note: nil)
         setFailed(host, false)
+        setWorking(host, true)
         Task {
             await loadSetup(host)
             guard let setup = setups[host] else {
-                update(host, status: .notInstalled, note: rows.first { $0.host == host }?.note)
+                setWorking(host, false)
                 return
             }
             let found = setup.foundRows.map(\.harness)
             let onThisMac = localSetup.map { local in AgentSetup.rows.filter { local.status(of: $0) == .installed }.map(\.harness) } ?? []
             let chosen = Self.chosen(found: found, onThisMac: onThisMac)
             if chosen.isEmpty {
-                update(host, status: .notInstalled, note: "No agent apps found")
+                update(host, note: "No agent apps found")
+                setWorking(host, false)
                 return
             }
             setup.apply(chosen, action: .installed)
@@ -360,7 +366,8 @@ final class NodeSetup: ObservableObject {
         guard !isWorking(host), let setup = setups[host] else {
             return
         }
-        update(host, status: .removing, note: nil)
+        update(host, note: nil)
+        setWorking(host, true)
         setup.apply(setup.foundRows.map(\.harness), action: .removed)
     }
 
@@ -393,9 +400,8 @@ final class NodeSetup: ObservableObject {
                 }
             }
             update(host, status: .notInstalled, note: nil)
-        } else if rows.first(where: { $0.host == host })?.status.isWorking == true {
-            update(host, status: links[host] == nil ? .unreachable : .linked, note: nil)
         }
+        setWorking(host, false)
     }
 
     private func token(for host: String) -> String {
@@ -465,19 +471,26 @@ final class NodeSetup: ObservableObject {
         }
     }
 
-    private func update(_ host: String, status: Status, note: String?, detail: String? = nil) {
+    /// Sets the note, and the link's status when one is given.
+    private func update(_ host: String, status: Status? = nil, note: String?, detail: String? = nil) {
         if let index = rows.firstIndex(where: { $0.host == host }) {
-            rows[index].status = status
+            rows[index].status = status ?? rows[index].status
             rows[index].note = note
             rows[index].detail = detail ?? (note == nil ? nil : rows[index].detail)
         } else {
-            rows.append(Row(host: host, status: status, note: note, detail: detail))
+            rows.append(Row(host: host, status: status ?? .notInstalled, note: note, detail: detail))
         }
     }
 
     private func setFailed(_ host: String, _ hasFailed: Bool) {
         if let index = rows.firstIndex(where: { $0.host == host }) {
             rows[index].hasFailed = hasFailed
+        }
+    }
+
+    private func setWorking(_ host: String, _ isWorking: Bool) {
+        if let index = rows.firstIndex(where: { $0.host == host }) {
+            rows[index].isWorking = isWorking
         }
     }
 

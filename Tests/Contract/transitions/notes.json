@@ -404,6 +404,17 @@
   }
  },
  {
+  "name": "A linked machine keeps its link and green dot while a change is under way",
+  "nodeStatus": "linked",
+  "isReachable": true,
+  "isWorking": true,
+  "expect": {
+   "dot": "green",
+   "reachable": "ok",
+   "link": "ok"
+  }
+ },
+ {
   "name": "A reachable machine with nothing installed is yellow",
   "nodeStatus": "notInstalled",
   "isReachable": true,

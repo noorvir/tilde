@@ -96,6 +96,7 @@ struct NodeLinkTests {
     /// Install: all its apps start tproxy, or, when one cannot change, all keep their URL.
     /// A machine takes one change at a time: while one is under way (here the move), an app's
     /// switch changes nothing, and a page that no longer speaks for the machine changes nothing.
+    /// The machine's link reads the same during a change.
     @MainActor @Test func aMachineTakesOneChangeAtATime() async throws {
         let local = try Fixtures.agentSetup()
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("nodes-\(UUID().uuidString).json")
@@ -105,7 +106,7 @@ struct NodeLinkTests {
         nodes.setSetupForTesting(page, for: "box")
         let codex = try #require(AgentSetup.rows.first { $0.harness == .codex })
 
-        nodes.setRowsForTesting([NodeSetup.Row(host: "box", status: .installing)])
+        nodes.setRowsForTesting([NodeSetup.Row(host: "box", status: .linked, isWorking: true)])
         _ = page.install([codex])
         let replaced = AgentSetup(installer: local.installer, placeholderIcon: Fixtures.appIcon, nodes: nodes, isRemote: true)
         await replaced.load()
@@ -116,6 +117,9 @@ struct NodeLinkTests {
 
         _ = page.install([codex])
         #expect(nodes.isWorking("box"))
+        // The change leaves the link as it is: "Linked to this Mac" stays green.
+        #expect(nodes.rows.map(\.status) == [.linked])
+        #expect(NodeSetup.linkState(of: nodes.rows[0]) == .ok)
         _ = page.uninstall([codex])
         for _ in 0..<50 where local.installer.status(of: .codex) != .installed {
             try await Task.sleep(for: .milliseconds(20))

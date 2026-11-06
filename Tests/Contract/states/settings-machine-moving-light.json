@@ -11,7 +11,8 @@
     "nodes": [
       {
         "host": "mac-mini",
-        "status": "installing",
+        "status": "linked",
+        "isWorking": true,
         "isReachable": true,
         "isProtected": false,
         "needsMove": true,

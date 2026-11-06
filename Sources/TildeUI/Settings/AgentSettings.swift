@@ -188,7 +188,7 @@ private struct NodesSection: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(row.host)
-                .accessibilityValue("\(row.status.text). \(row.dot.reason)")
+                .accessibilityValue("\(row.text). \(row.dot.reason)")
             }
         }
         .task {
@@ -216,7 +216,7 @@ struct MachineLabel: View {
     }
 
     private var subtitle: String {
-        var parts = [row.status.text]
+        var parts = [row.text]
         if row.needsMove {
             parts.append("Not protected (linked by a port): Install again to protect it")
         } else if row.status.isInstalled, !row.isProtected {
@@ -269,14 +269,14 @@ struct MachineSettings: View {
                             // While it works, the button keeps its width and its name.
                             ZStack {
                                 Text(removes ? "Remove" : "Install")
-                                    .opacity(row.status.isWorking ? 0 : 1)
-                                if row.status.isWorking {
+                                    .opacity(row.isWorking ? 0 : 1)
+                                if row.isWorking {
                                     ProgressView()
                                         .controlSize(.small)
                                 }
                             }
                         }
-                        .disabled(row.status.isWorking)
+                        .disabled(row.isWorking)
                         .accessibilityLabel("\(removes ? "Remove" : "Install") \(host)")
                     }
                     .padding(.horizontal, 16)
