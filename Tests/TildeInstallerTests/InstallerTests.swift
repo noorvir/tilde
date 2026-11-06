@@ -54,6 +54,26 @@ struct InstallerTests {
         #expect(try LocalToken.load(home: home) == token)
     }
 
+    /// Processes that find the same empty file at the same moment also end with one token.
+    @Test func anEmptyTokenFileIsReplacedOnce() throws {
+        for _ in 0..<20 {
+            let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-home-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: home) }
+            let file = LocalToken.file(home: home)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: file.path, contents: Data())
+
+            let tokens = OSAllocatedUnfairLock(initialState: Set<String>())
+            DispatchQueue.concurrentPerform(iterations: 8) { _ in
+                if let token = try? LocalToken.load(home: home) {
+                    tokens.withLock { _ = $0.insert(token) }
+                }
+            }
+            #expect(tokens.withLock { $0.count } == 1)
+            #expect(try LocalToken.load(home: home) == tokens.withLock { $0.first })
+        }
+    }
+
     @Test func aConfigItWritesIsForItsOwnerOnly() throws {
         try write(".cursor/mcp.json", "{}")
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: home.appendingPathComponent(".cursor/mcp.json").path)

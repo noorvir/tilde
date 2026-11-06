@@ -22,9 +22,25 @@ public enum LocalToken {
     }
 
     /// The token, made the first time. Made only once, also when two processes start at the
-    /// same moment: the first one's file stays, and the other reads it.
+    /// same moment: one makes it under a lock, and the other reads it.
     public static func load(home: URL) throws -> String {
         let file = file(home: home)
+        if let token = read(file) {
+            return token
+        }
+
+        let folder = file.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        } catch {
+            throw Failure.notSaved(error.localizedDescription)
+        }
+        // One process at a time from here; the lock goes with the file's closing.
+        let lock = open(folder.appendingPathComponent(".local-token.lock").path, O_CREAT | O_RDWR, 0o600)
+        guard lock >= 0, flock(lock, LOCK_EX) == 0 else {
+            throw Failure.notSaved(String(cString: strerror(errno)))
+        }
+        defer { close(lock) }
         if let token = read(file) {
             return token
         }
@@ -34,12 +50,6 @@ public enum LocalToken {
             throw Failure.noRandomBytes
         }
         let token = bytes.map { String(format: "%02x", $0) }.joined()
-        let folder = file.deletingLastPathComponent()
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        } catch {
-            throw Failure.notSaved(error.localizedDescription)
-        }
         // Private and whole from the start, then linked into place: a link never replaces a
         // file, so a token already there wins.
         let temporary = folder.appendingPathComponent(".local-token-\(UUID().uuidString)")
@@ -47,8 +57,8 @@ public enum LocalToken {
             throw Failure.notSaved("cannot write in \(folder.path)")
         }
         defer { try? FileManager.default.removeItem(at: temporary) }
-        // An empty file, such as one left by a full disk, is replaced; a token that another
-        // process has just made is never empty, so it stays.
+        // An empty file, such as one left by a full disk, is replaced: read under the lock, it
+        // cannot be a token that another process is making.
         if (try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? Int == 0 {
             try? FileManager.default.removeItem(at: file)
         }
