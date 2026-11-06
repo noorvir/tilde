@@ -443,7 +443,7 @@ final class NodeSetup: ObservableObject {
     }
 
     nonisolated private static func prepare(_ host: String, socket: String) async throws {
-        let lines = try RemotePush.runOnNode(host, command: prepareCommand(socket: socket)).split(whereSeparator: \.isNewline)
+        let lines = try await RemotePush.blocking { try RemotePush.runOnNode(host, command: prepareCommand(socket: socket)) }.split(whereSeparator: \.isNewline)
         guard let type = lines.first, let target = TProxy.Target(uname: String(type)) else {
             throw RemotePush.Failure.failed("Tilde has no tproxy for this machine")
         }
@@ -455,9 +455,12 @@ final class NodeSetup: ObservableObject {
         }
 
         let proxy = (socket as NSString).deletingLastPathComponent + "/bin/tproxy"
-        try RemotePush.copy(file, to: host, path: proxy + ".new")
         let check = "chmod 700 \(quoted(proxy + ".new")) && mv -f \(quoted(proxy + ".new")) \(quoted(proxy)) && { sha256sum || shasum -a 256; } 2>/dev/null <\(quoted(proxy))"
-        guard try RemotePush.runOnNode(host, command: check).hasPrefix(expected) else {
+        let copied = try await RemotePush.blocking {
+            try RemotePush.copy(file, to: host, path: proxy + ".new")
+            return try RemotePush.runOnNode(host, command: check)
+        }
+        guard copied.hasPrefix(expected) else {
             throw RemotePush.Failure.failed("tproxy changed on its way to the machine")
         }
     }

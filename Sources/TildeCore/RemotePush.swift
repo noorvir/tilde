@@ -57,17 +57,23 @@ public enum RemotePush {
             throw Failure.invalidHost
         }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        try await blocking {
+            let name = folder.lastPathComponent
+            // Only the owner can open the reports there, as on this Mac.
+            _ = try run(ssh, options + [host, "umask 077 && mkdir -p ~/.tilde/inbox/\(name) && chmod 700 ~/.tilde ~/.tilde/inbox ~/.tilde/inbox/\(name)"])
+            let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).map { folder.appendingPathComponent($0).path }
+            _ = try run(scp, options + files + ["\(host):.tilde/inbox/\(name)/"])
+            // Reports there are kept as here: 30 days, and always the last 100.
+            _ = try? run(ssh, options + [host, pruneInboxCommand])
+        }
+    }
+
+    /// Runs blocking work, such as ssh to a machine that may not answer for its whole timeout,
+    /// on a dispatch queue, not on one of Swift's few shared threads.
+    public static func blocking<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
-                continuation.resume(with: Result {
-                    let name = folder.lastPathComponent
-                    // Only the owner can open the reports there, as on this Mac.
-                    _ = try run(ssh, options + [host, "umask 077 && mkdir -p ~/.tilde/inbox/\(name) && chmod 700 ~/.tilde ~/.tilde/inbox ~/.tilde/inbox/\(name)"])
-                    let files = try FileManager.default.contentsOfDirectory(atPath: folder.path).map { folder.appendingPathComponent($0).path }
-                    _ = try run(scp, options + files + ["\(host):.tilde/inbox/\(name)/"])
-                    // Reports there are kept as here: 30 days, and always the last 100.
-                    _ = try? run(ssh, options + [host, pruneInboxCommand])
-                })
+                continuation.resume(with: Result(catching: work))
             }
         }
     }
