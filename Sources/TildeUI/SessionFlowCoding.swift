@@ -7,7 +7,7 @@ import Foundation
 extension SessionFlow: Codable {
     private enum Key: String, CodingKey, CaseIterable {
         case mode, pauses, drawing, panel, question, clip, operation, thenSend, recordMode, pickerOpen, returnTo
-        case notes, commentHasText, commentIsOnDrawing, lastOperation
+        case notes, commentHasText, commentIsOnDrawing, choosesInPicker, lastOperation
     }
 
     private struct AnyKey: CodingKey {
@@ -36,6 +36,7 @@ extension SessionFlow: Codable {
         notes = try values.decodeIfPresent(Int.self, forKey: .notes) ?? 0
         commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
         commentIsOnDrawing = try values.decodeIfPresent(Bool.self, forKey: .commentIsOnDrawing) ?? false
+        choosesInPicker = try values.decodeIfPresent(Bool.self, forKey: .choosesInPicker) ?? false
         lastOperation = try values.decodeIfPresent(Int.self, forKey: .lastOperation) ?? 0
         let operation = try values.decodeIfPresent(Int.self, forKey: .operation) ?? 0
 
@@ -88,6 +89,7 @@ extension SessionFlow: Codable {
         try values.encode(notes, forKey: .notes)
         try values.encode(commentHasText, forKey: .commentHasText)
         try values.encode(commentIsOnDrawing, forKey: .commentIsOnDrawing)
+        try values.encode(choosesInPicker, forKey: .choosesInPicker)
         try values.encode(lastOperation, forKey: .lastOperation)
 
         switch mode {

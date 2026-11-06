@@ -259,6 +259,8 @@ final class AnnotationController: ObservableObject {
     /// Where sent reports go, and where a report without an agent is copied; tests give their own.
     var inbox = inboxRoot
     var pasteboard = NSPasteboard.general
+    /// Keeps how the user last chose a window across launches; nil keeps it only in memory.
+    private let defaults: UserDefaults?
     /// When the session on screen started, for its saved record.
     private var sessionStarted = Date()
     private var saveTask: Task<Void, Never>?
@@ -276,12 +278,14 @@ final class AnnotationController: ObservableObject {
     private var isTracking = false
     private let trackingQueue = DispatchQueue(label: "tilde.tracking")
 
-    init(store: SessionStore, browser: BrowserController, shortcuts: ShortcutStore? = nil, archive: SessionArchive = SessionArchive()) {
+    init(store: SessionStore, browser: BrowserController, shortcuts: ShortcutStore? = nil, archive: SessionArchive = SessionArchive(), defaults: UserDefaults? = .standard) {
         self.store = store
         self.browser = browser
         self.archive = archive
+        self.defaults = defaults
         self.shortcuts = shortcuts ?? ShortcutStore()
         picker = ElementPicker(browser: browser)
+        flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
         subscription = store.$sessions
             .receive(on: RunLoop.main)
@@ -914,6 +918,9 @@ final class AnnotationController: ObservableObject {
         }
         let effects = next.handle(event)
         let questionChanged = next.session?.question != flow.session?.question
+        if next.choosesInPicker != flow.choosesInPicker {
+            defaults?.set(next.choosesInPicker, forKey: "ChoosesInPicker")
+        }
         flow = next
         if questionChanged {
             watchConfirmationKeys()
@@ -2752,7 +2759,10 @@ extension AnnotationController {
     ) {
         self.session = session
         self.drafts = drafts
+        // How the user chooses a window is theirs, not the session's.
+        let choosesInPicker = flow.choosesInPicker
         flow = SessionFlow(mode: mode, notes: drafts.count)
+        flow.choosesInPicker = choosesInPicker
         self.hover = hover
         self.composer = composer
         self.previewID = previewID

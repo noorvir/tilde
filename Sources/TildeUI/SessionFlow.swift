@@ -12,6 +12,9 @@ struct SessionFlow: Equatable {
     var notes = 0
     var commentHasText = false
     var commentIsOnDrawing = false
+    /// The window button opens the picker at once, as the user last chose from it, instead of
+    /// clicking on screen. The flow changes it; the controller keeps it across launches.
+    var choosesInPicker = false
     /// The last async operation started (a clip start or stop, a send, a confirmation); its
     /// result counts only while the mode still waits for that operation.
     var lastOperation = 0
@@ -358,6 +361,7 @@ struct SessionFlow: Equatable {
             // One level back at a time, as in the preview: the open picker, then choosing.
             if isPickerOpen {
                 open.activity = .picking(isRecordMode: isRecordMode, isPickerOpen: false)
+                choosesInPicker = false
                 return [.closePicker]
             }
             open.activity = back
@@ -367,6 +371,7 @@ struct SessionFlow: Equatable {
             return [.stopPicking]
         case .openPicker:
             open.activity = .picking(isRecordMode: isRecordMode, isPickerOpen: true)
+            choosesInPicker = true
             return [.openPicker]
         case .toggleRecordingMode:
             // Choosing goes on, for the other mode: a phone is offered only for recording.
@@ -628,8 +633,8 @@ struct SessionFlow: Equatable {
                 return leaveComment(&open)
             }
             let closes = finishDrawingAndPanel(&open)
-            open.activity = .picking(isRecordMode: open.activity != .annotating, isPickerOpen: false)
-            return closes + [.startPicking]
+            open.activity = .picking(isRecordMode: open.activity != .annotating, isPickerOpen: choosesInPicker)
+            return closes + [.startPicking] + (choosesInPicker ? [.openPicker] : [])
 
         case .openPicker, .choose:
             return []

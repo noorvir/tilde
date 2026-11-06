@@ -166,6 +166,36 @@ struct BehaviourTests {
         #expect(controller.clipSource == .phone(Fixtures.phone))
     }
 
+    /// The window button starts the way the user last chose, also after a restart: in the
+    /// picker once they chose from it, on screen once they went back to clicking there.
+    @Test func theWindowButtonStartsTheWayTheUserLastChose() async throws {
+        let suite = "tilde-picker-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        func restarted() -> AnnotationController {
+            let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
+            controller.sourcePicker.injected = (Fixtures.sources().screens, Fixtures.sources().apps, .done)
+            controller.setStateForTesting(session: Fixtures.session(), mode: .open(SessionFlow.Open()))
+            return controller
+        }
+
+        let first = restarted()
+        first.toggleWindowPick()
+        #expect(!first.isSourcePickerOpen)
+        first.openSourcePicker()
+        first.toggleWindowPick()
+
+        let second = restarted()
+        second.toggleWindowPick()
+        #expect(second.isSourcePickerOpen)
+        second.stepBackInSourcePicker()
+        #expect(second.isPickingWindow && !second.isSourcePickerOpen)
+
+        let third = restarted()
+        third.toggleWindowPick()
+        #expect(third.isPickingWindow && !third.isSourcePickerOpen)
+    }
+
     /// Clear History keeps the session on screen, whose notes and recordings are in use.
     @Test func clearHistoryKeepsTheSessionOnScreen() {
         let archive = Fixtures.archive()

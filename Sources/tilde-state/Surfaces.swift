@@ -59,7 +59,7 @@ enum Surfaces {
 
         case "toolbar":
             let browser = BrowserController()
-            let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive())
+            let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive(), defaults: nil)
             try await Task.sleep(for: .milliseconds(20))
             apply(state, drafts: try drafts(state), to: controller)
             let toolbar = BrowserToolbar(browser: browser, controller: controller).background(Color(white: 0.1))

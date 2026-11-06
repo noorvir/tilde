@@ -24,7 +24,7 @@ struct CardButton: View {
             .foregroundStyle(foreground)
             .padding(.horizontal, title == nil ? 0 : 10)
             .frame(minWidth: 30, minHeight: 30)
-            .background(RoundedRectangle(cornerRadius: 8).fill(background))
+            .background(shape.fill(background))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -33,6 +33,12 @@ struct CardButton: View {
         .accessibilityLabel(title ?? help)
         .accessibilityHint(title == nil ? "" : help)
     }
+    /// A button with text is round, as the pill's text buttons are; an icon alone is a
+    /// rounded square, as the pill's icons are.
+    private var shape: AnyShape {
+        title == nil ? AnyShape(RoundedRectangle(cornerRadius: 8)) : AnyShape(Capsule())
+    }
+
     private var foreground: Color {
         if isDestructive {
             return Color.red.opacity(isHovered ? 1 : 0.85)

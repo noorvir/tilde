@@ -2,14 +2,14 @@ import SwiftUI
 
 /// Under the HUD while choosing a source: a "Use window picker" button that grows into the picker,
 /// in the style of the HUD's list, with screens and a phone on a cable in one tab, apps and
-/// then their windows in the other. "‹ Back" and Esc step back one level: from an app's
-/// windows to the apps, then to the button. A phone shows in both modes, and can be chosen only
+/// then their windows in the other. "Select on screen" ("All apps" in an app's windows) and
+/// Esc step back one level: from an app's windows to the apps, then to clicking on screen. A phone shows in both modes, and can be chosen only
 /// in recording mode, as Tilde cannot draw on it.
 struct SourcePickerView: View {
     /// As many columns as fit; tiles past the picker's height scroll.
     private static let columns = [GridItem(.adaptive(minimum: 150), spacing: 12, alignment: .top)]
     /// The picker stays inside the HUD's panel, and inside the room under the pill.
-    static let sizes = (min: CGSize(width: 420, height: 260), max: CGSize(width: 780, height: 900))
+    static let sizes = (min: CGSize(width: 460, height: 260), max: CGSize(width: 780, height: 900))
 
     @ObservedObject var model: SourcePickerModel
     /// Open in full, or only its "Use window picker" button.
@@ -19,7 +19,7 @@ struct SourcePickerView: View {
     /// chosen one.
     let selectedID: String?
     let onOpen: () -> Void
-    /// "‹ Back", one level back as Esc.
+    /// "Select on screen" or "All apps", one level back as Esc.
     let onBack: () -> Void
     let onChoose: (RecordingSource) -> Void
     /// The size the user gave it with its corner, saved when the drag ends.
@@ -47,14 +47,29 @@ struct SourcePickerView: View {
                 .transition(.opacity)
             }
         }
-        .hudCard(cornerRadius: isOpen ? 16 : 18)
+        // Round around its round button, 4 pt out.
+        .hudCard(cornerRadius: isOpen ? 16 : 19)
         .environment(\.colorScheme, .dark)
     }
 
     private var picker: some View {
         let openApp = model.apps.first { $0.pid == model.openApp }
         return VStack(spacing: 14) {
-            ZStack {
+            // The tabs stay centred between two columns of the same width.
+            HStack(spacing: 8) {
+                Group {
+                    // The pair of "Use window picker", which opened the picker.
+                    if openApp == nil {
+                        CardButton(symbol: "cursorarrow", title: "Select on screen", help: "Choose by clicking on screen  Esc") {
+                            onBack()
+                        }
+                    } else {
+                        CardButton(symbol: "chevron.left", title: "All apps", help: "Back to all apps  Esc") {
+                            onBack()
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Picker("Source", selection: $model.tab) {
                     Text("Screens").tag(SourcePickerModel.Tab.screens)
                     Text("Windows").tag(SourcePickerModel.Tab.windows)
@@ -62,10 +77,8 @@ struct SourcePickerView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
-                CardButton(symbol: "chevron.left", title: "Back", help: openApp == nil ? "Back to clicking on screen  Esc" : "Back to all apps  Esc") {
-                    onBack()
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: 1)
             }
             .onChange(of: model.tab) {
                 model.openApp = nil
