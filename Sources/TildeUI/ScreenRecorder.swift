@@ -33,14 +33,10 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// window closed, the display went away, sharing was stopped, or the phone was unplugged.
     private let onSourceEnded: @Sendable () -> Void
 
-    /// Where the frames come from: ScreenCaptureKit for the Mac, a capture session for a phone.
-    private enum Capture {
-        case stream(SCStream)
-        case session(AVCaptureSession, observers: [NSObjectProtocol])
-    }
-
-    /// Set once, right after the recorder exists, as the stream needs it as its delegate.
-    private var capture: Capture?
+    /// Ends the source the frames come from: ScreenCaptureKit for the Mac, a capture session
+    /// for a phone. Set once, right after the recorder exists, as the stream needs it as its
+    /// delegate.
+    private var endCapture: () async -> Void = {}
     /// Takes a picture of what a stream records, at Resume; a phone streams all the time.
     private var takeStill: (@Sendable () async -> CMSampleBuffer?)?
     /// The clock of the frame times, which pauses are measured on.
@@ -107,7 +103,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         let (writer, input) = try makeWriter(width: width, height: height, to: video)
         let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: onSourceEnded)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: recorder)
-        recorder.capture = .stream(stream)
+        recorder.endCapture = {
+            try? await stream.stopCapture()
+        }
         recorder.takeStill = { [filter, configuration] in
             try? await SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: configuration)
         }
@@ -146,10 +144,14 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
                 recorder?.sourceEnded()
             }
         }
-        recorder.capture = .session(session, observers: [
+        let observers = [
             center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil, using: ended),
             center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: device, queue: nil, using: ended),
-        ])
+        ]
+        recorder.endCapture = {
+            observers.forEach(center.removeObserver)
+            session.stopRunning()
+        }
         output.setSampleBufferDelegate(recorder, queue: recorder.queue)
         return recorder
     }
@@ -211,15 +213,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
 
     private func stopCapture() async {
         writerWatch.cancel()
-        switch capture {
-        case .stream(let stream):
-            try? await stream.stopCapture()
-        case .session(let session, let observers):
-            observers.forEach(NotificationCenter.default.removeObserver)
-            session.stopRunning()
-        case nil:
-            break
-        }
+        await endCapture()
     }
 
     func pause() {
@@ -286,13 +280,15 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
 
     /// Ends the recording and returns the finished clip.
     func stop() async throws -> Clip {
-        await stopCapture()
+        // The clip ends now: frames and Resume pictures that come while the capture shuts down
+        // can show what the user put on screen after Stop.
         let (start, end, lastFrame) = await withCheckedContinuation { continuation in
             queue.async { [self] in
                 isStopped = true
                 continuation.resume(returning: (startTime, endTime, self.lastFrame))
             }
         }
+        await stopCapture()
         guard let start, end > start else {
             writer.cancelWriting()
             try? FileManager.default.removeItem(at: writer.outputURL)
@@ -443,11 +439,14 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
 #if DEBUG
 extension ScreenRecorder {
     /// A recorder of `width` × `height` frames into `video` with no source, whose Resume
-    /// pictures come from `takeStill`. Debug builds only.
-    static func forTesting(video: URL, width: Int, height: Int, takeStill: @escaping @Sendable () async -> CMSampleBuffer?) throws -> ScreenRecorder {
+    /// pictures come from `takeStill` and whose source ends with `endCapture`. Debug builds only.
+    static func forTesting(
+        video: URL, width: Int, height: Int, takeStill: @escaping @Sendable () async -> CMSampleBuffer?, endCapture: @escaping () async -> Void = {}
+    ) throws -> ScreenRecorder {
         let (writer, input) = try makeWriter(width: width, height: height, to: video)
         let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: {})
         recorder.takeStill = takeStill
+        recorder.endCapture = endCapture
         return recorder
     }
 }

@@ -59,11 +59,35 @@ struct ScreenRecorderTests {
         #expect(!FileManager.default.fileExists(atPath: discarded.video.path))
     }
 
-    private func makeRecorder(gate: Gate) throws -> ScreenRecorder {
-        let video = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recorder-\(UUID().uuidString).mp4")
-        return try ScreenRecorder.forTesting(video: video, width: 64, height: 64) {
-            await gate.wait()?.buffer
+    /// Stop ends the clip before the capture has shut down: a Resume picture that arrives
+    /// meanwhile, taken after Stop, shows what came on screen after it and never goes in.
+    @Test func aPictureWhileTheCaptureShutsDownIsDropped() async throws {
+        let gate = Gate()
+        let shutDown = Gate()
+        let recorder = try makeRecorder(gate: gate) {
+            _ = await shutDown.wait()
         }
+        recorder.pause()
+        recorder.resume()
+
+        let stopping = Task { try await recorder.stop() }
+        while await !shutDown.isWaiting {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await gate.release(with: try picture(at: now()))
+        try await Task.sleep(for: .milliseconds(200))
+        await shutDown.release(with: try picture(at: now()))
+
+        await #expect(throws: ScreenRecorder.Failure.self) {
+            try await stopping.value
+        }
+    }
+
+    private func makeRecorder(gate: Gate, endCapture: @escaping () async -> Void = {}) throws -> ScreenRecorder {
+        let video = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-recorder-\(UUID().uuidString).mp4")
+        return try ScreenRecorder.forTesting(video: video, width: 64, height: 64, takeStill: {
+            await gate.wait()?.buffer
+        }, endCapture: endCapture)
     }
 
     private func now() -> CMTime {
@@ -101,6 +125,10 @@ private actor Gate {
             return given
         }
         return await withCheckedContinuation { waiting.append($0) }
+    }
+
+    var isWaiting: Bool {
+        !waiting.isEmpty
     }
 
     func release(with picture: Picture) async {
