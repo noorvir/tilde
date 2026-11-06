@@ -35,7 +35,7 @@ PY
     real_running=1
 fi
 
-TILDE_BUNDLE_TPROXY=1 scripts/build-app.sh >/dev/null
+scripts/build-app.sh >/dev/null
 swift build --product tilde-ux-fixture >/dev/null
 scripts/build-driver.sh >/dev/null
 

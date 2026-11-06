@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CryptoKit
 import Foundation
 import Testing
 
@@ -85,15 +86,15 @@ struct UXSpecs {
     /// file and a `~/.codex` folder: "vmself", this Mac's own ssh (a macOS node), or a Linux VM.
     @Test func aNodeIsInstalledFromSettingsAndLinkedByItsSocket() async throws {
         let host = ProcessInfo.processInfo.environment["TILDE_UX_NODE"] ?? "vmself"
-        let dist = URL(fileURLWithPath: "proxy/dist").standardizedFileURL
         let home = try onNode(host, "echo $HOME").trimmingCharacters(in: .whitespacesAndNewlines)
         let proxy = "\(home)/.tilde/bin/tproxy"
         let socket = "\(home)/.tilde/tilde.sock"
         let type = try onNode(host, "uname -sm").trimmingCharacters(in: .whitespacesAndNewlines)
         let names = ["Darwin arm64": "darwin-arm64", "Darwin x86_64": "darwin-amd64", "Linux x86_64": "linux-amd64", "Linux aarch64": "linux-arm64"]
         let name = try #require(names[type], "No tproxy for \(type)")
-        let sums = try String(contentsOf: dist.appendingPathComponent("SHA256SUMS"), encoding: .utf8)
-        let expected = try #require(sums.split(separator: "\n").first { $0.hasSuffix("tproxy-\(name)") }?.prefix(64)).description
+        let app = ProcessInfo.processInfo.environment["TILDE_UX_APP"] ?? "build/TildeUX.app"
+        let file = try Data(contentsOf: URL(fileURLWithPath: "\(app)/Contents/Resources/tproxy/tproxy-\(name)"))
+        let expected = SHA256.hash(data: file).map { String(format: "%02x", $0) }.joined()
         let hash = "{ sha256sum || shasum -a 256; } 2>/dev/null < \(proxy) | cut -c1-64"
         _ = try? onNode(host, "rm -f \(proxy) \(socket)")
 

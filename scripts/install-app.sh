@@ -31,7 +31,7 @@ PY
     fi
 fi
 
-TILDE_BUNDLE_TPROXY=1 scripts/build-app.sh
+scripts/build-app.sh
 osascript -e 'quit app "Tilde"' 2>/dev/null || true
 sleep 1
 rm -rf /Applications/Tilde.app

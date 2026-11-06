@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds build/Tilde.app (menu-bar app plus the tilde-mcp stdio shim) and signs it ad hoc.
-# TILDE_BUNDLE_TPROXY=1 (dev builds) puts the tproxy files in it, built with Go, or the ones in
-# proxy/dist where there is no Go; without it, Tilde downloads them from its version's release.
+# It holds tproxy for every node type, built with Go, or the ones in proxy/dist where there is
+# no Go.
 # TILDE_UNIVERSAL=1 (the release) builds Tilde and tilde-mcp for Apple silicon and Intel Macs;
 # without it, for this Mac only.
 set -eu
@@ -28,13 +28,11 @@ for tool in Tilde tilde-mcp; do
     lipo -create -output "$app/Contents/MacOS/$tool" $(for arch in $archs; do echo "$(swift build -c "$configuration" --arch "$arch" --show-bin-path)/$tool"; done)
 done
 cp Sources/TildeUI/DrawingWeb/* "$app/Contents/Resources/"
-if [ "${TILDE_BUNDLE_TPROXY:-}" = 1 ]; then
-    if command -v go >/dev/null; then
-        proxy/build.sh
-    fi
-    mkdir "$app/Contents/Resources/tproxy"
-    cp proxy/dist/tproxy-* "$app/Contents/Resources/tproxy/"
+if command -v go >/dev/null; then
+    proxy/build.sh
 fi
+mkdir "$app/Contents/Resources/tproxy"
+cp proxy/dist/tproxy-* "$app/Contents/Resources/tproxy/"
 
 iconset="build/AppIcon.iconset"
 rm -rf "$iconset"

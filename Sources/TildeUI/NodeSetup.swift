@@ -232,10 +232,9 @@ final class NodeSetup: ObservableObject {
         let installer: Installer
         let hasProxy: Bool
         do {
-            (installer, hasProxy) = try await Task.detached { try await Self.installer(host, url: url, token: token, onPort: isOnPort) }.value
+            (installer, hasProxy) = try await Task.detached { try Self.installer(host, url: url, token: token, onPort: isOnPort) }.value
         } catch {
-            let note = error is TProxy.Failure ? "Could not get tproxy for it" : "Could not connect by ssh"
-            update(host, note: note, detail: String(describing: error))
+            update(host, note: "Could not connect by ssh", detail: String(describing: error))
             setFailed(host, true)
             return
         }
@@ -273,7 +272,7 @@ final class NodeSetup: ObservableObject {
         let url = remoteURL
         Task {
             let result = await Task.detached { () throws -> Installer? in
-                let (new, _) = try await Self.installer(host, url: url, token: token, onPort: false)
+                let (new, _) = try Self.installer(host, url: url, token: token, onPort: false)
                 return Self.move(installed, from: old.installer, to: new) ? new : nil
             }.result
             guard case .success(let moved?) = result else {
@@ -418,16 +417,12 @@ final class NodeSetup: ObservableObject {
     }
 
     /// The machine's installer, and whether its type has `tproxy`: its entries start `tproxy`
-    /// when it has, unless the node is still `onPort`. Such an installer exists only once Tilde
-    /// has the machine's `tproxy`, so no entry starts a file that Tilde cannot give it.
-    nonisolated private static func installer(_ host: String, url: String, token: String, onPort: Bool) async throws -> (Installer, Bool) {
+    /// when it has, unless the node is still `onPort`.
+    nonisolated private static func installer(_ host: String, url: String, token: String, onPort: Bool) throws -> (Installer, Bool) {
         let run: ShellFiles.Run = { command, input in
             try RemotePush.runOnNode(host, command: command, input: input)
         }
         let target = TProxy.Target(uname: try run("uname -sm", nil))
-        if let target, !onPort {
-            _ = try await TProxy.file(for: target)
-        }
         return (try Installer.remote(mcpURL: url, authorization: "Bearer \(token)", proxied: target != nil && !onPort, run: run), target != nil)
     }
 
@@ -454,7 +449,7 @@ final class NodeSetup: ObservableObject {
             throw RemotePush.Failure.failed("Tilde has no tproxy for this machine")
         }
         // The node's file is replaced whenever it differs from Tilde's.
-        let file = try await TProxy.file(for: target)
+        let file = TProxy.file(for: target)
         let expected = TProxy.sha256(try Data(contentsOf: file))
         guard lines.dropFirst().first?.split(separator: " ").first.map(String.init) != expected else {
             return
