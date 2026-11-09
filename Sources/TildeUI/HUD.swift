@@ -246,7 +246,7 @@ struct HUDView: View {
     /// The width of the pill in every mode. The widest title and a two-digit note count fit in
     /// it (the HUD reserves their space with hidden labels), so changing the mode or adding
     /// notes never moves a button; `everyModeFitsThePillWidth` checks it.
-    static let width: CGFloat = 479
+    static let width: CGFloat = 485
 
     @ObservedObject var controller: AnnotationController
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -334,7 +334,7 @@ struct HUDView: View {
 
     /// The pill's content width, the same in every state; embedded, the same without the
     /// pill's insets.
-    static let embeddedWidth = width - HUDMetrics.leadingInset - HUDMetrics.trailingInset
+    static let embeddedWidth = width - 2 * HUDMetrics.endInset
 
     @ViewBuilder
     private var pill: some View {
@@ -466,7 +466,7 @@ struct HUDView: View {
     /// `width`: the pill's whole width, or nil to fit the content.
     private func capsule(_ content: some View, width: CGFloat?) -> some View {
         content
-            .hudPillInsets(leading: HUDMetrics.leadingInset)
+            .hudPillInsets()
             .frame(width: width)
             .hudPill()
     }
@@ -498,7 +498,6 @@ struct HUDView: View {
                         recordModeEntries += 1
                     }
                 }
-                .padding(.leading, -4)
                 VStack(alignment: .leading, spacing: 1) {
                     titleText(status)
                         .font(.system(size: 13, weight: .semibold))
@@ -1199,7 +1198,7 @@ private struct AnnotationList: View {
         VStack(spacing: 0) {
             ForEach(Array(controller.drafts.enumerated()), id: \.element.id) { index, draft in
                 if index > 0 {
-                    Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1).padding(.leading, HUDMetrics.leadingInset).padding(.trailing, HUDMetrics.trailingInset)
+                    Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1).padding(.leading, HUDMetrics.leadingInset).padding(.trailing, HUDMetrics.endInset)
                 }
                 AnnotationRow(number: index + 1, draft: draft, controller: controller)
             }
@@ -1256,7 +1255,7 @@ private struct AnnotationRow: View {
             .disabled(!controller.canEditNotes)
         }
         .padding(.leading, HUDMetrics.leadingInset)
-        .padding(.trailing, HUDMetrics.trailingInset)
+        .padding(.trailing, HUDMetrics.endInset)
         .padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(isHovered ? 0.06 : 0)).padding(.horizontal, 4))
         .contentShape(Rectangle())

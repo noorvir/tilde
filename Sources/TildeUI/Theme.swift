@@ -11,10 +11,11 @@ enum HUDMetrics {
     static let height: CGFloat = 44
     /// The pill's buttons: the pill's height puts them 7 pt from its top and bottom.
     static let buttonSize: CGFloat = 30
-    /// Before the HUD's status and title at the pill's leading end.
+    /// Before text at the leading end of a pill or card, such as the install toast's result.
     static let leadingInset: CGFloat = 16
-    /// From a button at an end of the pill, such as the ×, to that end.
-    static let trailingInset: CGFloat = 18
+    /// From a button at either end of the pill, such as the HUD's status button and its ×,
+    /// to that end.
+    static let endInset: CGFloat = 18
     /// Between an icon and its text.
     static let iconGap: CGFloat = 8
 }
@@ -34,12 +35,10 @@ extension View {
             .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
     }
 
-    /// The pill's padding around a row of its controls: its height, `leading` before them (a
-    /// button's inset by default) and the trailing inset after them. Every surface in the
-    /// pill's shape takes its padding from here.
-    func hudPillInsets(leading: CGFloat = HUDMetrics.trailingInset) -> some View {
-        padding(.leading, leading)
-            .padding(.trailing, HUDMetrics.trailingInset)
+    /// The pill's padding around a row of its controls: its height and the end inset at both
+    /// ends. Every surface in the pill's shape takes its padding from here.
+    func hudPillInsets() -> some View {
+        padding(.horizontal, HUDMetrics.endInset)
             .frame(height: HUDMetrics.height)
     }
 

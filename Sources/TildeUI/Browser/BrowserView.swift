@@ -72,7 +72,7 @@ enum BrowserMetrics {
     static let addressMinWidth: CGFloat = 240
     /// Room for the traffic lights, the navigation buttons, the shortest address field and
     /// the HUD, so nothing in the toolbar is cut.
-    static let minWindowWidth: CGFloat = 84 + 3 * (30 + 4) + 4 + addressMinWidth + 4 + 8 + HUDView.embeddedWidth + frame
+    static let minWindowWidth: CGFloat = 84 + 3 * (30 + 4) + 4 + addressMinWidth + 4 + 4 + HUDView.embeddedWidth + frame
 }
 
 /// The title-bar row in the HUD's dark style: back, forward, reload and the address field,
@@ -106,7 +106,7 @@ struct BrowserToolbar: View {
 
             if controller.isHUDInBrowser {
                 HUDView(controller: controller, isEmbedded: true)
-                    .padding(.leading, 8)
+                    .padding(.leading, 4)
             } else {
                 Image(nsImage: TildeMark.menuBarImage())
                     .renderingMode(.template)
