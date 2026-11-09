@@ -2137,7 +2137,7 @@ final class AnnotationController: ObservableObject {
     private func openBrowser(at url: URL?) {
         browser.show(url)
         // With no page yet, the address field takes the keyboard instead of a blank page.
-        if url == nil, browser.webView.url == nil {
+        if url == nil, !browser.hasPage {
             browser.openLocation(nil)
         }
         scopeToBrowser()

@@ -69,7 +69,8 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
 
         observations = [
             webView.publisher(for: \.url).sink { [weak self] url in
-                self?.address = url?.absoluteString ?? ""
+                // The empty page of a closed window has no address.
+                self?.address = url == Self.blank ? "" : url?.absoluteString ?? ""
                 self?.pageURL = PageAnchor.pageURL(url)
                 self?.resolveAnchors()
             },
@@ -487,6 +488,18 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // The window is kept for its frame, but not its page: nothing plays or runs on.
+        webView.pauseAllMediaPlayback()
+        webView.stopLoading()
+        webView.load(URLRequest(url: Self.blank))
+    }
+
+    /// The page of a closed window.
+    private static let blank = URL(string: "about:blank")!
+
+    /// Whether the browser shows a page: none before the first, nor after its window closed.
+    var hasPage: Bool {
+        webView.url != nil && webView.url != Self.blank
     }
 
     private func makeWindow() -> NSWindow {
