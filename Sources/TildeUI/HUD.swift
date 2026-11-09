@@ -387,21 +387,25 @@ struct HUDView: View {
         }
     }
 
+    /// The drawing bar is a card under the HUD, so it is compact.
+    private static let drawingBarSize = HUDSize.compact
+
     @ViewBuilder
     private var drawingContent: some View {
+        let size = Self.drawingBarSize
         ForEach(Self.drawingTools, id: \.tool) { entry in
             HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, help: entry.help) {
                 controller.setDrawingTool(entry.tool)
             }
         }
-        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
         ForEach(Self.drawingColors, id: \.hex) { entry in
             Button {
                 controller.setDrawingColor(entry.hex)
             } label: {
                 Circle()
                     .fill(Color(hex: entry.hex))
-                    .frame(width: 12, height: 12)
+                    .frame(width: size.scaled(12), height: size.scaled(12))
                     .overlay(Circle().strokeBorder(Color.white.opacity(controller.drawingColor == entry.hex ? 1 : 0.25), lineWidth: controller.drawingColor == entry.hex ? 2 : 1))
                     .padding(1)
                     .contentShape(Circle())
@@ -409,7 +413,7 @@ struct HUDView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(entry.name)
         }
-        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
         HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
             controller.undoDrawing()
         }
@@ -455,7 +459,8 @@ struct HUDView: View {
     }
 
     private var drawingBar: some View {
-        capsule(HStack(spacing: 4) { drawingContent }, width: HUDView.width)
+        let size = Self.drawingBarSize
+        return capsule(HStack(spacing: size.scaled(4)) { drawingContent }, width: size.scaled(HUDView.width), size: size)
             .opacity(controller.isHUDShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -464,9 +469,9 @@ struct HUDView: View {
     }
 
     /// `width`: the pill's whole width, or nil to fit the content.
-    private func capsule(_ content: some View, width: CGFloat?) -> some View {
+    private func capsule(_ content: some View, width: CGFloat?, size: HUDSize = .regular) -> some View {
         content
-            .hudPillInsets()
+            .hudPillInsets(size)
             .frame(width: width)
             .hudPill()
     }
@@ -1060,6 +1065,7 @@ private struct SendButton: View {
 /// A text button for the pill's confirm state; destructive ones are red like Delete.
 struct PillTextButton: View {
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
+    @Environment(\.hudSize) private var hudSize
     let title: String
     /// A small key cap after the title, such as "esc", for the key that does the same.
     var key: String?
@@ -1069,17 +1075,17 @@ struct PillTextButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: hudSize.scaled(6)) {
                 Text(title)
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.system(size: hudSize.font(12.5), weight: .semibold))
                 if let key {
                     KeyHint(key: key)
                 }
             }
                 .foregroundStyle(isDestructive ? Color.red : .white.opacity(0.9))
-                .padding(.horizontal, 12)
-                .frame(height: 28)
-                .background(HUDShape(height: 28, isHUDEmbedded: isHUDEmbedded).fill(background))
+                .padding(.horizontal, hudSize.scaled(12))
+                .frame(height: hudSize.scaled(28))
+                .background(HUDShape(height: hudSize.scaled(28), isHUDEmbedded: isHUDEmbedded).fill(background))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1151,21 +1157,22 @@ struct PauseToast: View {
 /// character sits high.
 struct KeyHint: View {
     let key: String
+    @Environment(\.hudSize) private var hudSize
 
     var body: some View {
         Group {
             if key == "↩" {
                 Image(systemName: "return")
-                    .font(.system(size: 9.5, weight: .semibold))
+                    .font(.system(size: hudSize.font(9.5), weight: .semibold))
             } else {
                 Text(key)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: hudSize.font(11), weight: .medium))
             }
         }
         .opacity(0.75)
-        .padding(.horizontal, 4)
-        .frame(minWidth: 18, minHeight: 16, maxHeight: 16)
-        .background(RoundedRectangle(cornerRadius: 4).fill(.foreground.opacity(0.15)))
+        .padding(.horizontal, hudSize.scaled(4))
+        .frame(minWidth: hudSize.scaled(18), minHeight: hudSize.scaled(16), maxHeight: hudSize.scaled(16))
+        .background(RoundedRectangle(cornerRadius: hudSize.scaled(4)).fill(.foreground.opacity(0.15)))
     }
 }
 
