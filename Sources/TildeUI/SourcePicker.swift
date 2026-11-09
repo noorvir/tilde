@@ -43,13 +43,11 @@ struct SourcePickerView: View {
                 HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", help: "Choose from pictures of the screens and windows") {
                     onOpen()
                 }
-                // As `hudButtonCard()`: the HUD's height, and its trailing inset at both ends.
-                .padding(.horizontal, HUDMetrics.trailingInset)
-                .frame(height: HUDMetrics.height)
+                .hudPillInsets()
                 .transition(.opacity)
             }
         }
-        // Round at the button's height, as `hudButtonCard()`.
+        // A pill around its button, which grows into a card.
         .hudCard(cornerRadius: isOpen ? 16 : HUDMetrics.height / 2)
         .environment(\.colorScheme, .dark)
     }

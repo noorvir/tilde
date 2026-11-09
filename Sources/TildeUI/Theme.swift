@@ -9,7 +9,11 @@ extension NSColor {
 /// Spacing shared by the HUD's pill, message and list, so every state lines up.
 enum HUDMetrics {
     static let height: CGFloat = 44
+    /// The pill's buttons: the pill's height puts them 7 pt from its top and bottom.
+    static let buttonSize: CGFloat = 30
+    /// Before the HUD's status and title at the pill's leading end.
     static let leadingInset: CGFloat = 16
+    /// From a button at an end of the pill, such as the ×, to that end.
     static let trailingInset: CGFloat = 18
     /// Between an icon and its text.
     static let iconGap: CGFloat = 8
@@ -28,6 +32,15 @@ extension View {
             .background(Capsule().fill(Color.tildeInk))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)).allowsHitTesting(false))
             .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
+    }
+
+    /// The pill's padding around a row of its controls: its height, `leading` before them (a
+    /// button's inset by default) and the trailing inset after them. Every surface in the
+    /// pill's shape takes its padding from here.
+    func hudPillInsets(leading: CGFloat = HUDMetrics.trailingInset) -> some View {
+        padding(.leading, leading)
+            .padding(.trailing, HUDMetrics.trailingInset)
+            .frame(height: HUDMetrics.height)
     }
 
     /// A card in the HUD's style: the list, the source picker, the comment box and the pause

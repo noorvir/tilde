@@ -466,10 +466,8 @@ struct HUDView: View {
     /// `width`: the pill's whole width, or nil to fit the content.
     private func capsule(_ content: some View, width: CGFloat?) -> some View {
         content
-            .padding(.leading, HUDMetrics.leadingInset)
-            .padding(.trailing, HUDMetrics.trailingInset)
+            .hudPillInsets(leading: HUDMetrics.leadingInset)
             .frame(width: width)
-            .frame(height: HUDMetrics.height)
             .hudPill()
     }
 
@@ -937,7 +935,7 @@ struct HUDButton: View {
     /// count keeps the width of two digits, so the buttons stay put as the count changes.
     var badge: Int?
     /// The smallest width and the height.
-    var size: CGFloat = 30
+    var size: CGFloat = HUDMetrics.buttonSize
     /// Selected, such as the window the session is limited to: a grey fill.
     var isOn = false
     /// Doing what it started, such as choosing a window: a Tilde-blue fill.
@@ -1108,18 +1106,9 @@ struct BrowserHint: View {
             HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
             HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
         }
-        .hudButtonCard()
-    }
-}
-
-extension View {
-    /// A row of the pill's buttons under the HUD, in a pill of the HUD's height, with the
-    /// pill's trailing inset at both ends.
-    func hudButtonCard() -> some View {
-        padding(.horizontal, HUDMetrics.trailingInset)
-            .frame(height: HUDMetrics.height)
-            .hudPill()
-            .environment(\.colorScheme, .dark)
+        .hudPillInsets()
+        .hudPill()
+        .environment(\.colorScheme, .dark)
     }
 }
 
