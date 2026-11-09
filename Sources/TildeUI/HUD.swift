@@ -1094,7 +1094,8 @@ struct BrowserHint: View {
     var body: some View {
         HStack(spacing: 2) {
             CardButton(symbol: "globe", title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
-            CardButton(symbol: "xmark", help: "Dismiss", action: onDismiss)
+            // The same × as the pill's.
+            HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
         }
         .padding(4)
         .hudCard(cornerRadius: 19)
