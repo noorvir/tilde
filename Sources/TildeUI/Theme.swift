@@ -18,6 +18,55 @@ enum HUDMetrics {
     static let endInset: CGFloat = 18
     /// Between an icon and its text.
     static let iconGap: CGFloat = 8
+    /// Between the HUD and each card under it.
+    static let cardGap: CGFloat = 6
+    /// The cards under the HUD (the browser hint, "Use window picker" and the picker it grows
+    /// into) are compact, so the HUD stays the main surface: the buttons 5 pt from the top and
+    /// bottom, and the end inset smaller in the same proportion as the height.
+    static let compactHeight: CGFloat = 34
+    static let compactButtonSize: CGFloat = 24
+    static let compactEndInset: CGFloat = 14
+}
+
+/// The size of a surface in the HUD's style, which its buttons, text and spacing follow.
+enum HUDSize {
+    case regular
+    case compact
+
+    var height: CGFloat {
+        self == .regular ? HUDMetrics.height : HUDMetrics.compactHeight
+    }
+
+    var buttonSize: CGFloat {
+        self == .regular ? HUDMetrics.buttonSize : HUDMetrics.compactButtonSize
+    }
+
+    var endInset: CGFloat {
+        self == .regular ? HUDMetrics.endInset : HUDMetrics.compactEndInset
+    }
+
+    /// A regular length at this size, in whole points: every other length in a compact
+    /// surface shrinks as its height does.
+    func scaled(_ length: CGFloat) -> CGFloat {
+        (length * height / HUDMetrics.height).rounded()
+    }
+
+    /// A regular font size at this size: one step (1 pt) smaller in a compact surface.
+    func font(_ size: CGFloat) -> CGFloat {
+        self == .regular ? size : size - 1
+    }
+}
+
+private struct HUDSizeKey: EnvironmentKey {
+    static let defaultValue = HUDSize.regular
+}
+
+extension EnvironmentValues {
+    /// The size of the surface around a control, which `hudPillInsets(_:leading:)` sets.
+    var hudSize: HUDSize {
+        get { self[HUDSizeKey.self] }
+        set { self[HUDSizeKey.self] = newValue }
+    }
 }
 
 /// What a pill starts with: a button, such as the HUD's status button, or text, such as the
@@ -42,13 +91,15 @@ extension View {
             .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
     }
 
-    /// The pill's padding around a row of its controls: its height, the leading inset for
-    /// what `leading` starts with and the end inset after the button at the trailing end.
-    /// Every surface in the pill's shape takes its padding from here.
-    func hudPillInsets(leading: HUDPillEnd = .button) -> some View {
-        padding(.leading, leading == .text ? HUDMetrics.leadingInset : HUDMetrics.endInset)
-            .padding(.trailing, HUDMetrics.endInset)
-            .frame(height: HUDMetrics.height)
+    /// The pill's padding around a row of its controls at `size`: its height, the leading
+    /// inset for what `leading` starts with and the end inset after the button at the
+    /// trailing end. Its controls take `size` too. Every surface in the pill's shape takes its
+    /// padding from here.
+    func hudPillInsets(_ size: HUDSize = .regular, leading: HUDPillEnd = .button) -> some View {
+        padding(.leading, leading == .text ? size.scaled(HUDMetrics.leadingInset) : size.endInset)
+            .padding(.trailing, size.endInset)
+            .frame(height: size.height)
+            .environment(\.hudSize, size)
     }
 
     /// A card in the HUD's style: the list, the source picker, the comment box and the pause

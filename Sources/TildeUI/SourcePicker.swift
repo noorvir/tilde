@@ -6,10 +6,15 @@ import SwiftUI
 /// Esc step back one level: from an app's windows to the apps, then to clicking on screen. A phone shows in both modes, and can be chosen only
 /// in recording mode, as Tilde cannot draw on it.
 struct SourcePickerView: View {
+    /// A card under the HUD: it and everything in it are compact.
+    private static let hudSize = HUDSize.compact
     /// As many columns as fit; tiles past the picker's height scroll.
-    private static let columns = [GridItem(.adaptive(minimum: 150), spacing: 12, alignment: .top)]
+    private static let columns = [GridItem(.adaptive(minimum: hudSize.scaled(150)), spacing: hudSize.scaled(12), alignment: .top)]
     /// The picker stays inside the HUD's panel, and inside the room under the pill.
-    static let sizes = (min: CGSize(width: 460, height: 260), max: CGSize(width: 780, height: 900))
+    static let sizes = (
+        min: CGSize(width: hudSize.scaled(460), height: hudSize.scaled(260)),
+        max: CGSize(width: hudSize.scaled(780), height: hudSize.scaled(900))
+    )
 
     @ObservedObject var model: SourcePickerModel
     /// Open in full, or only its "Use window picker" button.
@@ -22,9 +27,9 @@ struct SourcePickerView: View {
     let onBack: () -> Void
     let onChoose: (RecordingSource) -> Void
     /// The size the user gave it with its corner, saved when the drag ends.
-    @AppStorage("SourcePickerWidth") private var savedWidth = 560.0
+    @AppStorage("SourcePickerWidth") private var savedWidth = Double(hudSize.scaled(560))
     /// Two full rows of tiles at the default width.
-    @AppStorage("SourcePickerHeight") private var savedHeight = 390.0
+    @AppStorage("SourcePickerHeight") private var savedHeight = Double(hudSize.scaled(390))
     /// The size while its corner is dragged, and the size when the drag began.
     @State private var resizing: (start: CGSize, size: CGSize)?
 
@@ -43,20 +48,22 @@ struct SourcePickerView: View {
                 HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", help: "Choose from pictures of the screens and windows") {
                     onOpen()
                 }
-                .hudPillInsets()
+                .hudPillInsets(Self.hudSize)
                 .transition(.opacity)
             }
         }
         // A pill around its button, which grows into a card.
-        .hudCard(cornerRadius: isOpen ? 16 : HUDMetrics.height / 2)
+        .hudCard(cornerRadius: isOpen ? Self.hudSize.scaled(16) : Self.hudSize.height / 2)
+        .environment(\.hudSize, Self.hudSize)
         .environment(\.colorScheme, .dark)
     }
 
     private var picker: some View {
         let openApp = model.apps.first { $0.pid == model.openApp }
-        return VStack(spacing: 14) {
+        let hudSize = Self.hudSize
+        return VStack(spacing: hudSize.scaled(14)) {
             // The tabs stay centred between two columns of the same width.
-            HStack(spacing: 8) {
+            HStack(spacing: hudSize.scaled(8)) {
                 Group {
                     // The pair of "Use window picker", which opened the picker.
                     if openApp == nil {
@@ -75,6 +82,7 @@ struct SourcePickerView: View {
                     Text("Windows").tag(SourcePickerModel.Tab.windows)
                 }
                 .pickerStyle(.segmented)
+                .controlSize(.small)
                 .labelsHidden()
                 .fixedSize()
                 Color.clear
@@ -103,9 +111,9 @@ struct SourcePickerView: View {
                 }
             case (_, .windows):
                 if let openApp {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: hudSize.scaled(10)) {
                         Text(openApp.name)
-                            .font(.system(size: 12.5, weight: .semibold))
+                            .font(.system(size: hudSize.font(12.5), weight: .semibold))
                             .foregroundStyle(.white.opacity(0.7))
                         grid {
                             ForEach(openApp.windows) { tile in
@@ -134,8 +142,8 @@ struct SourcePickerView: View {
                 }
             }
         }
-        .padding(.horizontal, HUDMetrics.leadingInset)
-        .padding(.vertical, 14)
+        .padding(.horizontal, hudSize.scaled(HUDMetrics.leadingInset))
+        .padding(.vertical, hudSize.scaled(14))
         .frame(width: size.width, height: size.height)
         // It stays centred under the pill, so it grows on both sides.
         .overlay(alignment: .bottomTrailing) {
@@ -152,12 +160,12 @@ struct SourcePickerView: View {
     }
 
     private func message(_ title: String, _ detail: String) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: Self.hudSize.scaled(4)) {
             Text(title)
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.system(size: Self.hudSize.font(12.5), weight: .semibold))
                 .foregroundStyle(.white.opacity(0.8))
             Text(detail)
-                .font(.system(size: 11))
+                .font(.system(size: Self.hudSize.font(11)))
                 .foregroundStyle(.white.opacity(0.5))
         }
         .multilineTextAlignment(.center)
@@ -176,7 +184,7 @@ struct SourcePickerView: View {
     /// The tiles in the rest of the picker, scrolling when they do not fit.
     private func grid<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView {
-            LazyVGrid(columns: Self.columns, spacing: 14, content: content)
+            LazyVGrid(columns: Self.columns, spacing: Self.hudSize.scaled(14), content: content)
         }
         .frame(maxHeight: .infinity)
     }
@@ -196,10 +204,11 @@ private struct SourceTile: View {
     let action: () -> Void
     @State private var isHovered = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.hudSize) private var hudSize
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
+            VStack(spacing: hudSize.scaled(3)) {
                 Color.white.opacity(0.06)
                     .aspectRatio(16 / 10, contentMode: .fit)
                     .overlay {
@@ -207,14 +216,14 @@ private struct SourceTile: View {
                             Image(decorative: picture, scale: 1)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                                .padding(6)
+                                .clipShape(RoundedRectangle(cornerRadius: hudSize.scaled(4)))
+                                .padding(hudSize.scaled(6))
                         } else if isLoading {
                             ProgressView()
                                 .controlSize(.small)
                         } else {
                             Image(systemName: "eye.slash")
-                                .font(.system(size: 14))
+                                .font(.system(size: hudSize.font(14)))
                                 .foregroundStyle(.white.opacity(0.3))
                         }
                     }
@@ -222,21 +231,21 @@ private struct SourceTile: View {
                         if let badge {
                             Image(nsImage: badge)
                                 .resizable()
-                                .frame(width: 24, height: 24)
-                                .padding(4)
+                                .frame(width: hudSize.scaled(24), height: hudSize.scaled(24))
+                                .padding(hudSize.scaled(4))
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: hudSize.scaled(10)))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: hudSize.scaled(10))
                             .strokeBorder(isSelected ? Color.tildeBlue : .white.opacity(isHovered && isEnabled ? 0.24 : 0.1), lineWidth: isSelected ? 2 : 1)
                     )
-                    .padding(.bottom, 4)
+                    .padding(.bottom, hudSize.scaled(4))
                 Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: hudSize.font(12), weight: .semibold))
                     .foregroundStyle(.white)
                 Text(detail)
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(.system(size: hudSize.font(10.5), weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
             }
             .lineLimit(1)

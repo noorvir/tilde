@@ -107,7 +107,7 @@ final class HUDPanel {
 
     /// The picker's room under the pill where the panel is now.
     private func pickerRoom(on screen: NSScreen) -> CGSize {
-        let pill = controller.isHUDInBrowser ? 0 : HUDMetrics.height + 8
+        let pill = controller.isHUDInBrowser ? 0 : HUDMetrics.height + HUDMetrics.cardGap
         return room(under: window.frame, pill: pill, in: screen.visibleFrame)
     }
 
@@ -269,7 +269,7 @@ struct HUDView: View {
     }
 
     private var floating: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: HUDMetrics.cardGap) {
             // In Tilde's browser the main bar is on the toolbar, below the canvas.
             if !controller.isHUDInBrowser {
                 // Its own width, also above the wider source picker.
@@ -933,8 +933,8 @@ struct HUDButton: View {
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
     /// count keeps the width of two digits, so the buttons stay put as the count changes.
     var badge: Int?
-    /// The smallest width and the height.
-    var size: CGFloat = HUDMetrics.buttonSize
+    /// The smallest width and the height; nil for the surface's button size.
+    var size: CGFloat?
     /// Selected, such as the window the session is limited to: a grey fill.
     var isOn = false
     /// Doing what it started, such as choosing a window: a Tilde-blue fill.
@@ -951,6 +951,7 @@ struct HUDButton: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
+    @Environment(\.hudSize) private var hudSize
     @State private var isHovered = false
 
     private var foreground: Color {
@@ -980,9 +981,9 @@ struct HUDButton: View {
         Button(action: action) {
             label
             .foregroundStyle(foreground)
-            .padding(.horizontal, horizontalPadding)
-            .frame(minWidth: size, minHeight: size)
-            .background(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9).fill(background))
+            .padding(.horizontal, hudSize.scaled(horizontalPadding))
+            .frame(minWidth: size ?? hudSize.buttonSize, minHeight: size ?? hudSize.buttonSize)
+            .background(RoundedRectangle(cornerRadius: hudSize.scaled(isHUDEmbedded ? 8 : 9)).fill(background))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1002,20 +1003,20 @@ struct HUDButton: View {
     /// The icon, then a slot two digits wide for the count, empty at zero, so the icon stays
     /// put as the count changes.
     private var label: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: hudSize.scaled(4)) {
             image
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: hudSize.font(12), weight: .semibold))
                 .symbolEffect(.bounce, value: bounce)
             if let title {
                 Text(title)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: hudSize.font(12.5), weight: .medium))
             }
             if let badge {
                 ZStack(alignment: .leading) {
                     Text("88").hidden()
                     Text(badge > 0 ? "\(badge)" : "")
                 }
-                .font(.system(size: 11.5, weight: .semibold).monospacedDigit())
+                .font(.system(size: hudSize.font(11.5), weight: .semibold).monospacedDigit())
             }
         }
     }
@@ -1105,7 +1106,7 @@ struct BrowserHint: View {
             HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
             HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
         }
-        .hudPillInsets()
+        .hudPillInsets(.compact)
         .hudPill()
         .environment(\.colorScheme, .dark)
     }
