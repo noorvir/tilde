@@ -931,6 +931,9 @@ private struct SubtitleLine: View {
 struct HUDButton: View {
     /// An SF Symbol, or an image such as an app icon.
     let image: Image
+    /// A label after the icon, such as "Use window picker": the button is then round, and the
+    /// label is its accessible name.
+    var title: String?
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
     /// count keeps the width of two digits, so the buttons stay put as the count changes.
     var badge: Int?
@@ -981,15 +984,30 @@ struct HUDButton: View {
         Button(action: action) {
             label
             .foregroundStyle(foreground)
-            .padding(.horizontal, badge == nil ? 0 : 9)
+            .padding(.horizontal, horizontalPadding)
             .frame(minWidth: size, minHeight: size)
-            .background(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9).fill(background))
+            .background(shape.fill(background))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
         .tildeTooltip(showsTooltip ? help : nil)
-        .accessibilityLabel(help)
+        .accessibilityLabel(title ?? help)
+        .accessibilityHint(title == nil ? "" : help)
+    }
+
+    private var horizontalPadding: CGFloat {
+        if title != nil {
+            return 10
+        }
+        return badge == nil ? 0 : 9
+    }
+
+    private var shape: AnyShape {
+        if title != nil {
+            return AnyShape(Capsule())
+        }
+        return AnyShape(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9))
     }
 
     /// The icon, then a slot two digits wide for the count, empty at zero, so the icon stays
@@ -999,6 +1017,10 @@ struct HUDButton: View {
             image
                 .font(.system(size: 12, weight: .semibold))
                 .symbolEffect(.bounce, value: bounce)
+            if let title {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .medium))
+            }
             if let badge {
                 ZStack(alignment: .leading) {
                     Text("88").hidden()
@@ -1082,27 +1104,34 @@ struct PillTextButton: View {
     }
 }
 
-/// A short note below the HUD after it paused: how to go on. It goes after 10 seconds, or at
-/// once on resume, discard or send; the pointer on it keeps it.
 /// Under the HUD after the first click in another browser in a session: opens its page in
-/// Tilde's browser. A round card, like "Use window picker", that stays until it is used or
-/// dismissed.
+/// Tilde's browser. A round card of the pill's buttons, like "Use window picker", that stays
+/// until it is used or dismissed.
 struct BrowserHint: View {
     let onOpen: () -> Void
     let onDismiss: () -> Void
 
     var body: some View {
         HStack(spacing: 2) {
-            CardButton(symbol: "globe", title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
-            // The same × as the pill's.
+            HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
             HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
         }
-        .padding(4)
-        .hudCard(cornerRadius: 19)
-        .environment(\.colorScheme, .dark)
+        .hudButtonCard()
     }
 }
 
+extension View {
+    /// A round card around a row of the pill's buttons under the HUD, with their hover fills
+    /// 6 pt inside its edge all round.
+    func hudButtonCard() -> some View {
+        padding(6)
+            .hudCard(cornerRadius: 21)
+            .environment(\.colorScheme, .dark)
+    }
+}
+
+/// A short note below the HUD after it paused: how to go on. It goes after 10 seconds, or at
+/// once on resume, discard or send; the pointer on it keeps it.
 struct PauseToast: View {
     let notice: AnnotationController.PauseNotice
     @ObservedObject var controller: AnnotationController
