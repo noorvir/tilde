@@ -1113,13 +1113,12 @@ struct BrowserHint: View {
 }
 
 extension View {
-    /// A round card around a row of the pill's buttons under the HUD: 6 pt above and below
-    /// them, and 12 pt at the sides, where the 9 pt corners of their fills keep 6 pt from the
-    /// card's 21 pt ends.
+    /// A row of the pill's buttons under the HUD, in a pill of the HUD's height, with the
+    /// pill's trailing inset at both ends.
     func hudButtonCard() -> some View {
-        padding(.vertical, 6)
-            .padding(.horizontal, 12)
-            .hudCard(cornerRadius: 21)
+        padding(.horizontal, HUDMetrics.trailingInset)
+            .frame(height: HUDMetrics.height)
+            .hudPill()
             .environment(\.colorScheme, .dark)
     }
 }
