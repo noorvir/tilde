@@ -933,9 +933,6 @@ struct HUDButton: View {
     let image: Image
     /// A label after the icon, such as "Use window picker", which is its accessible name.
     var title: String?
-    /// In a round card under the HUD: a capsule (a circle for an icon alone), so its fill is
-    /// concentric with the card's ends.
-    var isRound = false
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
     /// count keeps the width of two digits, so the buttons stay put as the count changes.
     var badge: Int?
@@ -988,7 +985,7 @@ struct HUDButton: View {
             .foregroundStyle(foreground)
             .padding(.horizontal, horizontalPadding)
             .frame(minWidth: size, minHeight: size)
-            .background(shape.fill(background))
+            .background(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9).fill(background))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1000,16 +997,9 @@ struct HUDButton: View {
 
     private var horizontalPadding: CGFloat {
         if title != nil {
-            return 14
+            return 10
         }
         return badge == nil ? 0 : 9
-    }
-
-    private var shape: AnyShape {
-        if isRound {
-            return AnyShape(Capsule())
-        }
-        return AnyShape(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9))
     }
 
     /// The icon, then a slot two digits wide for the count, empty at zero, so the icon stays
@@ -1115,18 +1105,20 @@ struct BrowserHint: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", isRound: true, help: "Pick exact page elements and send their HTML and styles", action: onOpen)
-            HUDButton(image: Image(systemName: "xmark"), isRound: true, help: "Dismiss", action: onDismiss)
+            HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
+            HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
         }
         .hudButtonCard()
     }
 }
 
 extension View {
-    /// A round card around a row of round buttons under the HUD: their 30 pt fills sit 6 pt
-    /// inside its edge all round, so its 21 pt ends are concentric with theirs.
+    /// A round card around a row of the pill's buttons under the HUD: 6 pt above and below
+    /// them, and 12 pt at the sides, where the 9 pt corners of their fills keep 6 pt from the
+    /// card's 21 pt ends.
     func hudButtonCard() -> some View {
-        padding(6)
+        padding(.vertical, 6)
+            .padding(.horizontal, 12)
             .hudCard(cornerRadius: 21)
             .environment(\.colorScheme, .dark)
     }
