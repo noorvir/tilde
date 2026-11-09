@@ -40,7 +40,7 @@ struct SourcePickerView: View {
                     .transition(.opacity)
             } else {
                 // As the browser hint under the HUD: the pill's button in a round card.
-                HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", help: "Choose from pictures of the screens and windows") {
+                HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", isRound: true, help: "Choose from pictures of the screens and windows") {
                     onOpen()
                 }
                 .padding(6)

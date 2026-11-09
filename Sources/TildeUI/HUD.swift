@@ -931,9 +931,11 @@ private struct SubtitleLine: View {
 struct HUDButton: View {
     /// An SF Symbol, or an image such as an app icon.
     let image: Image
-    /// A label after the icon, such as "Use window picker": the button is then round, and the
-    /// label is its accessible name.
+    /// A label after the icon, such as "Use window picker", which is its accessible name.
     var title: String?
+    /// In a round card under the HUD: a capsule (a circle for an icon alone), so its fill is
+    /// concentric with the card's ends.
+    var isRound = false
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
     /// count keeps the width of two digits, so the buttons stay put as the count changes.
     var badge: Int?
@@ -998,13 +1000,13 @@ struct HUDButton: View {
 
     private var horizontalPadding: CGFloat {
         if title != nil {
-            return 10
+            return 14
         }
         return badge == nil ? 0 : 9
     }
 
     private var shape: AnyShape {
-        if title != nil {
+        if isRound {
             return AnyShape(Capsule())
         }
         return AnyShape(RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : 9))
@@ -1113,16 +1115,16 @@ struct BrowserHint: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
-            HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
+            HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", isRound: true, help: "Pick exact page elements and send their HTML and styles", action: onOpen)
+            HUDButton(image: Image(systemName: "xmark"), isRound: true, help: "Dismiss", action: onDismiss)
         }
         .hudButtonCard()
     }
 }
 
 extension View {
-    /// A round card around a row of the pill's buttons under the HUD, with their hover fills
-    /// 6 pt inside its edge all round.
+    /// A round card around a row of round buttons under the HUD: their 30 pt fills sit 6 pt
+    /// inside its edge all round, so its 21 pt ends are concentric with theirs.
     func hudButtonCard() -> some View {
         padding(6)
             .hudCard(cornerRadius: 21)
