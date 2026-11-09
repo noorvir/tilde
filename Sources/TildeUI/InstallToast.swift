@@ -151,9 +151,7 @@ struct InstallToastView: View {
 
             PillTextButton(title: "Details", isDestructive: false, action: onDetails)
         }
-        .padding(.leading, HUDMetrics.leadingInset)
-        .padding(.trailing, 8)
-        .frame(height: HUDMetrics.height)
+        .hudPillInsets(leading: .text)
         .hudPill()
         .scaleEffect(state.isShown ? 1 : 0.5)
         .opacity(state.isShown ? 1 : 0)

@@ -20,6 +20,13 @@ enum HUDMetrics {
     static let iconGap: CGFloat = 8
 }
 
+/// What a pill starts with: a button, such as the HUD's status button, or text, such as the
+/// install toast's result.
+enum HUDPillEnd {
+    case button
+    case text
+}
+
 extension Color {
     static let tildeBlue = Color(nsColor: .tildeBlue)
     static let tildeInk = Color(nsColor: .tildeInk)
@@ -35,10 +42,12 @@ extension View {
             .shadow(color: .black.opacity(0.28), radius: 12, y: 4)
     }
 
-    /// The pill's padding around a row of its controls: its height and the end inset at both
-    /// ends. Every surface in the pill's shape takes its padding from here.
-    func hudPillInsets() -> some View {
-        padding(.horizontal, HUDMetrics.endInset)
+    /// The pill's padding around a row of its controls: its height, the leading inset for
+    /// what `leading` starts with and the end inset after the button at the trailing end.
+    /// Every surface in the pill's shape takes its padding from here.
+    func hudPillInsets(leading: HUDPillEnd = .button) -> some View {
+        padding(.leading, leading == .text ? HUDMetrics.leadingInset : HUDMetrics.endInset)
+            .padding(.trailing, HUDMetrics.endInset)
             .frame(height: HUDMetrics.height)
     }
 
