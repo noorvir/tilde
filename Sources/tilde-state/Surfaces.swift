@@ -22,7 +22,7 @@ enum Surfaces {
 
         switch state.surface {
         case "toast":
-            let toast = ToastState()
+            let toast = InstallToastState()
             toast.result = result(of: state.toast!)
             toast.isShown = true
             return try await hosted(InstallToastView(state: toast), size: size)
@@ -31,10 +31,10 @@ enum Surfaces {
             return try await hosted(SettingsView(model: try settings(state.settings!)), size: size)
 
         case "restorePrompt":
-            let prompt = RestorePromptState()
-            prompt.record = Fixtures.record(notes: 3, updated: Date().addingTimeInterval(-720))
-            prompt.isShown = true
-            return try await hosted(RestorePromptView(state: prompt), size: size)
+            let restore = RestoreToastState()
+            restore.record = Fixtures.record(notes: 3, updated: Date().addingTimeInterval(-720))
+            restore.isShown = true
+            return try await hosted(RestoreToastView(state: restore), size: size)
 
         case "tooltip":
             return try await hosted(TooltipBubble(text: state.text ?? "").frame(width: size.width, height: size.height), size: size)
@@ -42,8 +42,8 @@ enum Surfaces {
         case "outline":
             let model = HomeOutline.Model()
             model.isSnapped = state.snapped ?? false
-            let size = CGSize(width: HUDView.width, height: HUDMetrics.height)
-            return try await hosted(OutlineView(model: model, cornerRadius: HUDMetrics.height / 2).frame(width: size.width, height: size.height), size: size)
+            let size = CGSize(width: HUDView.width, height: PillMetrics.height)
+            return try await hosted(OutlineView(model: model, cornerRadius: PillMetrics.height / 2).frame(width: size.width, height: size.height), size: size)
 
         case "notesPanel":
             let controller = try await controller(state)
@@ -183,7 +183,7 @@ enum Surfaces {
             source: source,
             isHUDInBrowser: state.hudInBrowser ?? false,
             pauseNotice: notice,
-            browserHint: state.browserHint == true ? URL(string: "https://example.com/pricing") : nil,
+            browserAccessoryURL: state.browserAccessory == true ? URL(string: "https://example.com/pricing") : nil,
             restoreRecord: state.confirmation == "restore" ? Fixtures.record(notes: 3) : nil,
             sentText: state.sent ?? "",
             notice: state.notice.flatMap(Notice.init(rawValue:)),

@@ -23,7 +23,7 @@ final class HUDPanel {
         controller.isHUDShown = isShown
     }
     /// Drags the pill, snapping it home, and remembers where it was dropped on each screen.
-    private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: HUDMetrics.height / 2, positionsKey: "HUDPositions")
+    private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: PillMetrics.height / 2, positionsKey: "HUDPositions")
     /// The visible content (pill, message, list) in the panel's SwiftUI coordinates, which
     /// have a top-left origin. The hosting view has no sizing options, so its fitting size
     /// is zero and cannot give this.
@@ -31,7 +31,7 @@ final class HUDPanel {
     private var clickMonitor: Any?
 
     /// Room for the widest content (the source picker) and its shadow.
-    private static let width: CGFloat = SourcePickerView.sizes.max.width + 2 * 16
+    private static let width: CGFloat = HUDAccessoryPicker.sizes.max.width + 2 * 16
 
     init(controller: AnnotationController) {
         self.controller = controller
@@ -89,7 +89,7 @@ final class HUDPanel {
         guard let screen = screen ?? NSScreen.main else {
             return
         }
-        if pickerRoom(on: screen).height < SourcePickerView.sizes.min.height, !controller.isHUDInBrowser, placeBeforePicking == nil {
+        if pickerRoom(on: screen).height < HUDAccessoryPicker.sizes.min.height, !controller.isHUDInBrowser, placeBeforePicking == nil {
             placeBeforePicking = window.frame.origin
             let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
             window.setFrameOrigin(NSPoint(x: home.x - window.frame.width / 2, y: home.y - window.frame.height))
@@ -107,7 +107,7 @@ final class HUDPanel {
 
     /// The picker's room under the pill where the panel is now.
     private func pickerRoom(on screen: NSScreen) -> CGSize {
-        let pill = controller.isHUDInBrowser ? 0 : HUDMetrics.height + HUDMetrics.cardGap
+        let pill = controller.isHUDInBrowser ? 0 : PillMetrics.height + HUDAccessory.gap
         return room(under: window.frame, pill: pill, in: screen.visibleFrame)
     }
 
@@ -140,7 +140,7 @@ final class HUDPanel {
 
     /// The index of the screen frame with the pill of a panel at `frame`.
     static func pillScreen(of frame: NSRect, among screens: [NSRect]) -> Int? {
-        let pill = NSPoint(x: frame.midX, y: frame.maxY - 16 - HUDMetrics.height / 2)
+        let pill = NSPoint(x: frame.midX, y: frame.maxY - 16 - PillMetrics.height / 2)
         return screens.firstIndex { $0.contains(pill) }
     }
 
@@ -184,7 +184,7 @@ final class HUDPanel {
             let top = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
             return NSRect(x: top.x - Self.width / 2, y: top.y - height, width: Self.width, height: height)
         } outlineFrame: { home in
-            NSRect(x: home.midX - HUDView.width / 2, y: home.maxY - 16 - HUDMetrics.height, width: HUDView.width, height: HUDMetrics.height)
+            NSRect(x: home.midX - HUDView.width / 2, y: home.maxY - 16 - PillMetrics.height, width: HUDView.width, height: PillMetrics.height)
         } clamped: { top, visible in
             Self.clamped(top, in: visible)
         }
@@ -199,7 +199,7 @@ final class HUDPanel {
     static func clamped(_ top: NSPoint, in visible: NSRect) -> NSPoint {
         let halfWidth = HUDView.width / 2 + 16
         let x = min(max(top.x, visible.minX + halfWidth), visible.maxX - halfWidth)
-        let y = min(max(top.y, visible.minY + HUDMetrics.height + 32), visible.maxY + 4)
+        let y = min(max(top.y, visible.minY + PillMetrics.height + 32), visible.maxY + 4)
         return NSPoint(x: x, y: y)
     }
 
@@ -269,23 +269,23 @@ struct HUDView: View {
     }
 
     private var floating: some View {
-        VStack(spacing: HUDMetrics.cardGap) {
+        VStack(spacing: HUDAccessory.gap) {
             // In Tilde's browser the main bar is on the toolbar, below the canvas.
             if !controller.isHUDInBrowser {
-                // Its own width, also above the wider source picker.
+                // Its own width, also above a wider accessory picker.
                 pill
                     .fixedSize()
             }
             if controller.isDrawing {
-                drawingBar
+                drawingAccessoryBar
                     .transition(.opacity)
             }
-            if controller.isHUDShown, controller.showsBrowserHint {
-                BrowserHint(onOpen: controller.openBrowserHint, onDismiss: controller.dismissBrowserHint)
+            if controller.isHUDShown, controller.showsBrowserAccessory {
+                HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: controller.dismissBrowserAccessory)
                     .transition(Self.zoom)
             }
             if controller.isHUDShown, let notice = controller.pauseNotice {
-                PauseToast(notice: notice, controller: controller)
+                PauseCard(notice: notice, controller: controller)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if controller.isHUDShown, controller.isOpen, controller.showsList, !controller.drafts.isEmpty {
@@ -293,7 +293,7 @@ struct HUDView: View {
                     .transition(Self.zoom)
             }
             if controller.isHUDShown, controller.isPickingWindow {
-                SourcePickerView(
+                HUDAccessoryPicker(
                     model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
                     selectedID: controller.isRecordMode ? controller.clipSource.id : controller.source?.id,
                     onOpen: controller.openSourcePicker, onBack: controller.stepBackInSourcePicker, onChoose: controller.choose
@@ -314,7 +314,7 @@ struct HUDView: View {
         .animation(HUDPanel.motion, value: controller.sentConfirmation)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
         .animation(.easeOut(duration: 0.15), value: controller.pauseNotice)
-        .animation(.spring(duration: 0.28), value: controller.browserHint)
+        .animation(.spring(duration: 0.28), value: controller.browserAccessoryURL)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -334,7 +334,7 @@ struct HUDView: View {
 
     /// The pill's content width, the same in every state; embedded, the same without the
     /// pill's insets.
-    static let embeddedWidth = width - 2 * HUDMetrics.endInset
+    static let embeddedWidth = width - 2 * PillMetrics.endInset
 
     @ViewBuilder
     private var pill: some View {
@@ -352,7 +352,7 @@ struct HUDView: View {
     private var pillContent: some View {
         HStack(spacing: 4) {
             if let confirmation = controller.sentConfirmation {
-                HStack(spacing: HUDMetrics.iconGap) {
+                HStack(spacing: PillMetrics.iconGap) {
                     switch controller.sentStatus {
                     case .done:
                         Image(systemName: "checkmark.circle.fill")
@@ -387,12 +387,9 @@ struct HUDView: View {
         }
     }
 
-    /// The drawing bar is a card under the HUD, so it is compact.
-    private static let drawingBarSize = HUDSize.compact
-
     @ViewBuilder
     private var drawingContent: some View {
-        let size = Self.drawingBarSize
+        let size = HUDAccessory.size
         ForEach(Self.drawingTools, id: \.tool) { entry in
             HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, help: entry.help) {
                 controller.setDrawingTool(entry.tool)
@@ -458,8 +455,8 @@ struct HUDView: View {
         )
     }
 
-    private var drawingBar: some View {
-        let size = Self.drawingBarSize
+    private var drawingAccessoryBar: some View {
+        let size = HUDAccessory.size
         return capsule(HStack(spacing: size.scaled(4)) { drawingContent }, width: size.scaled(HUDView.width), size: size)
             .opacity(controller.isHUDShown ? 1 : 0)
             .gesture(
@@ -469,11 +466,11 @@ struct HUDView: View {
     }
 
     /// `width`: the pill's whole width, or nil to fit the content.
-    private func capsule(_ content: some View, width: CGFloat?, size: HUDSize = .regular) -> some View {
+    private func capsule(_ content: some View, width: CGFloat?, size: PillSize = .regular) -> some View {
         content
-            .hudPillInsets(size)
+            .pillInsets(size)
             .frame(width: width)
-            .hudPill()
+            .pill()
     }
 
     @ViewBuilder
@@ -485,7 +482,7 @@ struct HUDView: View {
         // While a source is being chosen, only the record toggle works; the others keep their
         // places with the disabled look. While the report is made, nothing works.
         Group {
-            HStack(spacing: HUDMetrics.iconGap) {
+            HStack(spacing: PillMetrics.iconGap) {
                 // Where the status dot was: in recording mode the record button, else pause and play.
                 HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, help: status.help) {
                     if controller.isRecordMode {
@@ -513,7 +510,7 @@ struct HUDView: View {
                 }
                 .lineLimit(1)
             }
-            .padding(.trailing, HUDMetrics.iconGap)
+            .padding(.trailing, PillMetrics.iconGap)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
@@ -610,7 +607,7 @@ struct HUDView: View {
         let count = controller.drafts.count
         let all = count == 1 ? "the note" : "all \(count) notes"
 
-        HStack(spacing: HUDMetrics.iconGap) {
+        HStack(spacing: PillMetrics.iconGap) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.red)
@@ -956,7 +953,7 @@ struct HUDButton: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
-    @Environment(\.hudSize) private var hudSize
+    @Environment(\.pillSize) private var pillSize
     @State private var isHovered = false
 
     private var foreground: Color {
@@ -986,9 +983,9 @@ struct HUDButton: View {
         Button(action: action) {
             label
             .foregroundStyle(foreground)
-            .padding(.horizontal, hudSize.scaled(horizontalPadding))
-            .frame(minWidth: size ?? hudSize.buttonSize, minHeight: size ?? hudSize.buttonSize)
-            .background(RoundedRectangle(cornerRadius: hudSize.scaled(isHUDEmbedded ? 8 : 9)).fill(background))
+            .padding(.horizontal, pillSize.scaled(horizontalPadding))
+            .frame(minWidth: size ?? pillSize.buttonSize, minHeight: size ?? pillSize.buttonSize)
+            .background(RoundedRectangle(cornerRadius: pillSize.scaled(isHUDEmbedded ? 8 : 9)).fill(background))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1008,20 +1005,20 @@ struct HUDButton: View {
     /// The icon, then a slot two digits wide for the count, empty at zero, so the icon stays
     /// put as the count changes.
     private var label: some View {
-        HStack(spacing: hudSize.scaled(4)) {
+        HStack(spacing: pillSize.scaled(4)) {
             image
-                .font(.system(size: hudSize.font(12), weight: .semibold))
+                .font(.system(size: pillSize.font(12), weight: .semibold))
                 .symbolEffect(.bounce, value: bounce)
             if let title {
                 Text(title)
-                    .font(.system(size: hudSize.font(12.5), weight: .medium))
+                    .font(.system(size: pillSize.font(12.5), weight: .medium))
             }
             if let badge {
                 ZStack(alignment: .leading) {
                     Text("88").hidden()
                     Text(badge > 0 ? "\(badge)" : "")
                 }
-                .font(.system(size: hudSize.font(11.5), weight: .semibold).monospacedDigit())
+                .font(.system(size: pillSize.font(11.5), weight: .semibold).monospacedDigit())
             }
         }
     }
@@ -1065,7 +1062,7 @@ private struct SendButton: View {
 /// A text button for the pill's confirm state; destructive ones are red like Delete.
 struct PillTextButton: View {
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
-    @Environment(\.hudSize) private var hudSize
+    @Environment(\.pillSize) private var pillSize
     let title: String
     /// A small key cap after the title, such as "esc", for the key that does the same.
     var key: String?
@@ -1075,17 +1072,17 @@ struct PillTextButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: hudSize.scaled(6)) {
+            HStack(spacing: pillSize.scaled(6)) {
                 Text(title)
-                    .font(.system(size: hudSize.font(12.5), weight: .semibold))
+                    .font(.system(size: pillSize.font(12.5), weight: .semibold))
                 if let key {
                     KeyHint(key: key)
                 }
             }
                 .foregroundStyle(isDestructive ? Color.red : .white.opacity(0.9))
-                .padding(.horizontal, hudSize.scaled(12))
-                .frame(height: hudSize.scaled(28))
-                .background(HUDShape(height: hudSize.scaled(28), isHUDEmbedded: isHUDEmbedded).fill(background))
+                .padding(.horizontal, pillSize.scaled(12))
+                .frame(height: pillSize.scaled(28))
+                .background(HUDShape(height: pillSize.scaled(28), isHUDEmbedded: isHUDEmbedded).fill(background))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1100,10 +1097,10 @@ struct PillTextButton: View {
     }
 }
 
-/// Under the HUD after the first click in another browser in a session: opens its page in
-/// Tilde's browser. A round card of the pill's buttons, like "Use window picker", that stays
-/// until it is used or dismissed.
-struct BrowserHint: View {
+/// The browser accessory bar: under the HUD after the first click in another browser in a
+/// session, it opens its page in Tilde's browser. The pill's buttons in an accessory bar, like
+/// "Use window picker", that stays until it is used or dismissed.
+struct HUDAccessoryBrowserBar: View {
     let onOpen: () -> Void
     let onDismiss: () -> Void
 
@@ -1112,15 +1109,15 @@ struct BrowserHint: View {
             HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
             HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
         }
-        .hudPillInsets(.compact)
-        .hudPill()
+        .pillInsets(HUDAccessory.size)
+        .pill()
         .environment(\.colorScheme, .dark)
     }
 }
 
-/// A short note below the HUD after it paused: how to go on. It goes after 10 seconds, or at
+/// A card below the HUD after it paused: how to go on. It goes after 10 seconds, or at
 /// once on resume, discard or send; the pointer on it keeps it.
-struct PauseToast: View {
+struct PauseCard: View {
     let notice: AnnotationController.PauseNotice
     @ObservedObject var controller: AnnotationController
 
@@ -1157,22 +1154,22 @@ struct PauseToast: View {
 /// character sits high.
 struct KeyHint: View {
     let key: String
-    @Environment(\.hudSize) private var hudSize
+    @Environment(\.pillSize) private var pillSize
 
     var body: some View {
         Group {
             if key == "↩" {
                 Image(systemName: "return")
-                    .font(.system(size: hudSize.font(9.5), weight: .semibold))
+                    .font(.system(size: pillSize.font(9.5), weight: .semibold))
             } else {
                 Text(key)
-                    .font(.system(size: hudSize.font(11), weight: .medium))
+                    .font(.system(size: pillSize.font(11), weight: .medium))
             }
         }
         .opacity(0.75)
-        .padding(.horizontal, hudSize.scaled(4))
-        .frame(minWidth: hudSize.scaled(18), minHeight: hudSize.scaled(16), maxHeight: hudSize.scaled(16))
-        .background(RoundedRectangle(cornerRadius: hudSize.scaled(4)).fill(.foreground.opacity(0.15)))
+        .padding(.horizontal, pillSize.scaled(4))
+        .frame(minWidth: pillSize.scaled(18), minHeight: pillSize.scaled(16), maxHeight: pillSize.scaled(16))
+        .background(RoundedRectangle(cornerRadius: pillSize.scaled(4)).fill(.foreground.opacity(0.15)))
     }
 }
 
@@ -1206,7 +1203,7 @@ private struct AnnotationList: View {
         VStack(spacing: 0) {
             ForEach(Array(controller.drafts.enumerated()), id: \.element.id) { index, draft in
                 if index > 0 {
-                    Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1).padding(.leading, HUDMetrics.leadingInset).padding(.trailing, HUDMetrics.endInset)
+                    Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1).padding(.leading, PillMetrics.leadingInset).padding(.trailing, PillMetrics.endInset)
                 }
                 AnnotationRow(number: index + 1, draft: draft, controller: controller)
             }
@@ -1262,8 +1259,8 @@ private struct AnnotationRow: View {
             }
             .disabled(!controller.canEditNotes)
         }
-        .padding(.leading, HUDMetrics.leadingInset)
-        .padding(.trailing, HUDMetrics.endInset)
+        .padding(.leading, PillMetrics.leadingInset)
+        .padding(.trailing, PillMetrics.endInset)
         .padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(isHovered ? 0.06 : 0)).padding(.horizontal, 4))
         .contentShape(Rectangle())

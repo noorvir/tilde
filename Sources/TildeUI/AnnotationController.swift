@@ -161,12 +161,12 @@ final class AnnotationController: ObservableObject {
     }
 
     @Published private(set) var pauseNotice: PauseNotice?
-    /// The page in another browser that the hint under the HUD offers to open in Tilde's
-    /// browser, until it is dismissed or opened; nil for no hint.
-    @Published private(set) var browserHint: URL?
-    /// The hint shows at most once a session.
+    /// The page in another browser that the browser accessory bar under the HUD offers to
+    /// open in Tilde's browser, until it is dismissed or opened; nil for no bar.
+    @Published private(set) var browserAccessoryURL: URL?
+    /// The browser accessory bar shows at most once a session.
     private var hasOfferedBrowser = false
-    /// The page the next `.openBrowser` effect opens, from the hint.
+    /// The page the next `.openBrowser` effect opens, from the browser accessory bar.
     private var browserURLToOpen: URL?
     static let browserBundleIDs: Set<String> = [
         "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.microsoft.edgemac", "com.brave.Browser",
@@ -373,7 +373,7 @@ final class AnnotationController: ObservableObject {
     private func begin(_ session: SessionStore.Session) {
         self.session = session
         hasOfferedBrowser = false
-        browserHint = nil
+        browserAccessoryURL = nil
         drafts = []
         hover = nil
         composer = nil
@@ -422,7 +422,7 @@ final class AnnotationController: ObservableObject {
         session = nil
         drafts = []
         setSource(nil)
-        browserHint = nil
+        browserAccessoryURL = nil
 
         if let returnApp {
             self.returnApp = nil
@@ -2160,27 +2160,28 @@ final class AnnotationController: ObservableObject {
                 return
             }
             hasOfferedBrowser = true
-            browserHint = url
+            browserAccessoryURL = url
         }
     }
 
-    /// The hint shows only while annotating outside Tilde's browser, and comes back there.
-    var showsBrowserHint: Bool {
-        browserHint != nil && !isRecordMode && !isPickingWindow && !isHUDInBrowser
+    /// The browser accessory bar shows only while annotating outside Tilde's browser, and comes
+    /// back there.
+    var showsBrowserAccessory: Bool {
+        browserAccessoryURL != nil && !isRecordMode && !isPickingWindow && !isHUDInBrowser
     }
 
-    /// The hint's ×.
-    func dismissBrowserHint() {
-        browserHint = nil
+    /// The browser accessory bar's ×.
+    func dismissBrowserAccessory() {
+        browserAccessoryURL = nil
     }
 
-    /// The hint's button: Tilde's browser opens the page and limits the session to it, as for
+    /// The browser accessory bar's open button: Tilde's browser opens the page and limits the session to it, as for
     /// an agent's start_annotation with a url. The notes stay.
-    func openBrowserHint() {
-        guard let url = browserHint else {
+    func openBrowserFromAccessory() {
+        guard let url = browserAccessoryURL else {
             return
         }
-        browserHint = nil
+        browserAccessoryURL = nil
         browserURLToOpen = url
         dispatch(.openBrowser)
         browserURLToOpen = nil
@@ -2824,7 +2825,7 @@ extension AnnotationController {
         source: RecordingSource? = nil,
         isHUDInBrowser: Bool = false,
         pauseNotice: PauseNotice? = nil,
-        browserHint: URL? = nil,
+        browserAccessoryURL: URL? = nil,
         restoreRecord: SessionRecord? = nil,
         sentText: String = "",
         notice: Notice? = nil,
@@ -2842,7 +2843,7 @@ extension AnnotationController {
         self.source = source
         self.isHUDInBrowser = isHUDInBrowser
         self.pauseNotice = pauseNotice
-        self.browserHint = browserHint
+        self.browserAccessoryURL = browserAccessoryURL
         self.restoreRecord = restoreRecord
         self.sentText = sentText
         self.notice = notice

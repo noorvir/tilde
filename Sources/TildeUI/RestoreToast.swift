@@ -1,18 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// Offers the session that was left unfinished, such as by a crash or a quit, in the HUD's
-/// pill style at the top centre of the screen with the pointer. It never takes focus and
+/// A toast that offers the session that was left unfinished, such as by a crash or a quit:
+/// a regular pill alone at the top centre of the screen with the pointer. It never takes focus and
 /// stays until Restore or Discard.
 @MainActor
-final class RestorePrompt {
+final class RestoreToast {
     private let panel: NSPanel
-    private let state = RestorePromptState()
+    private let state = RestoreToastState()
     private lazy var zoom = ZoomPresenter(panel: panel) { [state] isShown in
         state.isShown = isShown
     }
 
-    private static let size = NSSize(width: 560, height: HUDMetrics.height + 32)
+    private static let size = NSSize(width: 560, height: PillMetrics.height + 32)
 
     init(onRestore: @escaping (SessionRecord) -> Void, onDiscard: @escaping (SessionRecord) -> Void) {
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: Self.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -23,7 +23,7 @@ final class RestorePrompt {
         panel.hasShadow = false
         panel.isReleasedWhenClosed = false
 
-        let view = RestorePromptView(state: state) { [weak self] record in
+        let view = RestoreToastView(state: state) { [weak self] record in
             self?.hide()
             onRestore(record)
         } onDiscard: { [weak self] record in
@@ -49,13 +49,13 @@ final class RestorePrompt {
 }
 
 @MainActor
-final class RestorePromptState: ObservableObject {
+final class RestoreToastState: ObservableObject {
     @Published var record: SessionRecord?
     @Published var isShown = false
 }
 
-struct RestorePromptView: View {
-    @ObservedObject var state: RestorePromptState
+struct RestoreToastView: View {
+    @ObservedObject var state: RestoreToastState
     var onRestore: (SessionRecord) -> Void = { _ in }
     var onDiscard: (SessionRecord) -> Void = { _ in }
 
@@ -72,7 +72,7 @@ struct RestorePromptView: View {
 
     private func pill(_ record: SessionRecord) -> some View {
         HStack(spacing: 12) {
-            HStack(spacing: HUDMetrics.iconGap) {
+            HStack(spacing: PillMetrics.iconGap) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Color.tildeBlue)
@@ -94,8 +94,8 @@ struct RestorePromptView: View {
                 onRestore(record)
             }
         }
-        .hudPillInsets(leading: .text)
-        .hudPill()
+        .pillInsets(leading: .text)
+        .pill()
         .scaleEffect(state.isShown ? 1 : 0.5)
         .opacity(state.isShown ? 1 : 0)
     }

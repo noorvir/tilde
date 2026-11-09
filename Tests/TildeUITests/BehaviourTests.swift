@@ -524,7 +524,7 @@ struct BehaviourTests {
         let home = HUDPanel.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
         #expect(panel.window.frame.midX == home.x)
         #expect(panel.window.frame.maxY == home.y)
-        #expect(controller.sourcePicker.space.height >= SourcePickerView.sizes.min.height)
+        #expect(controller.sourcePicker.space.height >= HUDAccessoryPicker.sizes.min.height)
 
         panel.endPicking()
         #expect(panel.window.frame.origin == low)
@@ -540,7 +540,7 @@ struct BehaviourTests {
         let visible = NSRect(x: 0, y: 0, width: 1800, height: 1130)
         let halfWidth = HUDView.width / 2 + 16
         #expect(HUDPanel.clamped(NSPoint(x: -500, y: 5000), in: visible) == NSPoint(x: halfWidth, y: 1134))
-        #expect(HUDPanel.clamped(NSPoint(x: 5000, y: -10), in: visible) == NSPoint(x: 1800 - halfWidth, y: HUDMetrics.height + 32))
+        #expect(HUDPanel.clamped(NSPoint(x: 5000, y: -10), in: visible) == NSPoint(x: 1800 - halfWidth, y: PillMetrics.height + 32))
         #expect(HUDPanel.clamped(NSPoint(x: 900, y: 600), in: visible) == NSPoint(x: 900, y: 600))
     }
 

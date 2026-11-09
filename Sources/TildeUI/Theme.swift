@@ -6,8 +6,9 @@ extension NSColor {
     static let tildeInk = NSColor(white: 0.1, alpha: 0.96)
 }
 
-/// Spacing shared by the HUD's pill, message and list, so every state lines up.
-enum HUDMetrics {
+/// The pill's tokens: the shared capsule of the HUD, its accessory bars and the toasts, also
+/// used by the cards beside them (the list) so every state lines up.
+enum PillMetrics {
     static let height: CGFloat = 44
     /// The pill's buttons: the pill's height puts them 7 pt from its top and bottom.
     static let buttonSize: CGFloat = 30
@@ -18,62 +19,69 @@ enum HUDMetrics {
     static let endInset: CGFloat = 18
     /// Between an icon and its text.
     static let iconGap: CGFloat = 8
-    /// Between the HUD and each card under it.
-    static let cardGap: CGFloat = 6
-    /// The cards under the HUD (the browser hint, "Use window picker" and the picker it grows
-    /// into) are compact, so the HUD stays the main surface: the buttons 5 pt from the top and
-    /// bottom, and the end inset smaller in the same proportion as the height.
+    /// The compact pill: the buttons 5 pt from the top and bottom, and the end inset smaller in
+    /// the same proportion as the height.
     static let compactHeight: CGFloat = 34
     static let compactButtonSize: CGFloat = 24
     static let compactEndInset: CGFloat = 14
 }
 
-/// The size of a surface in the HUD's style, which its buttons, text and spacing follow.
-enum HUDSize {
+/// The size of a pill, which its buttons, text and spacing follow: regular for the HUD and
+/// the toasts, compact for the accessory bars.
+enum PillSize {
     case regular
     case compact
 
     var height: CGFloat {
-        self == .regular ? HUDMetrics.height : HUDMetrics.compactHeight
+        self == .regular ? PillMetrics.height : PillMetrics.compactHeight
     }
 
     var buttonSize: CGFloat {
-        self == .regular ? HUDMetrics.buttonSize : HUDMetrics.compactButtonSize
+        self == .regular ? PillMetrics.buttonSize : PillMetrics.compactButtonSize
     }
 
     var endInset: CGFloat {
-        self == .regular ? HUDMetrics.endInset : HUDMetrics.compactEndInset
+        self == .regular ? PillMetrics.endInset : PillMetrics.compactEndInset
     }
 
-    /// A regular length at this size, in whole points: every other length in a compact
-    /// surface shrinks as its height does.
+    /// A regular length at this size, in whole points: every other length in a compact pill
+    /// shrinks as its height does.
     func scaled(_ length: CGFloat) -> CGFloat {
-        (length * height / HUDMetrics.height).rounded()
+        (length * height / PillMetrics.height).rounded()
     }
 
-    /// A regular font size at this size: one step (1 pt) smaller in a compact surface.
+    /// A regular font size at this size: one step (1 pt) smaller in a compact pill.
     func font(_ size: CGFloat) -> CGFloat {
         self == .regular ? size : size - 1
     }
 }
 
-private struct HUDSizeKey: EnvironmentKey {
-    static let defaultValue = HUDSize.regular
+private struct PillSizeKey: EnvironmentKey {
+    static let defaultValue = PillSize.regular
 }
 
 extension EnvironmentValues {
-    /// The size of the surface around a control, which `hudPillInsets(_:leading:)` sets.
-    var hudSize: HUDSize {
-        get { self[HUDSizeKey.self] }
-        set { self[HUDSizeKey.self] = newValue }
+    /// The size of the pill around a control, which `pillInsets(_:leading:)` sets.
+    var pillSize: PillSize {
+        get { self[PillSizeKey.self] }
+        set { self[PillSizeKey.self] = newValue }
     }
 }
 
 /// What a pill starts with: a button, such as the HUD's status button, or text, such as the
 /// install toast's result.
-enum HUDPillEnd {
+enum PillEnd {
     case button
     case text
+}
+
+/// An accessory bar: a compact pill attached under the HUD, such as the drawing bar, the
+/// browser accessory bar and "Use window picker" (with the picker it grows into). It is
+/// compact so the HUD stays the main surface.
+enum HUDAccessory {
+    static let size = PillSize.compact
+    /// Between the HUD and an accessory bar or card under it.
+    static let gap: CGFloat = 6
 }
 
 extension Color {
@@ -82,9 +90,9 @@ extension Color {
 }
 
 extension View {
-    /// The HUD's pill, which the install toast and the restore prompt share: Tilde ink in a
+    /// The pill, which the HUD, its accessory bars and the toasts share: Tilde ink in a
     /// capsule, a faint edge and its shadow.
-    func hudPill() -> some View {
+    func pill() -> some View {
         clipShape(Capsule())
             .background(Capsule().fill(Color.tildeInk))
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.1)).allowsHitTesting(false))
@@ -93,13 +101,12 @@ extension View {
 
     /// The pill's padding around a row of its controls at `size`: its height, the leading
     /// inset for what `leading` starts with and the end inset after the button at the
-    /// trailing end. Its controls take `size` too. Every surface in the pill's shape takes its
-    /// padding from here.
-    func hudPillInsets(_ size: HUDSize = .regular, leading: HUDPillEnd = .button) -> some View {
-        padding(.leading, leading == .text ? size.scaled(HUDMetrics.leadingInset) : size.endInset)
+    /// trailing end. Its controls take `size` too. Every pill takes its padding from here.
+    func pillInsets(_ size: PillSize = .regular, leading: PillEnd = .button) -> some View {
+        padding(.leading, leading == .text ? size.scaled(PillMetrics.leadingInset) : size.endInset)
             .padding(.trailing, size.endInset)
             .frame(height: size.height)
-            .environment(\.hudSize, size)
+            .environment(\.pillSize, size)
     }
 
     /// A card in the HUD's style: the list, the source picker, the comment box and the pause
@@ -114,7 +121,7 @@ extension View {
 }
 
 /// Shows and hides a floating panel whose content zooms with `HUDPanel.motion`, as the HUD,
-/// the install toast and the restore prompt do: the panel comes on screen and its content
+/// the install toast and the restore toast do: the panel comes on screen and its content
 /// grows on the next pass; on hide the content shrinks, then the panel goes.
 @MainActor
 final class ZoomPresenter {

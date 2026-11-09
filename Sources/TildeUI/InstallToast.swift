@@ -1,20 +1,20 @@
 import AppKit
 import SwiftUI
 
-/// A short note after an install or uninstall, in the HUD's pill style at the top centre of
-/// the screen with the pointer. It zooms in and out like the HUD, never takes focus, and goes
+/// A toast after an install or uninstall: a regular pill alone at the top centre of the
+/// screen with the pointer. It zooms in and out like the HUD, never takes focus, and goes
 /// after a few seconds, after Esc, or after a click elsewhere. The pointer on it keeps it open.
 @MainActor
 final class InstallToast {
     private let panel: NSPanel
-    private let state = ToastState()
+    private let state = InstallToastState()
     private var pendingDismiss: DispatchWorkItem?
     private lazy var zoom = ZoomPresenter(panel: panel) { [state] isShown in
         state.isShown = isShown
     }
     private var monitors: [Any] = []
 
-    private static let size = NSSize(width: 560, height: HUDMetrics.height + 32)
+    private static let size = NSSize(width: 560, height: PillMetrics.height + 32)
 
     init(onDetails: @escaping () -> Void) {
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: Self.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -103,13 +103,13 @@ final class InstallToast {
     }
 }
 
-final class ToastState: ObservableObject {
+final class InstallToastState: ObservableObject {
     @Published var result: InstallResult?
     @Published var isShown = false
 }
 
 struct InstallToastView: View {
-    @ObservedObject var state: ToastState
+    @ObservedObject var state: InstallToastState
     var onDetails: () -> Void = {}
     var onHover: (Bool) -> Void = { _ in }
 
@@ -126,7 +126,7 @@ struct InstallToastView: View {
 
     private func pill(_ result: InstallResult) -> some View {
         HStack(spacing: 12) {
-            HStack(spacing: HUDMetrics.iconGap) {
+            HStack(spacing: PillMetrics.iconGap) {
                 Image(systemName: Self.symbol(result))
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Self.color(result))
@@ -151,8 +151,8 @@ struct InstallToastView: View {
 
             PillTextButton(title: "Details", isDestructive: false, action: onDetails)
         }
-        .hudPillInsets(leading: .text)
-        .hudPill()
+        .pillInsets(leading: .text)
+        .pill()
         .scaleEffect(state.isShown ? 1 : 0.5)
         .opacity(state.isShown ? 1 : 0)
         .onHover(perform: onHover)

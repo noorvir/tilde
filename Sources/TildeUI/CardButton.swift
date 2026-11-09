@@ -9,22 +9,22 @@ struct CardButton: View {
     var isDestructive = false
     let help: String
     let action: () -> Void
-    @Environment(\.hudSize) private var hudSize
+    @Environment(\.pillSize) private var pillSize
     @State private var isHovered = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: hudSize.scaled(5)) {
+            HStack(spacing: pillSize.scaled(5)) {
                 Image(systemName: symbol)
-                    .font(.system(size: hudSize.font(12), weight: .semibold))
+                    .font(.system(size: pillSize.font(12), weight: .semibold))
                 if let title {
                     Text(title)
-                        .font(.system(size: hudSize.font(12.5), weight: .medium))
+                        .font(.system(size: pillSize.font(12.5), weight: .medium))
                 }
             }
             .foregroundStyle(foreground)
-            .padding(.horizontal, title == nil ? 0 : hudSize.scaled(10))
-            .frame(minWidth: hudSize.buttonSize, minHeight: hudSize.buttonSize)
+            .padding(.horizontal, title == nil ? 0 : pillSize.scaled(10))
+            .frame(minWidth: pillSize.buttonSize, minHeight: pillSize.buttonSize)
             .background(shape.fill(background))
             .contentShape(Rectangle())
         }
@@ -37,7 +37,7 @@ struct CardButton: View {
     /// A button with text is round, as the pill's text buttons are; an icon alone is a
     /// rounded square, as the pill's icons are.
     private var shape: AnyShape {
-        title == nil ? AnyShape(RoundedRectangle(cornerRadius: hudSize.scaled(8))) : AnyShape(Capsule())
+        title == nil ? AnyShape(RoundedRectangle(cornerRadius: pillSize.scaled(8))) : AnyShape(Capsule())
     }
 
     private var foreground: Color {

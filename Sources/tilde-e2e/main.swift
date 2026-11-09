@@ -256,9 +256,9 @@ final class Harness {
         try check(previewWindow?.isVisible != true && controller.drafts.count == 1, "preview closes and keeps the annotation")
 
         // The pill keeps one width in every state.
-        let annotatingWidth = hudPillWidth
+        let annotatingWidth = hudWidth
         controller.togglePause()
-        let pausedWidth = hudPillWidth
+        let pausedWidth = hudWidth
         controller.togglePause()
         controller.showsList = true
         if let hudWindow, hudWindow.isVisible {
@@ -269,7 +269,7 @@ final class Harness {
 
         // Clear all and cancel ask first, in the pill, at the same width; Cancel keeps everything.
         controller.requestClearAll()
-        let confirmWidth = hudPillWidth
+        let confirmWidth = hudWidth
         if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04e-confirm-clear")
         }
@@ -286,7 +286,7 @@ final class Harness {
 
         // The pointer over the pill is over Tilde's UI; the empty panel below the HUD is not.
         if let hudWindow, hudWindow.isVisible {
-            let pill = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 16 - HUDMetrics.height / 2).flipped
+            let pill = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 16 - PillMetrics.height / 2).flipped
             let below = CGPoint(x: hudWindow.frame.midX, y: hudWindow.frame.maxY - 600).flipped
             try check(controller.isOverPanel(pill) && !controller.isOverPanel(below), "the pill counts as UI and the empty panel below it does not")
         }
@@ -422,8 +422,8 @@ final class Harness {
         NSApp.windows.first { $0.contentView is NSHostingView<HUDView> }
     }
 
-    /// Fitting width of the HUD's pill, measured on a fresh view so no animation is involved.
-    private var hudPillWidth: CGFloat {
+    /// Fitting width of the HUD, measured on a fresh view so no animation is involved.
+    private var hudWidth: CGFloat {
         let view = NSHostingView(rootView: HUDView(controller: controller))
         return view.fittingSize.width
     }

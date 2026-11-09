@@ -22,7 +22,7 @@ The check finds these changes (one run, macOS 26.6.2, SDK 15.2, `scripts/ui-chec
 
 | Change | States that failed |
 |---|---|
-| 1 pt more leading padding (`HUDMetrics.leadingInset` 16 → 17) | all 52, and one row |
+| 1 pt more leading padding (`PillMetrics.leadingInset` 16 → 17) | all 52, and one row |
 | A colour (Tilde blue's green 0.47 → 0.48) | 43 |
 | An icon (`pause.fill` → `pause`) | 18 |
 | A label ("Paused" → "Pauzed") | 6 |

@@ -28,7 +28,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menu: StatusMenu?
     private var settings: SettingsWindow?
     private var toast: InstallToast?
-    private var restorePrompt: RestorePrompt?
+    private var restoreToast: RestoreToast?
     private var historyRestore: AnyCancellable?
     private var hotKeys: HotKeys?
     private var browserEvents: Any?
@@ -58,7 +58,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         store.reattach = { id, node in controller.reattach(id, node: node) }
 
-        let prompt = RestorePrompt { record in
+        let toast = RestoreToast { record in
             // An agent may have taken its session back meanwhile.
             guard controller.archive.record(record.id)?.state == .active, controller.session?.id != record.id else {
                 return
@@ -67,14 +67,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } onDiscard: { record in
             controller.discard(record)
         }
-        restorePrompt = prompt
+        restoreToast = toast
 
         let unfinished = controller.archive.all().filter { $0.state == .active }
         for empty in unfinished where empty.notes.isEmpty {
             controller.discard(empty)
         }
         if let newest = unfinished.first(where: { !$0.notes.isEmpty }) {
-            prompt.show(newest)
+            toast.show(newest)
         }
     }
 
