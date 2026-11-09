@@ -246,7 +246,7 @@ struct HUDView: View {
     /// The width of the pill in every mode. The widest title and a two-digit note count fit in
     /// it (the HUD reserves their space with hidden labels), so changing the mode or adding
     /// notes never moves a button; `everyModeFitsThePillWidth` checks it.
-    static let width: CGFloat = 479
+    static let width: CGFloat = 513
 
     @ObservedObject var controller: AnnotationController
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -516,6 +516,12 @@ struct HUDView: View {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)
+
+            // As the menu's Open Browser; in the browser's toolbar the session is there already.
+            HUDButton(image: Image(systemName: "globe"), help: "Open Browser") {
+                controller.annotateInBrowser()
+            }
+            .disabled(isEmbedded || !flow.accepts(.openBrowser))
 
             // Recording mode puts Stop where Draw is; the other buttons stay.
             if controller.isRecordMode {
