@@ -169,7 +169,7 @@ agent by paste, or to try Tilde without an agent.
 | Esc | Closes the comment box |
 | Click a marker | Edits or deletes that annotation |
 | Space on a marker, or a thumbnail in the list | Opens the preview. ← and → show the other annotations; Esc or a click outside closes it |
-| Window button (HUD) | Choose one window to annotate; only that window takes hover, clicks and drags. Click again to annotate everything. Open Browser in the menu does this for Tilde's browser, and starts paused so you can browse first |
+| Record button (HUD) | Goes to recording mode and lets you choose a screen, window or phone to record; click the source name under the title to choose again before Record. Click the button again to go back to annotating. Open Browser in the menu limits annotating to Tilde's browser, and starts paused so you can browse first |
 | ⌃⌥P or Pause (HUD) | Lets you use your apps; markers stay. Press again, or Annotate in the HUD, to go on |
 | Clear all (HUD trash) | Deletes all annotations and keeps the session; asks first |
 | Cancel (HUD X or menu) | Closes the session without sending; the HUD asks first when there are annotations |

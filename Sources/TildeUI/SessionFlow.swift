@@ -66,9 +66,9 @@ struct SessionFlow: Equatable {
         case annotating
         /// Recording mode.
         case recording(Clip)
-        /// Choosing a window or screen, from annotating or from recording mode with no clip in
-        /// progress; the session goes back there after the choice. The picker is open in full,
-        /// or only its "Use window picker" button shows.
+        /// Choosing what to record, in recording mode with no clip in progress; the session
+        /// goes back there after the choice. The picker is open in full, or only its "Use
+        /// window picker" button shows.
         case picking(isRecordMode: Bool, isPickerOpen: Bool)
     }
 
@@ -351,9 +351,9 @@ struct SessionFlow: Equatable {
         }
     }
 
-    /// While choosing, only the window button, Esc (or the picker's Back), the picker, a
-    /// choice, the record toggle and Draw act, and the front app and hold key keep the pause
-    /// the session goes back to; nothing else does anything.
+    /// While choosing, only the source name, Esc (or the picker's Back), the picker, a choice
+    /// and the record toggle act, and the front app and hold key keep the pause the session
+    /// goes back to; nothing else does anything.
     private mutating func handlePicking(_ event: Event, isRecordMode: Bool, isPickerOpen: Bool, _ open: inout Open) -> [Effect] {
         let back: Activity = isRecordMode ? .recording(.ready) : .annotating
         switch event {
@@ -374,16 +374,9 @@ struct SessionFlow: Equatable {
             choosesInPicker = true
             return [.openPicker]
         case .toggleRecordingMode:
-            // Choosing goes on, for the other mode: a phone is offered only for recording.
-            open.activity = .picking(isRecordMode: !isRecordMode, isPickerOpen: isPickerOpen)
-            return isRecordMode ? [.exitRecording] : [.enterRecording]
-        case .startDrawing:
-            // The canvas takes the clicks: choosing ends with no change, and drawing starts.
-            guard !isRecordMode else {
-                return []
-            }
-            open.activity = .annotating
-            return [.stopPicking] + handleOpen(.startDrawing, &open)
+            // Choosing ends with no change, and the toggle goes back to annotating.
+            open.activity = back
+            return [.stopPicking] + handleOpen(.toggleRecordingMode, &open)
         case .choose(let drawable):
             // A phone only records; annotating takes only what it can draw on.
             guard drawable || isRecordMode else {
@@ -576,7 +569,12 @@ struct SessionFlow: Equatable {
             if case .recording = open.activity {
                 return leaveRecording(&open)
             }
-            return enterRecording(&open)
+            // Recording mode starts by choosing what to record, the way the user last chose.
+            let entered = enterRecording(&open)
+            guard open.activity == .recording(.ready) else {
+                return entered
+            }
+            return entered + startPicking(&open)
 
         case .record:
             return record(&open)
@@ -626,15 +624,14 @@ struct SessionFlow: Equatable {
             return [.showSaveFailure]
 
         case .windowButton:
-            guard open.canPick else {
+            // Only recording mode chooses a source, before Record: notes keep their own window.
+            guard open.activity == .recording(.ready) else {
                 return []
             }
             if open.panel == .comment, commentHasText {
                 return leaveComment(&open)
             }
-            let closes = finishDrawingAndPanel(&open)
-            open.activity = .picking(isRecordMode: open.activity != .annotating, isPickerOpen: choosesInPicker)
-            return closes + [.startPicking] + (choosesInPicker ? [.openPicker] : [])
+            return finishDrawingAndPanel(&open) + startPicking(&open)
 
         case .openPicker, .choose:
             return []
@@ -742,6 +739,11 @@ struct SessionFlow: Equatable {
         let closes = finishDrawingAndPanel(&open)
         open.activity = .recording(.ready)
         return closes + [.enterRecording]
+    }
+
+    private func startPicking(_ open: inout Open) -> [Effect] {
+        open.activity = .picking(isRecordMode: true, isPickerOpen: choosesInPicker)
+        return [.startPicking] + (choosesInPicker ? [.openPicker] : [])
     }
 
     /// Back to annotating; a clip that is not stopped is lost, so that asks first. A clip being

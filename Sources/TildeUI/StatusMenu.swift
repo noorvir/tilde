@@ -54,8 +54,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let flow = controller.flow
             let pause = pauseItem
             menu.addItem(action(pause.title, pause.works ? #selector(togglePause) : nil, shortcut: .togglePause))
-            let windowTitle = controller.isRecordMode ? "Record a Specific Window" : "Annotate a Specific Window"
-            menu.addItem(action(windowTitle, flow.accepts(.windowButton) && !flow.isPicking ? #selector(chooseWindow) : nil))
+            // Notes keep their own window; only recording mode chooses what it records.
+            if controller.isRecordMode {
+                menu.addItem(action("Record a Specific Window", flow.accepts(.windowButton) && !flow.isPicking ? #selector(chooseWindow) : nil))
+            }
             menu.addItem(action("Cancel Annotation", flow.accepts(.requestCancel) ? #selector(cancelAnnotation) : nil))
         }
         menu.addItem(.separator())

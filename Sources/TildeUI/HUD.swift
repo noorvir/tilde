@@ -246,7 +246,7 @@ struct HUDView: View {
     /// The width of the pill in every mode. The widest title and a two-digit note count fit in
     /// it (the HUD reserves their space with hidden labels), so changing the mode or adding
     /// notes never moves a button; `everyModeFitsThePillWidth` checks it.
-    static let width: CGFloat = 513
+    static let width: CGFloat = 479
 
     @ObservedObject var controller: AnnotationController
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -290,7 +290,7 @@ struct HUDView: View {
             }
             if controller.isHUDShown, controller.isPickingWindow {
                 SourcePickerView(
-                    model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen, isRecordMode: controller.isRecordMode,
+                    model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
                     selectedID: controller.isRecordMode ? controller.clipSource.id : controller.source?.id,
                     onOpen: controller.openSourcePicker, onBack: controller.stepBackInSourcePicker, onChoose: controller.choose
                 )
@@ -474,9 +474,8 @@ struct HUDView: View {
         let flow = controller.flow
         let status = Self.status(of: controller)
 
-        // While a window is being chosen, only the window button, the record toggle and Draw
-        // work; the others keep their places with the disabled look. While the report is made,
-        // nothing works.
+        // While a source is being chosen, only the record toggle works; the others keep their
+        // places with the disabled look. While the report is made, nothing works.
         Group {
             HStack(spacing: HUDMetrics.iconGap) {
                 // Where the status dot was: in recording mode the record button, else pause and play.
@@ -512,7 +511,8 @@ struct HUDView: View {
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
-            HUDButton(image: Image(systemName: "record.circle"), isOn: controller.isRecordMode, help: recordToggleHelp) {
+            // Recording mode starts by choosing what to record.
+            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, help: recordToggleHelp) {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)
@@ -534,12 +534,6 @@ struct HUDView: View {
             }
         }
 
-        // While choosing, its tooltip would cover "Use window picker" under the pill.
-        HUDButton(image: sourceIcon, isOn: controller.scope != nil, isActive: controller.isPickingWindow, showsTooltip: !controller.isPickingWindow, help: windowHelp) {
-            controller.toggleWindowPick()
-        }
-        // The source of a clip in progress stays until Stop.
-        .disabled(!flow.canPick)
 
         Group {
             HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide notes" : "Show notes") {
@@ -570,7 +564,7 @@ struct HUDView: View {
     /// Esc leaves recording mode only outside choosing, where it steps back instead.
     private var recordToggleHelp: String {
         guard controller.isRecordMode else {
-            return "Record a video"
+            return "Record a screen, window or phone"
         }
         return controller.isPickingWindow ? "Back to annotating" : "Back to annotating (Esc)"
     }
@@ -674,37 +668,6 @@ struct HUDView: View {
         return "Send to \(agent)  ⌘↩"
     }
 
-    private var windowHelp: String {
-        let action = controller.isRecordMode ? "record" : "annotate"
-        if controller.isPickingWindow {
-            return "Click a window or screen to \(action), or Esc"
-        }
-        if let name = controller.scopeName {
-            return "Only \(name). Choose another window or the whole screen"
-        }
-        return "Choose a screen or window to \(action)"
-    }
-
-    /// The window button's icon: the chosen screen, phone or window, or a pointer on a window
-    /// until a choice.
-    private var sourceIcon: Image {
-        switch controller.source {
-        case nil:
-            return Image(systemName: "rectangle.inset.filled.and.cursorarrow")
-        case .window:
-            // The app's icon at the size of the other buttons' symbols.
-            guard let icon = controller.scopeIcon?.copy() as? NSImage else {
-                return Image(systemName: "macwindow")
-            }
-            icon.size = NSSize(width: 16, height: 16)
-            return Image(nsImage: icon)
-        case .screen(let display):
-            return Image(systemName: CGDisplayIsBuiltin(display) != 0 ? "laptopcomputer" : "display")
-        case .phone:
-            return Image(systemName: "iphone")
-        }
-    }
-
     /// The title and the leading button of one mode.
     struct Status: Equatable {
         var title: String
@@ -774,7 +737,7 @@ struct HUDView: View {
     /// Every title the HUD shows, with the widest clock, for the width of the title column.
     static let titles: [String] = {
         let modes: [SessionFlow.Open] = [
-            SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(isRecordMode: false, isPickerOpen: false)),
+            SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(isRecordMode: true, isPickerOpen: false)),
         ] + [SessionFlow.Clip.ready, .starting(operation: 0), .recording, .paused, .finishing(operation: 0, thenSend: false)].map {
             SessionFlow.Open(activity: .recording($0))
         }
@@ -803,9 +766,9 @@ struct HUDView: View {
         .monospacedDigit()
     }
 
-    /// The subtitle on one line: where the report goes, in full, or what to do now. The window
-    /// the session is limited to is on the window button, not here. It never widens the pill:
-    /// every agent's name fits, and a longer one is cut.
+    /// The subtitle on one line: where the report goes, in full, what to do now, or in
+    /// recording mode what Record records, which a click chooses again before Record. It never
+    /// widens the pill: every agent's name fits, and a longer one is cut.
     private var subtitle: some View {
         let part = Self.subtitlePart(
             // A local session's report goes to the clipboard, like an agent's goes to the agent.
@@ -814,8 +777,19 @@ struct HUDView: View {
             machine: controller.session?.node.map { Machine(host: $0, dot: controller.machineDot($0)) },
             state: subtitleState
         )
-        return SubtitleLine(part: part)
-            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
+        return Group {
+            if case .source = subtitleState {
+                Button(action: controller.toggleWindowPick) {
+                    SubtitleLine(part: part).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!controller.flow.accepts(.windowButton))
+                .tildeTooltip("Choose what to record")
+            } else {
+                SubtitleLine(part: part)
+            }
+        }
+        .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
     private var subtitleState: SubtitleState {
@@ -824,6 +798,9 @@ struct HUDView: View {
         }
         if controller.isPickingWindow {
             return controller.isSourcePickerOpen ? .inPicker : .choosingWindow
+        }
+        if controller.isRecordMode {
+            return .source(controller.clipSourceName)
         }
         let pauses = controller.pauses
         if pauses.contains(.user) {
@@ -849,6 +826,8 @@ struct HUDView: View {
         /// The hold key is down; its symbol.
         case holding(String)
         case notice(String)
+        /// Recording mode: the name of what Record records.
+        case source(String)
     }
 
     /// The subtitle: an optional word, an optional app icon, a name or text, and a remote
@@ -886,6 +865,8 @@ struct HUDView: View {
             return SubtitlePart(text: "Esc cancels")
         case .inPicker:
             return SubtitlePart(text: "Esc goes back")
+        case .source(let name):
+            return SubtitlePart(text: name)
         // Paused, it still says where the report goes; the button's tooltip has the shortcut.
         case .annotating, .paused:
             break

@@ -14,7 +14,6 @@ struct SourcePickerView: View {
     @ObservedObject var model: SourcePickerModel
     /// Open in full, or only its "Use window picker" button.
     let isOpen: Bool
-    let isRecordMode: Bool
     /// The source that shows as chosen: in recording mode what Record records, else the
     /// chosen one.
     let selectedID: String?
@@ -165,17 +164,12 @@ struct SourcePickerView: View {
     }
 
     private func tileButton(_ tile: SourcePickerModel.Tile) -> some View {
-        let isOffered = isRecordMode || tile.source.isDrawable
-        let reason = isOffered ? nil : "Only for recordings, not for notes"
-        return SourceTile(
+        SourceTile(
             title: tile.title, detail: tile.detail, picture: tile.picture, isLoading: model.phase == .picturing, badge: nil,
             isSelected: selectedID == tile.id
         ) {
             onChoose(tile.source)
         }
-        .disabled(!isOffered)
-        .tildeTooltip(reason)
-        .accessibilityHint(reason ?? "")
     }
 
     /// The tiles in the rest of the picker, scrolling when they do not fit.

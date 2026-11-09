@@ -216,7 +216,11 @@ final class SourcePickerModel: ObservableObject {
 
     static func name(of display: CGDirectDisplayID) -> String {
         let screen = NSScreen.screens.first { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == display }
-        return screen?.localizedName ?? "Display"
+        // A screen with no name, such as a headless Mac's, is "Display".
+        guard let name = screen?.localizedName, !name.isEmpty else {
+            return "Display"
+        }
+        return name
     }
 
     private static func pixelSize(of display: CGDirectDisplayID) -> String {

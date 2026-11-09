@@ -999,11 +999,12 @@ final class AnnotationController: ObservableObject {
             PlainClickTap.stop()
         case .enterRecording:
             hover = nil
+            annotationSource = source
         case .exitRecording:
             clips.discard()
-            // A phone cannot be annotated: back to everything on screen.
-            if source?.isDrawable == false {
-                setSource(nil)
+            // What a clip recorded does not limit the notes: back to what annotating had.
+            if source != annotationSource {
+                setSource(annotationSource)
             }
             frontmostAppChanged(to: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         case .startClip: startClip()
@@ -1839,6 +1840,15 @@ final class AnnotationController: ObservableObject {
         source ?? .screen(hudDisplay ?? CGMainDisplayID())
     }
 
+    /// The name of what Record records, such as "Studio Display", for the HUD.
+    var clipSourceName: String {
+        switch clipSource {
+        case .screen(let display): SourcePickerModel.name(of: display)
+        case .window(let window): scopeName ?? window.app
+        case .phone(let phone): phone.name
+        }
+    }
+
     /// The display the floating HUD is on, which its panel keeps up to date as it is placed
     /// and dragged.
     @Published var hudDisplay: CGDirectDisplayID?
@@ -2147,6 +2157,10 @@ final class AnnotationController: ObservableObject {
             }
         }
     }
+
+    /// What annotating was limited to (nothing, or Tilde's browser) before recording mode,
+    /// which it gets back after.
+    private var annotationSource: RecordingSource?
 
     /// Counts requests to limit the session to the browser; a choice of another source or a
     /// newer request makes an older one stale.
