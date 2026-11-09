@@ -133,9 +133,15 @@ const snapDistance = 16;
 let snapFrame = null;
 let startSnap = null;
 let pointerAt = 0;
+const ringStyle = "position:fixed;width:12px;height:12px;margin:-8px 0 0 -8px;border:2px solid;border-radius:50%;pointer-events:none;z-index:9999;display:none";
 const ring = document.createElement("div");
-ring.style.cssText = "position:fixed;width:12px;height:12px;margin:-8px 0 0 -8px;border:2px solid #2F76FF;border-radius:50%;background:rgba(47,118,255,.25);pointer-events:none;z-index:9999;display:none";
-document.addEventListener("DOMContentLoaded", () => document.body.appendChild(ring));
+ring.style.cssText = `${ringStyle};border-color:#2F76FF;background:rgba(47,118,255,.25)`;
+// The same ring at the pointer while a drawing tool is ready, in the colour it draws with, so
+// the tool shows; it gives way to the snap ring and to a shape being drawn.
+const cursorRing = document.createElement("div");
+cursorRing.style.cssText = ringStyle;
+document.addEventListener("DOMContentLoaded", () => document.body.append(ring, cursorRing));
+let isPressed = false;
 
 function snapPoint(x, y, event) {
   if (!snapFrame || event.metaKey) return null;
@@ -153,6 +159,19 @@ function snapPoint(x, y, event) {
 }
 
 const drawingTools = new Set(["arrow", "rectangle", "ellipse"]);
+const cursorTools = new Set([...drawingTools, "freedraw"]);
+
+function showCursorRing(event, isSnapping) {
+  const tool = api?.getAppState().activeTool.type;
+  const isShown = cursorTools.has(tool) && !editing && !clickArrow && !isPressed && !isSnapping;
+  cursorRing.style.display = isShown ? "block" : "none";
+  if (!isShown) return;
+  const color = api.getAppState().currentItemStrokeColor;
+  cursorRing.style.borderColor = color;
+  cursorRing.style.background = `color-mix(in srgb, ${color} 25%, transparent)`;
+  cursorRing.style.left = `${event.clientX}px`;
+  cursorRing.style.top = `${event.clientY}px`;
+}
 
 window.addEventListener("pointermove", (event) => {
   const now = performance.now();
@@ -167,7 +186,12 @@ window.addEventListener("pointermove", (event) => {
     ring.style.left = `${point.x}px`;
     ring.style.top = `${point.y}px`;
   }
+  showCursorRing(event, point !== null);
 }, true);
+
+document.addEventListener("pointerleave", () => {
+  cursorRing.style.display = "none";
+});
 
 function selectEdited() {
   const element = live().find((candidate) => editing.has(candidate.id));
@@ -197,6 +221,8 @@ function isOnEditedShape(x, y) {
 }
 
 window.addEventListener("pointerdown", (event) => {
+  isPressed = true;
+  cursorRing.style.display = "none";
   startSnap = snapPoint(event.clientX, event.clientY, event);
   pressAt = { x: event.clientX, y: event.clientY };
   isPressOnShape = true;
@@ -261,6 +287,7 @@ function finishClickArrow(element, event) {
 }
 
 window.addEventListener("pointerup", (event) => {
+  isPressed = false;
   if (!isPressOnShape) return;
   ring.style.display = "none";
   // After Excalidraw has finished the shape.
