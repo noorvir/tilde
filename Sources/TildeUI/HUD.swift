@@ -277,7 +277,9 @@ struct HUDView: View {
                     .fixedSize()
             }
             if controller.isDrawing {
+                // Its own width: the HUD's, scaled, or wider for its content.
                 drawingAccessoryBar
+                    .fixedSize()
                     .transition(.opacity)
             }
             if controller.isHUDShown, controller.showsBrowserAccessory {
@@ -402,7 +404,7 @@ struct HUDView: View {
             } label: {
                 Circle()
                     .fill(Color(hex: entry.hex))
-                    .frame(width: size.scaled(12), height: size.scaled(12))
+                    .frame(width: size.swatchSize, height: size.swatchSize)
                     .overlay(Circle().strokeBorder(Color.white.opacity(controller.drawingColor == entry.hex ? 1 : 0.25), lineWidth: controller.drawingColor == entry.hex ? 2 : 1))
                     .padding(1)
                     .contentShape(Circle())
@@ -465,11 +467,11 @@ struct HUDView: View {
             )
     }
 
-    /// `width`: the pill's whole width, or nil to fit the content.
+    /// `width`: the pill's smallest width, which wider content grows, or nil to fit the content.
     private func capsule(_ content: some View, width: CGFloat?, size: PillSize = .regular) -> some View {
         content
             .pillInsets(size)
-            .frame(width: width)
+            .frame(minWidth: width)
             .pill()
     }
 

@@ -24,6 +24,9 @@ enum PillMetrics {
     static let compactHeight: CGFloat = 34
     static let compactButtonSize: CGFloat = 24
     static let compactEndInset: CGFloat = 14
+    /// A colour to pick, such as the drawing bar's: a dot big enough to hit.
+    static let swatchSize: CGFloat = 18
+    static let compactSwatchSize: CGFloat = 14
 }
 
 /// The size of a pill, which its buttons, text and spacing follow: regular for the HUD and
@@ -42,6 +45,10 @@ enum PillSize {
 
     var endInset: CGFloat {
         self == .regular ? PillMetrics.endInset : PillMetrics.compactEndInset
+    }
+
+    var swatchSize: CGFloat {
+        self == .regular ? PillMetrics.swatchSize : PillMetrics.compactSwatchSize
     }
 
     /// A regular length at this size, in whole points: every other length in a compact pill
