@@ -878,23 +878,9 @@ final class AnnotationController: ObservableObject {
                 return
             }
 
+            // Only the snap ring shows the element: no outline or label, as on hover.
             drawingPanel.setSnapFrame(picked?.chip == "window" ? nil : picked?.frame)
-            if isDrawing, isAimingAnArrow {
-                hover = picked
-            }
         }
-    }
-
-    /// An arrow's tip picks the element of its note, so the element under it is highlighted, as
-    /// on hover. With its comment open, that is while one of its ends is dragged.
-    private var isAimingAnArrow: Bool {
-        guard case .new(let pending) = composer else {
-            return drawingTool == "arrow"
-        }
-        guard case .drawing(let text) = pending.target, text.contains("\"to\":") else {
-            return false
-        }
-        return NSEvent.pressedMouseButtons != 0
     }
 
     func escapePressed() {
