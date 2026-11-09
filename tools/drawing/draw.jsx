@@ -118,6 +118,19 @@ window.addEventListener("wheel", (event) => {
   event.preventDefault();
 }, { capture: true, passive: false });
 
+// Tilde takes its own keys before the page; it must know when a text field here has the
+// keyboard. Excalidraw's own one-key tools would change the tool behind the HUD's back.
+const isTextField = (element) => element?.matches?.("textarea, input, [contenteditable]") ?? false;
+document.addEventListener("focusin", (event) => post(isTextField(event.target) ? "typing" : "notTyping"));
+document.addEventListener("focusout", () => post("notTyping"));
+document.addEventListener("keydown", (event) => {
+  if (isTextField(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (/^[a-z0-9 ]$/i.test(event.key)) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+}, true);
+
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   if (clickArrow) {

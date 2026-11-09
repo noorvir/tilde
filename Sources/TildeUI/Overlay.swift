@@ -241,12 +241,12 @@ final class OverlayView: NSView {
             controller.send()
             return
         }
-        if controller.pauses.contains(.user) {
-            super.keyDown(with: event)
+        // Space on a note's marker previews it, before Space pauses.
+        if !controller.pauses.contains(.user), event.keyCode == 49, let id = hoveredMarker {
+            controller.preview(id)
             return
         }
-        if event.keyCode == 49, let id = hoveredMarker {
-            controller.preview(id)
+        if controller.performShortcut(event) {
             return
         }
         super.keyDown(with: event)

@@ -259,6 +259,13 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
                 webView.goForward()
                 return true
             }
+        // The HUD's keys, as for Esc, but never while the page or a text field has the keyboard.
+        case .keyDown where window.isKeyWindow:
+            let responder = window.firstResponder as? NSView
+            guard let controller, controller.session != nil, !(responder is NSText), responder?.isDescendant(of: webView) != true else {
+                return false
+            }
+            return controller.performShortcut(event)
         default:
             break
         }

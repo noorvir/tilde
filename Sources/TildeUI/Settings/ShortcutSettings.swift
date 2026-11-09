@@ -6,24 +6,33 @@ struct ShortcutSettings: View {
     @Binding var recording: ShortcutStore.Action?
 
     var body: some View {
-        SettingsSection("Keyboard Shortcuts") {
-            ForEach(Array(ShortcutStore.Action.allCases.enumerated()), id: \.element) { index, action in
-                if index > 0 {
-                    SettingsDivider()
-                }
-                ShortcutRow(shortcuts: shortcuts, action: action, recording: $recording)
-            }
-            SettingsDivider()
-            SettingsRow(title: "Hold to use the app normally", subtitle: "While annotating only: hold the key to click and navigate") {
-                Picker("Hold key", selection: $shortcuts.holdKey) {
-                    ForEach([DoubleTapKey.control, .option, .shift]) { key in
-                        Text(key.holdTitle).tag(DoubleTapKey?.some(key))
+        // The global shortcuts, then the keys for the HUD's buttons while Tilde has the
+        // keyboard, by group.
+        VStack(alignment: .leading, spacing: 28) {
+            ForEach(ShortcutStore.Action.Group.allCases, id: \.self) { group in
+                SettingsSection(group.title) {
+                    let actions = ShortcutStore.Action.allCases.filter { $0.group == group }
+                    ForEach(Array(actions.enumerated()), id: \.element) { index, action in
+                        if index > 0 {
+                            SettingsDivider()
+                        }
+                        ShortcutRow(shortcuts: shortcuts, action: action, recording: $recording)
                     }
-                    Text("Off").tag(DoubleTapKey?.none)
+                    if group == .global {
+                        SettingsDivider()
+                        SettingsRow(title: "Hold to use the app normally", subtitle: "While annotating only: hold the key to click and navigate") {
+                            Picker("Hold key", selection: $shortcuts.holdKey) {
+                                ForEach([DoubleTapKey.control, .option, .shift]) { key in
+                                    Text(key.holdTitle).tag(DoubleTapKey?.some(key))
+                                }
+                                Text("Off").tag(DoubleTapKey?.none)
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .fixedSize()
+                        }
+                    }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .fixedSize()
             }
         }
         .onChange(of: recording, initial: true) { _, action in
@@ -43,6 +52,15 @@ private struct ShortcutRow: View {
 
     private var isRecording: Bool {
         recording == action
+    }
+
+    /// Only a global shortcut is a modifier tapped twice; an in-app one may be a key alone.
+    private var isGlobal: Bool {
+        action.group == .global
+    }
+
+    private var recordingHelp: String {
+        isGlobal ? "Press the new keys, or tap a modifier twice. Esc stops" : "Press the new key, alone or with modifiers. Esc stops"
     }
 
     var body: some View {
@@ -70,7 +88,7 @@ private struct ShortcutRow: View {
                     KeyCaps(caps: shortcut?.caps, isRecording: isRecording)
                 }
                 .buttonStyle(.plain)
-                .help(isRecording ? "Press the new keys, or tap a modifier twice. Esc stops" : "Click to record a new shortcut")
+                .help(isRecording ? recordingHelp : "Click to record a new shortcut")
             }
         }
         .onChange(of: isRecording, initial: true) { _, isRecording in
@@ -84,12 +102,14 @@ private struct ShortcutRow: View {
     }
 
     /// Takes the next key press: Esc stops, Delete clears the shortcut, and a key with ⌃, ⌥
-    /// or ⌘ becomes the shortcut unless another Tilde shortcut has it; so does a modifier
-    /// tapped twice.
+    /// or ⌘ (for an in-app action, a key alone too) becomes the shortcut unless another Tilde
+    /// shortcut has it; for a global one, so does a modifier tapped twice.
     private func startMonitor() {
         conflict = nil
         stopMonitor()
-        startDoubleTapMonitor()
+        if isGlobal {
+            startDoubleTapMonitor()
+        }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             switch Int(event.keyCode) {
             case 53:
@@ -98,7 +118,7 @@ private struct ShortcutRow: View {
                 _ = shortcuts.set(nil, for: action)
                 recording = nil
             default:
-                guard let combo = KeyCombo(event: event) else {
+                guard let combo = KeyCombo(event: event, allowsKeyAlone: !isGlobal) else {
                     NSSound.beep()
                     return nil
                 }

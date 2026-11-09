@@ -393,7 +393,7 @@ struct HUDView: View {
     private var drawingContent: some View {
         let size = HUDAccessory.size
         ForEach(Self.drawingTools, id: \.tool) { entry in
-            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, help: entry.help) {
+            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, key: key(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
                 controller.setDrawingTool(entry.tool)
             }
         }
@@ -410,6 +410,7 @@ struct HUDView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .tildeTooltip(entry.name, key: key(ShortcutStore.Action.allCases.first { $0.drawingColor?.hex == entry.hex }))
             .accessibilityLabel(entry.name)
         }
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
@@ -426,14 +427,19 @@ struct HUDView: View {
         .fixedSize()
     }
 
-    private static let drawingTools = [
+    /// The key of an in-app shortcut, for its button's tooltip.
+    private func key(_ action: ShortcutStore.Action?) -> String? {
+        action.flatMap { controller.shortcuts.shortcut(for: $0)?.title }
+    }
+
+    nonisolated static let drawingTools = [
         (tool: "arrow", symbol: "arrow.up.right", help: "Arrow"),
         (tool: "rectangle", symbol: "rectangle", help: "Rectangle"),
         (tool: "ellipse", symbol: "circle", help: "Circle"),
         (tool: "freedraw", symbol: "scribble", help: "Freehand"),
     ]
 
-    private static let drawingColors = [
+    nonisolated static let drawingColors = [
         (hex: "#2F76FF", name: "Blue"),
         (hex: "#FF3B30", name: "Red"),
         (hex: "#FFCC00", name: "Yellow"),
@@ -486,14 +492,8 @@ struct HUDView: View {
         Group {
             HStack(spacing: PillMetrics.iconGap) {
                 // Where the status dot was: in recording mode the record button, else pause and play.
-                HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, help: status.help) {
-                    if controller.isRecordMode {
-                        controller.toggleRecord()
-                    } else if !controller.pauses.isEmpty {
-                        controller.resume()
-                    } else {
-                        controller.togglePause()
-                    }
+                HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, key: key(.pauseOrResume), help: status.help) {
+                    controller.pressStatusButton()
                 }
                 .disabled(status.isBusy || controller.isPickingWindow)
                 // The red record button bounces once on the way into recording mode.
@@ -518,7 +518,7 @@ struct HUDView: View {
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
             // Recording mode starts by choosing what to record.
-            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, help: recordToggleHelp) {
+            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, key: key(.recordingMode), help: recordToggleHelp) {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)
@@ -530,7 +530,7 @@ struct HUDView: View {
                 }
                 .disabled(controller.recording != .recording && controller.recording != .paused)
             } else {
-                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, help: "Draw on the screen") {
+                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, key: key(.drawingMode), help: "Draw on the screen") {
                     if controller.isDrawing {
                         controller.finishDrawing()
                     } else {
@@ -950,6 +950,8 @@ struct HUDButton: View {
     var bounce = 0
     /// Off while the tooltip would cover what the button opened under it.
     var showsTooltip = true
+    /// The key that presses it while Tilde has the keyboard, after the help in its tooltip.
+    var key: String?
     let help: String
     let action: () -> Void
 
@@ -992,7 +994,7 @@ struct HUDButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .tildeTooltip(showsTooltip ? help : nil)
+        .tildeTooltip(showsTooltip ? help : nil, key: key)
         .accessibilityLabel(title ?? help)
         .accessibilityHint(title == nil ? "" : help)
     }

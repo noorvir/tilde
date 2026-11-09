@@ -177,6 +177,19 @@ agent by paste, or to try Tilde without an agent.
 | Cancel (HUD X or menu) | Closes the session without sending; the HUD asks first when there are annotations |
 | Drag the HUD pill | Moves the HUD on that screen. An outline shows the home position; the pill snaps there when close. Settings → General → HUD position → Reset also puts it back |
 
+While Tilde has the keyboard (where Esc works: its overlay, HUD or browser, never while you
+type), single keys press the HUD's buttons, under the same rules. Each button's tooltip
+shows its key, and Settings → Shortcuts changes them.
+
+| Key | Result |
+|---|---|
+| A | Back to annotating from drawing or recording mode |
+| R | Into or out of recording mode, as the record toggle |
+| D | Starts or ends drawing, as Draw |
+| Space | Pauses or resumes; in recording mode records, pauses or resumes the clip. On a marker, Space opens its preview instead |
+| A, S, O, P (while drawing) | Arrow, rectangle, circle, freehand. A picks the arrow and stays in drawing |
+| 1–6 (while drawing) | The colours, in the drawing bar's order |
+
 Tilde does not take focus from your app while you annotate.
 
 **iOS Simulator (Xcode 27 Device Hub):** drag a region on the device screen. A click

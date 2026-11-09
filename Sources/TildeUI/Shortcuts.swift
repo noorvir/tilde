@@ -70,7 +70,7 @@ enum Shortcut: Codable, Equatable {
     }
 }
 
-/// A key with at least one of ⌃ ⌥ ⌘ (⇧ may be added).
+/// A key with at least one of ⌃ ⌥ ⌘ (⇧ may be added); for an in-app action, a key alone.
 struct KeyCombo: Codable, Equatable {
     let keyCode: UInt32
     /// `NSEvent.ModifierFlags` raw value, limited to ⌃ ⌥ ⇧ ⌘.
@@ -106,13 +106,20 @@ struct KeyCombo: Codable, Equatable {
         key.count == 1 ? key.lowercased() : ""
     }
 
-    /// The shortcut for a key-down event, or nil without ⌃, ⌥ or ⌘.
-    init?(event: NSEvent) {
+    /// The shortcut for a key-down event, or nil without ⌃, ⌥ or ⌘ unless `allowsKeyAlone`.
+    /// Return is never a key alone: it answers the HUD's questions.
+    init?(event: NSEvent, allowsKeyAlone: Bool = false) {
         let modifiers = event.modifierFlags.intersection([.control, .option, .shift, .command])
-        guard !modifiers.intersection([.control, .option, .command]).isEmpty else {
+        let isKeyAlone = modifiers.intersection([.control, .option, .command]).isEmpty
+        guard !isKeyAlone || (allowsKeyAlone && event.keyCode != UInt16(kVK_Return)) else {
             return nil
         }
         self.init(keyCode: UInt32(event.keyCode), modifiers: modifiers.rawValue, key: Self.name(of: event))
+    }
+
+    /// The same keys as an event, whatever the names.
+    func matches(_ event: NSEvent) -> Bool {
+        UInt32(event.keyCode) == keyCode && event.modifierFlags.intersection([.control, .option, .shift, .command]).rawValue == modifiers
     }
 
     init(keyCode: UInt32, modifiers: UInt, key: String) {
@@ -136,19 +143,89 @@ struct KeyCombo: Codable, Equatable {
     }
 }
 
-/// Tilde's global shortcuts, editable in Settings and saved in user defaults.
+/// Tilde's shortcuts, editable in Settings and saved in user defaults: global ones, and keys
+/// for the HUD's buttons while Tilde has the keyboard.
 @MainActor
 final class ShortcutStore: ObservableObject {
     enum Action: String, CaseIterable, Identifiable {
         case startAnnotation
         case togglePause
+        case annotationMode
+        case recordingMode
+        case drawingMode
+        case pauseOrResume
+        case arrowTool
+        case rectangleTool
+        case ellipseTool
+        case penTool
+        case color1
+        case color2
+        case color3
+        case color4
+        case color5
+        case color6
+
+        /// Where an action works, and its section in Settings.
+        enum Group: CaseIterable {
+            /// In every app.
+            case global
+            /// While Tilde's overlay, HUD or browser has the keyboard, where Esc works.
+            case modes
+            /// The same, while drawing; these keys come before the modes' keys there.
+            case drawingTools
+            case colors
+
+            var title: String {
+                switch self {
+                case .global: "Keyboard Shortcuts"
+                case .modes: "Modes"
+                case .drawingTools: "Drawing Tools"
+                case .colors: "Colours"
+                }
+            }
+        }
 
         var id: String { rawValue }
+
+        var group: Group {
+            switch self {
+            case .startAnnotation, .togglePause: .global
+            case .annotationMode, .recordingMode, .drawingMode, .pauseOrResume: .modes
+            case .arrowTool, .rectangleTool, .ellipseTool, .penTool: .drawingTools
+            case .color1, .color2, .color3, .color4, .color5, .color6: .colors
+            }
+        }
+
+        /// The drawing tool it picks, as the drawing bar names it.
+        var drawingTool: String? {
+            switch self {
+            case .arrowTool: "arrow"
+            case .rectangleTool: "rectangle"
+            case .ellipseTool: "ellipse"
+            case .penTool: "freedraw"
+            default: nil
+            }
+        }
+
+        /// The colour it picks, in the drawing bar's order.
+        var drawingColor: (hex: String, name: String)? {
+            let colors: [Action] = [.color1, .color2, .color3, .color4, .color5, .color6]
+            return colors.firstIndex(of: self).map { HUDView.drawingColors[$0] }
+        }
 
         var title: String {
             switch self {
             case .startAnnotation: "Start or resume annotating"
             case .togglePause: "Pause"
+            case .annotationMode: "Annotate"
+            case .recordingMode: "Recording mode"
+            case .drawingMode: "Draw"
+            case .pauseOrResume: "Pause or resume"
+            case .arrowTool: "Arrow"
+            case .rectangleTool: "Rectangle"
+            case .ellipseTool: "Circle"
+            case .penTool: "Freehand"
+            default: drawingColor?.name ?? rawValue
             }
         }
 
@@ -156,6 +233,12 @@ final class ShortcutStore: ObservableObject {
             switch self {
             case .startAnnotation: "Starts a session, or resumes a paused one"
             case .togglePause: "Esc also pauses; Esc again discards"
+            case .annotationMode: "Back to annotating from drawing or recording mode"
+            case .recordingMode: "Into or out of recording mode, as the record toggle"
+            case .drawingMode: "Starts or ends drawing, as Draw"
+            case .pauseOrResume: "Pauses or resumes, or records in recording mode"
+            case .arrowTool, .rectangleTool, .ellipseTool, .penTool: "Draws with this tool"
+            default: "Draws in this colour"
             }
         }
 
@@ -164,7 +247,32 @@ final class ShortcutStore: ObservableObject {
             switch self {
             case .startAnnotation: .doubleTap(.control)
             case .togglePause: nil
+            case .annotationMode, .arrowTool: Self.key(kVK_ANSI_A, "A")
+            case .recordingMode: Self.key(kVK_ANSI_R, "R")
+            case .drawingMode: Self.key(kVK_ANSI_D, "D")
+            case .pauseOrResume: Self.key(kVK_Space, "Space")
+            case .rectangleTool: Self.key(kVK_ANSI_S, "S")
+            case .ellipseTool: Self.key(kVK_ANSI_O, "O")
+            case .penTool: Self.key(kVK_ANSI_P, "P")
+            case .color1: Self.key(kVK_ANSI_1, "1")
+            case .color2: Self.key(kVK_ANSI_2, "2")
+            case .color3: Self.key(kVK_ANSI_3, "3")
+            case .color4: Self.key(kVK_ANSI_4, "4")
+            case .color5: Self.key(kVK_ANSI_5, "5")
+            case .color6: Self.key(kVK_ANSI_6, "6")
             }
+        }
+
+        private static func key(_ keyCode: Int, _ name: String) -> Shortcut {
+            .keys(KeyCombo(keyCode: UInt32(keyCode), modifiers: 0, key: name))
+        }
+
+        /// Whether two actions may not share keys. A drawing key may be a mode's key too: while
+        /// drawing it wins, so A is the arrow there and annotating elsewhere.
+        func clashes(with other: Action) -> Bool {
+            let drawing: Set<Group> = [.drawingTools, .colors]
+            let isDrawingOverMode = drawing.contains(group) && other.group == .modes || drawing.contains(other.group) && group == .modes
+            return !isDrawingOverMode
         }
     }
 
@@ -197,10 +305,24 @@ final class ShortcutStore: ObservableObject {
         Set(shortcuts.values.compactMap(\.doubleTapKey))
     }
 
-    /// Saves the shortcut, or returns the action that already uses it. Both actions may share
-    /// a double tap: it starts a session when there is none, and pauses or resumes one.
+    /// The in-app action for a key press while Tilde has the keyboard: while drawing a tool or
+    /// colour first, then a mode.
+    func inAppAction(for event: NSEvent, isDrawing: Bool) -> Action? {
+        let groups: [Action.Group] = isDrawing ? [.drawingTools, .colors, .modes] : [.modes]
+        for group in groups {
+            if let action = Action.allCases.first(where: { $0.group == group && shortcut(for: $0)?.combo?.matches(event) == true }) {
+                return action
+            }
+        }
+        return nil
+    }
+
+    /// Saves the shortcut, or returns the action that already uses it. Both global actions may
+    /// share a double tap: it starts a session when there is none, and pauses or resumes one.
     func set(_ shortcut: Shortcut?, for action: Action) -> Action? {
-        if let shortcut, shortcut.combo != nil, let other = Action.allCases.first(where: { $0 != action && self.shortcut(for: $0) == shortcut }) {
+        if let shortcut, let combo = shortcut.combo,
+           let other = Action.allCases.first(where: { $0 != action && action.clashes(with: $0) && self.shortcut(for: $0)?.combo.map { $0.keyCode == combo.keyCode && $0.modifiers == combo.modifiers } == true })
+        {
             return other
         }
         shortcuts[action] = shortcut

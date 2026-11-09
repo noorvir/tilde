@@ -640,6 +640,61 @@ final class AnnotationController: ObservableObject {
         dispatch(.togglePause)
     }
 
+    /// The HUD's leading button: records, pauses or resumes a clip in recording mode; else
+    /// resumes after any pause, or pauses.
+    func pressStatusButton() {
+        if isRecordMode {
+            toggleRecord()
+        } else if !pauses.isEmpty {
+            resume()
+        } else {
+            togglePause()
+        }
+    }
+
+    /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that
+    /// enables that button. True when the key is one of them, whether it did anything or not.
+    func performShortcut(_ event: NSEvent) -> Bool {
+        guard session != nil, confirmation == nil, let action = shortcuts.inAppAction(for: event, isDrawing: isDrawing) else {
+            return false
+        }
+        if event.isARepeat {
+            return true
+        }
+        let isBusy = HUDView.status(of: self).isBusy
+        switch action {
+        case .annotationMode:
+            if isDrawing, !isBusy {
+                finishDrawing()
+            } else if isRecordMode, !isBusy {
+                toggleRecordingMode()
+            }
+        case .recordingMode:
+            if !isBusy {
+                toggleRecordingMode()
+            }
+        case .drawingMode:
+            if !isRecordMode, !isBusy {
+                isDrawing ? finishDrawing() : startDrawing()
+            }
+        case .pauseOrResume:
+            if !isBusy, !isPickingWindow {
+                pressStatusButton()
+            }
+        case .arrowTool, .rectangleTool, .ellipseTool, .penTool:
+            if let tool = action.drawingTool {
+                setDrawingTool(tool)
+            }
+        case .color1, .color2, .color3, .color4, .color5, .color6:
+            if let color = action.drawingColor {
+                setDrawingColor(color.hex)
+            }
+        case .startAnnotation, .togglePause:
+            return false
+        }
+        return true
+    }
+
     /// Annotates again after any pause: one the user chose, or one while another app was in
     /// front.
     func resume() {
@@ -681,6 +736,7 @@ final class AnnotationController: ObservableObject {
             }
         }
         drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
+        drawingPanel.onKey = { [weak self] in self?.performShortcut($0) ?? false }
         drawingPanel.onPress = { [weak self] point in
             guard let self, let id = self.noteLabel(at: point) else {
                 return false

@@ -4,9 +4,10 @@ extension View {
     /// Shows `text` in a dark tooltip under this view after 500 ms of hover. A view up the
     /// tree must call `tildeTooltipHost()` to draw it. Used instead of `.help`, which has a
     /// fixed delay and does not show reliably in Tilde's non-activating panels.
-    /// A nil `text` shows none.
-    func tildeTooltip(_ text: String?) -> some View {
-        modifier(TooltipSource(text: text))
+    /// A nil `text` shows none. `key`, such as "R", is the key that does the same, after the
+    /// text in a key hint.
+    func tildeTooltip(_ text: String?, key: String? = nil) -> some View {
+        modifier(TooltipSource(text: text, key: key))
     }
 
     /// Draws the tooltip of the hovered `tildeTooltip` view inside this view, over its content.
@@ -15,7 +16,7 @@ extension View {
         overlayPreferenceValue(TooltipKey.self) { tooltip in
             GeometryReader { proxy in
                 if let tooltip {
-                    TooltipLayer(text: tooltip.text, target: proxy[tooltip.anchor], bounds: proxy.size)
+                    TooltipLayer(text: tooltip.text, key: tooltip.key, target: proxy[tooltip.anchor], bounds: proxy.size)
                 }
             }
         }
@@ -29,7 +30,7 @@ extension View {
                 let target = tooltip.map { proxy[$0.anchor] }
                 AboveAppKit {
                     if let tooltip, let target {
-                        TooltipLayer(text: tooltip.text, target: target, bounds: proxy.size)
+                        TooltipLayer(text: tooltip.text, key: tooltip.key, target: target, bounds: proxy.size)
                     }
                 }
                 .allowsHitTesting(false)
@@ -40,6 +41,7 @@ extension View {
 
 private struct Tooltip {
     let text: String
+    let key: String?
     let anchor: Anchor<CGRect>
 }
 
@@ -54,6 +56,7 @@ private struct TooltipKey: PreferenceKey {
 private struct TooltipSource: ViewModifier {
     /// Nil for no tooltip.
     let text: String?
+    let key: String?
     @State private var isShown = false
     @State private var delay: Task<Void, Never>?
 
@@ -78,7 +81,7 @@ private struct TooltipSource: ViewModifier {
                 guard isShown, let text else {
                     return nil
                 }
-                return Tooltip(text: text, anchor: anchor)
+                return Tooltip(text: text, key: key, anchor: anchor)
             }
     }
 }
@@ -86,13 +89,14 @@ private struct TooltipSource: ViewModifier {
 /// A tooltip under its target, moved sideways to stay whole inside the area that draws it.
 struct TooltipLayer: View {
     let text: String
+    var key: String?
     let target: CGRect
     let bounds: CGSize
 
     var body: some View {
-        TooltipBubble(text: text)
+        TooltipBubble(text: text, key: key)
             .fixedSize()
-            .position(x: Self.centerX(text: text, target: target, width: bounds.width), y: target.maxY + 20)
+            .position(x: Self.centerX(text: text, key: key, target: target, width: bounds.width), y: target.maxY + 20)
             .allowsHitTesting(false)
             .transition(.opacity)
     }
@@ -100,9 +104,11 @@ struct TooltipLayer: View {
 
 extension TooltipLayer {
     /// The bubble's centre: under the target, but at least 4 pt inside both edges.
-    static func centerX(text: String, target: CGRect, width: CGFloat) -> CGFloat {
+    static func centerX(text: String, key: String? = nil, target: CGRect, width: CGFloat) -> CGFloat {
         let font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
-        let half = ((text as NSString).size(withAttributes: [.font: font]).width + 18) / 2
+        let keyFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let keyWidth = key.map { max(18, ($0 as NSString).size(withAttributes: [.font: keyFont]).width + 8) + 6 } ?? 0
+        let half = ((text as NSString).size(withAttributes: [.font: font]).width + keyWidth + 18) / 2
         guard width > 2 * (half + 4) else {
             return width / 2
         }
@@ -112,9 +118,16 @@ extension TooltipLayer {
 
 struct TooltipBubble: View {
     let text: String
+    /// The key that does the same, in a key hint after the text.
+    var key: String?
 
     var body: some View {
-        Text(text)
+        HStack(spacing: 6) {
+            Text(text)
+            if let key {
+                KeyHint(key: key)
+            }
+        }
             .font(.system(size: 11.5, weight: .medium))
             .foregroundStyle(.white.opacity(0.92))
             .padding(.horizontal, 9)

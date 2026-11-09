@@ -29,6 +29,8 @@ final class DrawingPanel {
     var onPress: (CGPoint) -> Bool = { _ in false }
     /// The pointer moved, in Quartz screen coordinates.
     var onPointer: (CGPoint) -> Void = { _ in }
+    /// A key press on the canvas, outside its text fields. True: it was taken.
+    var onKey: (NSEvent) -> Bool = { _ in false }
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
     var windowNumbers: [Int] {
@@ -53,6 +55,7 @@ final class DrawingPanel {
         canvas.onClickAway = { [weak self] in self?.onClickAway() }
         canvas.onPress = { [weak self] in self?.onPress($0) ?? false }
         canvas.onPointer = { [weak self] in self?.onPointer($0) }
+        canvas.onKey = { [weak self] in self?.onKey($0) ?? false }
         canvas.startDrawing(tool: tool, color: color)
     }
 
@@ -172,6 +175,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     var onClickAway: () -> Void = {}
     var onPress: (CGPoint) -> Bool = { _ in false }
     var onPointer: (CGPoint) -> Void = { _ in }
+    var onKey: (NSEvent) -> Bool = { _ in false }
 
     init(frame: CGRect) {
         self.frame = frame
@@ -317,6 +321,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             onEdited()
         case "clickAway":
             onClickAway()
+        case "typing", "notTyping":
+            (panel as? CanvasPanel)?.isTyping = text == "typing"
         case _ where text.hasPrefix("pointer:"):
             let values = text.dropFirst(8).split(separator: ",").compactMap { Double($0) }
             if values.count == 2 {
@@ -360,6 +366,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel.ignoresMouseEvents = true
         panel.setFrame(frame, display: false)
         panel.onPress = { [weak self] in self?.onPress($0) ?? false }
+        panel.onKey = { [weak self] in self?.onKey($0) ?? false }
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(self, name: "tilde")
@@ -377,10 +384,16 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 /// back when the press ends.
 private final class CanvasPanel: FloatingPanel {
     var onPress: (CGPoint) -> Bool = { _ in false }
+    /// Tilde's keys come before the page's, unless a text field on the page has the keyboard.
+    var onKey: (NSEvent) -> Bool = { _ in false }
+    var isTyping = false
     private var heldEvents: [NSEvent]?
     private var isPressTaken = false
 
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, !isTyping, onKey(event) {
+            return
+        }
         if isPressTaken {
             isPressTaken = event.type != .leftMouseUp
             return

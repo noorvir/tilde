@@ -37,7 +37,7 @@ enum Surfaces {
             return try await hosted(RestoreToastView(state: restore), size: size)
 
         case "tooltip":
-            return try await hosted(TooltipBubble(text: state.text ?? "").frame(width: size.width, height: size.height), size: size)
+            return try await hosted(TooltipBubble(text: state.text ?? "", key: state.key).frame(width: size.width, height: size.height), size: size)
 
         case "outline":
             let model = HomeOutline.Model()
