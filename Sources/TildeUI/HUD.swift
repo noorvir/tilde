@@ -280,8 +280,8 @@ struct HUDView: View {
                 drawingBar
                     .transition(.opacity)
             }
-            if controller.isHUDShown, controller.browserHint != nil, !controller.isPickingWindow {
-                BrowserHint(action: controller.openBrowserHint)
+            if controller.isHUDShown, controller.showsBrowserHint {
+                BrowserHint(onOpen: controller.openBrowserHint, onDismiss: controller.dismissBrowserHint)
                     .transition(Self.zoom)
             }
             if controller.isHUDShown, let notice = controller.pauseNotice {
@@ -1084,16 +1084,21 @@ struct PillTextButton: View {
 
 /// A short note below the HUD after it paused: how to go on. It goes after 10 seconds, or at
 /// once on resume, discard or send; the pointer on it keeps it.
-/// Under the HUD, once a session, while the pointer is in another browser: opens its page in
-/// Tilde's browser. A round card, like "Use window picker".
+/// Under the HUD after the first click in another browser in a session: opens its page in
+/// Tilde's browser. A round card, like "Use window picker", that stays until it is used or
+/// dismissed.
 struct BrowserHint: View {
-    let action: () -> Void
+    let onOpen: () -> Void
+    let onDismiss: () -> Void
 
     var body: some View {
-        CardButton(symbol: "globe", title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: action)
-            .padding(4)
-            .hudCard(cornerRadius: 19)
-            .environment(\.colorScheme, .dark)
+        HStack(spacing: 2) {
+            CardButton(symbol: "globe", title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
+            CardButton(symbol: "xmark", help: "Dismiss", action: onDismiss)
+        }
+        .padding(4)
+        .hudCard(cornerRadius: 19)
+        .environment(\.colorScheme, .dark)
     }
 }
 

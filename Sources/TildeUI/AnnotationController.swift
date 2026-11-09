@@ -162,16 +162,10 @@ final class AnnotationController: ObservableObject {
 
     @Published private(set) var pauseNotice: PauseNotice?
     /// The page in another browser that the hint under the HUD offers to open in Tilde's
-    /// browser; nil while the hint does not show.
+    /// browser, until it is dismissed or opened; nil for no hint.
     @Published private(set) var browserHint: URL?
-    /// The browser the hint is for: it goes when the pointer leaves that browser's windows.
-    private var browserHintPID: pid_t?
     /// The hint shows at most once a session.
     private var hasOfferedBrowser = false
-    /// A read of a browser window's page address, one at a time, and the windows whose
-    /// address could not be read, which are not read again.
-    private var browserHintTask: Task<Void, Never>?
-    private var unreadableWindows: Set<Int> = []
     /// The page the next `.openBrowser` effect opens, from the hint.
     private var browserURLToOpen: URL?
     static let browserBundleIDs: Set<String> = [
@@ -379,10 +373,7 @@ final class AnnotationController: ObservableObject {
     private func begin(_ session: SessionStore.Session) {
         self.session = session
         hasOfferedBrowser = false
-        unreadableWindows = []
-        browserHintTask?.cancel()
-        browserHintTask = nil
-        hideBrowserHint()
+        browserHint = nil
         drafts = []
         hover = nil
         composer = nil
@@ -431,7 +422,7 @@ final class AnnotationController: ObservableObject {
         session = nil
         drafts = []
         setSource(nil)
-        hideBrowserHint()
+        browserHint = nil
 
         if let returnApp {
             self.returnApp = nil
@@ -907,8 +898,6 @@ final class AnnotationController: ObservableObject {
     }
 
     func escapePressed() {
-        // Esc also does what it does without the hint.
-        hideBrowserHint()
         // In the picker, Esc first goes from an app's windows back to the apps, as "‹ Back".
         if isSourcePickerOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
@@ -1023,7 +1012,6 @@ final class AnnotationController: ObservableObject {
             PlainClickTap.stop()
         case .enterRecording:
             hover = nil
-            hideBrowserHint()
             annotationSource = source
         case .exitRecording:
             clips.discard()
@@ -2147,7 +2135,6 @@ final class AnnotationController: ObservableObject {
     /// Opens `url` (or just the browser) in Tilde's browser and limits the session to its
     /// window.
     private func openBrowser(at url: URL?) {
-        hideBrowserHint()
         browser.show(url)
         // With no page yet, the address field takes the keyboard instead of a blank page.
         if url == nil, browser.webView.url == nil {
@@ -2156,47 +2143,35 @@ final class AnnotationController: ObservableObject {
         scopeToBrowser()
     }
 
-    /// The first element hovered in another browser while annotating offers, once a session,
-    /// to open its page in Tilde's browser, when its address can be read; the offer goes when
-    /// the pointer leaves that browser's windows.
-    private func offerBrowser(for picked: Picked?) {
-        if let pid = browserHintPID {
-            if picked?.window?.pid != pid {
-                hideBrowserHint()
-            }
-            return
-        }
-        guard !hasOfferedBrowser, browserHintTask == nil, composer == nil, flow.session?.activity == .annotating,
-              let window = picked?.window, !unreadableWindows.contains(window.number),
+    /// The first click on an element in another browser in a session offers to open its page
+    /// in Tilde's browser, when the address the note reads for its page is a web address.
+    private func offerBrowser(window: ElementPicker.WindowInfo, page: Task<PageIdentity?, Never>) {
+        guard !hasOfferedBrowser,
               let bundleID = NSRunningApplication(processIdentifier: window.pid)?.bundleIdentifier,
               Self.browserBundleIDs.contains(bundleID)
         else {
             return
         }
         let sessionID = session?.id
-        browserHintTask = Task {
-            let address = await Task.detached { PageIdentity.read(pid: window.pid, windowFrame: window.frame)?.url }.value
-            guard !Task.isCancelled else {
-                return
-            }
-            browserHintTask = nil
-            guard let url = address.flatMap(URL.init(string:)), url.scheme == "http" || url.scheme == "https" else {
-                unreadableWindows.insert(window.number)
-                return
-            }
-            // Still the same session, annotating, with the pointer in that browser.
-            guard session?.id == sessionID, !hasOfferedBrowser, flow.session?.activity == .annotating, hover?.window?.pid == window.pid else {
+        Task {
+            guard let url = await page.value?.url.flatMap(URL.init(string:)), url.scheme == "http" || url.scheme == "https",
+                  session?.id == sessionID, !hasOfferedBrowser
+            else {
                 return
             }
             hasOfferedBrowser = true
-            browserHintPID = window.pid
             browserHint = url
         }
     }
 
-    private func hideBrowserHint() {
+    /// The hint shows only while annotating outside Tilde's browser, and comes back there.
+    var showsBrowserHint: Bool {
+        browserHint != nil && !isRecordMode && !isPickingWindow && !isHUDInBrowser
+    }
+
+    /// The hint's ×.
+    func dismissBrowserHint() {
         browserHint = nil
-        browserHintPID = nil
     }
 
     /// The hint's button: Tilde's browser opens the page and limits the session to it, as for
@@ -2205,7 +2180,7 @@ final class AnnotationController: ObservableObject {
         guard let url = browserHint else {
             return
         }
-        hideBrowserHint()
+        browserHint = nil
         browserURLToOpen = url
         dispatch(.openBrowser)
         browserURLToOpen = nil
@@ -2304,9 +2279,6 @@ final class AnnotationController: ObservableObject {
                 }
                 if composer == nil && !isPointerOverPanel && !isPickingWindow {
                     hover = picked
-                }
-                if !isPointerOverPanel {
-                    offerBrowser(for: picked)
                 }
             }
             hoverTask = nil
@@ -2477,7 +2449,9 @@ final class AnnotationController: ObservableObject {
             let windowID = CGWindowID(window.number)
             let area = pictureArea ?? frame
             fingerprint = Task { await NoteFingerprint.capture(window: windowID, area: area) }
-            page = Task.detached { PageIdentity.read(pid: window.pid, windowFrame: window.frame) }
+            let read = Task.detached { PageIdentity.read(pid: window.pid, windowFrame: window.frame) }
+            page = read
+            offerBrowser(window: window, page: read)
         }
         composer = .new(Pending(
             target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked,
