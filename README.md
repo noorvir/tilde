@@ -170,7 +170,8 @@ agent by paste, or to try Tilde without an agent.
 | Click a marker | Edits or deletes that annotation |
 | Space on a marker, or a thumbnail in the list | Opens the preview. ← and → show the other annotations; Esc or a click outside closes it |
 | Record button (HUD) | Goes to recording mode and lets you choose a screen, window or phone to record; click the source name under the title to choose again before Record. Click the button again to go back to annotating. |
-| Globe button (HUD) or Open Browser (menu) | Opens Tilde's browser and limits annotating to it; starts paused so you can browse first |
+| Open Browser (menu) | Opens Tilde's browser and limits annotating to it; starts paused so you can browse first |
+| Open in Tilde's browser (under the HUD) | Shows once a session when you point at a page in Chrome, Safari, Arc, Edge or Brave. Opens that page in Tilde's browser, where you pick exact page elements and send their HTML and styles. Your notes stay |
 | ⌃⌥P or Pause (HUD) | Lets you use your apps; markers stay. Press again, or Annotate in the HUD, to go on |
 | Clear all (HUD trash) | Deletes all annotations and keeps the session; asks first |
 | Cancel (HUD X or menu) | Closes the session without sending; the HUD asks first when there are annotations |

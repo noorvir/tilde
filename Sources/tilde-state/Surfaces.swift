@@ -183,6 +183,7 @@ enum Surfaces {
             source: source,
             isHUDInBrowser: state.hudInBrowser ?? false,
             pauseNotice: notice,
+            browserHint: state.browserHint == true ? URL(string: "https://example.com/pricing") : nil,
             restoreRecord: state.confirmation == "restore" ? Fixtures.record(notes: 3) : nil,
             sentText: state.sent ?? "",
             notice: state.notice.flatMap(Notice.init(rawValue:)),

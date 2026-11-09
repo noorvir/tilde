@@ -246,7 +246,7 @@ struct HUDView: View {
     /// The width of the pill in every mode. The widest title and a two-digit note count fit in
     /// it (the HUD reserves their space with hidden labels), so changing the mode or adding
     /// notes never moves a button; `everyModeFitsThePillWidth` checks it.
-    static let width: CGFloat = 513
+    static let width: CGFloat = 479
 
     @ObservedObject var controller: AnnotationController
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -280,6 +280,10 @@ struct HUDView: View {
                 drawingBar
                     .transition(.opacity)
             }
+            if controller.isHUDShown, controller.browserHint != nil, !controller.isPickingWindow {
+                BrowserHint(action: controller.openBrowserHint)
+                    .transition(Self.zoom)
+            }
             if controller.isHUDShown, let notice = controller.pauseNotice {
                 PauseToast(notice: notice, controller: controller)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -310,6 +314,7 @@ struct HUDView: View {
         .animation(HUDPanel.motion, value: controller.sentConfirmation)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
         .animation(.easeOut(duration: 0.15), value: controller.pauseNotice)
+        .animation(.spring(duration: 0.28), value: controller.browserHint)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -516,12 +521,6 @@ struct HUDView: View {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)
-
-            // As the menu's Open Browser; in the browser's toolbar the session is there already.
-            HUDButton(image: Image(systemName: "globe"), help: "Open Browser") {
-                controller.annotateInBrowser()
-            }
-            .disabled(isEmbedded || !flow.accepts(.openBrowser))
 
             // Recording mode puts Stop where Draw is; the other buttons stay.
             if controller.isRecordMode {
@@ -1085,6 +1084,19 @@ struct PillTextButton: View {
 
 /// A short note below the HUD after it paused: how to go on. It goes after 10 seconds, or at
 /// once on resume, discard or send; the pointer on it keeps it.
+/// Under the HUD, once a session, while the pointer is in another browser: opens its page in
+/// Tilde's browser. A round card, like "Use window picker".
+struct BrowserHint: View {
+    let action: () -> Void
+
+    var body: some View {
+        CardButton(symbol: "globe", title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: action)
+            .padding(4)
+            .hudCard(cornerRadius: 19)
+            .environment(\.colorScheme, .dark)
+    }
+}
+
 struct PauseToast: View {
     let notice: AnnotationController.PauseNotice
     @ObservedObject var controller: AnnotationController

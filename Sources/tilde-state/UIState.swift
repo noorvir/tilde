@@ -56,6 +56,8 @@ struct UIState: Decodable {
     var autoPaused: Bool?
     var confirmation: String?
     var pauseNotice: String?
+    /// The hint under the HUD that offers to open the page of another browser in Tilde's.
+    var browserHint: Bool?
     var scoped: Bool?
     var pickingWindow: Bool?
     var clientWithIcon: String?
