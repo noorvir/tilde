@@ -1,5 +1,6 @@
 @testable import TildeCore
 import Foundation
+import Network
 import TildeSkill
 import Testing
 
@@ -172,6 +173,35 @@ struct MCPServerTests {
         let body = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
         #expect(body["id"] as? Int == 4)
         #expect(text(of: try #require(body["result"] as? [String: Any])).contains("cancelled the annotation session"))
+    }
+
+    /// An agent that goes away during a wait ends the wait; it does not stay for its 600 s.
+    @Test func aClosedConnectionEndsItsWait() async throws {
+        let session = store.start(client: "Codex", url: nil)
+        let (returned, continuation) = AsyncStream<Void>.makeStream()
+        let http = try HTTPServer(port: 0) { [server] request in
+            let response = await server.handleLocal(request)
+            continuation.yield()
+            return response
+        }
+        let port = try await http.started()
+        defer { http.stop() }
+
+        let call = #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"wait_for_annotation","arguments":{"session_id":"\#(session.id)","wait_seconds":600}}}"#
+        let head = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer test\r\nContent-Type: application/json\r\nContent-Length: \(call.utf8.count)\r\n\r\n"
+        let connection = NWConnection(host: "127.0.0.1", port: try #require(NWEndpoint.Port(rawValue: port)), using: .tcp)
+        connection.start(queue: .global())
+        connection.send(content: Data((head + call).utf8), completion: .idempotent)
+        try await Task.sleep(for: .milliseconds(200))
+        connection.cancel()
+
+        Task {
+            try await Task.sleep(for: .seconds(5))
+            continuation.finish()
+        }
+        var answers = returned.makeAsyncIterator()
+        #expect(await answers.next() != nil)
+        store.finish(session.id, with: .cancelled)
     }
 
     // MARK: - Helpers
@@ -477,6 +507,39 @@ struct HTTPServerTests {
         request.httpMethod = "POST"
         let (data, _) = try await URLSession.shared.data(for: request)
         #expect(String(data: data, encoding: .utf8) == "one two three")
+    }
+
+    /// A caller that goes away ends its request: the handler's task is cancelled, and a
+    /// stream that answers it ends.
+    @Test func aClosedConnectionEndsItsRequest() async throws {
+        let (events, continuation) = AsyncStream<String>.makeStream()
+        let server = try HTTPServer(port: 0) { request in
+            continuation.yield("begun")
+            if request.path == "/stream" {
+                let (stream, chunks) = AsyncStream<Data>.makeStream()
+                chunks.onTermination = { _ in continuation.yield("ended") }
+                Task {
+                    try? await Task.sleep(for: .seconds(5))
+                    continuation.yield("not ended")
+                }
+                return HTTPResponse(status: 200, headers: ["Content-Type": "text/event-stream"], stream: stream)
+            }
+            try? await Task.sleep(for: .seconds(5))
+            continuation.yield(Task.isCancelled ? "ended" : "not ended")
+            return HTTPResponse(status: 200)
+        }
+        let port = try await server.started()
+        defer { server.stop() }
+
+        var next = events.makeAsyncIterator()
+        for path in ["/wait", "/stream"] {
+            let connection = NWConnection(host: "127.0.0.1", port: try #require(NWEndpoint.Port(rawValue: port)), using: .tcp)
+            connection.start(queue: .global())
+            connection.send(content: Data("POST \(path) HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".utf8), completion: .idempotent)
+            #expect(await next.next() == "begun")
+            connection.cancel()
+            #expect(await next.next() == "ended", "\(path)")
+        }
     }
 
     /// One caller may have 8 requests open on a limited listener, such as long polls; another

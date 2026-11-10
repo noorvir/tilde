@@ -26,7 +26,8 @@ public struct HTTPResponse: Sendable {
 }
 
 /// Minimal HTTP/1.1 server on the loopback interface. One request per connection;
-/// requests are handled concurrently so long-polling calls do not block others.
+/// requests are handled concurrently so long-polling calls do not block others. A caller
+/// that closes its connection cancels the task that handles its request.
 public final class HTTPServer: @unchecked Sendable {
     public typealias Handler = @Sendable (HTTPRequest) async -> HTTPResponse
 
@@ -101,6 +102,7 @@ public final class HTTPServer: @unchecked Sendable {
         connection.stateUpdateHandler = { [weak self] state in
             // A failed connection is cancelled too, so it counts down once, here.
             if case .cancelled = state {
+                reading.task?.cancel()
                 self?.connections.removeAll { $0 === reading }
             }
         }
@@ -125,6 +127,8 @@ public final class HTTPServer: @unchecked Sendable {
         var isDone = false
         /// The `Authorization` of a request being handled, when callers are limited.
         var caller: String?
+        /// Handles the request and sends its response; cancelled when the connection ends.
+        var task: Task<Void, Never>?
 
         init(connection: NWConnection) {
             self.connection = connection
@@ -162,10 +166,26 @@ public final class HTTPServer: @unchecked Sendable {
                     reading.caller = caller
                 }
                 let handler = self.handler
-                Task {
+                reading.task = Task {
                     let response = await handler(request)
                     self.send(response, on: connection)
+                    if let stream = response.stream {
+                        await self.send(stream, on: connection)
+                    }
                 }
+                self.cancelWhenClosed(connection)
+            }
+        }
+    }
+
+    /// After its request a caller sends nothing more, so the end of its bytes, or an error,
+    /// is the caller going away: nobody reads the response then.
+    private func cancelWhenClosed(_ connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] _, _, isComplete, error in
+            if isComplete || error != nil {
+                connection.cancel()
+            } else {
+                self?.cancelWhenClosed(connection)
             }
         }
     }
@@ -224,6 +244,7 @@ public final class HTTPServer: @unchecked Sendable {
         return .request(HTTPRequest(method: String(requestLine[0]), path: path, headers: headers, body: body))
     }
 
+    /// Sends the head and the body, and closes the connection unless a stream follows.
     private func send(_ response: HTTPResponse, on connection: NWConnection) {
         var head = "HTTP/1.1 \(response.status) \(Self.reason(response.status))\r\n"
         var headers = response.headers
@@ -238,23 +259,24 @@ public final class HTTPServer: @unchecked Sendable {
 
         var payload = Data(head.utf8)
         payload.append(response.body)
-        guard let stream = response.stream else {
-            connection.send(content: payload, completion: .contentProcessed { _ in
-                connection.cancel()
-            })
+        guard response.stream == nil else {
+            connection.send(content: payload, completion: .idempotent)
             return
         }
+        connection.send(content: payload, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
+    }
 
-        // Without a length, the end of the stream is marked by closing the connection.
-        connection.send(content: payload, completion: .idempotent)
-        Task {
-            for await chunk in stream {
-                connection.send(content: chunk, completion: .idempotent)
-            }
-            connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
-                connection.cancel()
-            })
+    /// Sends each chunk as it arrives. Without a length, the end of the stream is marked by
+    /// closing the connection.
+    private func send(_ stream: AsyncStream<Data>, on connection: NWConnection) async {
+        for await chunk in stream {
+            connection.send(content: chunk, completion: .idempotent)
         }
+        connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
+            connection.cancel()
+        })
     }
 
     private static func reason(_ status: Int) -> String {
