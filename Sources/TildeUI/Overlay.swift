@@ -50,6 +50,23 @@ final class OverlayWindow: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
+    /// Close (⌘W) acts on the key window. On Tilde's browser that is often this overlay, a
+    /// child window with no close button, so Close goes to the browser.
+    override func performClose(_ sender: Any?) {
+        guard let parent else {
+            super.performClose(sender)
+            return
+        }
+        parent.performClose(sender)
+    }
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(performClose(_:)), let parent {
+            return parent.validateUserInterfaceItem(item)
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
     /// Covers exactly the frame it is given, also under the menu bar, like the window it is on.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect

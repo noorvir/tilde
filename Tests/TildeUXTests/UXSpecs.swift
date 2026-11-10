@@ -109,10 +109,8 @@ struct UXSpecs {
             try await page.waitForBeats()
             step("page in Tilde's browser")
 
-            // ⌘W closes the window, and the page stops. The browser must have the keyboard: a
-            // click on its address field gives it (⌘W while the page's overlay has the keyboard
-            // closes nothing, a known bug).
-            try await app.press(page.url + "live.html")
+            // ⌘W closes the window while the overlay on its page has the keyboard, and the
+            // page stops.
             try await app.key(.w, command: true)
             try await app.waitNotToSee("Live page")
             try await page.waitForNoBeats()
