@@ -176,6 +176,29 @@ func TestADropAnswersOpenCallsAndHoldsNewLines(t *testing.T) {
 	}
 }
 
+// A reply that a drop cuts in the middle of its line does not reach the agent: its call gets the
+// error to call again, on a line of its own.
+func TestADropInTheMiddleOfALineAnswersItsCall(t *testing.T) {
+	socket := shortSocket(t)
+	listener := listen(t, socket)
+	defer listener.Close()
+
+	agentOut, stdout := io.Pipe()
+	read := lines(agentOut)
+	agentIn := start(t, socket, stdout)
+
+	mac := accept(t, listener)
+	mac.line(t)
+	agentIn.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_report"}}` + "\n"))
+	mac.line(t)
+	mac.conn.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"image","data":"iVBOR`))
+	mac.conn.Close()
+
+	if got := next(t, read); !strings.HasPrefix(got, `{"jsonrpc":"2.0","id":2,"error"`) || !strings.Contains(got, "Call again") {
+		t.Errorf("the cut call got %q", got)
+	}
+}
+
 // A request that waits too long for the link gets an error; a notification gets nothing.
 func TestAHeldRequestTimesOut(t *testing.T) {
 	set(t, &holdFor, 200*time.Millisecond)

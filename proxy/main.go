@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "1.2.0"
+const version = "1.2.1"
 
 var (
 	holdFor    = 30 * time.Second
@@ -135,14 +135,13 @@ func pipe(conn net.Conn, socket string, file os.FileInfo, hello []byte, held []h
 		reader := bufio.NewReader(conn)
 		for {
 			line, err := reader.ReadBytes('\n')
-			if len(line) > 0 {
-				open.answered(line)
-				agent.write(line)
-			}
 			if err != nil {
+				// A part of a line that the drop cut is not passed on: its call stays open.
 				close(tildeDone)
 				return
 			}
+			open.answered(line)
+			agent.write(line)
 		}
 	}()
 
