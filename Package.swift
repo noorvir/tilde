@@ -37,7 +37,7 @@ let package = Package(
         // tilde-ui-check, which uses no code of Tilde, compares the pictures. See Tests/Contract.
         .executableTarget(name: "tilde-state", dependencies: ["TildeCore", "TildeInstaller", "TildeUI"], swiftSettings: strict),
         .executableTarget(name: "tilde-ui-check", swiftSettings: strict),
-        .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill"]),
+        .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill", "tilde-mcp"]),
         .testTarget(name: "TildeInstallerTests", dependencies: ["TildeInstaller", "TildeSkill"]),
         // Snapshot and behaviour tests of the UI; they render offscreen and need a logged-in Mac.
         .testTarget(name: "TildeUITests", dependencies: ["TildeCore", "TildeUI"]),
