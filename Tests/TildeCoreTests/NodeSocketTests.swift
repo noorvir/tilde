@@ -45,6 +45,20 @@ struct NodeSocketTests {
         #expect(mode(socket.path) == 0o600)
     }
 
+    @Test func aLineThatIsNotAMessageGetsAParseError() async throws {
+        let folder = folder()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let socket = try NodeSocket(node: "box", mcp: MCPServer(store: store, localToken: "test"), folder: folder)
+        socket.start()
+        defer { socket.stop() }
+        let client = try await LineClient(path: socket.path)
+
+        try client.send("not json")
+        let reply = try await client.next()
+        #expect(reply["id"] is NSNull)
+        #expect((reply["error"] as? [String: Any])?["code"] as? Int == -32700)
+    }
+
     /// After a drop, tproxy connects again with its id: the agent keeps its MCP session with no
     /// new `initialize`, and another tproxy does not get it.
     @Test func aTproxyGetsItsSessionBackWhenItConnectsAgain() async throws {

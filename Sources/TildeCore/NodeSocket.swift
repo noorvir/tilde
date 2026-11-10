@@ -104,24 +104,37 @@ public final class NodeSocket: @unchecked Sendable {
                     guard !line.allSatisfy({ $0 == 0x20 || $0 == 0x0D }) else {
                         continue
                     }
+                    guard let message = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else {
+                        self.send(MCPServer.parseError, on: connection, session: session)
+                        continue
+                    }
                     // tproxy's id, before any other line: its session, if it had one.
-                    let hello = line.range(of: Data("tproxy/connect".utf8)) == nil ? nil : (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
-                    if hello?["method"] as? String == "tproxy/connect", let proxy = (hello?["params"] as? [String: Any])?["id"] as? String {
+                    if message["method"] as? String == "tproxy/connect", let proxy = (message["params"] as? [String: Any])?["id"] as? String {
                         session.proxy = proxy
                         session.id = self.proxySessions.last { $0.proxy == proxy }?.session
                         continue
                     }
                     guard self.openCalls < self.maxCalls else {
-                        self.refuse(line, on: connection, session: session)
+                        self.refuse(message, on: connection, session: session)
                         continue
                     }
                     self.openCalls += 1
                     let call = UUID()
                     session.calls[call] = Task { @MainActor in
-                        let id = await self.mcp.handleLine(line, session: session.id, node: self.node) { reply in
-                            self.send(reply, on: connection, session: session)
+                        let caller = MCPServer.Caller(session: session.id, node: self.node)
+                        let reply = await self.mcp.receive(message, from: caller)
+
+                        switch reply {
+                        case .none:
+                            break
+                        case .message(let line, let made):
+                            session.id = made ?? session.id
+                            self.send(line, on: connection, session: session)
+                        case .stream(let messages):
+                            for await line in messages {
+                                self.send(line, on: connection, session: session)
+                            }
                         }
-                        session.id = id ?? session.id
                         self.remember(session)
                         session.calls[call] = nil
                         self.openCalls -= 1
@@ -153,13 +166,11 @@ public final class NodeSocket: @unchecked Sendable {
     }
 
     /// A call over the limit gets an error at once; a notification over it is dropped.
-    @MainActor private func refuse(_ line: Data, on connection: NWConnection, session: Session) {
-        guard let message = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any], let id = message["id"], !(id is NSNull) else {
+    @MainActor private func refuse(_ message: [String: Any], on connection: NWConnection, session: Session) {
+        guard let id = message["id"], !(id is NSNull) else {
             return
         }
-        let error: [String: Any] = ["code": -32000, "message": "Too many calls at once from this machine. Call again when one has returned."]
-        if let reply = try? JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": id, "error": error]) {
-            send(reply, on: connection, session: session)
-        }
+        let reply = MCPServer.error(id: id, code: -32000, message: "Too many calls at once from this machine. Call again when one has returned.")
+        send(reply, on: connection, session: session)
     }
 }

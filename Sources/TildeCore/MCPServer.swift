@@ -2,17 +2,16 @@ import Foundation
 import OSLog
 import TildeSkill
 
-/// MCP over Streamable HTTP at `/mcp`. Replies are JSON, except tool calls that wait for the
-/// user: when the client sends a progress token and accepts event streams, those stream
-/// progress notifications ("Tilde is open: 2 notes so far") before the result.
-/// Exposes `start_annotation` and `wait_for_annotation` on top of a `SessionStore`.
+/// Tilde's MCP server: `start_annotation`, `wait_for_annotation` and `get_report` on top of a
+/// `SessionStore`, and sent feedback as resources. It takes JSON-RPC messages from any
+/// transport through `receive`: the HTTP listeners and the nodes' sockets.
 @MainActor
 public final class MCPServer {
     private let store: SessionStore
     private let inbox: URL
     /// What agents on this Mac send as `Authorization: Bearer <token>`.
-    private let localToken: String
-    /// Connected harnesses, keyed by `Mcp-Session-Id`.
+    let localToken: String
+    /// Connected harnesses, keyed by their MCP session.
     private var clients: [String: Client] = [:]
     /// Keeps those, oldest first, as a harness keeps its session when Tilde restarts.
     private let clientsFile: URL?
@@ -20,8 +19,7 @@ public final class MCPServer {
     private let log = Logger(subsystem: "dev.tilde.app", category: "mcp")
 
     private let supportedVersions = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
-    private let defaultWaitSeconds = 45.0
-    private let maxWaitSeconds = 600.0
+
     public init(store: SessionStore, localToken: String, inbox: URL = inboxRoot, clientsFile: URL? = nil) {
         self.store = store
         self.localToken = localToken
@@ -33,8 +31,32 @@ public final class MCPServer {
         }
     }
 
+    /// Who sent a message, as its transport knows it.
+    struct Caller {
+        /// The MCP session that an earlier `initialize` made.
+        var session: String?
+        /// The machine the message came from, nil for this Mac. It comes from the listener,
+        /// never from the message.
+        var node: String?
+        /// What the caller's app calls itself, when its transport says so.
+        var userAgent: String?
+    }
+
+    /// The answer to one message. Each `Data` is one JSON-RPC message, as JSON with no line
+    /// break in it.
+    enum Reply {
+        /// A notification or a client's response needs no answer.
+        case none
+        /// `session` is the MCP session that an `initialize` made.
+        case message(Data, session: String? = nil)
+        /// Progress notifications, then the result, for a tool call that waits for the user
+        /// and has a progress token. A reader that stops, such as a connection that ended,
+        /// ends the wait.
+        case stream(AsyncStream<Data>)
+    }
+
     /// Who asked: the harness's display name, such as "Codex", and the machine it runs on
-    /// when it came through a node's tunnel.
+    /// when it came from a node.
     private struct Client {
         let name: String
         let node: String?
@@ -55,114 +77,69 @@ public final class MCPServer {
         try? data.write(to: clientsFile, options: .atomic)
     }
 
-    /// A request from an agent on this Mac: only with the local token.
-    public func handleLocal(_ request: HTTPRequest) async -> HTTPResponse {
-        guard request.headers["authorization"] == "Bearer \(localToken)" else {
-            return HTTPResponse(status: 401)
-        }
-        return await handle(request, node: nil)
-    }
-
-    /// A request from a node's tunnel: only with that node's token, and only from a node that
-    /// is not linked by its socket.
-    public func handleFromNode(_ request: HTTPRequest, store: NodeStore) async -> HTTPResponse {
-        guard let node = store.node(forAuthorization: request.headers["authorization"]), node.socket == nil else {
-            return HTTPResponse(status: 401)
-        }
-        return await handle(request, node: node.host)
-    }
-
-    /// A message from a node's socket, in MCP's stdio framing: one JSON-RPC message per line,
-    /// one MCP session per connection. The socket is the node's identity, as its token is on
-    /// the port. Gives each reply line to `reply`, progress before a result for a call that
-    /// waits for the user, and returns the connection's session after the message.
-    public func handleLine(_ line: Data, session: String?, node: String, reply: (Data) -> Void) async -> String? {
-        var headers = ["host": "127.0.0.1", "content-type": "application/json", "accept": "application/json, text/event-stream"]
-        headers["mcp-session-id"] = session
-        let response = await handle(HTTPRequest(method: "POST", path: "/mcp", headers: headers, body: line), node: node)
-        if !response.body.isEmpty {
-            reply(response.body)
-        }
-        // Each server-sent event is one message: its data is the line.
-        if let stream = response.stream {
-            for await event in stream {
-                if let data = event.range(of: Data("data: ".utf8)) {
-                    reply(event[data.upperBound...].filter { $0 != 0x0A })
-                }
-            }
-        }
-        return response.headers["Mcp-Session-Id"] ?? session
-    }
-
-    /// A request whose caller is known: `node` is the machine it came from, nil for this Mac.
-    func handle(_ request: HTTPRequest, node: String?) async -> HTTPResponse {
-        guard isLocalRequest(request) else {
-            return HTTPResponse(status: 403)
-        }
-        guard request.path == "/mcp" else {
-            return HTTPResponse(status: 404)
-        }
-
-        switch request.method {
-        case "POST":
-            // A web page can only send JSON after a preflight, which gets 405.
-            guard request.headers["content-type"]?.lowercased().hasPrefix("application/json") == true else {
-                return HTTPResponse(status: 415)
-            }
-        case "DELETE":
-            // Only the machine that made a session can end it.
-            if let sessionID = request.headers["mcp-session-id"], clients[sessionID]?.node == node {
-                clients.removeValue(forKey: sessionID)
-                savedClients.removeAll { $0.id == sessionID }
-                saveClients()
-            }
-            return HTTPResponse(status: 200)
-        default:
-            return HTTPResponse(status: 405, headers: ["Allow": "POST, DELETE"])
-        }
-
-        guard let message = (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any] else {
-            return json(status: 400, error(id: NSNull(), code: -32700, message: "Parse error"))
-        }
+    /// Answers one JSON-RPC message, whatever carried it.
+    func receive(_ message: [String: Any], from caller: Caller) async -> Reply {
         guard let id = message["id"], let method = message["method"] as? String else {
-            // Notifications and client responses need no reply.
-            return HTTPResponse(status: 202)
+            return .none
         }
-
         let params = message["params"] as? [String: Any] ?? [:]
-        let sessionID = request.headers["mcp-session-id"]
 
         switch method {
         case "initialize":
-            return initialize(id: id, params: params, node: node)
+            return initialize(id: id, params: params, node: caller.node)
         case "ping":
-            return json(result(id: id, [:]))
+            return .message(result(id: id, [:]))
         case "tools/list":
-            return json(result(id: id, ["tools": tools]))
+            return .message(result(id: id, ["tools": tools]))
         case "tools/call":
-            let client = client(for: sessionID, userAgent: request.headers["user-agent"], node: node)
-            let accept = request.headers["accept"] ?? ""
-            if let token = (params["_meta"] as? [String: Any])?["progressToken"], accept.contains("text/event-stream"), waitsForUser(params) {
-                return progressStream(id: id, params: params, client: client, progressToken: token)
+            let call: ToolCall
+            do {
+                call = try ToolCall(params)
+            } catch {
+                return .message(result(id: id, toolError(error.message)))
             }
-            let content = await callTool(params: params, client: client)
-            return json(result(id: id, content))
+
+            let client = client(for: caller)
+            if let token = (params["_meta"] as? [String: Any])?["progressToken"], call.waitsForUser {
+                return .stream(progressStream(id: id, call: call, client: client, progressToken: token))
+            }
+            let content = await run(call, for: client)
+            return .message(result(id: id, content))
         case "resources/list":
-            return json(result(id: id, ["resources": resources(for: node)]))
+            return .message(result(id: id, ["resources": resources(for: caller.node)]))
         case "resources/read":
             let uri = params["uri"] as? String ?? ""
-            guard let contents = readResource(uri, node: node) else {
-                return json(error(id: id, code: -32002, message: "Resource not found: \(uri)"))
+            guard let contents = readResource(uri, node: caller.node) else {
+                return .message(Self.error(id: id, code: -32002, message: "Resource not found: \(uri)"))
             }
-            return json(result(id: id, ["contents": contents]))
+            return .message(result(id: id, ["contents": contents]))
         default:
-            return json(error(id: id, code: -32601, message: "Method not found: \(method)"))
+            return .message(Self.error(id: id, code: -32601, message: "Method not found: \(method)"))
         }
+    }
+
+    /// Ends an MCP session. Only the machine that made a session can end it.
+    func end(session: String, node: String?) {
+        guard clients[session]?.node == node else {
+            return
+        }
+        clients.removeValue(forKey: session)
+        savedClients.removeAll { $0.id == session }
+        saveClients()
+    }
+
+    /// The JSON-RPC error for a message that is not a JSON object.
+    nonisolated static var parseError: Data {
+        error(id: NSNull(), code: -32700, message: "Parse error")
+    }
+
+    nonisolated static func error(id: Any, code: Int, message: String) -> Data {
+        encoded(["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]])
     }
 
     // MARK: - Methods
 
-    private func initialize(id: Any, params: [String: Any], node: String?) -> HTTPResponse {
+    private func initialize(id: Any, params: [String: Any], node: String?) -> Reply {
         let requested = params["protocolVersion"] as? String ?? ""
         let version = supportedVersions.contains(requested) ? requested : supportedVersions.last!
 
@@ -184,51 +161,42 @@ public final class MCPServer {
             "serverInfo": ["name": "tilde", "version": "0.2.0"],
             "instructions": tildeSkillBody,
         ])
-        return json(body, headers: ["Mcp-Session-Id": sessionID])
+        return .message(body, session: sessionID)
     }
 
     // MARK: - Progress
 
-    private func waitsForUser(_ params: [String: Any]) -> Bool {
-        let name = params["name"] as? String
-        let arguments = params["arguments"] as? [String: Any] ?? [:]
-        let waitSeconds = arguments["wait_seconds"] as? Double ?? defaultWaitSeconds
-        return (name == "start_annotation" || name == "wait_for_annotation") && waitSeconds > 0
-    }
-
-    /// Runs the tool call and streams a progress notification every 2 s until it returns.
-    private func progressStream(id: Any, params: [String: Any], client: Client, progressToken: Any) -> HTTPResponse {
+    /// Runs the tool call and gives a progress notification every 2 s until it returns.
+    private func progressStream(id: Any, call: ToolCall, client: Client, progressToken: Any) -> AsyncStream<Data> {
         let (stream, continuation) = AsyncStream<Data>.makeStream()
-        let waitedSession = (params["arguments"] as? [String: Any])?["session_id"] as? String
 
         let ticker = Task {
             var progress = 0
             while !Task.isCancelled {
-                let waited = waitedSession.flatMap(store.session).flatMap { $0.node == client.node ? $0 : nil }
+                let waited = call.waitedSession.flatMap(store.session).flatMap { $0.node == client.node ? $0 : nil }
                 let session = waited ?? store.active
                 let notification: [String: Any] = [
                     "jsonrpc": "2.0",
                     "method": "notifications/progress",
                     "params": ["progressToken": progressToken, "progress": progress, "message": progressMessage(notes: session?.noteCount ?? 0)],
                 ]
-                continuation.yield(event(notification))
+                continuation.yield(Self.encoded(notification))
                 progress += 1
                 try? await Task.sleep(for: .seconds(2))
             }
         }
-        let call = Task {
-            let content = await callTool(params: params, client: client)
+        let running = Task {
+            let content = await run(call, for: client)
             ticker.cancel()
-            continuation.yield(event(result(id: id, content)))
+            continuation.yield(result(id: id, content))
             continuation.finish()
         }
-        // A reader that stops, such as a connection that ended, ends the wait.
         continuation.onTermination = { _ in
             ticker.cancel()
-            call.cancel()
+            running.cancel()
         }
 
-        return HTTPResponse(status: 200, headers: ["Content-Type": "text/event-stream", "Cache-Control": "no-cache"], stream: stream)
+        return stream
     }
 
     private func progressMessage(notes: Int) -> String {
@@ -240,11 +208,6 @@ public final class MCPServer {
         default:
             return "Tilde is open on the user's screen: \(notes) notes so far"
         }
-    }
-
-    private func event(_ message: [String: Any]) -> Data {
-        let data = (try? JSONSerialization.data(withJSONObject: message)) ?? Data()
-        return Data("event: message\ndata: ".utf8) + data + Data("\n\n".utf8)
     }
 
     // MARK: - Resources
@@ -414,47 +377,90 @@ public final class MCPServer {
         ]
     }
 
-    private func callTool(params: [String: Any], client: Client) async -> [String: Any] {
-        let name = params["name"] as? String ?? ""
-        let arguments = params["arguments"] as? [String: Any] ?? [:]
-        let waitSeconds = min(max(arguments["wait_seconds"] as? Double ?? defaultWaitSeconds, 0), maxWaitSeconds)
+    /// A `tools/call`, read once from its params.
+    private enum ToolCall {
+        case start(url: URL?, capturesContext: Bool, waitSeconds: Double)
+        case wait(session: String, waitSeconds: Double)
+        case report(id: String)
 
-        switch name {
-        case "start_annotation":
-            var url: URL?
-            if let text = arguments["url"] as? String {
-                guard let parsed = URL(string: text), ["http", "https"].contains(parsed.scheme?.lowercased()) else {
-                    return toolError("Invalid url: \(text). Use an http or https address.")
+        /// What is wrong with a call, in words for the agent.
+        struct Invalid: Error {
+            let message: String
+        }
+
+        private static let defaultWaitSeconds = 45.0
+        private static let maxWaitSeconds = 600.0
+
+        init(_ params: [String: Any]) throws(Invalid) {
+            let name = params["name"] as? String ?? ""
+            let arguments = params["arguments"] as? [String: Any] ?? [:]
+            let waitSeconds = min(max(arguments["wait_seconds"] as? Double ?? Self.defaultWaitSeconds, 0), Self.maxWaitSeconds)
+
+            switch name {
+            case "start_annotation":
+                var url: URL?
+                if let text = arguments["url"] as? String {
+                    guard let parsed = URL(string: text), ["http", "https"].contains(parsed.scheme?.lowercased()) else {
+                        throw Invalid(message: "Invalid url: \(text). Use an http or https address.")
+                    }
+                    url = parsed
                 }
-                url = parsed
-            }
 
-            let context = arguments["context"] as? String ?? "window"
-            guard context == "window" || context == "none" else {
-                return toolError("Invalid context: \(context). Use \"window\" or \"none\".")
-            }
+                let context = arguments["context"] as? String ?? "window"
+                guard context == "window" || context == "none" else {
+                    throw Invalid(message: "Invalid context: \(context). Use \"window\" or \"none\".")
+                }
+                self = .start(url: url, capturesContext: context == "window", waitSeconds: waitSeconds)
 
-            let session = store.start(client: client.name, node: client.node, url: url, capturesContext: context == "window")
+            case "wait_for_annotation":
+                guard let session = arguments["session_id"] as? String else {
+                    throw Invalid(message: "session_id is required")
+                }
+                self = .wait(session: session, waitSeconds: waitSeconds)
+
+            case "get_report":
+                self = .report(id: arguments["id"] as? String ?? "")
+
+            default:
+                throw Invalid(message: "Unknown tool: \(name)")
+            }
+        }
+
+        var waitsForUser: Bool {
+            switch self {
+            case .start(_, _, let waitSeconds), .wait(_, let waitSeconds):
+                return waitSeconds > 0
+            case .report:
+                return false
+            }
+        }
+
+        /// The session that the call waits for, when it names one.
+        var waitedSession: String? {
+            if case .wait(let session, _) = self {
+                return session
+            }
+            return nil
+        }
+    }
+
+    private func run(_ call: ToolCall, for client: Client) async -> [String: Any] {
+        switch call {
+        case .start(let url, let capturesContext, let waitSeconds):
+            let session = store.start(client: client.name, node: client.node, url: url, capturesContext: capturesContext)
             let state = await store.wait(for: session.id, node: client.node, seconds: waitSeconds)
             return toolResult(sessionID: session.id, state: state)
 
-        case "wait_for_annotation":
-            guard let sessionID = arguments["session_id"] as? String else {
-                return toolError("session_id is required")
-            }
+        case .wait(let sessionID, let waitSeconds):
             let state = await store.wait(for: sessionID, node: client.node, seconds: waitSeconds)
             return toolResult(sessionID: sessionID, state: state)
 
-        case "get_report":
-            let id = arguments["id"] as? String ?? ""
+        case .report(let id):
             guard let saved = savedReport(id, node: client.node) else {
                 return toolError("No Tilde report with id \(id)")
             }
             let images = saved.images.flatMap { [textBlock($0.name), imageBlock($0.data)] }
             return ["content": [textBlock(saved.report)] + images]
-
-        default:
-            return toolError("Unknown tool: \(name)")
         }
     }
 
@@ -477,15 +483,14 @@ public final class MCPServer {
 
     // MARK: - Helpers
 
-    /// Who calls: the session's saved client, only for the machine whose token it came with,
-    /// as the machine comes from the listener and never from the caller.
-    private func client(for sessionID: String?, userAgent: String?, node: String?) -> Client {
-        if let sessionID, let client = clients[sessionID], client.node == node {
+    /// Who calls: the session's saved client, only for the machine that made the session.
+    private func client(for caller: Caller) -> Client {
+        if let session = caller.session, let client = clients[session], client.node == caller.node {
             return client
         }
-        // An unknown session: the request may still say who sent it.
-        log.notice("MCP session unknown, user agent \(userAgent ?? "-", privacy: .public)")
-        return Client(name: userAgent.flatMap(Self.knownName(forClient:)) ?? "Agent", node: node)
+        // An unknown session: the caller may still say who it is.
+        log.notice("MCP session unknown, user agent \(caller.userAgent ?? "-", privacy: .public)")
+        return Client(name: caller.userAgent.flatMap(Self.knownName(forClient:)) ?? "Agent", node: caller.node)
     }
 
     /// The app name for an MCP `clientInfo.name`. The HUD shows it with that app's icon, so
@@ -515,23 +520,6 @@ public final class MCPServer {
         return known.first { lowercased.contains($0.match) }?.name
     }
 
-    /// Rejects DNS-rebinding and browser cross-origin requests; the listener is loopback-only.
-    private func isLocalRequest(_ request: HTTPRequest) -> Bool {
-        let localHosts = ["127.0.0.1", "localhost", "[::1]"]
-        let host = request.headers["host"] ?? ""
-        let hostName = host.hasPrefix("[") ? String(host.prefix { $0 != "]" }) + "]" : String(host.split(separator: ":").first ?? "")
-        guard localHosts.contains(hostName) else {
-            return false
-        }
-
-        // A page in a sandboxed frame or from a file sends "null", which is not local.
-        guard let origin = request.headers["origin"] else {
-            return true
-        }
-        let originHost = URL(string: origin)?.host.map { $0 == "::1" ? "[::1]" : $0 } ?? ""
-        return localHosts.contains(originHost)
-    }
-
     private func text(_ value: String) -> [String: Any] {
         ["content": [["type": "text", "text": value]]]
     }
@@ -540,18 +528,11 @@ public final class MCPServer {
         ["content": [["type": "text", "text": message]], "isError": true]
     }
 
-    private func result(id: Any, _ value: [String: Any]) -> [String: Any] {
-        ["jsonrpc": "2.0", "id": id, "result": value]
+    private func result(id: Any, _ value: [String: Any]) -> Data {
+        Self.encoded(["jsonrpc": "2.0", "id": id, "result": value])
     }
 
-    private func error(id: Any, code: Int, message: String) -> [String: Any] {
-        ["jsonrpc": "2.0", "id": id, "error": ["code": code, "message": message]]
-    }
-
-    private func json(status: Int = 200, _ body: [String: Any], headers: [String: String] = [:]) -> HTTPResponse {
-        let data = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
-        var allHeaders = headers
-        allHeaders["Content-Type"] = "application/json"
-        return HTTPResponse(status: status, headers: allHeaders, body: data)
+    private nonisolated static func encoded(_ message: [String: Any]) -> Data {
+        (try? JSONSerialization.data(withJSONObject: message)) ?? Data()
     }
 }

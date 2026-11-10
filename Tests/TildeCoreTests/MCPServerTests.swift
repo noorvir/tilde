@@ -158,6 +158,22 @@ struct MCPServerTests {
         #expect(String(decoding: last, as: UTF8.self).contains("cancelled the annotation session"))
     }
 
+    /// A client that takes no event stream gets the result alone, as JSON.
+    @Test func withoutAnEventStreamAWaitingCallGivesOnlyTheResult() async throws {
+        let session = store.start(client: "Codex", url: nil)
+        store.finish(session.id, with: .cancelled)
+        let response = await post([
+            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+            "params": ["name": "wait_for_annotation", "arguments": ["session_id": session.id, "wait_seconds": 30], "_meta": ["progressToken": 7]],
+        ], session: nil)
+        #expect(response.headers["Content-Type"] == "application/json")
+        #expect(response.stream == nil)
+
+        let body = try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+        #expect(body["id"] as? Int == 4)
+        #expect(text(of: try #require(body["result"] as? [String: Any])).contains("cancelled the annotation session"))
+    }
+
     // MARK: - Helpers
 
     private func request(_ method: String, _ params: [String: Any], on server: MCPServer? = nil) async throws -> [String: Any] {
@@ -428,7 +444,7 @@ struct HTTPServerTests {
         let server = try HTTPServer(port: 0) { request in
             HTTPResponse(status: 200, headers: ["X-Path": request.path], body: request.body)
         }
-        let port = try await start(server)
+        let port = try await server.started()
         defer { server.stop() }
 
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp?x=1")!)
@@ -454,7 +470,7 @@ struct HTTPServerTests {
             }
             return HTTPResponse(status: 200, headers: ["Content-Type": "text/event-stream"], stream: stream)
         }
-        let port = try await start(server)
+        let port = try await server.started()
         defer { server.stop() }
 
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/mcp")!)
@@ -472,7 +488,7 @@ struct HTTPServerTests {
             }
             return HTTPResponse(status: 200)
         }
-        let port = try await start(server)
+        let port = try await server.started()
         defer { server.stop() }
 
         func status(_ token: String) async throws -> Int {
@@ -491,11 +507,14 @@ struct HTTPServerTests {
             #expect(try await poll.value == 200)
         }
     }
+}
 
-    private func start(_ server: HTTPServer) async throws -> UInt16 {
+extension HTTPServer {
+    /// Starts the server and gives its port.
+    func started() async throws -> UInt16 {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UInt16, Error>) in
             let resumed = Locked(false)
-            server.start { status in
+            start { status in
                 guard resumed.swap(true) == false else {
                     return
                 }
