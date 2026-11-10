@@ -51,6 +51,8 @@ enum Key: Int {
     case delete = 51
     case leftBracket = 33
     case rightBracket = 30
+    case r = 15
+    case space = 49
 }
 
 /// The built app in a throwaway environment, driven from outside: real input and the
@@ -180,6 +182,23 @@ final class TildeApp {
     func seen() async throws -> [Seen] {
         let result = try await drive("ax", ["pid": pid])
         return (result["tree"] as? [[String: Any]] ?? []).map(Seen.init).flatMap(\.flattened)
+    }
+
+    /// Waits until another app, such as Safari, shows an element with this name.
+    func waitToSee(_ name: String, inApp appName: String, timeout: Double = 20, sourceLocation: SourceLocation = #_sourceLocation) async throws -> Seen {
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            if let app = NSWorkspace.shared.runningApplications.first(where: { $0.localizedName == appName }) {
+                let result = try await drive("ax", ["pid": app.processIdentifier])
+                if let found = (result["tree"] as? [[String: Any]] ?? []).map(Seen.init).flatMap(\.flattened).first(where: { $0.name == name }) {
+                    return found
+                }
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        await saveFailure(named: name)
+        Issue.record("\"\(name)\" is not on screen in \(appName)", sourceLocation: sourceLocation)
+        throw UXFailure(description: "\(name) is not on screen in \(appName)")
     }
 
     /// Clicks the control with this name with the mouse, as a user does: unlike an
@@ -497,6 +516,7 @@ final class ChangingWindow {
 final class TestPage {
     let url: String
     private let server = Process()
+    private let requests: URL
 
     init(port: Int = 7399) throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-page-\(UUID().uuidString)", isDirectory: true)
@@ -516,10 +536,17 @@ final class TestPage {
         try scrollPage("panel", body: "<body style=\"margin:0;overflow:hidden\"><main id=panel style=\"height:100vh;overflow:auto\">\(rows)</main>", scroll: "panel.scrollTop=120")
         try scrollPage("whole", body: "<body style=\"margin:0\">\(rows)", scroll: "window.scrollTo(0,120)")
         try "<!doctype html><title>Other</title><h1>Other page heading</h1>".write(to: folder.appendingPathComponent("other.html"), atomically: true, encoding: .utf8)
+        // A page that runs: it asks the server for /beat five times a second while it is loaded.
+        try """
+        <!doctype html><meta charset=utf-8><title>Live</title><h1 style="margin: 300px 40px">Live page</h1>
+        <script>setInterval(() => fetch("beat?" + Date.now()).catch(() => {}), 200)</script>
+        """.write(to: folder.appendingPathComponent("live.html"), atomically: true, encoding: .utf8)
+        requests = folder.appendingPathComponent("requests.log")
+        FileManager.default.createFile(atPath: requests.path, contents: nil)
         server.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        server.arguments = ["-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]
+        server.arguments = ["-u", "-m", "http.server", String(port), "--bind", "127.0.0.1", "--directory", folder.path]
         server.standardOutput = FileHandle.nullDevice
-        server.standardError = FileHandle.nullDevice
+        server.standardError = try FileHandle(forWritingTo: requests)
         try server.run()
         url = "http://127.0.0.1:\(port)/"
         // The page must not fail to load because the server is not listening yet.
@@ -539,5 +566,67 @@ final class TestPage {
     func stop() {
         server.terminate()
         waitForExit(server)
+    }
+
+    /// How many times a live page has asked for /beat; the server logs each request.
+    var beats: Int {
+        ((try? String(contentsOf: requests, encoding: .utf8)) ?? "").components(separatedBy: "GET /beat").count - 1
+    }
+
+    /// Waits until a live page runs: new beats arrive.
+    func waitForBeats(timeout: Double = 10, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let before = beats
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            if beats >= before + 3 {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        Issue.record("No live page runs", sourceLocation: sourceLocation)
+        throw UXFailure(description: "No live page runs")
+    }
+
+    /// Waits until no live page runs: no beat for a whole second, five times its interval.
+    func waitForNoBeats(timeout: Double = 10, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        var last = (count: beats, at: Date())
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            try await Task.sleep(for: .milliseconds(100))
+            if beats != last.count {
+                last = (beats, Date())
+            } else if Date().timeIntervalSince(last.at) >= 1 {
+                return
+            }
+        }
+        Issue.record("A live page still runs", sourceLocation: sourceLocation)
+        throw UXFailure(description: "A live page still runs")
+    }
+}
+
+/// Safari with one page, as the user's other browser.
+final class Safari {
+    private let app: NSRunningApplication
+
+    private init(app: NSRunningApplication) {
+        self.app = app
+    }
+
+    static func open(_ url: String) async throws -> Safari {
+        let page = try #require(URL(string: url))
+        let app = try await NSWorkspace.shared.open([page], withApplicationAt: URL(fileURLWithPath: "/Applications/Safari.app"), configuration: NSWorkspace.OpenConfiguration())
+        return Safari(app: app)
+    }
+
+    /// Quits it and waits until it is gone, so that its pages run no more.
+    func quit() {
+        app.terminate()
+        let end = Date().addingTimeInterval(10)
+        while !app.isTerminated, Date() < end {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        if !app.isTerminated {
+            app.forceTerminate()
+        }
     }
 }

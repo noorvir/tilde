@@ -27,13 +27,19 @@ rewrite:
    session with a note and a clip, ⌘↩, "Copied", the report folder on the machine; a machine
    that cannot be reached gets its own warning and the report still copies.
 4. **A rectangle leaves a label that hides on another page, and a crash leaves only its note**
-   (`aRectangleLeaves…`): drawing on the canvas, a note on another app's window that hides on
-   its other page and follows the window; the app killed once the session is saved; Restore
-   brings the note back.
-5. **Two clips reach the agent as videos** (`twoClipsReachTheAgentAsVideos`): record, pause,
-   resume, stop; the clip in the preview's player; Esc asks before it drops a clip; a click on
-   a window chooses it; Send while recording; both videos play, the first leaves out its pause,
-   and the second has the window's shape.
+   (`aRectangleLeaves…`): drawing on the canvas, with the R key picking the rectangle (not
+   recording mode); a note on another app's window that hides on its other page and follows
+   the window; the app killed once the session is saved; Restore brings the note back.
+5. **Two clips reach the agent as videos** (`twoClipsReachTheAgentAsVideos`): the R key into
+   recording mode, which starts by choosing, and Esc keeps the screen; record, Space pauses,
+   resume, stop; the clip in the preview's player; Esc asks before it drops a clip; the record
+   toggle chooses at once, and a click on a window chooses it; Send while recording; both
+   videos play, the first leaves out its pause, and the second has the window's shape.
+6. **A click in another browser offers Tilde's browser, which unloads the page on close**
+   (`aClickInAnotherBrowser…`): a click on a page in Safari opens the comment box and "Open in
+   Tilde's browser", which stays after Esc; the button opens the page in Tilde's browser,
+   which runs it; ⌘W closes the window and the page stops (it asks the test server for
+   `/beat` while it runs).
 
 ## Where the other stories are
 

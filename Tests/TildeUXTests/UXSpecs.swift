@@ -16,10 +16,10 @@ struct UXSpecs {
     /// Clicks Annotate. A window of an inactive app takes its first click to come forward, as
     /// on any Mac, so a second click may be needed.
     private func annotate(_ app: TildeApp) async throws {
-        try await app.press("Annotate (Double-tap ⌃)")
+        try await app.press("Annotate")
         try await Task.sleep(for: .milliseconds(100))
-        if try await app.seen().contains(where: { $0.name == "Annotate (Double-tap ⌃)" }) {
-            try await app.press("Annotate (Double-tap ⌃)")
+        if try await app.seen().contains(where: { $0.name == "Annotate" }) {
+            try await app.press("Annotate")
         }
         try await app.waitToSee("Annotating")
     }
@@ -75,6 +75,47 @@ struct UXSpecs {
             let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 5])
             #expect(report.text.contains("Make this bigger"))
             #expect(report.images.count >= 1)
+        }
+    }
+
+    // MARK: - Another browser
+
+    /// The first click on an element in another browser offers Tilde's browser, which opens
+    /// that page; closing its window unloads the page, so nothing on it runs on.
+    @Test func aClickInAnotherBrowserOffersTildesBrowserWhichUnloadsThePageOnClose() async throws {
+        let page = try TestPage()
+        defer { page.stop() }
+        let safari = try await Safari.open(page.url + "live.html")
+        defer { safari.quit() }
+        try await withApp { app in
+            let heading = try await app.waitToSee("Live page", inApp: "Safari")
+            try await page.waitForBeats()
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+
+            // The click still opens the comment box; the offer stays after Esc closes it.
+            try await app.click(at: CGPoint(x: heading.frame.midX, y: heading.frame.midY))
+            try await app.waitToSee("add")
+            try await app.waitToSee("Open in Tilde's browser")
+            try await app.key(.escape)
+            try await app.waitNotToSee("add")
+            try await app.waitToSee("Open in Tilde's browser")
+
+            // Tilde's browser opens the same page and runs it, with Safari gone.
+            try await app.press("Open in Tilde's browser")
+            try await app.waitToSee("Live page", timeout: 20)
+            try await app.waitNotToSee("Open in Tilde's browser")
+            safari.quit()
+            try await page.waitForBeats()
+            step("page in Tilde's browser")
+
+            // ⌘W closes the window, and the page stops. The browser must have the keyboard: a
+            // click on its address field gives it (⌘W while the page's overlay has the keyboard
+            // closes nothing, a known bug).
+            try await app.press(page.url + "live.html")
+            try await app.key(.w, command: true)
+            try await app.waitNotToSee("Live page")
+            try await page.waitForNoBeats()
         }
     }
 
@@ -221,13 +262,16 @@ struct UXSpecs {
             try await app.waitToSee("For the remote", timeout: 3)
             try await app.key(.enter)
             try await app.waitToSeeText(containing: "1 note")
-            // A clip goes to the machine with the images.
-            try await app.press("Record a video")
+            // A clip goes to the machine with the images. Recording mode starts by choosing;
+            // Esc keeps the screen and stays in recording mode.
+            try await app.press("Record screen")
+            try await app.waitToSee("Choose a window")
+            try await app.key(.escape)
             try await app.waitToSeeText(containing: "Ready to record")
-            try await app.press("Start recording the screen")
+            try await app.press("Record")
             try await app.waitToSeeText(containing: "Recording 0:0")
             try await Task.sleep(for: .seconds(1))
-            try await app.press("Stop and add the recording to the list")
+            try await app.press("Stop recording")
             try await app.waitToSeeText(containing: "Ready to record")
             try await app.key(.enter, command: true)
             // "Copied" at once, and gone again while the images go to the machine.
@@ -277,13 +321,14 @@ struct UXSpecs {
         defer { first.quit() }
         try await first.doubleTap("control")
         try await first.waitToSee("Annotating")
-        try await first.press("Draw on the screen")
+        try await first.press("Draw")
         try await first.waitToSee("Done, esc")
         try await first.waitToSee("Drawing canvas", timeout: 15)
         let frame = ChangingWindow.frame
         let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
         let end = CGPoint(x: start.x + 200, y: start.y + 120)
-        try await first.press("Rectangle")
+        // R picks the rectangle while drawing; it does not go to recording mode.
+        try await first.key(.r)
         try await first.drag(from: start, to: end)
         try await first.waitToSee("add", timeout: 15)
         try await first.type("On the window")
@@ -355,18 +400,22 @@ struct UXSpecs {
             let session = try #require(reply.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0 != "." && $0 != " " && $0 != "\n" }))
             try await app.waitToSee("Annotating")
 
-            try await app.press("Record a video")
+            // The R key goes to recording mode, which starts by choosing; Esc keeps the screen.
+            try await app.key(.r)
+            try await app.waitToSee("Choose a window")
+            try await app.key(.escape)
             try await app.waitToSeeText(containing: "Ready to record")
             let started = Date()
-            try await app.press("Start recording the screen")
+            try await app.press("Record")
             try await app.waitToSeeText(containing: "Recording 0:0")
             try await Task.sleep(for: .seconds(2))
-            try await app.press("Pause the recording")
+            // Space pauses the clip, as the button does.
+            try await app.key(.space)
             try await app.waitToSeeText(containing: "Paused 0:0")
             try await Task.sleep(for: .seconds(2))
-            try await app.press("Resume the recording")
+            try await app.press("Resume")
             try await Task.sleep(for: .seconds(1))
-            try await app.press("Stop and add the recording to the list")
+            try await app.press("Stop recording")
             let firstClipTime = Date().timeIntervalSince(started)
             try await app.waitToSeeText(containing: "Ready to record")
 
@@ -382,19 +431,19 @@ struct UXSpecs {
             // Esc goes back to annotating.
             try await app.key(.escape)
             try await app.waitToSee("Annotating")
-            try await app.press("Record a video")
-            try await app.waitToSeeText(containing: "Ready to record")
 
-            // A click on the fixture's window chooses it for the next clip.
-            try await app.press("Choose a screen or window to record")
+            // The record toggle chooses at once: a click on the fixture's window chooses it for
+            // the next clip, and the subtitle names it.
+            try await app.press("Record screen")
             try await app.waitToSee("Choose a window")
             let frame = ChangingWindow.frame
             try await app.click(at: CGPoint(x: frame.minX + 20, y: frame.maxY - 20))
-            try await app.waitToSee("Start recording tilde-ux-fixture")
+            try await app.waitToSeeText(containing: "Ready to record")
+            try await app.waitToSeeText(containing: "tilde-ux-fixture")
 
             // Send while a clip is in progress keeps that clip too. Before that, Esc asks to
             // discard the clip, and Esc again keeps it.
-            try await app.press("Start recording tilde-ux-fixture")
+            try await app.press("Record")
             try await app.waitToSeeText(containing: "Recording 0:0")
             try await app.key(.escape)
             try await app.waitToSee("Discard the recording?")
