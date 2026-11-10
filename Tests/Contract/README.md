@@ -15,6 +15,9 @@ Run it on every commit.
 - **Checker:** `tilde-ui-check` uses no code of Tilde.
 - **New UI state:** add a state file, run `scripts/ui-check.sh --record <name>`, look at the picture, commit it. A picture records what you approve, bugs too.
 - **New rule:** add a row. A key left out of `expect` is not checked.
+- **Single keys:** a row with `key` (the default name, such as `"R"` or `"Space"`) in place of
+  `event` presses that key while Tilde has the keyboard; `keyAction` is the action it chose
+  (such as `rectangleTool`), or null for none.
 
 Pictures belong to one macOS version and one SDK: `pictures/macos-<major.minor>/`, with the exact setup in `recorded-on.txt`. On another version the check says that it skips them. On the setup in `recorded-on.txt` every pixel must be the same; when only the SDK or patch version differs, it says "pixels approximate" and lets a channel differ by 2 in at most 0.1 % of the pixels. Record only on the macOS they are for.
 
@@ -28,4 +31,4 @@ The check finds these changes (one run, macOS 26.6.2, SDK 15.2, `scripts/ui-chec
 | A label ("Paused" → "Pauzed") | 6 |
 | A removed control (the Clear all button) | 41 |
 
-Clicks, keys and real apps are not tested here: the 5 flows in `Tests/TildeUXTests` do that before a release, in at most 3 minutes (`scripts/ux.sh`, or `scripts/ux-vm.sh` in the VM).
+Clicks, keys and real apps are not tested here: the 6 flows in `Tests/TildeUXTests` do that before a release, in at most 3 minutes (`scripts/ux.sh`, or `scripts/ux-vm.sh` in the VM).

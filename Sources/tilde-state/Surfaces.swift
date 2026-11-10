@@ -173,6 +173,8 @@ enum Surfaces {
         case "display": .screen(Fixtures.display)
         default: state.scoped == true ? .window(Fixtures.window) : nil
         }
+        // A stand-in for the screen Record records, never the name of the Mac that draws it.
+        controller.screenName = { _ in "Studio Display" }
         controller.setStateForTesting(
             session: state.session.map { Fixtures.session(client: $0.client, node: $0.node, isLocal: $0.isLocal ?? false) },
             drafts: drafts,

@@ -8,6 +8,6 @@
   "session": {
     "client": "Codex"
   },
-  "notes": 1,
-  "pickingWindow": true
+  "notes": 3,
+  "browserAccessory": true
 }

@@ -5,6 +5,7 @@
     "client": "Codex"
   },
   "notes": 1,
+  "recording": "ready",
   "pickingWindow": true,
   "hudInBrowser": true,
   "scoped": true

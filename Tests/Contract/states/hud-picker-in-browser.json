@@ -9,6 +9,7 @@
     "client": "Codex"
   },
   "notes": 0,
+  "recording": "ready",
   "pickingWindow": true,
   "sourcePicker": "windows",
   "hudInBrowser": true,

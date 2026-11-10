@@ -1877,11 +1877,15 @@ final class AnnotationController: ObservableObject {
     /// The name of what Record records, such as "Studio Display", for the HUD.
     var clipSourceName: String {
         switch clipSource {
-        case .screen(let display): SourcePickerModel.name(of: display)
+        case .screen(let display): screenName(display)
         case .window(let window): scopeName ?? window.app
         case .phone(let phone): phone.name
         }
     }
+
+    /// A screen's name as the system gives it; pictures of the HUD give a stand-in, so that
+    /// they never show the name of the Mac that drew them.
+    var screenName: (CGDirectDisplayID) -> String = SourcePickerModel.name(of:)
 
     /// The display the floating HUD is on, which its panel keeps up to date as it is placed
     /// and dragged.

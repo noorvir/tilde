@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "surface": "tooltip",
+  "size": [
+    300,
+    44
+  ],
+  "text": "Annotate",
+  "keys": [
+    "⌃⌃",
+    "Space"
+  ]
+}

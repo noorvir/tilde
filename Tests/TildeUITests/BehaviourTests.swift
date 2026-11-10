@@ -148,27 +148,17 @@ struct BehaviourTests {
         controller.toggleWindowPick()
         controller.openSourcePicker()
         #expect(controller.isRecordMode)
-        #expect(controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) })
-
-        open()
-        controller.toggleWindowPick()
-        controller.openSourcePicker()
-        #expect(!controller.isRecordMode)
-        #expect(controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) })
-        controller.choose(.phone(Fixtures.phone))
         #expect(controller.isSourcePickerOpen)
-
-        controller.toggleRecordingMode()
-        #expect(controller.isRecordMode)
-        #expect(controller.isSourcePickerOpen)
+        let offersPhone = controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) }
+        #expect(offersPhone)
         controller.choose(.phone(Fixtures.phone))
         #expect(!controller.isPickingWindow)
         #expect(controller.clipSource == .phone(Fixtures.phone))
     }
 
-    /// The window button starts the way the user last chose, also after a restart: in the
-    /// picker once they chose from it, on screen once they went back to clicking there.
-    @Test func theWindowButtonStartsTheWayTheUserLastChose() async throws {
+    /// Recording mode starts choosing the way the user last chose, also after a restart: in
+    /// the picker once they opened it, on screen once they went back to clicking there.
+    @Test func recordingModeStartsChoosingTheWayTheUserLastChose() async throws {
         let suite = "tilde-picker-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -180,20 +170,23 @@ struct BehaviourTests {
         }
 
         let first = restarted()
-        first.toggleWindowPick()
+        first.toggleRecordingMode()
+        #expect(first.isPickingWindow)
         #expect(!first.isSourcePickerOpen)
         first.openSourcePicker()
-        first.toggleWindowPick()
+        first.toggleRecordingMode()
 
         let second = restarted()
-        second.toggleWindowPick()
+        second.toggleRecordingMode()
         #expect(second.isSourcePickerOpen)
         second.stepBackInSourcePicker()
-        #expect(second.isPickingWindow && !second.isSourcePickerOpen)
+        #expect(second.isPickingWindow)
+        #expect(!second.isSourcePickerOpen)
 
         let third = restarted()
-        third.toggleWindowPick()
-        #expect(third.isPickingWindow && !third.isSourcePickerOpen)
+        third.toggleRecordingMode()
+        #expect(third.isPickingWindow)
+        #expect(!third.isSourcePickerOpen)
     }
 
     /// Clear History keeps the session on screen, whose notes and recordings are in use.
@@ -279,7 +272,7 @@ struct BehaviourTests {
         #expect(controller.drafts[0].annotation.comment == "typed")
 
         controller.updateCommentSoon(drafts[1].id, "typed too")
-        controller.toggleWindowPick()
+        controller.toggleRecordingMode()
         #expect(controller.drafts[1].annotation.comment == "typed too")
     }
 
@@ -625,11 +618,17 @@ struct BehaviourTests {
         #expect(AnnotationController.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: nil) == CGRect(x: 0, y: 0, width: 50, height: 50))
     }
 
-    /// The window button picks on screen, with the picker closed to its button; a second click
-    /// stops with no change. A choice is taken only while choosing.
-    @Test func windowButtonChoosesAgainAndTheScreenTileLiftsTheScope() {
+    /// Annotating has no source to choose. Before Record, a click on the source name picks on
+    /// screen, with the picker closed to its button; a second click stops with no change. A
+    /// choice is taken only while choosing, and Record records it; back in annotating, the
+    /// session is limited to nothing again.
+    @Test func theSourceNameChoosesAgainBeforeRecord() {
         let elsewhere = CGPoint(x: -5000, y: -5000)
         open()
+        controller.toggleWindowPick()
+        #expect(!controller.isPickingWindow)
+
+        open(activity: .recording(.ready))
         controller.toggleWindowPick()
         #expect(controller.isPickingWindow)
         #expect(!controller.isSourcePickerOpen)
@@ -637,27 +636,31 @@ struct BehaviourTests {
         #expect(!controller.isPickingWindow)
 
         controller.choose(.window(Fixtures.window))
-        #expect(controller.scope == nil)
+        #expect(controller.source == nil)
 
         controller.toggleWindowPick()
         controller.choose(.window(Fixtures.window))
-        #expect(controller.scope == Fixtures.window)
         #expect(!controller.isPickingWindow)
-        #expect(controller.scopeName == "Safari")
-        #expect(!controller.allows(elsewhere))
+        #expect(controller.isRecordMode)
+        #expect(controller.clipSource == .window(Fixtures.window))
+        #expect(controller.clipSourceName == "Safari")
 
-        // Limited to a window, choosing takes the other windows too, and Esc keeps the limit.
-        open(activity: .picking(isRecordMode: false, isPickerOpen: false), source: .window(Fixtures.window))
+        // While choosing, every window can be clicked, and Esc keeps the choice.
+        open(activity: .picking(isRecordMode: true, isPickerOpen: false), source: .window(Fixtures.window))
         #expect(controller.allows(elsewhere))
         controller.escapePressed()
-        #expect(controller.scope == Fixtures.window)
-        #expect(!controller.allows(elsewhere))
+        #expect(controller.isRecordMode)
+        #expect(controller.clipSource == .window(Fixtures.window))
 
-        open(activity: .picking(isRecordMode: false, isPickerOpen: false), source: .window(Fixtures.window))
+        open(activity: .picking(isRecordMode: true, isPickerOpen: false), source: .window(Fixtures.window))
         controller.choose(.screen(1))
-        #expect(controller.scope == nil)
         #expect(!controller.isPickingWindow)
         #expect(controller.source == .screen(1))
+
+        controller.toggleRecordingMode()
+        #expect(!controller.isRecordMode)
+        #expect(controller.scope == nil)
+        #expect(controller.allows(elsewhere))
     }
 
     /// The window button does nothing while a clip is in progress: a clip keeps its source.
@@ -674,7 +677,7 @@ struct BehaviourTests {
     /// The open picker takes no clicks on screen. "‹ Back" and Esc step back one level: an
     /// app's windows, then the picker, then choosing.
     @Test func theOpenPickerStepsBackOneLevelAtATime() {
-        open(activity: .picking(isRecordMode: false, isPickerOpen: true))
+        open(activity: .picking(isRecordMode: true, isPickerOpen: true))
         controller.click(at: CGPoint(x: -5000, y: -5000))
         #expect(controller.isSourcePickerOpen)
         #expect(controller.source == nil)
@@ -690,6 +693,7 @@ struct BehaviourTests {
 
         controller.escapePressed()
         #expect(!controller.isPickingWindow)
+        #expect(controller.isRecordMode)
     }
 
     @Test func scopeEndsWhenTheWindowIsGone() {
@@ -713,13 +717,15 @@ struct BehaviourTests {
         ]
         // One of each state, then every value it can have; a new state does not compile here
         // until it has its values.
-        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice("")]
+        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice(""), .source("")]
         let states = kinds.flatMap { kind -> [HUDView.SubtitleState] in
             switch kind {
             case .annotating, .choosingWindow, .inPicker, .waitingForWindow: [kind]
             case .paused: shortcuts.map { .paused(shortcut: $0) }
             case .holding: DoubleTapKey.allCases.map { .holding($0.symbol) }
             case .notice: Notice.allCases.map { .notice($0.rawValue) }
+            // The screens of Macs, Tilde's own window and a phone, as Record names them.
+            case .source: ["Built-in Retina Display", "Studio Display", "Display", "Tilde Browser", "iPhone"].map { .source($0) }
             }
         }
 
@@ -752,8 +758,10 @@ struct BehaviourTests {
 
     @Test func tooltipsStayInsideTheAreaThatDrawsThem() {
         let near = CGRect(x: 10, y: 10, width: 26, height: 26)
-        let x = TooltipLayer.centerX(text: "Annotate (Double-tap ⌃)", target: near, width: 528)
+        let x = TooltipLayer.centerX(text: "Annotate", target: near, width: 528)
         #expect(x > near.midX)
+        // Its key hints widen it, so it moves further in.
+        #expect(TooltipLayer.centerX(text: "Annotate", keys: ["⌃⌃", "Space"], target: near, width: 528) > x)
         #expect(TooltipLayer.centerX(text: "Pause", target: CGRect(x: 250, y: 10, width: 26, height: 26), width: 528) == 263)
     }
 
