@@ -123,8 +123,8 @@ struct KeyCombo: Codable, Equatable {
     }
 
     /// The same keys as an event, whatever the names.
-    func matches(_ event: NSEvent) -> Bool {
-        UInt32(event.keyCode) == keyCode && event.modifierFlags.intersection([.control, .option, .shift, .command]).rawValue == modifiers
+    func matches(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) -> Bool {
+        UInt32(keyCode) == self.keyCode && modifiers.intersection([.control, .option, .shift, .command]).rawValue == self.modifiers
     }
 
     init(keyCode: UInt32, modifiers: UInt, key: String) {
@@ -311,10 +311,10 @@ final class ShortcutStore: ObservableObject {
 
     /// The in-app action for a key press while Tilde has the keyboard: while drawing a tool or
     /// colour first, then a mode, which does nothing while drawing.
-    func inAppAction(for event: NSEvent, isDrawing: Bool) -> Action? {
+    func inAppAction(keyCode: UInt16, modifiers: NSEvent.ModifierFlags, isDrawing: Bool) -> Action? {
         let groups: [Action.Group] = isDrawing ? [.drawingTools, .colors, .modes] : [.modes]
         for group in groups {
-            if let action = Action.allCases.first(where: { $0.group == group && shortcut(for: $0)?.combo?.matches(event) == true }) {
+            if let action = Action.allCases.first(where: { $0.group == group && shortcut(for: $0)?.combo?.matches(keyCode: keyCode, modifiers: modifiers) == true }) {
                 return action
             }
         }

@@ -10,6 +10,8 @@ enum Transitions {
         let name: String
         var state: SessionFlow?
         var event: SessionFlow.Event?
+        /// A single key pressed while Tilde has the keyboard, by its default name, such as "R".
+        var key: String?
         var note: NoteVisibility?
         var similarity: Double?
         var original: PageIdentity?
@@ -63,6 +65,8 @@ enum Transitions {
         let name: String
         var state: SessionFlow?
         var effects: [SessionFlow.Effect]?
+        /// The action the key chose, such as "rectangleTool"; nil when it is none.
+        var keyAction: String?
         var note: NoteVisibility?
         var samePage: Bool?
         var hides: Bool?
@@ -101,6 +105,14 @@ enum Transitions {
             var result = Result(name: row.name)
             if var state = row.state, let event = row.event {
                 result.effects = state.handle(event)
+                result.state = state
+            }
+            if var state = row.state, let key = row.key {
+                let shortcuts = ShortcutStore(defaults: UserDefaults(suiteName: "tilde-state-keys") ?? .standard)
+                let code = ShortcutStore.Action.allCases.lazy.compactMap { $0.defaultShortcut?.combo }.first { $0.key == key }?.keyCode
+                let action = code.flatMap { shortcuts.inAppAction(keyCode: UInt16($0), modifiers: [], isDrawing: state.session?.isDrawing ?? false) }
+                result.keyAction = action?.rawValue
+                result.effects = action.map { state.events(forKey: $0).flatMap { state.handle($0) } } ?? []
                 result.state = state
             }
             if let original = row.original, let page = row.page {

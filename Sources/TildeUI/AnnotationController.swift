@@ -655,42 +655,21 @@ final class AnnotationController: ObservableObject {
     /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that
     /// enables that button. True when the key is one of them, whether it did anything or not.
     func performShortcut(_ event: NSEvent) -> Bool {
-        guard session != nil, confirmation == nil, let action = shortcuts.inAppAction(for: event, isDrawing: isDrawing) else {
+        guard session != nil, confirmation == nil,
+              let action = shortcuts.inAppAction(keyCode: event.keyCode, modifiers: event.modifierFlags, isDrawing: isDrawing)
+        else {
             return false
         }
-        // While drawing only the drawing bar's keys work: a mode key, such as R, never leaves
-        // drawing by mistake. Done and Esc leave it.
-        if event.isARepeat || (isDrawing && action.group == .modes) {
+        if event.isARepeat {
             return true
         }
-        let isBusy = HUDView.status(of: self).isBusy
-        switch action {
-        case .annotationMode:
-            if isRecordMode, !isBusy {
-                toggleRecordingMode()
-            }
-        case .recordingMode:
-            if !isBusy {
-                toggleRecordingMode()
-            }
-        case .drawingMode:
-            if !isRecordMode, !isBusy {
-                startDrawing()
-            }
-        case .pauseOrResume:
-            if !isBusy, !isPickingWindow {
-                pressStatusButton()
-            }
-        case .arrowTool, .rectangleTool, .ellipseTool, .penTool:
-            if let tool = action.drawingTool {
-                setDrawingTool(tool)
-            }
-        case .color1, .color2, .color3, .color4, .color5, .color6:
-            if let color = action.drawingColor {
-                setDrawingColor(color.hex)
-            }
-        case .startAnnotation, .togglePause:
-            return false
+        if let tool = action.drawingTool {
+            setDrawingTool(tool)
+        } else if let color = action.drawingColor {
+            setDrawingColor(color.hex)
+        }
+        for next in flow.events(forKey: action) {
+            dispatch(next)
         }
         return true
     }

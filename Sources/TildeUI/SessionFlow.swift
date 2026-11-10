@@ -223,6 +223,38 @@ struct SessionFlow: Equatable {
         return !effects.isEmpty || next != self
     }
 
+    /// The events that a single key's action sends, under the rules that enable its button:
+    /// none under a question, while a clip starts or is saved, or while sending; while drawing,
+    /// none for a mode's key, so that it never leaves drawing. A drawing tool or colour changes
+    /// no mode.
+    func events(forKey action: ShortcutStore.Action) -> [Event] {
+        guard case .open(let open) = mode, open.question == nil, !(open.isDrawing && action.group == .modes) else {
+            return []
+        }
+        let isBusy = switch open.activity {
+        case .recording(.starting), .recording(.finishing): true
+        default: false
+        }
+        switch action {
+        case .annotationMode:
+            return isRecordMode && !isBusy ? [.toggleRecordingMode] : []
+        case .recordingMode:
+            return isBusy ? [] : [.toggleRecordingMode]
+        case .drawingMode:
+            return isRecordMode || isBusy ? [] : [.startDrawing]
+        case .pauseOrResume:
+            guard !isBusy, !isPicking else {
+                return []
+            }
+            if isRecordMode {
+                return [.record]
+            }
+            return open.pauses.isEmpty ? [.togglePause] : [.resume]
+        default:
+            return []
+        }
+    }
+
     /// Send and ⌘↩ have something to send, and nothing is starting or finishing.
     var canSend: Bool {
         guard case .open(let open) = mode, !isPicking, open.question == nil else {
