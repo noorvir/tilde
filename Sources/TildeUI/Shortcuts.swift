@@ -253,10 +253,9 @@ final class ShortcutStore: ObservableObject {
             case .startAnnotation: .doubleTap(.control)
             case .togglePause: nil
             case .annotationMode, .arrowTool: Self.key(kVK_ANSI_A, "A")
-            case .recordingMode: Self.key(kVK_ANSI_R, "R")
+            case .recordingMode, .rectangleTool: Self.key(kVK_ANSI_R, "R")
             case .drawingMode: Self.key(kVK_ANSI_D, "D")
             case .pauseOrResume: Self.key(kVK_Space, "Space")
-            case .rectangleTool: Self.key(kVK_ANSI_S, "S")
             case .ellipseTool: Self.key(kVK_ANSI_O, "O")
             case .penTool: Self.key(kVK_ANSI_P, "P")
             case .color1: Self.key(kVK_ANSI_1, "1")

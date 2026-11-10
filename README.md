@@ -187,10 +187,10 @@ shows its key, and Settings → Shortcuts changes them.
 | R | Into or out of recording mode, as the record toggle |
 | D | Starts drawing, as Draw |
 | Space | Pauses or resumes; in recording mode records, pauses or resumes the clip. On a marker, Space opens its preview instead |
-| A, S, O, P (while drawing) | Arrow, rectangle, circle, freehand. A picks the arrow and stays in drawing |
+| A, R, O, P (while drawing) | Arrow, rectangle, circle, freehand. A and R pick their tools and stay in drawing |
 | 1–6 (while drawing) | The colours, in the drawing bar's order |
 
-While drawing, only the drawing keys work; R, D and Space do nothing. Done or Esc ends drawing.
+While drawing, only the drawing keys work; D and Space do nothing. Done or Esc ends drawing.
 
 Tilde does not take focus from your app while you annotate.
 
