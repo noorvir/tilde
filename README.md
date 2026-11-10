@@ -75,13 +75,16 @@ The same installer runs from the command line:
 Options: `--all`, `--uninstall`, `--dry-run`, and `--home <dir>`, which
 uses another home folder and finds only apps inside it.
 
-**Copy setup for other agents…** on the same page copies these snippets, for remote
-agents or other apps:
+Tilde answers only calls that carry its token (`~/.tilde/local-token`, which only you can
+read) as an `Authorization: Bearer` header. Install writes the header into each entry.
+
+**Copy** in the **Copy setup** row on the same page copies these snippets, for agents that
+are not listed. Each is the entry that Install writes, with your token in place of `<token>`:
 
 **Claude Code**
 
 ```sh
-claude mcp add --scope user --transport http tilde http://127.0.0.1:7311/mcp
+claude mcp add --scope user --transport http tilde http://127.0.0.1:7311/mcp --header "Authorization: Bearer <token>"
 ```
 
 **Codex** (`~/.codex/config.toml`)
@@ -89,24 +92,46 @@ claude mcp add --scope user --transport http tilde http://127.0.0.1:7311/mcp
 ```toml
 [mcp_servers.tilde]
 url = "http://127.0.0.1:7311/mcp"
+http_headers = { Authorization = "Bearer <token>" }
 default_tools_approval_mode = "approve"
 ```
 
 Without `default_tools_approval_mode`, Codex asks before each call, and `codex exec` refuses the call.
 
-**Cursor, VS Code, others (HTTP)**
+**Cursor, others (HTTP)**
 
 ```json
-{ "mcpServers": { "tilde": { "url": "http://127.0.0.1:7311/mcp" } } }
+{
+  "mcpServers": {
+    "tilde": {
+      "url": "http://127.0.0.1:7311/mcp",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
+    }
+  }
+}
 ```
 
 **Harnesses that only start stdio servers**
 
 ```json
-{ "mcpServers": { "tilde": { "command": "/Applications/Tilde.app/Contents/MacOS/tilde-mcp" } } }
+{
+  "mcpServers": {
+    "tilde": {
+      "command": "/Applications/Tilde.app/Contents/MacOS/tilde-mcp",
+      "args": []
+    }
+  }
+}
 ```
 
-`tilde-mcp` forwards stdio to the HTTP endpoint and starts Tilde when it is not running.
+`tilde-mcp` forwards stdio to the HTTP endpoint with the token, which it reads itself, and
+starts Tilde when it is not running.
+
+The last item copies an `ssh -R` command that forwards Tilde's port to another machine, where
+an entry with the token then works. For a server, use Remote machines (below): the token
+stays on your Mac.
 
 **Remote agents** (the agent runs on a server, you annotate on your Mac)
 

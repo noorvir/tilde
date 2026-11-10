@@ -96,15 +96,20 @@ final class AgentSetup: ObservableObject {
     }
 
     /// Snippets for apps that Tilde cannot set up itself, and for agents on other machines.
+    /// Each holds the local token, as the entries that Install writes do, except the stdio
+    /// one: the `tilde-mcp` bridge reads the token itself.
     var copySetups: [CopySetup] {
-        let url = installer.environment.mcpURL
-        let port = URL(string: url)?.port ?? 7311
-        let bridge = installer.environment.bridgePath
+        let environment = installer.environment
+        let port = URL(string: environment.mcpURL)?.port ?? 7311
+        let header = environment.authorization.map { " --header \"Authorization: \($0)\"" } ?? ""
+        var bridge = environment
+        bridge.proxy = [environment.bridgePath]
+
         return [
-            CopySetup(title: "Claude Code Command", text: "claude mcp add --scope user --transport http tilde \(url)"),
-            CopySetup(title: "Codex Config (config.toml)", text: "[mcp_servers.tilde]\nurl = \"\(url)\"\ndefault_tools_approval_mode = \"approve\"\n"),
-            CopySetup(title: "JSON Config (HTTP)", text: #"{ "mcpServers": { "tilde": { "url": "\#(url)" } } }"#),
-            CopySetup(title: "JSON Config (stdio)", text: #"{ "mcpServers": { "tilde": { "command": "\#(bridge)" } } }"#),
+            CopySetup(title: "Claude Code Command", text: "claude mcp add --scope user --transport http tilde \(environment.mcpURL)\(header)"),
+            CopySetup(title: "Codex Config (config.toml)", text: installer.entryText(for: .codex)),
+            CopySetup(title: "JSON Config (HTTP)", text: installer.entryText(for: .cursor)),
+            CopySetup(title: "JSON Config (stdio)", text: Installer(environment: bridge).entryText(for: .cursor)),
             CopySetup(title: "SSH Tunnel for Remote Agents", text: "ssh -R \(port):127.0.0.1:\(port) <host>"),
         ]
     }

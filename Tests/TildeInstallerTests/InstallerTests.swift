@@ -27,6 +27,19 @@ struct InstallerTests {
         #expect(try InstallEnvironment.local(home: home, port: "7311", bridgePath: "", isolated: true).authorization == "Bearer \(token)")
     }
 
+    /// The text to set an app up by hand is the entry that Install writes, with the token.
+    @Test func anEntryTextIsTheInstalledEntry() throws {
+        var environment = installer.environment
+        environment.authorization = "Bearer secret"
+        let installer = Installer(environment: environment)
+
+        for harness in Harness.allCases {
+            let text = installer.entryText(for: harness)
+            #expect(text.contains("Bearer secret"), "\(harness)")
+            #expect(try installer.target(for: harness).format.entry(in: text), "\(harness)")
+        }
+    }
+
     /// Processes that start at the same moment get the same token: it is made once.
     @Test func theLocalTokenIsMadeOnce() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-home-\(UUID().uuidString)")
