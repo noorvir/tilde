@@ -37,6 +37,11 @@ enum Shortcut: Codable, Equatable {
         }
     }
 
+    /// "⌃⌥A" or "⌃⌃", in a key hint.
+    var chip: String {
+        caps.joined()
+    }
+
     /// "⌃⌥A" or "⌃ twice", for tight spaces.
     var shortTitle: String {
         switch self {
@@ -233,9 +238,9 @@ final class ShortcutStore: ObservableObject {
             switch self {
             case .startAnnotation: "Starts a session, or resumes a paused one"
             case .togglePause: "Esc also pauses; Esc again discards"
-            case .annotationMode: "Back to annotating from drawing or recording mode"
+            case .annotationMode: "Back to annotating from recording mode"
             case .recordingMode: "Into or out of recording mode, as the record toggle"
-            case .drawingMode: "Starts or ends drawing, as Draw"
+            case .drawingMode: "Starts drawing, as Draw; Esc ends it"
             case .pauseOrResume: "Pauses or resumes, or records in recording mode"
             case .arrowTool, .rectangleTool, .ellipseTool, .penTool: "Draws with this tool"
             default: "Draws in this colour"
@@ -306,7 +311,7 @@ final class ShortcutStore: ObservableObject {
     }
 
     /// The in-app action for a key press while Tilde has the keyboard: while drawing a tool or
-    /// colour first, then a mode.
+    /// colour first, then a mode, which does nothing while drawing.
     func inAppAction(for event: NSEvent, isDrawing: Bool) -> Action? {
         let groups: [Action.Group] = isDrawing ? [.drawingTools, .colors, .modes] : [.modes]
         for group in groups {

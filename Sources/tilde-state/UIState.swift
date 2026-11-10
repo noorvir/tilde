@@ -82,8 +82,8 @@ struct UIState: Decodable {
     var preview: Int?
     var enlarged: String?
     var text: String?
-    /// The key hint after a tooltip's text, such as "R".
-    var key: String?
+    /// The key hints after a tooltip's text, such as ["⌃⌃", "Space"].
+    var keys: [String]?
     var snapped: Bool?
     var pageNotes: Bool?
     var toast: Toast?

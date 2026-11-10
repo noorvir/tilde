@@ -220,7 +220,7 @@ struct PreviewView: View {
                 Text("\(index + 1) of \(controller.drafts.count)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
-                CardButton(symbol: "xmark", help: "Close  Esc") {
+                CardButton(symbol: "xmark", keys: ["Esc"], help: "Close") {
                     controller.closePreview()
                 }
             }
@@ -258,10 +258,10 @@ struct PreviewView: View {
 
     private func footer(id: Draft.ID) -> some View {
         HStack(spacing: 6) {
-            CardButton(symbol: "chevron.left", help: "Previous  ←") {
+            CardButton(symbol: "chevron.left", keys: ["←"], help: "Previous") {
                 controller.showAdjacentPreview(-1)
             }
-            CardButton(symbol: "chevron.right", help: "Next  →") {
+            CardButton(symbol: "chevron.right", keys: ["→"], help: "Next") {
                 controller.showAdjacentPreview(1)
             }
             Spacer()
@@ -311,7 +311,7 @@ struct PreviewView: View {
     private func enlarged(title: String, data: Data?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                CardButton(symbol: "chevron.left", title: "Back", help: "Back  Esc") {
+                CardButton(symbol: "chevron.left", title: "Back", keys: ["Esc"], help: "Back") {
                     controller.expandedPreviewImage = nil
                 }
                 Text(title)

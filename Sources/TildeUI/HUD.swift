@@ -393,7 +393,7 @@ struct HUDView: View {
     private var drawingContent: some View {
         let size = HUDAccessory.size
         ForEach(Self.drawingTools, id: \.tool) { entry in
-            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, key: key(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
+            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
                 controller.setDrawingTool(entry.tool)
             }
         }
@@ -410,7 +410,7 @@ struct HUDView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .tildeTooltip(entry.name, key: key(ShortcutStore.Action.allCases.first { $0.drawingColor?.hex == entry.hex }))
+            .tildeTooltip(entry.name, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingColor?.hex == entry.hex }))
             .accessibilityLabel(entry.name)
         }
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
@@ -427,9 +427,13 @@ struct HUDView: View {
         .fixedSize()
     }
 
-    /// The key of an in-app shortcut, for its button's tooltip.
-    private func key(_ action: ShortcutStore.Action?) -> String? {
-        action.flatMap { controller.shortcuts.shortcut(for: $0)?.title }
+    /// The key of an in-app shortcut, for its button's tooltip; none when it has none, and
+    /// none for a mode's key while drawing, where it does nothing.
+    private func keys(_ action: ShortcutStore.Action?) -> [String] {
+        guard let action, !(controller.isDrawing && action.group == .modes), let shortcut = controller.shortcuts.shortcut(for: action) else {
+            return []
+        }
+        return [shortcut.chip]
     }
 
     nonisolated static let drawingTools = [
@@ -492,7 +496,7 @@ struct HUDView: View {
         Group {
             HStack(spacing: PillMetrics.iconGap) {
                 // Where the status dot was: in recording mode the record button, else pause and play.
-                HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, key: key(.pauseOrResume), help: status.help) {
+                HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, keys: controller.isDrawing ? [] : status.keys + keys(.pauseOrResume), help: status.help) {
                     controller.pressStatusButton()
                 }
                 .disabled(status.isBusy || controller.isPickingWindow)
@@ -518,19 +522,19 @@ struct HUDView: View {
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
             // Recording mode starts by choosing what to record.
-            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, key: key(.recordingMode), help: recordToggleHelp) {
+            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, keys: recordToggleKeys, help: controller.isRecordMode ? "Annotate" : "Record screen") {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)
 
             // Recording mode puts Stop where Draw is; the other buttons stay.
             if controller.isRecordMode {
-                HUDButton(image: Image(systemName: "stop.fill"), help: "Stop and add the recording to the list") {
+                HUDButton(image: Image(systemName: "stop.fill"), help: "Stop recording") {
                     controller.stopRecording()
                 }
                 .disabled(controller.recording != .recording && controller.recording != .paused)
             } else {
-                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, key: key(.drawingMode), help: "Draw on the screen") {
+                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, keys: keys(.drawingMode), help: "Draw") {
                     if controller.isDrawing {
                         controller.finishDrawing()
                     } else {
@@ -547,7 +551,7 @@ struct HUDView: View {
             }
             .disabled(count == 0)
 
-            HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all notes and keep annotating") {
+            HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all notes") {
                 controller.requestClearAll()
             }
             .disabled(count == 0)
@@ -555,12 +559,12 @@ struct HUDView: View {
             // A session without an agent copies the report.
             SendButton(copies: controller.session?.isLocal == true, action: controller.send)
                 .disabled(!flow.canSend)
-                .tildeTooltip(sendHelp)
+                .tildeTooltip(sendHelp, keys: ["⌘↩"])
                 .accessibilityHint(sendHelp)
             .padding(.leading, 4)
 
             // Esc closes the session only while paused; elsewhere it pauses or steps back.
-            HUDButton(image: Image(systemName: "xmark"), help: controller.pauses.contains(.user) ? "Cancel and close (Esc)" : "Cancel and close") {
+            HUDButton(image: Image(systemName: "xmark"), keys: controller.pauses.contains(.user) ? ["Esc"] : [], help: "Close") {
                 controller.requestCancel()
             }
         }
@@ -568,11 +572,11 @@ struct HUDView: View {
     }
 
     /// Esc leaves recording mode only outside choosing, where it steps back instead.
-    private var recordToggleHelp: String {
-        guard controller.isRecordMode else {
-            return "Record a screen, window or phone"
+    private var recordToggleKeys: [String] {
+        guard controller.isRecordMode, !controller.isPickingWindow else {
+            return keys(.recordingMode)
         }
-        return controller.isPickingWindow ? "Back to annotating" : "Back to annotating (Esc)"
+        return ["Esc"] + keys(.recordingMode)
     }
 
     private var isSending: Bool {
@@ -580,16 +584,6 @@ struct HUDView: View {
             return true
         }
         return false
-    }
-
-    /// What a cancel would throw away, such as "2 notes and the recording".
-    private var lost: String {
-        let count = controller.drafts.count
-        let notes = count == 1 ? "the note" : "\(count) notes"
-        guard controller.flow.holdsClip else {
-            return notes
-        }
-        return count == 0 ? "the recording" : "\(notes) and the recording"
     }
 
     /// The cancel question names the session's end, unlike leaving recording mode's.
@@ -647,31 +641,31 @@ struct HUDView: View {
             PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
-            .tildeTooltip("Discard \(lost) and close")
+            .tildeTooltip("Discard and close")
         case .discardComment:
             EmptyView()
         case .discardRecording:
             PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
-            .tildeTooltip("Throw the recording away and go back to annotating")
+            .tildeTooltip("Discard the recording")
         case .restore:
             PillTextButton(title: "Replace", key: "↩", isDestructive: true) {
                 controller.confirm()
             }
-            .tildeTooltip("Replace the notes with the saved session's")
+            .tildeTooltip("Replace the notes")
         }
     }
 
     private var sendHelp: String {
         guard let session = controller.session else {
-            return "Send  ⌘↩"
+            return "Send"
         }
         if session.isLocal {
-            return "Copy to clipboard  ⌘↩"
+            return "Copy"
         }
         let agent = session.node.map { "\(session.client) on \($0)" } ?? session.client
-        return "Send to \(agent)  ⌘↩"
+        return "Send to \(agent)"
     }
 
     /// The title and the leading button of one mode.
@@ -682,6 +676,8 @@ struct HUDView: View {
         var symbol: String
         var tint: Color?
         var help: String
+        /// The keys that do the same, in the tooltip; the view adds the in-app key.
+        var keys: [String] = []
         /// Starting, saving or sending: the leading button and the record toggle wait.
         var isBusy = false
 
@@ -696,46 +692,45 @@ struct HUDView: View {
         let clock = controller.clips.clock
         switch controller.mode {
         case .sending(_, let returnTo):
-            var status = status(of: returnTo, scopeName: controller.scopeName, shortcut: shortcut, clock: clock)
+            var status = status(of: returnTo, shortcut: shortcut, clock: clock)
             status.title = "Sending"
             status.clock = nil
             status.isBusy = true
             return status
         case .open(let open):
-            return status(of: open, scopeName: controller.scopeName, shortcut: shortcut, clock: clock)
+            return status(of: open, shortcut: shortcut, clock: clock)
         case .idle, .sent:
-            return status(of: SessionFlow.Open(), scopeName: nil, shortcut: nil, clock: clock)
+            return status(of: SessionFlow.Open(), shortcut: nil, clock: clock)
         }
     }
 
-    /// "Pause (Esc)", and when paused "Annotate (Double-tap ⌃)"; in recording mode the record
-    /// button, red to start or resume a clip and pause while it records.
-    static func status(of open: SessionFlow.Open, scopeName: String?, shortcut: Shortcut?, clock: (since: Date, before: TimeInterval)) -> Status {
+    /// "Pause" with Esc, and when paused "Annotate" with the start shortcut, such as ⌃⌃; in
+    /// recording mode the record button, red to start or resume a clip and pause while it records.
+    static func status(of open: SessionFlow.Open, shortcut: Shortcut?, clock: (since: Date, before: TimeInterval)) -> Status {
         switch open.activity {
         case .picking(let isRecordMode, _):
             var back = open
             back.activity = isRecordMode ? .recording(.ready) : .annotating
-            var status = status(of: back, scopeName: scopeName, shortcut: shortcut, clock: clock)
+            var status = status(of: back, shortcut: shortcut, clock: clock)
             status.title = "Choose a window"
             return status
         case .annotating:
             if open.pauses.isEmpty {
-                return Status(title: "Annotating", symbol: "pause.fill", help: "Pause (Esc)")
+                return Status(title: "Annotating", symbol: "pause.fill", help: "Pause", keys: ["Esc"])
             }
-            return Status(title: "Paused", symbol: "play.fill", help: shortcut.map { "Annotate (\($0.title))" } ?? "Annotate")
+            return Status(title: "Paused", symbol: "play.fill", help: "Annotate", keys: shortcut.map { [$0.chip] } ?? [])
         case .recording(let clip):
-            let start = scopeName.map { "Start recording \($0)" } ?? "Start recording the screen"
             switch clip {
             case .ready:
-                return Status(title: "Ready to record", symbol: "circle.fill", tint: .red, help: start)
+                return Status(title: "Ready to record", symbol: "circle.fill", tint: .red, help: "Record")
             case .starting:
-                return Status(title: "Starting", symbol: "circle.fill", tint: .red, help: start, isBusy: true)
+                return Status(title: "Starting", symbol: "circle.fill", tint: .red, help: "Record", isBusy: true)
             case .recording:
-                return Status(title: "Recording", clock: .running(since: clock.since, before: clock.before), symbol: "pause.fill", help: "Pause the recording")
+                return Status(title: "Recording", clock: .running(since: clock.since, before: clock.before), symbol: "pause.fill", help: "Pause")
             case .paused:
-                return Status(title: "Paused", clock: .stopped(clock.before), symbol: "circle.fill", tint: .red, help: "Resume the recording")
+                return Status(title: "Paused", clock: .stopped(clock.before), symbol: "circle.fill", tint: .red, help: "Resume")
             case .finishing:
-                return Status(title: "Saving", symbol: "circle.fill", tint: .red, help: start, isBusy: true)
+                return Status(title: "Saving", symbol: "circle.fill", tint: .red, help: "Record", isBusy: true)
             }
         }
     }
@@ -747,7 +742,7 @@ struct HUDView: View {
         ] + [SessionFlow.Clip.ready, .starting(operation: 0), .recording, .paused, .finishing(operation: 0, thenSend: false)].map {
             SessionFlow.Open(activity: .recording($0))
         }
-        let statuses = modes.map { status(of: $0, scopeName: nil, shortcut: nil, clock: (Date(), 0)) }
+        let statuses = modes.map { status(of: $0, shortcut: nil, clock: (Date(), 0)) }
         return statuses.map { $0.clock == nil ? $0.title : "\($0.title) 00:00" } + ["Sending"]
     }()
 
@@ -790,7 +785,7 @@ struct HUDView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(!controller.flow.accepts(.windowButton))
-                .tildeTooltip("Choose what to record")
+                .tildeTooltip("Choose source")
             } else {
                 SubtitleLine(part: part)
             }
@@ -950,8 +945,8 @@ struct HUDButton: View {
     var bounce = 0
     /// Off while the tooltip would cover what the button opened under it.
     var showsTooltip = true
-    /// The key that presses it while Tilde has the keyboard, after the help in its tooltip.
-    var key: String?
+    /// The keys that press it while Tilde has the keyboard, after the help in its tooltip.
+    var keys: [String] = []
     let help: String
     let action: () -> Void
 
@@ -994,7 +989,7 @@ struct HUDButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .tildeTooltip(showsTooltip ? help : nil, key: key)
+        .tildeTooltip(showsTooltip ? help : nil, keys: keys)
         .accessibilityLabel(title ?? help)
         .accessibilityHint(title == nil ? "" : help)
     }
@@ -1110,7 +1105,7 @@ struct HUDAccessoryBrowserBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements and send their HTML and styles", action: onOpen)
+            HUDButton(image: Image(systemName: "globe"), title: "Open in Tilde's browser", help: "Pick exact page elements", action: onOpen)
             HUDButton(image: Image(systemName: "xmark"), help: "Dismiss", action: onDismiss)
         }
         .pillInsets(HUDAccessory.size)
@@ -1258,7 +1253,7 @@ private struct AnnotationRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             // A button's click does not reach the row's tap gesture, so Delete never opens the preview.
-            HUDButton(image: Image(systemName: "trash"), size: 26, isDestructive: true, help: "Delete this note") {
+            HUDButton(image: Image(systemName: "trash"), size: 26, isDestructive: true, help: "Delete note") {
                 controller.deleteDraft(draft.id)
             }
             .disabled(!controller.canEditNotes)
@@ -1270,7 +1265,7 @@ private struct AnnotationRow: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture { controller.preview(draft.id) }
-        .tildeTooltip("Open preview")
+        .tildeTooltip("Preview")
     }
 }
 

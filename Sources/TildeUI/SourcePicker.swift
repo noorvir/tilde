@@ -43,7 +43,7 @@ struct HUDAccessoryPicker: View {
                     .transition(.opacity)
             } else {
                 // As the browser accessory bar: the pill's button in a compact pill.
-                HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", help: "Choose from pictures of the screens and windows") {
+                HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", help: "Show screens and windows") {
                     onOpen()
                 }
                 .pillInsets(HUDAccessory.size)
@@ -64,11 +64,11 @@ struct HUDAccessoryPicker: View {
                 Group {
                     // The pair of "Use window picker", which opened the picker.
                     if openApp == nil {
-                        CardButton(symbol: "cursorarrow", title: "Select on screen", help: "Choose by clicking on screen  Esc") {
+                        CardButton(symbol: "cursorarrow", title: "Select on screen", keys: ["Esc"], help: "Click on screen") {
                             onBack()
                         }
                     } else {
-                        CardButton(symbol: "chevron.left", title: "All apps", help: "Back to all apps  Esc") {
+                        CardButton(symbol: "chevron.left", title: "All apps", keys: ["Esc"], help: "Back") {
                             onBack()
                         }
                     }

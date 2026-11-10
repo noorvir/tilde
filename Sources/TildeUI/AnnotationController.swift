@@ -658,15 +658,15 @@ final class AnnotationController: ObservableObject {
         guard session != nil, confirmation == nil, let action = shortcuts.inAppAction(for: event, isDrawing: isDrawing) else {
             return false
         }
-        if event.isARepeat {
+        // While drawing only the drawing bar's keys work: a mode key, such as R, never leaves
+        // drawing by mistake. Done and Esc leave it.
+        if event.isARepeat || (isDrawing && action.group == .modes) {
             return true
         }
         let isBusy = HUDView.status(of: self).isBusy
         switch action {
         case .annotationMode:
-            if isDrawing, !isBusy {
-                finishDrawing()
-            } else if isRecordMode, !isBusy {
+            if isRecordMode, !isBusy {
                 toggleRecordingMode()
             }
         case .recordingMode:
@@ -675,7 +675,7 @@ final class AnnotationController: ObservableObject {
             }
         case .drawingMode:
             if !isRecordMode, !isBusy {
-                isDrawing ? finishDrawing() : startDrawing()
+                startDrawing()
             }
         case .pauseOrResume:
             if !isBusy, !isPickingWindow {
