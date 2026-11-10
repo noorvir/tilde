@@ -246,7 +246,7 @@ scripts/e2e.sh       # full flow in one process, no permissions needed
 
 | Layer | Covers | Run |
 |---|---|---|
-| `TildeCoreTests` | MCP session contract, HTTP server, report path compaction | `swift test --filter TildeCoreTests` |
+| `TildeCoreTests` | MCP session contract, HTTP server, node socket, the `tilde-mcp` stdio bridge, report path compaction | `swift test --filter TildeCoreTests` |
 | `TildeInstallerTests` | Install, merge, idempotency, uninstall, Codex TOML and linked skills folders, in a temporary home | `swift test --filter TildeInstallerTests` |
 | `TildeUITests/BehaviourTests` | Confirm flows, Esc/Return in the confirm state, single delete, close-up and context rules, HUD home, snap distance, on-screen limits | `swift test --filter BehaviourTests` |
 | `TildeUITests/SnapshotTests` | Pixel snapshots of every HUD state, the list, the comment box, the preview, a tooltip, the home outline and the overlay | `swift test --filter SnapshotTests` |
