@@ -56,30 +56,47 @@ enum TextEntryFront {
 
         // Tilde loses its key window with the front. Once the other app is in front, the
         // window that had the keyboard, such as the overlay, takes it again, as before the
-        // text view had it.
+        // text view had it. The two notices come in either order.
         var keyWindow: NSWindow?
-        observe(NSApplication.willResignActiveNotification, from: .default) { _ in
-            keyWindow = NSApp.keyWindow
-            debugLog.notice("willResign key \(keyWindow?.className ?? "none", privacy: .public)")
-        }
-        observe(NSWorkspace.didActivateApplicationNotification, from: NSWorkspace.shared.notificationCenter) { note in
-            let activated = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            debugLog.notice("activated \(activated?.processIdentifier ?? 0) after yield, key \(keyWindow?.className ?? "none", privacy: .public), front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)")
-            guard activated == app else {
+        var hasResigned = false
+        var isAppInFront = false
+        func takeKeyboardBack() {
+            guard hasResigned, isAppInFront else {
                 return
             }
             stopObserving()
-            if let keyWindow, keyWindow.isVisible, keyWindow.canBecomeKey {
-                keyWindow.makeKey()
+            DispatchQueue.main.asyncAfter(deadline: .now() + rekeyDelay) {
+                debugLog.notice("re-key \(keyWindow?.className ?? "none", privacy: .public), front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive)")
+                if let keyWindow, keyWindow.isVisible, keyWindow.canBecomeKey, lender == nil {
+                    keyWindow.makeKey()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    debugLog.notice("later, front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive) key \(NSApp.keyWindow?.className ?? "none", privacy: .public)")
+                }
             }
-            debugLog.notice("made key, front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                debugLog.notice("later, front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive) key \(NSApp.keyWindow?.className ?? "none", privacy: .public)")
+        }
+        observe(NSApplication.willResignActiveNotification, from: .default) { _ in
+            keyWindow = NSApp.keyWindow
+        }
+        observe(NSApplication.didResignActiveNotification, from: .default) { _ in
+            debugLog.notice("didResign")
+            hasResigned = true
+            takeKeyboardBack()
+        }
+        observe(NSWorkspace.didActivateApplicationNotification, from: NSWorkspace.shared.notificationCenter) { note in
+            debugLog.notice("activated after yield")
+            if note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication == app {
+                isAppInFront = true
+                takeKeyboardBack()
             }
         }
         NSApp.yieldActivation(to: app)
         ElementPicker.bringToFront(app)
         debugLog.notice("yielded to \(app.processIdentifier), active \(NSApp.isActive)")
+    }
+
+    private static var rekeyDelay: TimeInterval {
+        UserDefaults.standard.object(forKey: "rekeyDelay") as? Double ?? 0.1
     }
 
     private static func observe(_ name: Notification.Name, from center: NotificationCenter, _ handle: @escaping @MainActor (Notification) -> Void) {
