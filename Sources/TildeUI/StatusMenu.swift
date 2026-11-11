@@ -5,6 +5,11 @@ import Combine
 
 /// The menu-bar item: annotation, the agent apps, the browser and Settings. A missing
 /// permission shows as one warning at the top.
+///
+/// AppKit asks for the menu's items more often than the user opens it: for each key typed in
+/// Tilde, to look for a shortcut, and when an accessibility client reads the menu-bar item. So
+/// the menu itself is made from state in memory, and the Agents and History submenus read
+/// their files only when they open.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -15,6 +20,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let version: String
     private let onResult: (InstallResult) -> Void
     private var subscription: AnyCancellable?
+    private lazy var agents = SubmenuFiller { [unowned self] in fillAgents($0) }
+    private lazy var history = SubmenuFiller { [unowned self] in fillHistory($0) }
 
     init(
         browser: BrowserController, controller: AnnotationController, settings: SettingsWindow,
@@ -61,8 +68,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        menu.addItem(agentsItem())
-        menu.addItem(historyItem())
+        let agentsItem = action("Agents", nil)
+        agentsItem.submenu = agents.makeMenu()
+        menu.addItem(agentsItem)
+        let historyItem = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
+        historyItem.submenu = history.makeMenu()
+        menu.addItem(historyItem)
         let opensBrowser = controller.session == nil || controller.accepts(.openBrowser)
         menu.addItem(action("Open Browser", opensBrowser ? #selector(openBrowser) : nil))
         let settingsItem = action("Settings", #selector(openSettings))
@@ -85,9 +96,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// The last five sessions, each restoring its notes (or showing History when it cannot be
     /// restored), then Show All.
-    private func historyItem() -> NSMenuItem {
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
+    private func fillHistory(_ submenu: NSMenu) {
         let records = controller.archive.all().prefix(5)
         if records.isEmpty {
             let none = NSMenuItem(title: "No sessions yet", action: nil, keyEquivalent: "")
@@ -106,10 +115,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         submenu.addItem(.separator())
         submenu.addItem(action("Show All", #selector(showHistory)))
-
-        let item = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
-        item.submenu = submenu
-        return item
     }
 
     @objc private func openHistoryEntry(_ sender: NSMenuItem) {
@@ -136,18 +141,16 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// One row per agent app on this Mac with its status and icon; each opens Install and
     /// Uninstall.
-    private func agentsItem() -> NSMenuItem {
-        let submenu = NSMenu()
-        submenu.autoenablesItems = false
-        let rows = setup.foundRows
-        if rows.isEmpty {
+    private func fillAgents(_ submenu: NSMenu) {
+        // Each app's files are read once.
+        let found = AgentSetup.rows.map { (row: $0, status: setup.status(of: $0)) }.filter { $0.status != .notFound }
+        if found.isEmpty {
             let none = NSMenuItem(title: "No agent apps found", action: nil, keyEquivalent: "")
             none.isEnabled = false
             submenu.addItem(none)
         }
 
-        for row in rows {
-            let status = setup.status(of: row)
+        for (row, status) in found {
             let entry = NSMenuItem(title: row.name, action: nil, keyEquivalent: "")
             entry.image = rowImage(icon: setup.icon(for: row), status: status)
 
@@ -172,13 +175,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
         submenu.addItem(.separator())
         let everywhere = action("Install Everywhere", #selector(installEverywhere))
-        everywhere.isEnabled = !rows.isEmpty
+        everywhere.isEnabled = !found.isEmpty
         submenu.addItem(everywhere)
         submenu.addItem(action("Manage in Settings", #selector(openAgentSettings)))
-
-        let item = action("Agents", nil)
-        item.submenu = submenu
-        return item
     }
 
     /// A 6 pt status dot, then the 16 pt app icon, in one image so every row lines up.
@@ -297,5 +296,35 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             entry.keyEquivalentModifierMask = keys.modifierFlags
         }
         return entry
+    }
+}
+
+/// Fills a submenu each time it opens, and not when AppKit only looks for a shortcut: a
+/// submenu of the menu-bar item has none.
+@MainActor
+final class SubmenuFiller: NSObject, NSMenuDelegate {
+    private let fill: (NSMenu) -> Void
+
+    init(fill: @escaping (NSMenu) -> Void) {
+        self.fill = fill
+    }
+
+    /// An empty submenu that this object fills when it opens.
+    func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        return menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        fill(menu)
+    }
+
+    func menuHasKeyEquivalent(
+        _ menu: NSMenu, for event: NSEvent, target: AutoreleasingUnsafeMutablePointer<AnyObject?>, action: UnsafeMutablePointer<Selector?>
+    ) -> Bool {
+        false
     }
 }

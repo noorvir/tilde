@@ -681,6 +681,28 @@ struct BehaviourTests {
         #expect(controller.previewCard.id == nil)
     }
 
+    // MARK: - The menu
+
+    /// The Agents and History submenus read the agent apps' files and the saved sessions.
+    /// They are empty in the menu, which AppKit asks for also when it does not open, and
+    /// fill when they open, each time anew.
+    @Test func aSubmenuOfTheMenuFillsWhenItOpens() throws {
+        var fills = 0
+        let filler = SubmenuFiller { submenu in
+            fills += 1
+            submenu.addItem(NSMenuItem(title: "Codex", action: nil, keyEquivalent: ""))
+        }
+        let submenu = filler.makeMenu()
+        #expect(submenu.items.isEmpty)
+        #expect(fills == 0)
+
+        // What AppKit sends when the submenu opens.
+        submenu.delegate?.menuNeedsUpdate?(submenu)
+        submenu.delegate?.menuNeedsUpdate?(submenu)
+        #expect(fills == 2)
+        #expect(submenu.items.map(\.title) == ["Codex"])
+    }
+
     // MARK: - Shortcuts
 
     @Test func shortcutsAreSavedClearedResetAndNeverShared() {
