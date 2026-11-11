@@ -30,22 +30,22 @@ struct BehaviourTests {
 
     @Test func cancelWithoutAnnotationsClosesAtOnce() {
         open()
-        controller.requestCancel()
+        controller.dispatch(.requestCancel)
         #expect(controller.confirmation == nil)
         #expect(controller.session == nil)
     }
 
     @Test func cancelWithAnnotationsAsksFirst() {
         open(drafts: Fixtures.drafts(2))
-        controller.requestCancel()
+        controller.dispatch(.requestCancel)
         #expect(controller.confirmation == .cancelSession)
 
-        controller.dismissConfirmation()
+        controller.dispatch(.dismissConfirmation)
         #expect(controller.confirmation == nil)
         #expect(controller.drafts.count == 2)
 
-        controller.requestCancel()
-        controller.confirm()
+        controller.dispatch(.requestCancel)
+        controller.dispatch(.confirm)
         #expect(controller.session == nil)
         #expect(controller.drafts.isEmpty)
     }
@@ -53,19 +53,19 @@ struct BehaviourTests {
     /// A clip that is not stopped is lost on cancel like a note, so × asks for it too.
     @Test func cancelAsksForAClipInProgress() {
         open(activity: .recording(.recording))
-        controller.requestCancel()
+        controller.dispatch(.requestCancel)
         #expect(controller.confirmation == .cancelSession)
     }
 
     @Test func clearAllAsksAndKeepsTheSession() {
         open()
-        controller.requestClearAll()
+        controller.dispatch(.requestClearAll)
         #expect(controller.confirmation == nil)
 
         open(drafts: Fixtures.drafts(3))
-        controller.requestClearAll()
+        controller.dispatch(.requestClearAll)
         #expect(controller.confirmation == .clearAll)
-        controller.confirm()
+        controller.dispatch(.confirm)
         #expect(controller.drafts.isEmpty)
         #expect(controller.session != nil)
     }
@@ -78,7 +78,7 @@ struct BehaviourTests {
         #expect(controller.confirmation == nil)
         #expect(controller.drafts.count == 2)
 
-        controller.requestClearAll()
+        controller.dispatch(.requestClearAll)
         overlay.keyDown(with: try key(36))
         #expect(controller.drafts.isEmpty)
     }
@@ -107,8 +107,8 @@ struct BehaviourTests {
         let clip = try Fixtures.clip(in: controller.archive.newClip(in: session.id))
         open(drafts: [clip] + Fixtures.drafts(1), session: session)
 
-        controller.requestCancel()
-        controller.confirm()
+        controller.dispatch(.requestCancel)
+        controller.dispatch(.confirm)
         controller.archive.flush()
 
         let video = try #require(Fixtures.video(of: clip))
@@ -130,12 +130,12 @@ struct BehaviourTests {
         controller.setStateForTesting(
             session: Fixtures.session(), mode: .open(SessionFlow.Open(panel: .comment)), composer: .new(pending)
         )
-        controller.submitComment(thenSend: false)
+        controller.dispatch(.submitComment)
         #expect(controller.drafts.count == 1)
-        #expect(controller.flow.canSend)
+        #expect(controller.canSend)
 
         controller.deleteDraft(try #require(controller.drafts.first).id)
-        #expect(!controller.flow.canSend)
+        #expect(!controller.canSend)
     }
 
     /// The picker lists a phone in both modes, and the HUD stays in its mode; the record toggle
@@ -145,8 +145,8 @@ struct BehaviourTests {
         controller.sourcePicker.injected = (screens, apps, .done)
 
         open(activity: .recording(.ready))
-        controller.toggleWindowPick()
-        controller.openSourcePicker()
+        controller.dispatch(.windowButton)
+        controller.dispatch(.openPicker)
         #expect(controller.isRecordMode)
         #expect(controller.isSourcePickerOpen)
         let offersPhone = controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) }
@@ -170,21 +170,21 @@ struct BehaviourTests {
         }
 
         let first = restarted()
-        first.toggleRecordingMode()
+        first.dispatch(.toggleRecordingMode)
         #expect(first.isPickingWindow)
         #expect(!first.isSourcePickerOpen)
-        first.openSourcePicker()
-        first.toggleRecordingMode()
+        first.dispatch(.openPicker)
+        first.dispatch(.toggleRecordingMode)
 
         let second = restarted()
-        second.toggleRecordingMode()
+        second.dispatch(.toggleRecordingMode)
         #expect(second.isSourcePickerOpen)
-        second.stepBackInSourcePicker()
+        second.escapePressed()
         #expect(second.isPickingWindow)
         #expect(!second.isSourcePickerOpen)
 
         let third = restarted()
-        third.toggleRecordingMode()
+        third.dispatch(.toggleRecordingMode)
         #expect(third.isPickingWindow)
         #expect(!third.isSourcePickerOpen)
     }
@@ -239,7 +239,7 @@ struct BehaviourTests {
         }
         let draft = Fixtures.drafts(1)[0]
         open(drafts: [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)] + Fixtures.drafts(2).dropFirst())
-        controller.send()
+        controller.dispatch(.send)
 
         controller.deleteDraft(draft.id)
         controller.updateComment(draft.id, "changed")
@@ -251,7 +251,7 @@ struct BehaviourTests {
     @Test func notesStayAsTheyAreUnderAQuestion() {
         let drafts = Fixtures.drafts(2)
         open(drafts: drafts)
-        controller.requestClearAll()
+        controller.dispatch(.requestClearAll)
         #expect(!controller.canEditNotes)
 
         controller.deleteDraft(drafts[0].id)
@@ -267,12 +267,12 @@ struct BehaviourTests {
         let drafts = Fixtures.drafts(2)
         open(drafts: drafts)
         controller.updateCommentSoon(drafts[0].id, "typed")
-        controller.requestClearAll()
-        controller.dismissConfirmation()
+        controller.dispatch(.requestClearAll)
+        controller.dispatch(.dismissConfirmation)
         #expect(controller.drafts[0].annotation.comment == "typed")
 
         controller.updateCommentSoon(drafts[1].id, "typed too")
-        controller.toggleRecordingMode()
+        controller.dispatch(.toggleRecordingMode)
         #expect(controller.drafts[1].annotation.comment == "typed too")
     }
 
@@ -291,14 +291,14 @@ struct BehaviourTests {
     /// The menu and History read the flow: a command it would drop is off.
     @Test func commandsTheFlowWouldDropAreOff() {
         open(drafts: Fixtures.drafts(1), activity: .recording(.recording))
-        #expect(!controller.flow.accepts(.openBrowser))
-        #expect(!controller.flow.accepts(.restore))
-        #expect(controller.flow.accepts(.togglePause))
+        #expect(!controller.accepts(.openBrowser))
+        #expect(!controller.accepts(.restore))
+        #expect(controller.accepts(.togglePause))
 
         open(drafts: Fixtures.drafts(1))
-        controller.requestCancel()
+        controller.dispatch(.requestCancel)
         for event: SessionFlow.Event in [.togglePause, .requestCancel, .openBrowser, .restore, .windowButton, .deleteNote, .editNote] {
-            #expect(!controller.flow.accepts(event), "\(event)")
+            #expect(!controller.accepts(event), "\(event)")
         }
     }
 
@@ -314,13 +314,13 @@ struct BehaviourTests {
         let draft = Fixtures.drafts(1)[0]
         open(drafts: [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)], session: Fixtures.session(isLocal: true))
 
-        controller.send()
+        controller.dispatch(.send)
         #expect(HUDView.status(of: controller).title == "Sending")
         #expect(controller.sentConfirmation == nil)
         #expect(controller.sender.pasteboard.string(forType: .string) == nil)
 
         open(drafts: Fixtures.drafts(1), session: Fixtures.session(isLocal: true))
-        controller.send()
+        controller.dispatch(.send)
         try await until { controller.sentConfirmation != nil }
         #expect(controller.sentConfirmation == "Copied")
         #expect(controller.sender.pasteboard.string(forType: .string)?.contains("Avatar and name are not vertically centered") == true)
@@ -337,11 +337,11 @@ struct BehaviourTests {
         open(drafts: [Draft(annotation: draft.annotation, marker: draft.marker, chip: draft.chip, capture: unfinished)])
         controller.hover = Fixtures.hover()
 
-        controller.send()
+        controller.dispatch(.send)
         #expect(controller.hover == nil)
-        controller.requestCancel()
+        controller.dispatch(.requestCancel)
         controller.escapePressed()
-        controller.send()
+        controller.dispatch(.send)
         #expect(controller.session != nil)
         #expect(controller.confirmation == nil)
         #expect(HUDView.status(of: controller).title == "Sending")
@@ -399,7 +399,7 @@ struct BehaviourTests {
         open(activity: .picking(isRecordMode: true, isPickerOpen: false))
         controller.choose(.phone(phone))
         #expect(controller.scope.source == .phone(phone))
-        controller.toggleRecordingMode()
+        controller.dispatch(.toggleRecordingMode)
         #expect(controller.recording == nil)
         #expect(controller.scope.source == nil)
     }
@@ -510,7 +510,7 @@ struct BehaviourTests {
         let low = NSPoint(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 120 - height)
         panel.window.setFrame(NSRect(origin: low, size: NSSize(width: 800, height: height)), display: false)
         open()
-        controller.toggleWindowPick()
+        controller.dispatch(.windowButton)
 
         panel.fitPicker()
 
@@ -625,20 +625,20 @@ struct BehaviourTests {
     @Test func theSourceNameChoosesAgainBeforeRecord() {
         let elsewhere = CGPoint(x: -5000, y: -5000)
         open()
-        controller.toggleWindowPick()
+        controller.dispatch(.windowButton)
         #expect(!controller.isPickingWindow)
 
         open(activity: .recording(.ready))
-        controller.toggleWindowPick()
+        controller.dispatch(.windowButton)
         #expect(controller.isPickingWindow)
         #expect(!controller.isSourcePickerOpen)
-        controller.toggleWindowPick()
+        controller.dispatch(.windowButton)
         #expect(!controller.isPickingWindow)
 
         controller.choose(.window(Fixtures.window))
         #expect(controller.scope.source == nil)
 
-        controller.toggleWindowPick()
+        controller.dispatch(.windowButton)
         controller.choose(.window(Fixtures.window))
         #expect(!controller.isPickingWindow)
         #expect(controller.isRecordMode)
@@ -657,7 +657,7 @@ struct BehaviourTests {
         #expect(!controller.isPickingWindow)
         #expect(controller.scope.source == .screen(1))
 
-        controller.toggleRecordingMode()
+        controller.dispatch(.toggleRecordingMode)
         #expect(!controller.isRecordMode)
         #expect(controller.scope.window == nil)
         #expect(controller.allows(elsewhere))
@@ -667,7 +667,7 @@ struct BehaviourTests {
     @Test func aClipKeepsItsSource() {
         for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, thenSend: false)] {
             open(activity: .recording(clip), source: .window(Fixtures.window))
-            controller.toggleWindowPick()
+            controller.dispatch(.windowButton)
             controller.annotateInBrowser()
             #expect(!controller.isPickingWindow, "\(clip)")
             #expect(controller.clipSource == .window(Fixtures.window), "\(clip)")
@@ -683,7 +683,7 @@ struct BehaviourTests {
         #expect(controller.scope.source == nil)
 
         controller.sourcePicker.openApp = Fixtures.window.pid
-        controller.stepBackInSourcePicker()
+        controller.escapePressed()
         #expect(controller.sourcePicker.openApp == nil)
         #expect(controller.isSourcePickerOpen)
 
@@ -780,7 +780,7 @@ struct BehaviourTests {
         let controller = try await Fixtures.controller()
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(SessionFlow.Open(pauses: [.user, .otherApp])))
 
-        controller.togglePause()
+        controller.dispatch(.togglePause)
 
         #expect(controller.pauses.isEmpty)
     }

@@ -107,7 +107,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             record.isLocal ? nil : setup.icon(forClient: record.client)
         }
         historyRestore = controller.$flow
-            .map { flow in flow.mode == .idle || flow.accepts(.restore) }
+            .map { flow in flow.mode == .idle || flow.accepts(.restore, controller.facts) }
             .removeDuplicates()
             .sink { [weak history] takes in history?.takesRestore = takes }
         let model = SettingsModel(

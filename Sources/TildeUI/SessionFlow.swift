@@ -1,23 +1,28 @@
 import Foundation
 
-/// What a session does next: a pure function of its mode and an event. The mode is the one
-/// source of truth for what the session on screen does; the controller keeps it, runs the
-/// effects, and holds the data that goes with it (the comment, the preview's note, the
-/// recorder). Every user action and every async result goes through `handle(_:)`.
+/// What a session does next: a pure function of its mode, an event and the facts of the
+/// session's data. The mode is the one source of truth for what the session on screen does;
+/// the controller keeps it, runs the effects, and holds the data that goes with it (the notes,
+/// the comment, the preview's note, the recorder). Every user action and every async result
+/// goes through `handle(_:_:)`.
 /// Tests/Contract/transitions pins this table.
 struct SessionFlow: Equatable {
     var mode: Mode = .open(Open())
-    /// Facts the rules read, which the controller keeps current: the number of notes, and the
-    /// comment being written.
-    var notes = 0
-    var commentHasText = false
-    var commentIsOnDrawing = false
     /// The window button opens the picker at once, as the user last chose from it, instead of
     /// clicking on screen. The flow changes it; the controller keeps it across launches.
     var choosesInPicker = false
     /// The last async operation started (a clip start or stop, a send, a confirmation); its
     /// result counts only while the mode still waits for that operation.
     var lastOperation = 0
+
+    /// What the rules read of the data that the controller owns. It gives them with each event.
+    struct Facts: Equatable {
+        /// The number of notes.
+        var notes = 0
+        /// The comment being written has text, and is on a drawing.
+        var commentHasText = false
+        var commentIsOnDrawing = false
+    }
 
     enum Mode: Equatable {
         case idle
@@ -217,9 +222,9 @@ struct SessionFlow: Equatable {
 
     /// Whether the event would do anything now: change the mode or have an effect. A control
     /// that sends it is enabled only then.
-    func accepts(_ event: Event) -> Bool {
+    func accepts(_ event: Event, _ facts: Facts) -> Bool {
         var next = self
-        let effects = next.handle(event)
+        let effects = next.handle(event, facts)
         return !effects.isEmpty || next != self
     }
 
@@ -256,13 +261,13 @@ struct SessionFlow: Equatable {
     }
 
     /// Send and ⌘↩ have something to send, and nothing is starting or finishing.
-    var canSend: Bool {
+    func canSend(_ facts: Facts) -> Bool {
         guard case .open(let open) = mode, !isPicking, open.question == nil else {
             return false
         }
         switch open.activity {
         case .recording(.starting), .recording(.finishing): return false
-        default: return notes > 0 || holdsClip || open.panel == .comment
+        default: return facts.notes > 0 || holdsClip || open.panel == .comment
         }
     }
 
@@ -271,10 +276,12 @@ struct SessionFlow: Equatable {
     /// Set by a rule that leaves the session on screen, for sending or for its end; `handle`
     /// takes it as the new mode.
     private var leaving: Mode?
+    /// The facts of the event that `handle` works on, as the event changes them: a saved clip
+    /// is a note. They are no part of the state: `handle` takes them away again.
+    private var facts = Facts()
 
-    init(mode: Mode = .open(Open()), notes: Int = 0, lastOperation: Int = 0) {
+    init(mode: Mode = .open(Open()), lastOperation: Int = 0) {
         self.mode = mode
-        self.notes = notes
         self.lastOperation = lastOperation
     }
 
@@ -283,7 +290,11 @@ struct SessionFlow: Equatable {
         return lastOperation
     }
 
-    mutating func handle(_ event: Event) -> [Effect] {
+    mutating func handle(_ event: Event, _ facts: Facts) -> [Effect] {
+        self.facts = facts
+        defer {
+            self.facts = Facts()
+        }
         switch mode {
         case .idle:
             return handleWithoutSession(event)
@@ -374,8 +385,8 @@ struct SessionFlow: Equatable {
         let isAboutSomething = switch open.question {
         case .discardRecording: open.clipInProgress
         case .discardComment: open.panel == .comment
-        case .clearAll: notes > 0
-        case .cancelSession: notes > 0 || open.holdsClip
+        case .clearAll: facts.notes > 0
+        case .cancelSession: facts.notes > 0 || open.holdsClip
         case .restore, nil: true
         }
         if !isAboutSomething {
@@ -456,11 +467,11 @@ struct SessionFlow: Equatable {
             return open.activity == .annotating && open.pauses.contains(.user) ? togglePause(&open) : [.showHUD]
 
         case .requestClearAll:
-            guard notes > 0 else {
+            guard facts.notes > 0 else {
                 return []
             }
             // A question never opens over a comment: one with text asks about it first.
-            if open.panel == .comment, commentHasText {
+            if open.panel == .comment, facts.commentHasText {
                 return leaveComment(&open)
             }
             let closes = open.panel == .comment ? closePanel(&open) : []
@@ -475,11 +486,11 @@ struct SessionFlow: Equatable {
             guard open.canPick else {
                 return []
             }
-            if open.panel == .comment, commentHasText {
+            if open.panel == .comment, facts.commentHasText {
                 return leaveComment(&open)
             }
             let closes = finishDrawingAndPanel(&open)
-            guard notes > 0 else {
+            guard facts.notes > 0 else {
                 return closes + [.restoreDrafts]
             }
             open.question = .restore
@@ -490,20 +501,16 @@ struct SessionFlow: Equatable {
             guard open.canPick else {
                 return []
             }
-            if open.panel == .comment, commentHasText {
+            if open.panel == .comment, facts.commentHasText {
                 return leaveComment(&open)
             }
             return finishDrawingAndPanel(&open) + [.openBrowser]
 
         case .deleteNote:
-            guard notes > 0 else {
-                return []
-            }
-            notes -= 1
-            return [.deleteNote]
+            return facts.notes > 0 ? [.deleteNote] : []
 
         case .editNote:
-            return notes > 0 ? [.editNote] : []
+            return facts.notes > 0 ? [.editNote] : []
 
         case .confirm:
             return confirm(&open)
@@ -545,7 +552,7 @@ struct SessionFlow: Equatable {
                 return []
             }
             // A shape is worth keeping without words; words are not thrown away unasked.
-            if commentIsOnDrawing, !commentHasText {
+            if facts.commentIsOnDrawing, !facts.commentHasText {
                 return submitComment(&open)
             }
             return leaveComment(&open)
@@ -578,7 +585,7 @@ struct SessionFlow: Equatable {
                 return []
             }
             // A comment with text asks first, like leaving it any other way.
-            if open.panel == .comment, commentHasText {
+            if open.panel == .comment, facts.commentHasText {
                 return leaveComment(&open)
             }
             let closes = closePanel(&open)
@@ -645,7 +652,7 @@ struct SessionFlow: Equatable {
                 return [.dropClip]
             }
             open.activity = .recording(.ready)
-            notes += 1
+            facts.notes += 1
             return [.keepClip] + (thenSend ? send(&open) : [])
 
         case .clipFailed(let operation):
@@ -660,7 +667,7 @@ struct SessionFlow: Equatable {
             guard open.activity == .recording(.ready) else {
                 return []
             }
-            if open.panel == .comment, commentHasText {
+            if open.panel == .comment, facts.commentHasText {
                 return leaveComment(&open)
             }
             return finishDrawingAndPanel(&open) + startPicking(&open)
@@ -701,11 +708,11 @@ struct SessionFlow: Equatable {
 
     private func requestCancel(_ open: inout Open) -> [Effect] {
         // A question never opens over a comment: one with text asks about it first.
-        if open.panel == .comment, commentHasText {
+        if open.panel == .comment, facts.commentHasText {
             return leaveComment(&open)
         }
         let closes = open.panel == .comment ? closePanel(&open) : []
-        guard notes > 0 || open.holdsClip else {
+        guard facts.notes > 0 || open.holdsClip else {
             return closes + [.clearNotice, .cancelSession]
         }
         open.question = .cancelSession
@@ -765,7 +772,7 @@ struct SessionFlow: Equatable {
             return []
         }
         // A comment with text asks first, as Draw does.
-        if open.panel == .comment, commentHasText {
+        if open.panel == .comment, facts.commentHasText {
             return leaveComment(&open)
         }
         let closes = finishDrawingAndPanel(&open)
@@ -784,7 +791,7 @@ struct SessionFlow: Equatable {
         switch open.activity {
         case .recording(.recording), .recording(.paused):
             // A question never opens over a comment: one with text asks about it first.
-            if open.panel == .comment, commentHasText {
+            if open.panel == .comment, facts.commentHasText {
                 return leaveComment(&open)
             }
             let closes = open.panel == .comment ? closePanel(&open) : []
@@ -840,13 +847,13 @@ struct SessionFlow: Equatable {
         if open.panel == .comment {
             // The comment becomes a note, or edits one.
             effects = submitComment(&open)
-            notes = max(notes, 1)
+            facts.notes = max(facts.notes, 1)
         }
         if open.clipInProgress {
             open.activity = .recording(.finishing(operation: nextOperation(), thenSend: true))
             return effects + [.finishClip]
         }
-        guard notes > 0 else {
+        guard facts.notes > 0 else {
             return effects
         }
         effects += finishDrawingAndPanel(&open)
@@ -866,7 +873,7 @@ struct SessionFlow: Equatable {
     /// Leaving a comment with text asks first, and pauses, so that the screen can be used
     /// meanwhile; the comment waits. An empty comment just goes.
     private func leaveComment(_ open: inout Open) -> [Effect] {
-        guard commentHasText else {
+        guard facts.commentHasText else {
             open.panel = nil
             return [.closeComposer]
         }

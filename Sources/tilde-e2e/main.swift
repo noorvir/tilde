@@ -108,7 +108,7 @@ final class Harness {
             try await until("the session is limited to the browser window") { self.isScopedToBrowser }
             try check(isScopedToBrowser, "a session that opens a page annotates only the browser window")
             try check(controller.pauses.contains(.user), "a session that opens a page starts paused, so the user can browse")
-            controller.togglePause()
+            controller.dispatch(.togglePause)
         }
         try await until("the page is loaded", timeout: 30) { await self.pageIsReady() }
         // On a Mac with more displays, other apps' windows can cover the page. Keep it on the
@@ -149,9 +149,9 @@ final class Harness {
             }
             page.makeKeyAndOrderFront(nil)
             try await until("the overlay goes back above the browser after a click in it", timeout: 1) { overlayIsAbovePage() }
-            controller.togglePause()
+            controller.dispatch(.togglePause)
             page.makeKeyAndOrderFront(nil)
-            controller.togglePause()
+            controller.dispatch(.togglePause)
             try await until("the overlay is above the browser after pause and resume", timeout: 1) { overlayIsAbovePage() }
             try check(overlayIsAbovePage(), "hover reaches the page after a click in the browser and after pause and resume")
         }
@@ -252,14 +252,14 @@ final class Harness {
             controller.expandedPreviewImage = .context
             await renderAlone(previewWindow, "04c-preview-context")
         }
-        controller.closePreview()
+        controller.dispatch(.closePreview)
         try check(previewWindow?.isVisible != true && controller.drafts.count == 1, "preview closes and keeps the annotation")
 
         // The pill keeps one width in every state.
         let annotatingWidth = hudWidth
-        controller.togglePause()
+        controller.dispatch(.togglePause)
         let pausedWidth = hudWidth
-        controller.togglePause()
+        controller.dispatch(.togglePause)
         controller.showsList = true
         if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04d-hud-list")
@@ -268,17 +268,17 @@ final class Harness {
         try check(annotatingWidth == pausedWidth && annotatingWidth > 0, "HUD keeps its width when paused, got \(annotatingWidth) and \(pausedWidth)")
 
         // Clear all and cancel ask first, in the pill, at the same width; Cancel keeps everything.
-        controller.requestClearAll()
+        controller.dispatch(.requestClearAll)
         let confirmWidth = hudWidth
         if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04e-confirm-clear")
         }
-        controller.dismissConfirmation()
-        controller.requestCancel()
+        controller.dispatch(.dismissConfirmation)
+        controller.dispatch(.requestCancel)
         if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04f-confirm-cancel")
         }
-        controller.dismissConfirmation()
+        controller.dispatch(.dismissConfirmation)
         try check(
             confirmWidth == annotatingWidth && controller.drafts.count == 1 && controller.isOpen,
             "confirming keeps the pill width and Cancel keeps the annotation"
@@ -378,7 +378,7 @@ final class Harness {
         browser.close()
         try await until("the scope ends when the browser closes", timeout: 5) { self.controller.scope.window == nil }
         try check(controller.notices.notice == .windowClosed, "the HUD says the window closed")
-        controller.requestCancel()
+        controller.dispatch(.requestCancel)
     }
 
     private var isScopedToBrowser: Bool {

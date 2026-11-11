@@ -284,13 +284,13 @@ struct CommentView: View {
 
             HStack(alignment: .bottom, spacing: 8) {
                 CommentEditor(draft: controller.commentDraft, height: $editorHeight, isEmpty: $isEmpty, onHeightChange: onHeightChange) {
-                    controller.submitComment(thenSend: false)
+                    controller.dispatch(.submitComment)
                 } onCancel: {
                     controller.escapePressed()
                 } onClick: {
                     // A click back in the box answers the question: keep writing.
                     if isAskingToDiscard {
-                        controller.dismissConfirmation()
+                        controller.dispatch(.dismissConfirmation)
                     }
                 }
                 .frame(height: editorHeight)
@@ -305,7 +305,7 @@ struct CommentView: View {
                 .padding(.vertical, 3)
 
                 Button {
-                    controller.submitComment(thenSend: false)
+                    controller.dispatch(.submitComment)
                 } label: {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11.5, weight: .bold))
@@ -328,7 +328,7 @@ struct CommentView: View {
             }
         }
         .background {
-            Button("Send") { controller.submitComment(thenSend: true) }
+            Button("Send") { controller.dispatch(.send) }
                 .keyboardShortcut(.return, modifiers: .command)
                 .opacity(0)
         }
@@ -356,11 +356,15 @@ struct CommentView: View {
                 .foregroundStyle(.white)
             Spacer(minLength: 4)
             // The answers as the pill's questions show them: the label, then its key.
-            Button(action: controller.dismissConfirmation) {
+            Button {
+                controller.dispatch(.dismissConfirmation)
+            } label: {
                 answer("Cancel", key: "esc", color: .white.opacity(0.9))
             }
             .buttonStyle(.plain)
-            Button(action: controller.confirm) {
+            Button {
+                controller.dispatch(.confirm)
+            } label: {
                 answer("Discard", key: "↩", color: .red)
             }
             .buttonStyle(.plain)

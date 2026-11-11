@@ -364,7 +364,7 @@ struct HUDView: View {
                 HUDAccessoryPicker(
                     model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
                     selectedID: controller.isRecordMode ? controller.clipSource.id : controller.scope.source?.id,
-                    onOpen: controller.openSourcePicker, onBack: controller.stepBackInSourcePicker, onChoose: controller.choose
+                    onOpen: { controller.dispatch(.openPicker) }, onBack: controller.escapePressed, onChoose: controller.choose
                 )
                     .transition(Self.zoom)
             }
@@ -481,14 +481,14 @@ struct HUDView: View {
         }
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
         HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
-            controller.undoDrawing()
+            controller.dispatch(.undoDrawing)
         }
         HUDButton(image: Image(systemName: "arrow.uturn.forward"), help: "Redo") {
-            controller.redoDrawing()
+            controller.dispatch(.redoDrawing)
         }
         Spacer(minLength: 0)
         PillTextButton(title: "Done", key: "esc", isDestructive: false) {
-            controller.finishDrawing()
+            controller.dispatch(.finishDrawing)
         }
         .fixedSize()
     }
@@ -554,7 +554,6 @@ struct HUDView: View {
     @ViewBuilder
     private var annotatingContent: some View {
         let count = controller.drafts.count
-        let flow = controller.flow
         let status = Self.status(of: controller)
 
         // While a source is being chosen, only the record toggle works; the others keep their
@@ -589,22 +588,22 @@ struct HUDView: View {
 
             // Recording mode starts by choosing what to record.
             HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, keys: recordToggleKeys, help: controller.isRecordMode ? "Annotate" : "Record screen") {
-                controller.toggleRecordingMode()
+                controller.dispatch(.toggleRecordingMode)
             }
             .disabled(status.isBusy)
 
             // Recording mode puts Stop where Draw is; the other buttons stay.
             if controller.isRecordMode {
                 HUDButton(image: Image(systemName: "stop.fill"), help: "Stop recording") {
-                    controller.stopRecording()
+                    controller.dispatch(.stop)
                 }
                 .disabled(controller.recording != .recording && controller.recording != .paused)
             } else {
                 HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, keys: keys(.drawingMode), help: "Draw") {
                     if controller.isDrawing {
-                        controller.finishDrawing()
+                        controller.dispatch(.finishDrawing)
                     } else {
-                        controller.startDrawing()
+                        controller.dispatch(.startDrawing)
                     }
                 }
             }
@@ -613,25 +612,25 @@ struct HUDView: View {
 
         Group {
             HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide notes" : "Show notes") {
-                controller.showNotes()
+                controller.dispatch(.toggleList)
             }
             .disabled(count == 0)
 
             HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all notes") {
-                controller.requestClearAll()
+                controller.dispatch(.requestClearAll)
             }
             .disabled(count == 0)
 
             // A session without an agent copies the report.
-            SendButton(copies: controller.session?.isLocal == true, action: controller.send)
-                .disabled(!flow.canSend)
+            SendButton(copies: controller.session?.isLocal == true, action: { controller.dispatch(.send) })
+                .disabled(!controller.canSend)
                 .tildeTooltip(sendHelp, keys: ["⌘↩"])
                 .accessibilityHint(sendHelp)
             .padding(.leading, 4)
 
             // Esc closes the session only while paused; elsewhere it pauses or steps back.
             HUDButton(image: Image(systemName: "xmark"), keys: controller.pauses.contains(.user) ? ["Esc"] : [], help: "Close") {
-                controller.requestCancel()
+                controller.dispatch(.requestCancel)
             }
         }
         .disabled(controller.isPickingWindow)
@@ -693,31 +692,31 @@ struct HUDView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
 
         PillTextButton(title: "Cancel", key: "esc", isDestructive: false) {
-            controller.dismissConfirmation()
+            controller.dispatch(.dismissConfirmation)
         }
         .tildeTooltip(confirmation == .discardRecording ? "Keep recording" : "Keep everything")
 
         switch confirmation {
         case .clearAll:
             PillTextButton(title: "Clear", key: "↩", isDestructive: true) {
-                controller.confirm()
+                controller.dispatch(.confirm)
             }
             .tildeTooltip("Delete all notes")
         case .cancelSession:
             PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
-                controller.confirm()
+                controller.dispatch(.confirm)
             }
             .tildeTooltip("Discard and close")
         case .discardComment:
             EmptyView()
         case .discardRecording:
             PillTextButton(title: "Discard", key: "↩", isDestructive: true) {
-                controller.confirm()
+                controller.dispatch(.confirm)
             }
             .tildeTooltip("Discard the recording")
         case .restore:
             PillTextButton(title: "Replace", key: "↩", isDestructive: true) {
-                controller.confirm()
+                controller.dispatch(.confirm)
             }
             .tildeTooltip("Replace the notes")
         }
@@ -846,11 +845,13 @@ struct HUDView: View {
         )
         return Group {
             if case .source = subtitleState {
-                Button(action: controller.toggleWindowPick) {
+                Button {
+                    controller.dispatch(.windowButton)
+                } label: {
                     SubtitleLine(part: part).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!controller.flow.accepts(.windowButton))
+                .disabled(!controller.accepts(.windowButton))
                 .tildeTooltip("Choose source")
             } else {
                 SubtitleLine(part: part)

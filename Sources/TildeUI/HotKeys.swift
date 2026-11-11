@@ -15,8 +15,8 @@ final class HotKeys {
     init(controller: AnnotationController, shortcuts: ShortcutStore) {
         self.shortcuts = shortcuts
         actions = [
-            1: { controller.startOrResume() },
-            2: { controller.togglePause() },
+            1: { controller.dispatch(.startShortcut) },
+            2: { controller.dispatch(.togglePause) },
         ]
 
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))

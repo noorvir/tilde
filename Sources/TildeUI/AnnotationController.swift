@@ -52,8 +52,6 @@ final class AnnotationController: ObservableObject {
     @Published private(set) var session: SessionStore.Session?
     @Published private(set) var drafts: [Draft] = [] {
         didSet {
-            // Send and the questions read the count; it changes with the notes, not later.
-            flow.notes = drafts.count
             if let session, drafts.count != oldValue.count {
                 store.updateNoteCount(drafts.count, for: session.id)
             }
@@ -371,11 +369,6 @@ final class AnnotationController: ObservableObject {
         composer = nil
     }
 
-    /// Sends all drafts, including the comment that is still open and a clip in progress.
-    func send() {
-        dispatch(.send)
-    }
-
     /// Makes the report: waits for the captures, then saves it to the inbox. "Sent" or
     /// "Copied" shows only once that is done; a failure leaves the session as it was.
     private func startSend() {
@@ -434,11 +427,6 @@ final class AnnotationController: ObservableObject {
     func showNoteInPanel(_ id: Draft.ID) {
         browser.showsNotes = true
         browser.selectedNote = id
-    }
-
-    /// The HUD's list button: the notes panel in the browser, the list elsewhere.
-    func showNotes() {
-        dispatch(.toggleList)
     }
 
     private func toggleList() {
@@ -502,48 +490,16 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    func togglePause() {
-        dispatch(.togglePause)
-    }
-
     /// The HUD's leading button: records, pauses or resumes a clip in recording mode; else
     /// resumes after any pause, or pauses.
     func pressStatusButton() {
         if isRecordMode {
-            toggleRecord()
+            dispatch(.record)
         } else if !pauses.isEmpty {
-            resume()
+            dispatch(.resume)
         } else {
-            togglePause()
+            dispatch(.togglePause)
         }
-    }
-
-    /// Annotates again after any pause: one the user chose, or one while another app was in
-    /// front.
-    func resume() {
-        dispatch(.resume)
-    }
-
-    /// Asks in the pill before clearing all annotations.
-    func requestClearAll() {
-        dispatch(.requestClearAll)
-    }
-
-    /// Asks in the pill before cancelling, unless there is nothing to lose.
-    func requestCancel() {
-        dispatch(.requestCancel)
-    }
-
-    func confirm() {
-        dispatch(.confirm)
-    }
-
-    func dismissConfirmation() {
-        dispatch(.dismissConfirmation)
-    }
-
-    func startDrawing() {
-        dispatch(.startDrawing)
     }
 
     private func showCanvas() {
@@ -553,10 +509,6 @@ final class AnnotationController: ObservableObject {
             hud.show()
         }
         drawing.start()
-    }
-
-    func finishDrawing() {
-        dispatch(.finishDrawing)
     }
 
     func setDrawingTool(_ tool: String) {
@@ -595,14 +547,6 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    func undoDrawing() {
-        dispatch(.undoDrawing)
-    }
-
-    func redoDrawing() {
-        dispatch(.redoDrawing)
-    }
-
     func setDrawingColor(_ color: String) {
         drawing.setColor(color)
         if composer != nil {
@@ -629,8 +573,9 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    /// Esc, and the picker's "‹ Back".
     func escapePressed() {
-        // In the picker, Esc first goes from an app's windows back to the apps, as "‹ Back".
+        // In the picker, Esc first goes from an app's windows back to the apps.
         if isSourcePickerOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
             return
@@ -638,15 +583,30 @@ final class AnnotationController: ObservableObject {
         dispatch(.escape)
     }
 
-    /// The picker's "‹ Back": one level back, as Esc.
-    func stepBackInSourcePicker() {
-        escapePressed()
+    /// What the flow's rules read of the notes and the comment being written, as they are now.
+    var facts: SessionFlow.Facts {
+        var facts = SessionFlow.Facts(notes: drafts.count)
+        facts.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if case .new(let pending) = composer {
+            facts.commentIsOnDrawing = !pending.drawingIDs.isEmpty
+        }
+        return facts
     }
 
-    /// The one way the session's mode changes: the flow decides, with the facts it reads kept
-    /// current, then its effects run. `with` gives the data of the effects that need it, as
-    /// what to do for them, such as showing the comment box that the caller built; one the
-    /// flow does not return is dropped.
+    /// Whether the event would do anything now; a control that sends it is enabled only then.
+    func accepts(_ event: SessionFlow.Event) -> Bool {
+        flow.accepts(event, facts)
+    }
+
+    /// Send and ⌘↩ have something to send, and nothing is starting or finishing.
+    var canSend: Bool {
+        flow.canSend(facts)
+    }
+
+    /// The one way the session's mode changes: the flow decides from the facts as they are
+    /// now, then its effects run. `with` gives the data of the effects that need it, as what
+    /// to do for them, such as showing the comment box that the caller built; one the flow
+    /// does not return is dropped.
     func dispatch(_ event: SessionFlow.Event, with data: [SessionFlow.Effect: () -> Void] = [:]) {
         // A comment typed in the preview is saved first: the event may open a question or a
         // mode in which notes cannot be edited.
@@ -654,14 +614,7 @@ final class AnnotationController: ObservableObject {
             saveTypedComments()
         }
         var next = flow
-        next.notes = drafts.count
-        next.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if case .new(let pending) = composer {
-            next.commentIsOnDrawing = !pending.drawingIDs.isEmpty
-        } else {
-            next.commentIsOnDrawing = false
-        }
-        let effects = next.handle(event)
+        let effects = next.handle(event, facts)
         let questionChanged = next.session?.question != flow.session?.question
         if next.choosesInPicker != flow.choosesInPicker {
             defaults?.set(next.choosesInPicker, forKey: "ChoosesInPicker")
@@ -681,10 +634,10 @@ final class AnnotationController: ObservableObject {
 
     private func run(_ effect: SessionFlow.Effect) {
         switch effect {
-        // Their data comes with the event that returns them, if at all.
+        // Their data comes with the event that returns them.
         case .showComment, .showPreview, .applySource, .finishSend, .adoptClip, .keepClip, .dropClip, .showPushFailure,
              .askRestore, .deleteNote, .editNote:
-            break
+            assertionFailure("\(effect) came without the data of its event")
         case .applyPause: applyPause()
         case .closeComposer: discardComposer()
         case .saveComment: saveComment()
@@ -774,11 +727,6 @@ final class AnnotationController: ObservableObject {
         case .startSend: startSend()
         case .showSendFailure: notices.show(.reportNotSaved)
         }
-    }
-
-    /// The start shortcut: starts a session, resumes a paused one, or shows the HUD.
-    func startOrResume() {
-        dispatch(.startShortcut)
     }
 
     // MARK: - Labels of notes
@@ -959,22 +907,6 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - Recording
 
-    /// The HUD's record toggle: into recording mode, or back to annotating, which asks first
-    /// when a clip is not stopped (Stop adds it to the list).
-    func toggleRecordingMode() {
-        dispatch(.toggleRecordingMode)
-    }
-
-    /// The leading button in recording mode: starts a clip, pauses it, resumes it.
-    func toggleRecord() {
-        dispatch(.record)
-    }
-
-    /// Ends the clip in progress and adds it to the list.
-    func stopRecording() {
-        dispatch(.stop)
-    }
-
     /// What Record records: the chosen source, or the screen with the HUD when there is none.
     var clipSource: RecordingSource {
         scope.source ?? .screen(hudDisplay ?? CGMainDisplayID())
@@ -1029,17 +961,6 @@ final class AnnotationController: ObservableObject {
         SessionScope.allows(point, scope: isPickingWindow ? nil : scope.window?.frame)
     }
 
-    /// The HUD's window button: starts choosing a source on screen, or stops choosing with no
-    /// change.
-    func toggleWindowPick() {
-        dispatch(.windowButton)
-    }
-
-    /// Esc while choosing: closes the open picker, then stops choosing.
-    func cancelWindowPick() {
-        dispatch(.escape)
-    }
-
     /// The overlays cover every screen while choosing, and the floating HUD shows the picker.
     private func pickingChanged() {
         guard isOpen, !overlays.isEmpty else {
@@ -1048,11 +969,6 @@ final class AnnotationController: ObservableObject {
         layoutOverlays()
         placeHUD()
         makeOverlayKey()
-    }
-
-    /// Opens the source picker in full while choosing, on its screens.
-    func openSourcePicker() {
-        dispatch(.openPicker)
     }
 
     private func openPicker() {
@@ -1185,7 +1101,7 @@ final class AnnotationController: ObservableObject {
 
     func click(at point: CGPoint) {
         if previewID != nil {
-            closePreview()
+            dispatch(.closePreview)
             return
         }
         if isPickingWindow {
@@ -1228,7 +1144,7 @@ final class AnnotationController: ObservableObject {
 
     func dragEnded(with rect: CGRect) {
         if previewID != nil {
-            closePreview()
+            dispatch(.closePreview)
             return
         }
         // While choosing, only a click chooses.
@@ -1297,15 +1213,6 @@ final class AnnotationController: ObservableObject {
         }])
     }
 
-    /// The comment box's Return, and ⌘↩ there, which sends the whole report.
-    func submitComment(thenSend: Bool) {
-        if thenSend {
-            send()
-        } else {
-            dispatch(.submitComment)
-        }
-    }
-
     /// Puts the open comment in the list: a new note, or the edited one.
     private func saveComment() {
         guard let composer else {
@@ -1350,7 +1257,7 @@ final class AnnotationController: ObservableObject {
     /// Notes change only when the flow takes it: not under a question, while choosing or while
     /// the report is made.
     var canEditNotes: Bool {
-        flow.accepts(.editNote)
+        accepts(.editNote)
     }
 
     func deleteDraft(_ id: Draft.ID) {
@@ -1358,20 +1265,15 @@ final class AnnotationController: ObservableObject {
             if previewID == id {
                 showAdjacentPreview(1)
                 if previewID == id {
-                    closePreview()
+                    dispatch(.closePreview)
                 }
             }
             drafts.filter { $0.id == id }.forEach(ClipRecorder.deleteVideo)
             drafts.removeAll { $0.id == id }
             if case .edit(id) = composer {
-                closeComposer()
+                dispatch(.closeComment)
             }
         }])
-    }
-
-    /// Discards the open comment.
-    func closeComposer() {
-        dispatch(.closeComment)
     }
 
     /// Discards the open comment's data, including a new target's capture.
@@ -1463,10 +1365,6 @@ final class AnnotationController: ObservableObject {
         hud.resetPosition()
     }
 
-    func closePreview() {
-        dispatch(.closePreview)
-    }
-
     private func hidePreview() {
         previewID = nil
         expandedPreviewImage = nil
@@ -1529,7 +1427,7 @@ extension AnnotationController {
         self.drafts = drafts
         // How the user chooses a window is theirs, not the session's.
         let choosesInPicker = flow.choosesInPicker
-        flow = SessionFlow(mode: mode, notes: drafts.count)
+        flow = SessionFlow(mode: mode)
         flow.choosesInPicker = choosesInPicker
         self.hover = hover
         self.composer = composer

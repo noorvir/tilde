@@ -6,9 +6,25 @@ import AppKit
 /// Runs the rows of a transition table through the real rules.
 @MainActor
 enum Transitions {
+    /// A row's flow with its facts, which the row writes as one object.
+    struct FlowState: Codable {
+        var flow: SessionFlow
+        var facts: SessionFlow.Facts
+
+        init(from decoder: Decoder) throws {
+            flow = try SessionFlow(from: decoder)
+            facts = try SessionFlow.Facts(from: decoder)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            try flow.encode(to: encoder)
+            try facts.encode(to: encoder)
+        }
+    }
+
     struct Row: Decodable {
         let name: String
-        var state: SessionFlow?
+        var state: FlowState?
         var event: SessionFlow.Event?
         /// A single key pressed while Tilde has the keyboard, by its default name, such as "R".
         var key: String?
@@ -63,7 +79,7 @@ enum Transitions {
 
     struct Result: Encodable {
         let name: String
-        var state: SessionFlow?
+        var state: FlowState?
         var effects: [SessionFlow.Effect]?
         /// The action the key chose, such as "rectangleTool"; nil when it is none.
         var keyAction: String?
@@ -104,15 +120,15 @@ enum Transitions {
         let results = rows.map { row -> Result in
             var result = Result(name: row.name)
             if var state = row.state, let event = row.event {
-                result.effects = state.handle(event)
+                result.effects = state.flow.handle(event, state.facts)
                 result.state = state
             }
             if var state = row.state, let key = row.key {
                 let shortcuts = ShortcutStore(defaults: UserDefaults(suiteName: "tilde-state-keys") ?? .standard)
                 let code = ShortcutStore.Action.allCases.lazy.compactMap { $0.defaultShortcut?.combo }.first { $0.key == key }?.keyCode
-                let action = code.flatMap { shortcuts.inAppAction(keyCode: UInt16($0), modifiers: [], isDrawing: state.session?.isDrawing ?? false) }
+                let action = code.flatMap { shortcuts.inAppAction(keyCode: UInt16($0), modifiers: [], isDrawing: state.flow.session?.isDrawing ?? false) }
                 result.keyAction = action?.rawValue
-                result.effects = action.map { state.events(forKey: $0).flatMap { state.handle($0) } } ?? []
+                result.effects = action.map { state.flow.events(forKey: $0).flatMap { state.flow.handle($0, state.facts) } } ?? []
                 result.state = state
             }
             if let original = row.original, let page = row.page {

@@ -139,7 +139,7 @@ struct SessionArchiveTests {
         #expect(controller.restoreRecord == record)
         #expect(controller.drafts.count == 1)
 
-        controller.confirm()
+        controller.dispatch(.confirm)
         #expect(controller.drafts.map(\.annotation.comment) == record.notes.map(\.comment))
         archive.flush()
         #expect(archive.record(record.id)?.state == .restored)

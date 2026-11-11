@@ -6,9 +6,17 @@ import Testing
 struct SessionFlowTests {
     typealias Open = SessionFlow.Open
 
+    /// A state of the flow with the facts of the session's data.
+    struct State {
+        let flow: SessionFlow
+        let facts: SessionFlow.Facts
+
+        var mode: SessionFlow.Mode { flow.mode }
+    }
+
     /// Every kind of state: each activity, with and without pauses, a panel, drawing and each
     /// question; sending; Sent; no session. Operation 3 is the one under way.
-    static let states: [SessionFlow] = {
+    static let states: [State] = {
         let activities: [SessionFlow.Activity] = [
             .annotating, .recording(.ready), .recording(.starting(operation: 3)), .recording(.recording), .recording(.paused),
             .recording(.finishing(operation: 3, thenSend: false)), .recording(.finishing(operation: 3, thenSend: true)),
@@ -29,23 +37,21 @@ struct SessionFlowTests {
             + [.sent(operation: 3), .idle]
         // With and without notes, and with and without text in the comment: the first
         // comment of a session has text and no note yet.
-        let flows = modes.flatMap { mode in
+        let states = modes.flatMap { mode in
             [(0, false), (0, true), (2, false), (2, true)].map { notes, hasText in
-                var flow = SessionFlow(mode: mode, notes: notes, lastOperation: 3)
-                flow.commentHasText = hasText
-                return flow
+                State(flow: SessionFlow(mode: mode, lastOperation: 3), facts: SessionFlow.Facts(notes: notes, commentHasText: hasText))
             }
         }
-        return flows.filter(isReachable)
+        return states.filter(isReachable)
     }()
 
     /// Only states a session can be in: a question is about something that is there.
-    private static func isReachable(_ flow: SessionFlow) -> Bool {
-        if case .sending(_, let returnTo) = flow.mode {
+    private static func isReachable(_ state: State) -> Bool {
+        if case .sending(_, let returnTo) = state.mode {
             // Send takes no question with it.
             return returnTo.question == nil
         }
-        guard case .open(let open) = flow.mode, let question = open.question else {
+        guard case .open(let open) = state.mode, let question = open.question else {
             return true
         }
         // Choosing holds no question, and only the comment's own is asked while it is open.
@@ -54,9 +60,9 @@ struct SessionFlowTests {
         }
         switch question {
         case .discardRecording: return open.clipInProgress
-        case .discardComment: return open.panel == .comment && flow.commentHasText
-        case .clearAll: return flow.notes > 0
-        case .cancelSession: return flow.notes > 0 || open.holdsClip
+        case .discardComment: return open.panel == .comment && state.facts.commentHasText
+        case .clearAll: return state.facts.notes > 0
+        case .cancelSession: return state.facts.notes > 0 || open.holdsClip
         case .restore: return true
         }
     }
@@ -73,11 +79,11 @@ struct SessionFlowTests {
 
     /// Runs every event in every state; `check` gets the state before, the event, the state
     /// after and the effects.
-    private func everyTransition(_ check: (SessionFlow, SessionFlow.Event, SessionFlow, [SessionFlow.Effect]) -> Void) {
+    private func everyTransition(_ check: (State, SessionFlow.Event, SessionFlow, [SessionFlow.Effect]) -> Void) {
         for state in Self.states {
             for event in Self.events {
-                var next = state
-                let effects = next.handle(event)
+                var next = state.flow
+                let effects = next.handle(event, state.facts)
                 check(state, event, next, effects)
             }
         }
@@ -102,7 +108,7 @@ struct SessionFlowTests {
             if [.confirm, .dismissConfirmation, .escape].contains(event) || Self.isOutside(event) {
                 return
             }
-            #expect(next == state && effects.isEmpty, "\(open) + \(event) gave \(effects)")
+            #expect(next == state.flow && effects.isEmpty, "\(open) + \(event) gave \(effects)")
         }
     }
 
@@ -117,9 +123,9 @@ struct SessionFlowTests {
             case .sendFinished(3), .sendFailed(3), .holdEnded, .ended:
                 return
             case .clipStarted, .clipFinished:
-                #expect(next == state && effects == [.dropClip], "\(event) gave \(effects)")
+                #expect(next == state.flow && effects == [.dropClip], "\(event) gave \(effects)")
             default:
-                #expect(next == state && effects.isEmpty, "\(event) gave \(effects)")
+                #expect(next == state.flow && effects.isEmpty, "\(event) gave \(effects)")
             }
         }
     }
@@ -130,9 +136,9 @@ struct SessionFlowTests {
         everyTransition { state, event, next, effects in
             switch event {
             case .clipStarted(2), .clipFinished(2):
-                #expect(next == state && (effects == [.dropClip] || effects.isEmpty), "\(state.mode) + \(event) gave \(effects)")
+                #expect(next == state.flow && (effects == [.dropClip] || effects.isEmpty), "\(state.mode) + \(event) gave \(effects)")
             case .clipStartFailed(2), .clipFailed(2), .sendFinished(2), .sendFailed(2), .sentShown(2):
-                #expect(next == state && effects.isEmpty, "\(state.mode) + \(event) gave \(effects)")
+                #expect(next == state.flow && effects.isEmpty, "\(state.mode) + \(event) gave \(effects)")
             default:
                 break
             }
@@ -150,9 +156,9 @@ struct SessionFlowTests {
             case .escape, .windowButton, .openPicker, .choose, .toggleRecordingMode, .startDrawing, .holdEnded, .otherAppInFront, .scopeAppInFront, .ended:
                 return
             case .clipStarted, .clipFinished:
-                #expect(next == state && effects == [.dropClip], "\(event) gave \(effects)")
+                #expect(next == state.flow && effects == [.dropClip], "\(event) gave \(effects)")
             default:
-                #expect(next == state && effects.isEmpty, "\(open) + \(event) gave \(effects)")
+                #expect(next == state.flow && effects.isEmpty, "\(open) + \(event) gave \(effects)")
             }
         }
     }
@@ -167,7 +173,7 @@ struct SessionFlowTests {
             case .idle, .sent:
                 #expect(next.session != nil)
             case .open, .sending:
-                #expect(next == state)
+                #expect(next == state.flow)
             }
         }
     }
@@ -176,17 +182,22 @@ struct SessionFlowTests {
     /// is there: notes to clear, a session with notes or a clip to close, words to discard, a
     /// clip in progress to throw away, notes to replace.
     @Test func aQuestionIsAskedOnlyWhileReturnStillLosesSomething() {
-        everyTransition { state, event, next, _ in
+        everyTransition { state, event, next, kept in
             guard case .open(let open) = next.mode, let question = open.question, state.mode != next.mode else {
                 return
             }
+            // A clip that the event saved is a note by now.
+            var facts = state.facts
+            if kept.contains(.keepClip) {
+                facts.notes += 1
+            }
             var answered = next
-            let effects = answered.handle(.confirm)
+            let effects = answered.handle(.confirm, facts)
             let context = "\(state.mode) + \(event)"
             switch question {
-            case .clearAll: #expect(effects.contains(.clearDrafts) && next.notes > 0, "\(context)")
-            case .cancelSession: #expect(effects.contains(.cancelSession) && (next.notes > 0 || open.holdsClip), "\(context)")
-            case .discardComment: #expect(effects.contains(.closeComposer) && next.commentHasText, "\(context)")
+            case .clearAll: #expect(effects.contains(.clearDrafts) && facts.notes > 0, "\(context)")
+            case .cancelSession: #expect(effects.contains(.cancelSession) && (facts.notes > 0 || open.holdsClip), "\(context)")
+            case .discardComment: #expect(effects.contains(.closeComposer) && facts.commentHasText, "\(context)")
             case .discardRecording: #expect(effects.contains(.exitRecording) && open.clipInProgress, "\(context)")
             case .restore: #expect(effects.contains(.restoreDrafts), "\(context)")
             }

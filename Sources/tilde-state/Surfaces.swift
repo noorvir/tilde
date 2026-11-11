@@ -220,7 +220,7 @@ enum Surfaces {
             }
             // Opened as the app opens it, so it offers what the app would.
             controller.sourcePicker.injected = (screens, apps, phase)
-            controller.openSourcePicker()
+            controller.dispatch(.openPicker)
             controller.sourcePicker.tab = picker == .screens ? .screens : .windows
             controller.sourcePicker.openApp = picker == .app ? Fixtures.window.pid : nil
         }

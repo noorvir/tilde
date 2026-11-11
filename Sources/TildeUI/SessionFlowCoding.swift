@@ -2,12 +2,13 @@ import Foundation
 
 /// The flow as the contract rows write it: one flat object, such as
 /// `{"mode": "recording", "clip": "paused", "notes": 2}`. A key left out has its default: a
-/// session annotating with no notes. `sending` keeps the session it goes back to in `returnTo`.
+/// session annotating. `sending` keeps the session it goes back to in `returnTo`. The same
+/// object holds the row's facts, which `SessionFlow.Facts` reads.
 /// An unknown key or value is an error, so a typo cannot test another state.
 extension SessionFlow: Codable {
     private enum Key: String, CodingKey, CaseIterable {
         case mode, pauses, drawing, panel, question, clip, operation, thenSend, recordMode, pickerOpen, returnTo
-        case notes, commentHasText, commentIsOnDrawing, choosesInPicker, lastOperation
+        case choosesInPicker, lastOperation
     }
 
     private struct AnyKey: CodingKey {
@@ -28,14 +29,11 @@ extension SessionFlow: Codable {
     }
 
     init(from decoder: Decoder) throws {
-        let known = Set(Key.allCases.map(\.rawValue))
+        let known = Set(Key.allCases.map(\.rawValue)).union(Facts.Key.allCases.map(\.rawValue))
         if let key = try decoder.container(keyedBy: AnyKey.self).allKeys.first(where: { !known.contains($0.stringValue) }) {
             throw Self.unknown("key \(key.stringValue)", decoder)
         }
         let values = try decoder.container(keyedBy: Key.self)
-        notes = try values.decodeIfPresent(Int.self, forKey: .notes) ?? 0
-        commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
-        commentIsOnDrawing = try values.decodeIfPresent(Bool.self, forKey: .commentIsOnDrawing) ?? false
         choosesInPicker = try values.decodeIfPresent(Bool.self, forKey: .choosesInPicker) ?? false
         lastOperation = try values.decodeIfPresent(Int.self, forKey: .lastOperation) ?? 0
         let operation = try values.decodeIfPresent(Int.self, forKey: .operation) ?? 0
@@ -86,9 +84,6 @@ extension SessionFlow: Codable {
 
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: Key.self)
-        try values.encode(notes, forKey: .notes)
-        try values.encode(commentHasText, forKey: .commentHasText)
-        try values.encode(commentIsOnDrawing, forKey: .commentIsOnDrawing)
         try values.encode(choosesInPicker, forKey: .choosesInPicker)
         try values.encode(lastOperation, forKey: .lastOperation)
 
@@ -138,6 +133,28 @@ extension SessionFlow: Codable {
                 try values.encode(thenSend, forKey: .thenSend)
             }
         }
+    }
+}
+
+/// The facts as the contract rows write them, in the object of the flow: `notes` (0 when left
+/// out), `commentHasText` and `commentIsOnDrawing` (false when left out).
+extension SessionFlow.Facts: Codable {
+    enum Key: String, CodingKey, CaseIterable {
+        case notes, commentHasText, commentIsOnDrawing
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: Key.self)
+        notes = try values.decodeIfPresent(Int.self, forKey: .notes) ?? 0
+        commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
+        commentIsOnDrawing = try values.decodeIfPresent(Bool.self, forKey: .commentIsOnDrawing) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: Key.self)
+        try values.encode(notes, forKey: .notes)
+        try values.encode(commentHasText, forKey: .commentHasText)
+        try values.encode(commentIsOnDrawing, forKey: .commentIsOnDrawing)
     }
 }
 

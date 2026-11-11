@@ -211,7 +211,7 @@ struct PreviewView: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.5))
                 CardButton(symbol: "xmark", keys: ["Esc"], help: "Close") {
-                    controller.closePreview()
+                    controller.dispatch(.closePreview)
                 }
             }
             // The whole strip above the pictures moves the card, margins included, like the

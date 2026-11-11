@@ -16,7 +16,7 @@ enum KeySurface {
 
 /// What a key does in the session's windows. Each window gives its key to `handleKey` first
 /// and keeps only keys of its own: back and forward in the browser, the end of editing in the
-/// preview. The comment box has no key codes: its text view sends ↩ as `submitComment`, Esc
+/// preview. The comment box has no key codes: its text view sends ↩ as the event `submitComment`, Esc
 /// as `escapePressed` and ⌘↩ as Send. A question takes Esc and ↩ before any window, through
 /// `handleConfirmationKey`.
 extension AnnotationController {
