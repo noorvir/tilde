@@ -37,7 +37,7 @@ function describe(element) {
   if (element.customData?.tildeWireframe) {
     shape.type = element.customData.tildeWireframe;
     delete shape.color;
-    for (const key of ["label", "borders", "rows", "columns", "filled", "radius", "shadow"]) {
+    for (const key of ["label", "borders", "rows", "columns", "filled", "radius"]) {
       if (element.customData[key] !== undefined) shape[key] = element.customData[key];
     }
   }
@@ -153,22 +153,9 @@ window.tildeDraw = {
     });
     drawingTool = "rectangle";
     if (!editing) api.setActiveTool({ type: drawingTool, locked: true });
-    if (!wasOn) postStyle();
   },
   undoWireframe() {
     restoreScene(wireframeHistory.undo, wireframeHistory.redo);
-  },
-  // A change of style (`radius`, `shadow`) for the selected component, or else for new ones.
-  setStyle(change) {
-    const frame = selectedGroup ? frameOf(selectedGroup) : null;
-    if (frame) {
-      record();
-      rebuild(selectedGroup, frame, { ...frame.customData, ...change });
-      showHandles();
-    } else {
-      Object.assign(newStyle, change);
-    }
-    postStyle();
   },
   redoWireframe() {
     restoreScene(wireframeHistory.redo, wireframeHistory.undo);
@@ -178,7 +165,7 @@ window.tildeDraw = {
   restoreWireframe({ shapes, origin: [left, top] }) {
     const elements = shapes.filter((shape) => kindNames[shape.type]).flatMap((shape) => {
       const [x, y, width, height] = shape.rect;
-      const data = Object.fromEntries(["label", "borders", "rows", "columns", "filled", "radius", "shadow"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
+      const data = Object.fromEntries(["label", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
       return wireframeElements(shape.type, { x: x + left, y: y + top, width, height }, data);
     });
     api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
@@ -341,11 +328,8 @@ function componentParts(kind, { x, y, width, height }, data) {
   return parts;
 }
 
-// The style of a component: its corner radius and shadow, each a size by name.
+// A component's corner radius, a size by name.
 const radii = { none: 0, small: 4, medium: 8, large: 16 };
-const shadows = { none: 0, small: 3, medium: 6, large: 12 };
-// The style of new components, set in the Style menu while no component is selected.
-const newStyle = { radius: "medium", shadow: "none" };
 
 // The radius Excalidraw draws for a rect of this size: a quarter of its short side when that
 // is smaller.
@@ -401,19 +385,6 @@ function borderLines({ x, y, width, height }, borders, radius) {
   });
 }
 
-// A soft shadow under the main part: a few faint layers, each wider and lower.
-function shadowParts(kind, { x, y, width, height }, data) {
-  const size = shadows[data.shadow ?? "none"] ?? 0;
-  if (!size) return [];
-  const radius = cornerRadius({ width, height }, data);
-  return [3, 2, 1].map((layer) => {
-    const spread = (size * layer) / 3;
-    const rect = { x: x - spread / 2, y: y + size / 2 - spread / 2, width: width + spread, height: height + spread };
-    const roundness = radius ? { type: 3, value: radius + spread / 2 } : null;
-    return { type: kind === "ellipse" ? "ellipse" : "rectangle", ...rect, ...flat, strokeColor: "transparent", backgroundColor: "#000000", opacity: 6, roundness };
-  });
-}
-
 // Buttons, dropdowns, cards and plain shapes show a label on themselves; the rest on a chip,
 // over their rows.
 const plainLabels = new Set(["button", "dropdown", "card", "rectangle", "ellipse"]);
@@ -423,7 +394,7 @@ const allBorders = ["top", "right", "bottom", "left"];
 let isFilled = true;
 
 function newData(kind) {
-  const data = { borders: allBorders, ...newStyle };
+  const data = { borders: allBorders };
   if (kind === "rectangle" || kind === "ellipse") data.filled = isFilled;
   return data;
 }
@@ -432,7 +403,7 @@ function wireframeElements(kind, rect, data, groupIds = [`wireframe-${Math.rando
   const { label } = data;
   const parts = componentParts(kind, rect, data);
   parts[0].customData = { ...data, tildeWireframe: kind };
-  const elements = convertToExcalidrawElements([...shadowParts(kind, rect, data), ...parts]);
+  const elements = convertToExcalidrawElements(parts);
   if (label) {
     const fontSize = plainLabels.has(kind) ? clamp(rect.height * 0.32, 12, 20) : 15;
     const [text] = convertToExcalidrawElements([{ type: "text", x: 0, y: 0, text: label, fontSize, fontFamily: 2, strokeColor: skeleton.text, textAlign: "center", roughness: 0 }]);
@@ -582,8 +553,7 @@ const selectionOutline = document.createElement("div");
 selectionOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:2px solid #2F76FF;margin:-1px 0 0 -1px";
 document.addEventListener("DOMContentLoaded", () => document.body.append(handleOutline, selectionOutline, chip, resizer, typeMenu, moveCursor));
 let hoveredGroup = null;
-// The component a click selected: the Style menu changes it, and its handles show while the
-// pointer is not over another one.
+// The component a click selected: its handles show while the pointer is not over another one.
 let selectedGroup = null;
 let adjusting = null;
 let isTypeMenuOpen = false;
@@ -647,7 +617,6 @@ function changedKind(frame, kind) {
   const data = { ...newData(kind), tildeWireframe: kind, label: old.label };
   if (old.borders) data.borders = old.borders;
   if (old.radius) data.radius = old.radius;
-  if (old.shadow) data.shadow = old.shadow;
   if ("filled" in data && old.filled !== undefined) data.filled = old.filled;
   if ((kind === "table" || kind === "list") && old.rows !== undefined) data.rows = old.rows;
   return data;
@@ -682,14 +651,6 @@ function changedData(frame, action) {
 function selectGroup(group) {
   selectedGroup = group;
   showHandles();
-  postStyle();
-}
-
-// Tells Tilde the style the Style menu shows: the selected component's, or else new ones'.
-function postStyle() {
-  const frame = selectedGroup ? frameOf(selectedGroup) : null;
-  const style = frame ? { radius: frame.customData.radius ?? "medium", shadow: frame.customData.shadow ?? "none" } : newStyle;
-  post(`wireframeStyle:${JSON.stringify({ ...style, isSelection: Boolean(frame) })}`);
 }
 
 function showHandles() {

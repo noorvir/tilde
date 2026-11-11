@@ -31,8 +31,6 @@ final class DrawingPanel {
     var onPointer: (CGPoint) -> Void = { _ in }
     /// A key press on the canvas, outside its text fields. True: it was taken.
     var onKey: (NSEvent) -> Bool = { _ in false }
-    /// The wireframe style the Style menu shows, as JSON.
-    var onWireframeStyle: (String) -> Void = { _ in }
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
     var windowNumbers: [Int] {
@@ -58,7 +56,6 @@ final class DrawingPanel {
         canvas.onPress = { [weak self] in self?.onPress($0) ?? false }
         canvas.onPointer = { [weak self] in self?.onPointer($0) }
         canvas.onKey = { [weak self] in self?.onKey($0) ?? false }
-        canvas.onWireframeStyle = { [weak self] in self?.onWireframeStyle($0) }
         canvas.startDrawing(tool: tool, color: color)
     }
 
@@ -244,7 +241,6 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     var onPress: (CGPoint) -> Bool = { _ in false }
     var onPointer: (CGPoint) -> Void = { _ in }
     var onKey: (NSEvent) -> Bool = { _ in false }
-    var onWireframeStyle: (String) -> Void = { _ in }
 
     init(frame: CGRect) {
         self.frame = frame
@@ -407,8 +403,6 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
                 let origin = frame.flipped.origin
                 onPointer(CGPoint(x: origin.x + values[0], y: origin.y + values[1]))
             }
-        case _ where text.hasPrefix("wireframeStyle:"):
-            onWireframeStyle(String(text.dropFirst("wireframeStyle:".count)))
         case _ where text.hasPrefix("error: "):
             log.error("drawing canvas \(text, privacy: .public)")
         default:

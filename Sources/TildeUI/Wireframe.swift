@@ -1,6 +1,5 @@
 import AppKit
 import ApplicationServices
-import SwiftUI
 import TildeCore
 
 /// Wireframe mode: skeletons of components drawn over the screen in the drawing canvas, each
@@ -24,37 +23,8 @@ struct Wireframe: Equatable {
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
     ]
 
-    var style = Style()
-
     var json: String {
         DrawingPanel.json(["tool": tool])
-    }
-
-    /// The Style menu's rows: corner radius and shadow, of the selected component, or else of
-    /// the components drawn next.
-    struct Style: Equatable {
-        var radius = "medium"
-        var shadow = "none"
-        var isSelection = false
-
-        static let rows = [
-            (key: "radius", title: "Corner Radius", options: [("none", "None"), ("small", "Small"), ("medium", "Medium"), ("large", "Large")]),
-            (key: "shadow", title: "Shadow", options: [("none", "None"), ("small", "Small"), ("medium", "Medium"), ("large", "Large")]),
-        ]
-
-        init() {}
-
-        /// From the canvas's JSON.
-        init(json: String) {
-            let values = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
-            radius = values["radius"] as? String ?? radius
-            shadow = values["shadow"] as? String ?? shadow
-            isSelection = values["isSelection"] as? Bool ?? false
-        }
-
-        func value(of key: String) -> String {
-            key == "radius" ? radius : shadow
-        }
     }
 
     /// The edges of the element at a point, of its containers up to the window, and of their
@@ -127,9 +97,6 @@ extension AnnotationController {
         }
         drawingPanel.setSnapFrame(nil)
         hover = nil
-        drawingPanel.onWireframeStyle = { [weak self] json in
-            self?.wireframe?.style = Wireframe.Style(json: json)
-        }
         let next = Wireframe()
         wireframe = next
         drawingPanel.setWireframe(next.json)
@@ -150,10 +117,6 @@ extension AnnotationController {
         wireframe?.tool = tool
         drawingPanel.setWireframe(wireframe?.json ?? "null")
         _ = focusWireframeCanvas()
-    }
-
-    func setWireframeStyle(_ key: String, to value: String) {
-        drawingPanel.runWireframe("setStyle(\(DrawingPanel.json([key: value])))")
     }
 
     func undoWireframe() {
@@ -332,46 +295,6 @@ extension AnnotationController {
             if wireframe != nil {
                 drawingPanel.setSnapTargets(rects: layout.rects, containers: layout.containers, window: window?.frame, screen: screen)
             }
-        }
-    }
-}
-
-/// The Style button of the wireframe bar and its popover: a row for each setting of the selected
-/// component, or else of the components drawn next. The popover is at the HUD's level, above the
-/// overlay and the canvas, where a menu would not take clicks.
-struct WireframeStyleButton: View {
-    @ObservedObject var controller: AnnotationController
-    @State private var isShown = false
-
-    var body: some View {
-        HUDButton(image: Image(systemName: "paintbrush"), isOn: isShown, help: "Style") {
-            isShown.toggle()
-        }
-        .popover(isPresented: $isShown, arrowEdge: .bottom) {
-            let style = controller.wireframe?.style ?? Wireframe.Style()
-            VStack(alignment: .leading, spacing: 10) {
-                Text(style.isSelection ? "Selected Component" : "New Components")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                ForEach(Wireframe.Style.rows, id: \.key) { row in
-                    HStack(spacing: 12) {
-                        Text(row.title)
-                            .frame(width: 92, alignment: .leading)
-                        Picker(row.title, selection: Binding(
-                            get: { style.value(of: row.key) },
-                            set: { controller.setWireframeStyle(row.key, to: $0) }
-                        )) {
-                            ForEach(row.options, id: \.0) { value, title in
-                                Text(title).tag(value)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                }
-            }
-            .padding(14)
         }
     }
 }
