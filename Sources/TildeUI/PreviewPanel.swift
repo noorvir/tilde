@@ -268,7 +268,7 @@ struct PreviewView: View {
                 previewCard.step(1, in: controller.drafts)
             }
             Spacer()
-            if controller.drafts.first(where: { $0.id == id })?.chip == "Wireframe" {
+            if controller.drafts.first(where: { $0.id == id })?.isWireframe == true {
                 CardButton(symbol: "pencil", title: "Edit Wireframe", help: "Edit the wireframe on the screen") {
                     controller.editWireframe(id)
                 }

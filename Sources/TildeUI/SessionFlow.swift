@@ -40,10 +40,15 @@ struct SessionFlow: Equatable {
         /// Why annotating is paused; empty while annotating. Kept through recording mode and
         /// choosing a window, so the session comes back to the same pause.
         var pauses: Set<PauseReason> = []
-        /// Draw mode, only while annotating.
-        var isDrawing = false
+        /// The drawing canvas, only while annotating: Draw mode or Wireframe mode.
+        var canvas: Canvas?
         var panel: Panel?
         var question: Question?
+
+        /// Draw mode or Wireframe mode: the canvas is open.
+        var isDrawing: Bool {
+            canvas != nil
+        }
 
         /// A clip that a cancel would lose: recording, paused or being saved.
         var holdsClip: Bool {
@@ -75,6 +80,39 @@ struct SessionFlow: Equatable {
         /// goes back there after the choice. The picker is open in full, or only its "Use
         /// window picker" button shows.
         case picking(isPickerOpen: Bool)
+    }
+
+    /// What the drawing canvas is open for.
+    enum Canvas: String, Codable {
+        /// Draw mode: each shape gets a comment and becomes a note.
+        case draw
+        /// Wireframe mode: components, which Done sends together as one note.
+        case wireframe
+    }
+
+    /// The mode a new session starts in: the one that was on last. Recording mode needs a
+    /// source, so it counts as no mode.
+    enum StartMode: String {
+        case annotating, draw, wireframe
+        case noMode = "none"
+
+        /// The mode to start in: the saved one, and annotation mode until one is saved. A
+        /// session in Tilde's browser starts with no mode, so the user can type an address
+        /// and browse first.
+        init(saved: String?, inBrowser: Bool) {
+            let last = saved.flatMap(StartMode.init(rawValue:)) ?? .annotating
+            self = inBrowser ? .noMode : last
+        }
+
+        /// The event that turns the mode on in a session that began, which has no mode.
+        var event: Event? {
+            switch self {
+            case .annotating: .toggleAnnotating
+            case .draw: .startDrawing
+            case .wireframe: .startWireframe
+            case .noMode: nil
+            }
+        }
     }
 
     /// The clip of recording mode.
@@ -120,7 +158,7 @@ struct SessionFlow: Equatable {
     }
 
     enum Event: Equatable {
-        case begin(inBrowser: Bool)
+        case begin
         /// The session ended elsewhere, such as the agent cancelling it.
         case ended
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
@@ -132,11 +170,16 @@ struct SessionFlow: Equatable {
         case deleteNote, editNote
         case holdBegan, holdEnded, otherAppInFront, scopeAppInFront
         case openComment, clickAway, submitComment, closeComment, openPreview, closePreview, toggleList
+        /// `finishDrawing` is Done, in Draw mode and in Wireframe mode.
         case startDrawing, finishDrawing, undoDrawing, redoDrawing, shapeFinished
+        /// Wireframe mode on, also from Draw mode; and Done has taken its components for their note.
+        case startWireframe, wireframeTaken
         case toggleRecordingMode, record, stop
         case clipStarted(Int), clipStartFailed(Int), clipFinished(Int), clipFailed(Int)
         /// The recorded window, screen or phone stopped sending frames.
         case captureStopped
+        /// The window that the session is limited to closed.
+        case windowClosed
         case windowButton, openPicker
         /// A window, a screen or a phone was chosen to record.
         case choose
@@ -146,6 +189,9 @@ struct SessionFlow: Equatable {
     enum Effect: String, Codable {
         case applyPause, closeComposer, saveComment, showComment, showPreview, closePreview, toggleList
         case showCanvas, keepDrawing, undoShape, redoShape, openShapeComment
+        /// Wireframe mode on the canvas, and off it; Done's note of its components. No tool
+        /// draws, in Draw mode and in Wireframe mode.
+        case showWireframe, endWireframe, takeWireframe, putToolDown
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case endSession, cancelSession, clearDrafts, restoreDrafts, startLocalSession, showHUD
@@ -183,6 +229,43 @@ struct SessionFlow: Equatable {
         case .annotating: return open.pauses.isEmpty
         case .picking: return true
         case .recording: return false
+        }
+    }
+
+    /// Annotation mode: annotating, with no pause and no canvas; also while its report is made.
+    var isAnnotating: Bool {
+        guard let open = session else {
+            return false
+        }
+        return open.activity == .annotating && open.pauses.isEmpty && !open.isDrawing
+    }
+
+    var isWireframe: Bool {
+        session?.canvas == .wireframe
+    }
+
+    /// The mode on screen, which the next session starts in; nil while there is none to keep:
+    /// no session, a report being made, choosing a source, or a pause by the hold key or
+    /// another app.
+    var startMode: StartMode? {
+        guard case .open(let open) = mode else {
+            return nil
+        }
+        switch open.canvas {
+        case .wireframe: return .wireframe
+        case .draw: return .draw
+        case nil: break
+        }
+        switch open.activity {
+        case .recording:
+            return .noMode
+        case .picking:
+            return nil
+        case .annotating:
+            if open.pauses.isEmpty {
+                return .annotating
+            }
+            return open.pauses.contains(.user) ? .noMode : nil
         }
     }
 
@@ -382,7 +465,7 @@ struct SessionFlow: Equatable {
     private static func isAnswer(_ event: Event, to question: Question) -> Bool {
         switch event {
         case .confirm, .dismissConfirmation, .escape, .ended, .holdEnded, .otherAppInFront, .scopeAppInFront,
-             .clipStarted, .clipStartFailed, .clipFinished, .clipFailed, .captureStopped:
+             .clipStarted, .clipStartFailed, .clipFinished, .clipFailed, .captureStopped, .windowClosed:
             return true
         default:
             return false
@@ -525,8 +608,9 @@ struct SessionFlow: Equatable {
             return dismiss(&open)
 
         case .holdBegan:
-            // Not while typing a comment, where these keys are for the text.
-            guard open.activity == .annotating, open.panel == nil, open.pauses.isEmpty else {
+            // Not while typing a comment, where these keys are for the text, nor in wireframe
+            // mode, where ⌥ and a drag copies a component.
+            guard open.activity == .annotating, open.panel == nil, open.pauses.isEmpty, open.canvas != .wireframe else {
                 return []
             }
             open.pauses.insert(.hold)
@@ -590,21 +674,23 @@ struct SessionFlow: Equatable {
             guard open.activity == .annotating, !open.isDrawing else {
                 return []
             }
-            // A comment with text asks first, like leaving it any other way.
-            if open.panel == .comment, facts.commentHasText {
-                return leaveComment(&open)
+            return openCanvas(.draw, &open)
+
+        case .startWireframe:
+            guard open.activity == .annotating, open.canvas != .wireframe else {
+                return []
             }
-            let closes = closePanel(&open)
-            open.isDrawing = true
-            // Draw is a mode of its own, also from no mode.
-            guard open.pauses.contains(.user) else {
-                return closes + [.showCanvas]
+            // Draw's canvas goes to wireframe mode as it is.
+            if open.canvas == .draw {
+                open.canvas = .wireframe
+                return [.showWireframe]
             }
-            open.pauses.remove(.user)
-            return closes + [.applyPause, .showCanvas]
+            let opened = openCanvas(.wireframe, &open)
+            return open.canvas == .wireframe ? opened + [.showWireframe] : opened
 
         case .shapeFinished:
-            return open.isDrawing && open.panel != .comment ? [.openShapeComment] : []
+            // A wireframe's components get no comment each.
+            return open.canvas == .draw && open.panel != .comment ? [.openShapeComment] : []
 
         case .undoDrawing:
             return open.isDrawing ? [.undoShape] : []
@@ -613,7 +699,11 @@ struct SessionFlow: Equatable {
             return open.isDrawing ? [.redoShape] : []
 
         case .finishDrawing:
-            return leaveDrawing(&open)
+            // A wireframe becomes a note first; `wireframeTaken` then ends the mode.
+            return open.canvas == .wireframe ? [.takeWireframe] : leaveDrawing(&open)
+
+        case .wireframeTaken:
+            return open.canvas == .wireframe ? leaveDrawing(&open) : []
 
         case .toggleRecordingMode:
             if case .recording = open.activity {
@@ -651,12 +741,16 @@ struct SessionFlow: Equatable {
             return [.showStartFailure]
 
         case .captureStopped:
-            // The source went away: the clip ends at its last frame and goes to the list.
-            guard open.clipInProgress else {
-                return []
+            return endClipOfLostSource(&open)
+
+        case .windowClosed:
+            // A clip of the window ends with it; annotating covers everything again, with no
+            // mode on.
+            let ended = endClipOfLostSource(&open)
+            guard open.activity == .annotating, open.pauses.isEmpty, open.question == nil else {
+                return ended
             }
-            open.activity = .recording(.finishing(operation: nextOperation(), thenSend: false))
-            return [.finishClip, .showSourceGone]
+            return ended + togglePause(&open)
 
         case .clipFinished(let operation):
             guard case .recording(.finishing(operation, let thenSend)) = open.activity else {
@@ -704,13 +798,10 @@ struct SessionFlow: Equatable {
         if open.panel == .preview {
             return closePreview(&open)
         }
-        // Esc never ends Draw: it pauses it, and the drawing waits.
+        // Esc never ends Draw or Wireframe: it puts the tool down, so that nothing draws. Only
+        // the pause command pauses them.
         if open.isDrawing {
-            guard open.pauses.isEmpty else {
-                return []
-            }
-            open.pauses.insert(.user)
-            return [.applyPause, .keepKeyboard]
+            return open.pauses.isEmpty ? [.putToolDown] : []
         }
         if case .recording = open.activity {
             return leaveRecording(&open)
@@ -794,7 +885,32 @@ struct SessionFlow: Equatable {
         return [.applyPause, .takeKeyboard]
     }
 
-    /// Done or Esc in Draw: no mode, not annotation mode; Tilde keeps the keyboard for its keys.
+    /// Draw and Wireframe are modes of their own: the canvas opens from annotation mode and
+    /// from no mode.
+    private func openCanvas(_ canvas: Canvas, _ open: inout Open) -> [Effect] {
+        // A comment with text asks first, like leaving it any other way.
+        if open.panel == .comment, facts.commentHasText {
+            return leaveComment(&open)
+        }
+        let closes = closePanel(&open)
+        open.canvas = canvas
+        guard open.pauses.contains(.user) else {
+            return closes + [.showCanvas]
+        }
+        open.pauses.remove(.user)
+        return closes + [.applyPause, .showCanvas]
+    }
+
+    /// The source went away: the clip ends at its last frame and goes to the list.
+    private mutating func endClipOfLostSource(_ open: inout Open) -> [Effect] {
+        guard open.clipInProgress else {
+            return []
+        }
+        open.activity = .recording(.finishing(operation: nextOperation(), thenSend: false))
+        return [.finishClip, .showSourceGone]
+    }
+
+    /// Done in Draw or Wireframe: no mode, not annotation mode; Tilde keeps the keyboard for its keys.
     private func leaveDrawing(_ open: inout Open) -> [Effect] {
         let finished = finishDrawing(&open)
         guard !finished.isEmpty else {
@@ -950,11 +1066,12 @@ struct SessionFlow: Equatable {
     }
 
     private func finishDrawing(_ open: inout Open) -> [Effect] {
-        guard open.isDrawing else {
+        guard let canvas = open.canvas else {
             return []
         }
-        open.isDrawing = false
-        return [.keepDrawing]
+        open.canvas = nil
+        // A wireframe's components that Done did not take go with the mode.
+        return canvas == .wireframe ? [.endWireframe, .keepDrawing] : [.keepDrawing]
     }
 
     /// Closes the preview, or an empty comment; a comment with text is resolved before.

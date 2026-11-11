@@ -320,6 +320,7 @@ struct HUDView: View {
     @ObservedObject private var hud: HUDPlacement
     @ObservedObject private var notices: Notices
     @ObservedObject private var drawing: DrawingNotes
+    @ObservedObject private var wireframe: WireframeMode
     @ObservedObject private var browserOffer: BrowserOffer
     /// What Record records, which the controller reads for the source's name.
     @ObservedObject private var scope: SessionScope
@@ -342,6 +343,7 @@ struct HUDView: View {
         hud = controller.hud
         notices = controller.notices
         drawing = controller.drawing
+        wireframe = controller.wireframe
         browserOffer = controller.browserOffer
         scope = controller.scope
         self.isEmbedded = isEmbedded
@@ -478,37 +480,17 @@ struct HUDView: View {
         }
     }
 
+    /// The bar under the pill in Draw and Wireframe: the mode's tools, Undo and Redo, then
+    /// Done. While paused the tools wait; Done still finishes.
     @ViewBuilder
-    private var drawingContent: some View {
-        let size = HUDAccessory.size
-        // While paused the tools wait; Done still finishes.
+    private func canvasBarContent(undoKeys: [String] = [], redoKeys: [String] = [], @ViewBuilder tools: () -> some View) -> some View {
         Group {
-            ForEach(Self.drawingTools, id: \.tool) { entry in
-                HUDButton(image: Image(systemName: entry.symbol), isOn: drawing.tool == entry.tool && !drawing.hasNoTool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
-                    controller.setDrawingTool(entry.tool)
-                }
-            }
-            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
-            ForEach(Self.drawingColors, id: \.hex) { entry in
-                Button {
-                    controller.setDrawingColor(entry.hex)
-                } label: {
-                    Circle()
-                        .fill(Color(hex: entry.hex))
-                        .frame(width: size.swatchSize, height: size.swatchSize)
-                        .overlay(Circle().strokeBorder(Color.white.opacity(drawing.color == entry.hex ? 1 : 0.25), lineWidth: drawing.color == entry.hex ? 2 : 1))
-                        .padding(1)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .tildeTooltip(entry.name, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingColor?.hex == entry.hex }))
-                .accessibilityLabel(entry.name)
-            }
-            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
-            HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
+            tools()
+            barDivider
+            HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: undoKeys, help: "Undo") {
                 controller.dispatch(.undoDrawing)
             }
-            HUDButton(image: Image(systemName: "arrow.uturn.forward"), help: "Redo") {
+            HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: redoKeys, help: "Redo") {
                 controller.dispatch(.redoDrawing)
             }
         }
@@ -520,30 +502,45 @@ struct HUDView: View {
         .fixedSize()
     }
 
+    private var barDivider: some View {
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: HUDAccessory.size.scaled(20))
+    }
+
+    /// Draw's tools and colours. No tool is on after Esc put the tool down.
     @ViewBuilder
-    private var wireframeContent: some View {
+    private var drawingTools: some View {
         let size = HUDAccessory.size
-        // While paused the tools wait; Done still finishes.
-        Group {
-            ForEach(Wireframe.tools, id: \.tool) { entry in
-                HUDButton(image: Image(systemName: entry.symbol), isOn: controller.wireframe?.tool == entry.tool, keys: [entry.key.uppercased()], help: entry.help) {
-                    controller.setWireframeTool(entry.tool)
-                }
-            }
-            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
-            HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: ["⌘Z"], help: "Undo") {
-                controller.undoWireframe()
-            }
-            HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: ["⇧⌘Z"], help: "Redo") {
-                controller.redoWireframe()
+        ForEach(Self.drawingTools, id: \.tool) { entry in
+            let isOn = drawing.tool == entry.tool && !drawing.isToolDown
+            HUDButton(image: Image(systemName: entry.symbol), isOn: isOn, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
+                controller.setDrawingTool(entry.tool)
             }
         }
-        .disabled(controller.isDrawingPaused)
-        Spacer(minLength: 0)
-        PillTextButton(title: "Done", key: "⌘↩", isDestructive: false) {
-            controller.finishWireframe()
+        barDivider
+        ForEach(Self.drawingColors, id: \.hex) { entry in
+            Button {
+                controller.setDrawingColor(entry.hex)
+            } label: {
+                Circle()
+                    .fill(Color(hex: entry.hex))
+                    .frame(width: size.swatchSize, height: size.swatchSize)
+                    .overlay(Circle().strokeBorder(Color.white.opacity(drawing.color == entry.hex ? 1 : 0.25), lineWidth: drawing.color == entry.hex ? 2 : 1))
+                    .padding(1)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .tildeTooltip(entry.name, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingColor?.hex == entry.hex }))
+            .accessibilityLabel(entry.name)
         }
-        .fixedSize()
+    }
+
+    /// Wireframe's tools, each with its own letter.
+    private var wireframeTools: some View {
+        ForEach(WireframeMode.tools, id: \.tool) { entry in
+            HUDButton(image: Image(systemName: entry.symbol), isOn: wireframe.tool == entry.tool, keys: [entry.key.uppercased()], help: entry.help) {
+                controller.setWireframeTool(entry.tool)
+            }
+        }
     }
 
     /// The key of an in-app shortcut, for its button's tooltip; none when it has none, and
@@ -589,10 +586,10 @@ struct HUDView: View {
     private var drawingAccessoryBar: some View {
         let size = HUDAccessory.size
         return capsule(HStack(spacing: size.scaled(4)) {
-            if controller.wireframe != nil {
-                wireframeContent
+            if controller.isWireframe {
+                canvasBarContent(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"]) { wireframeTools }
             } else {
-                drawingContent
+                canvasBarContent { drawingTools }
             }
         }, width: size.scaled(HUDView.width), size: size)
             .opacity(hud.isShown ? 1 : 0)
@@ -600,6 +597,19 @@ struct HUDView: View {
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
                     .onChanged { _ in onDrag() }
             )
+    }
+
+    /// The button of a canvas's mode: it starts the mode, resumes it when it is paused, and is
+    /// Done while it is on.
+    private func canvasButton(_ canvas: SessionFlow.Canvas, symbol: String, keys: [String], help: String) -> some View {
+        let isOn = controller.flow.session?.canvas == canvas
+        return HUDButton(image: Image(systemName: symbol), isOn: isOn, keys: keys, help: help) {
+            if isOn {
+                controller.dispatch(controller.isDrawingPaused ? .resume : .finishDrawing)
+            } else {
+                controller.dispatch(canvas == .draw ? .startDrawing : .startWireframe)
+            }
+        }
     }
 
     /// `width`: the pill's smallest width, which wider content grows, or nil to fit the content.
@@ -663,28 +673,12 @@ struct HUDView: View {
                 }
                 .disabled(controller.recording != .recording && controller.recording != .paused)
             } else {
-                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing && controller.wireframe == nil, keys: keys(.drawingMode), help: "Draw") {
-                    if controller.isDrawingPaused {
-                        controller.dispatch(.resume)
-                    } else if controller.isDrawing {
-                        controller.dispatch(.finishDrawing)
-                    } else {
-                        controller.dispatch(.startDrawing)
-                    }
-                }
-                .disabled(controller.wireframe != nil)
+                canvasButton(.draw, symbol: "pencil.tip", keys: keys(.drawingMode), help: "Draw")
+                    .disabled(controller.isWireframe)
             }
             // In recording mode too, disabled, so that no button moves.
-            HUDButton(image: Image(systemName: "squareshape.split.2x2.dotted"), isOn: controller.wireframe != nil, keys: controller.wireframe == nil ? ["W"] : ["⌘↩"], help: "Wireframe") {
-                if controller.wireframe != nil, controller.isDrawingPaused {
-                    controller.dispatch(.resume)
-                } else if controller.wireframe != nil {
-                    controller.finishWireframe()
-                } else {
-                    controller.startWireframe()
-                }
-            }
-            .disabled(controller.isRecordMode)
+            canvasButton(.wireframe, symbol: "squareshape.split.2x2.dotted", keys: controller.isWireframe ? ["⌘↩"] : ["W"], help: "Wireframe")
+                .disabled(controller.isRecordMode)
         }
 
 

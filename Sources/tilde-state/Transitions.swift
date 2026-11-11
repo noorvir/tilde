@@ -26,7 +26,8 @@ enum Transitions {
         let name: String
         var state: FlowState?
         var event: SessionFlow.Event?
-        /// A single key pressed while Tilde has the keyboard, by its default name, such as "R".
+        /// A single key pressed while Tilde has the keyboard, by its default name, such as "R";
+        /// a key of wireframe mode by its letter.
         var key: String?
         var note: NoteVisibility?
         var similarity: Double?
@@ -81,7 +82,9 @@ enum Transitions {
         let name: String
         var state: FlowState?
         var effects: [SessionFlow.Effect]?
-        /// The action the key chose, such as "rectangleTool"; nil when it is none.
+        /// The action the key chose, such as "rectangleTool"; nil when it is none. For a key of
+        /// wireframe mode: "startWireframe", "resumeWireframe", "wireframeTool:table" or
+        /// "ignoredInWireframe".
         var keyAction: String?
         var note: NoteVisibility?
         var samePage: Bool?
@@ -105,6 +108,15 @@ enum Transitions {
         var previewSize: [CGFloat]?
     }
 
+    private static func name(_ key: WireframeKey) -> String {
+        switch key {
+        case .start: "startWireframe"
+        case .resume: "resumeWireframe"
+        case .tool(let tool): "wireframeTool:\(tool)"
+        case .ignored: "ignoredInWireframe"
+        }
+    }
+
     /// "ok", the button's title, "error: <button>", or the grey text.
     private static func name(_ state: SetupState) -> String {
         switch state {
@@ -123,7 +135,12 @@ enum Transitions {
                 result.effects = state.flow.handle(event, state.facts)
                 result.state = state
             }
-            if var state = row.state, let key = row.key {
+            if var state = row.state, let key = row.key, let wireframeKey = AnnotationController.wireframeKey(key.lowercased(), flow: state.flow) {
+                // Wireframe mode's keys come before the keys of the HUD's buttons.
+                result.keyAction = name(wireframeKey)
+                result.effects = wireframeKey.event.map { state.flow.handle($0, state.facts) } ?? []
+                result.state = state
+            } else if var state = row.state, let key = row.key {
                 let shortcuts = ShortcutStore(defaults: UserDefaults(suiteName: "tilde-state-keys") ?? .standard)
                 let code = ShortcutStore.Action.allCases.lazy.compactMap { $0.defaultShortcut?.combo }.first { $0.key == key }?.keyCode
                 let action = code.flatMap { shortcuts.inAppAction(keyCode: UInt16($0), modifiers: [], isDrawing: state.flow.session?.isDrawing ?? false) }

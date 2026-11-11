@@ -9,8 +9,8 @@ final class DrawingNotes: ObservableObject {
     let panel = DrawingPanel()
     @Published private(set) var tool = "arrow"
     @Published private(set) var color = "#2F76FF"
-    /// Esc put Draw's tool down: nothing draws until one is chosen.
-    @Published var hasNoTool = false
+    /// Esc put the tool down: nothing draws until one is chosen.
+    @Published private(set) var isToolDown = false
     /// The window that the session is limited to.
     var scope: () -> ElementPicker.WindowInfo? = { nil }
     /// Whether a note's label is at a Quartz point.
@@ -29,13 +29,30 @@ final class DrawingNotes: ObservableObject {
     func start() {
         let pointer = NSEvent.mouseLocation
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
+            isToolDown = false
             panel.startDrawing(on: screen, tool: tool)
         }
     }
 
     func setTool(_ tool: String) {
         self.tool = tool
+        isToolDown = false
         panel.setTool(tool)
+    }
+
+    /// Draw and Wireframe stay through a pause: what was drawn stays on screen, and the mouse
+    /// goes through the canvas.
+    func setPaused(_ isPaused: Bool) {
+        if isPaused {
+            panel.stopDrawing()
+        } else {
+            panel.resumeDrawing()
+        }
+    }
+
+    func putToolDown() {
+        isToolDown = true
+        panel.setNoTool()
     }
 
     func setColor(_ color: String) {

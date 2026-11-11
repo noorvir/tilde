@@ -14,7 +14,7 @@ struct SessionFlowTests {
         var mode: SessionFlow.Mode { flow.mode }
     }
 
-    /// Every kind of state: each activity, with and without pauses, a panel, drawing and each
+    /// Every kind of state: each activity, with and without pauses, a panel, each canvas and each
     /// question; sending; Sent; no session. Operation 3 is the one under way.
     static let states: [State] = {
         let activities: [SessionFlow.Activity] = [
@@ -27,13 +27,15 @@ struct SessionFlowTests {
             for pauses in [[], [SessionFlow.PauseReason.user], [.hold, .otherApp]] as [Set<SessionFlow.PauseReason>] {
                 for panel in [nil, SessionFlow.Panel.comment, .preview] {
                     for question in [nil, SessionFlow.Question.clearAll, .cancelSession, .discardComment, .discardRecording, .restore] {
-                        opens.append(Open(activity: activity, pauses: pauses, isDrawing: false, panel: panel, question: question))
+                        opens.append(Open(activity: activity, pauses: pauses, panel: panel, question: question))
                     }
                 }
             }
         }
-        opens.append(Open(isDrawing: true))
-        opens.append(Open(pauses: [.user], isDrawing: true))
+        for canvas in [SessionFlow.Canvas.draw, .wireframe] {
+            opens.append(Open(canvas: canvas))
+            opens.append(Open(pauses: [.user], canvas: canvas))
+        }
         let modes = opens.map(SessionFlow.Mode.open) + opens.prefix(18).map { .sending(operation: 3, returnTo: $0) }
             + [.sent(operation: 3), .idle]
         // With and without notes, and with and without text in the comment: the first
@@ -69,12 +71,13 @@ struct SessionFlowTests {
     }
 
     static let events: [SessionFlow.Event] = [
-        .begin(inBrowser: false), .begin(inBrowser: true), .ended, .escape, .togglePause, .toggleAnnotating, .resume, .startShortcut,
+        .begin, .ended, .escape, .togglePause, .toggleAnnotating, .resume, .startShortcut,
         .requestClearAll, .requestCancel, .confirm, .dismissConfirmation, .restore, .openBrowser, .deleteNote, .editNote, .holdBegan, .holdEnded, .otherAppInFront,
         .scopeAppInFront, .openComment, .clickAway, .submitComment, .closeComment, .openPreview, .closePreview, .toggleList,
-        .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .toggleRecordingMode, .record, .stop,
+        .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .startWireframe, .wireframeTaken,
+        .toggleRecordingMode, .record, .stop,
         .clipStarted(3), .clipStarted(2), .clipStartFailed(3), .clipStartFailed(2), .clipFinished(3), .clipFinished(2),
-        .clipFailed(3), .clipFailed(2), .captureStopped, .windowButton, .openPicker, .choose,
+        .clipFailed(3), .clipFailed(2), .captureStopped, .windowClosed, .windowButton, .openPicker, .choose,
         .send, .sendFinished(3), .sendFinished(2), .sendFailed(3), .sendFailed(2), .sentShown(3), .sentShown(2), .pushFailed,
     ]
 
@@ -92,7 +95,8 @@ struct SessionFlowTests {
 
     private static func isOutside(_ event: SessionFlow.Event) -> Bool {
         switch event {
-        case .ended, .holdEnded, .otherAppInFront, .scopeAppInFront, .clipStarted, .clipStartFailed, .clipFinished, .clipFailed, .captureStopped:
+        case .ended, .holdEnded, .otherAppInFront, .scopeAppInFront, .clipStarted, .clipStartFailed, .clipFinished, .clipFailed, .captureStopped,
+             .windowClosed:
             true
         default:
             false

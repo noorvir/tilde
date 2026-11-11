@@ -110,6 +110,11 @@ struct UIState: Decodable {
     var hover: Bool?
     var editing: Bool?
     var drawing: Bool?
+    /// Wireframe mode, in place of Draw mode.
+    var wireframe: Bool?
+    /// The tool of Draw mode or Wireframe mode, such as "ellipse" or "table"; "none" after
+    /// Esc put the tool down.
+    var tool: String?
     /// The HUD's recording mode: ready, starting, recording, paused or finishing.
     var recording: Recording?
     /// What clips record when not scoped to a window: "display" or "phone".

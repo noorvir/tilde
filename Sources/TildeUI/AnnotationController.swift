@@ -18,7 +18,6 @@ final class AnnotationController: ObservableObject {
         didSet {
             updateOverlayInput()
             tracker.isPaused = !pauses.isEmpty
-            saveLastMode()
         }
     }
     var mode: SessionFlow.Mode { flow.mode }
@@ -46,11 +45,13 @@ final class AnnotationController: ObservableObject {
     }
     /// A question in the pill, waiting for the user.
     var confirmation: SessionFlow.Question? { flow.session?.question }
+    /// Annotation mode: annotating, with no pause and no canvas.
+    var isAnnotating: Bool { flow.isAnnotating }
+    /// Draw mode or Wireframe mode: the canvas is open.
     var isDrawing: Bool { flow.session?.isDrawing ?? false }
-    /// Annotation mode: annotating, not paused and not drawing.
-    var isAnnotating: Bool {
-        flow.session?.activity == .annotating && flow.session?.pauses.isEmpty == true && !isDrawing
-    }
+    var isWireframe: Bool { flow.isWireframe }
+    /// Draw or Wireframe paused: what was drawn stays on screen, and the tools wait.
+    var isDrawingPaused: Bool { isDrawing && !pauses.isEmpty }
     /// Whether the overlay takes the pointer (hover, picks, clicks, the crosshair) and the
     /// keyboard: while annotating, and while choosing a window in any mode.
     var overlayTakesInput: Bool { flow.overlayTakesInput }
@@ -102,11 +103,8 @@ final class AnnotationController: ObservableObject {
     }
     /// Draw mode: the canvas, and the notes that shapes become.
     let drawing: DrawingNotes
-    /// Wireframe mode, while it is on.
-    @Published var wireframe: Wireframe? {
-        didSet { saveLastMode() }
-    }
-    var isFindingWireframeSnaps = false
+    /// Wireframe mode, on Draw's canvas: its tool, its window and the note of its components.
+    let wireframe: WireframeMode
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -149,9 +147,9 @@ final class AnnotationController: ObservableObject {
     private let store: SessionStore
     let browser: BrowserController
     let shortcuts: ShortcutStore
-    /// Keeps how the user last chose a window, and the last mode, across launches; nil keeps
-    /// them only in memory.
-    let defaults: UserDefaults?
+    /// Keeps how the user last chose a window, and the mode that was on last, across launches;
+    /// nil keeps them only in memory.
+    private let defaults: UserDefaults?
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
     private var subscription: AnyCancellable?
     /// The app that was in front when an agent's session opened Tilde's browser. The session
@@ -173,6 +171,7 @@ final class AnnotationController: ObservableObject {
         hoverPicker = HoverPicker(picker: picker)
         scope = SessionScope(picker: picker, browser: browser)
         drawing = DrawingNotes(picker: picker)
+        wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
         flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
@@ -206,6 +205,7 @@ final class AnnotationController: ObservableObject {
         picker.windows.onRead = { [weak self] isChanged in
             self?.tracker.refreshCovers()
             self?.scope.windowsRead()
+            self?.wireframe.windowsRead()
             if isChanged {
                 self?.tracker.somethingChanged()
             }
@@ -228,6 +228,7 @@ final class AnnotationController: ObservableObject {
         }
 
         drawing.scope = { [weak self] in self?.scope.window }
+        wireframe.scope = { [weak self] in self?.scope.window }
         drawing.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         let canvas = drawing.panel
         canvas.onEscape = { [weak self] in self?.escapePressed() }
@@ -240,30 +241,9 @@ final class AnnotationController: ObservableObject {
                 self?.commentBox.focus()
             }
         }
-        canvas.onPointer = { [weak self] point in
-            guard let self else {
-                return
-            }
-            let isOverLabel = tracker.label(at: point) != nil
-            if isOverLabel {
-                hover = nil
-            }
-            if wireframe != nil, !isOverLabel {
-                drawing.panel.setOverLabel(false)
-                findWireframeSnaps(at: point)
-                return
-            }
-            drawing.pointerMoved(to: point, isOverLabel: isOverLabel)
-        }
+        canvas.onPointer = { [weak self] in self?.canvasPointerMoved(to: $0) }
+        canvas.onPress = { [weak self] in self?.canvasPressed(at: $0) ?? false }
         canvas.onKey = { [weak self] in self?.handleKey($0, in: .canvas) ?? false }
-        canvas.onPress = { [weak self] point in
-            self?.chooseWireframeWindow(at: point)
-            guard let self, let id = tracker.label(at: point) else {
-                return false
-            }
-            preview(id)
-            return true
-        }
     }
 
     // MARK: - The flow
@@ -308,6 +288,9 @@ final class AnnotationController: ObservableObject {
         if next.choosesInPicker != flow.choosesInPicker {
             defaults?.set(next.choosesInPicker, forKey: "ChoosesInPicker")
         }
+        if let startMode = next.startMode, startMode != flow.startMode {
+            defaults?.set(startMode.rawValue, forKey: "LastMode")
+        }
         flow = next
         if questionChanged {
             keyMonitors.watchQuestion(confirmation != nil)
@@ -333,12 +316,35 @@ final class AnnotationController: ObservableObject {
         case .closePreview: hidePreview()
         case .toggleList: toggleList()
         case .showCanvas: showCanvas()
-        case .undoShape: undoLastDrawing()
-        case .redoShape: redoLastDrawing()
+        case .showWireframe: showWireframe()
+        case .endWireframe: wireframe.end()
+        case .putToolDown:
+            if isWireframe {
+                wireframe.putToolDown()
+            } else {
+                drawing.putToolDown()
+            }
+        // A wireframe keeps its own undo history, of every change; Draw undoes a shape's note.
+        case .undoShape:
+            if isWireframe {
+                wireframe.undo()
+            } else {
+                undoLastDrawing()
+            }
+        case .redoShape:
+            if isWireframe {
+                wireframe.redo()
+            } else {
+                redoLastDrawing()
+            }
         case .openShapeComment:
             Task { await addDrawingNote() }
+        case .takeWireframe:
+            // A second Done while the first makes its pictures changes nothing.
+            if !wireframe.isTaking {
+                Task { await takeWireframe() }
+            }
         case .keepDrawing:
-            endWireframe()
             drawing.panel.endEditing()
             drawing.panel.stopDrawing()
             drawing.panel.setSnapFrame(nil)
@@ -422,11 +428,6 @@ final class AnnotationController: ObservableObject {
             sourcePicker.openApp = nil
             return
         }
-        // In Draw and Wireframe Esc puts the tool down; only Pause pauses.
-        if isDrawing, !isDrawingPaused, flow.session?.panel == nil, flow.session?.question == nil {
-            putDrawingToolDown()
-            return
-        }
         dispatch(.escape)
     }
 
@@ -486,12 +487,13 @@ final class AnnotationController: ObservableObject {
         if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
             returnApp = frontmost
         }
-        // A session in the browser starts paused, so the user can type an address and browse
-        // first; Annotate in the HUD (or the pause shortcut) starts annotating.
+        // A session begins with no mode, then goes into the mode that was on last. One in
+        // the browser stays with no mode, so the user can type an address and browse first;
+        // Annotate in the HUD (or the pause shortcut) starts annotating.
         let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
         scopesNextLocalSessionToBrowser = false
-        let lastMode = savedLastMode
-        dispatch(.begin(inBrowser: isInBrowser))
+        let startMode = SessionFlow.StartMode(saved: defaults?.string(forKey: "LastMode"), inBrowser: isInBrowser)
+        dispatch(.begin)
 
         layoutOverlays()
         if isInBrowser {
@@ -499,7 +501,9 @@ final class AnnotationController: ObservableObject {
             openBrowser(at: session.url)
         } else {
             placeHUD()
-            start(in: lastMode)
+        }
+        if let event = startMode.event {
+            dispatch(event)
         }
     }
 
@@ -747,12 +751,11 @@ final class AnnotationController: ObservableObject {
         hoverPicker.logNext()
         log.notice("annotating \(self.pauses.isEmpty ? "on" : "paused", privacy: .public) (\(String(describing: self.pauses), privacy: .public), overlays \(self.overlays.count))")
         hover = nil
-        // Draw and Wireframe stay through a pause, on screen; the mouse goes through them.
         if isDrawing {
-            if pauses.isEmpty {
-                drawing.panel.resumeDrawing()
-            } else {
-                drawing.panel.stopDrawing()
+            drawing.setPaused(!pauses.isEmpty)
+            // The canvas takes the keyboard when it resumes; an open comment keeps it.
+            if pauses.isEmpty, commentBox.composer != nil {
+                commentBox.focus()
             }
         }
         overlays.orderAbove(scope.window?.number)
@@ -785,10 +788,21 @@ final class AnnotationController: ObservableObject {
         guard overlayTakesInput, commentBox.composer == nil, previewCard.id == nil else {
             return
         }
-        if focusWireframeCanvas() {
-            return
+        if !focusCanvas() {
+            overlays.makeKey()
         }
-        overlays.makeKey()
+    }
+
+    /// In Draw and Wireframe the canvas, not the overlay, takes the keyboard and so the
+    /// pointer's moves: the cursor ring shows at once, and the screen behind shows no hover
+    /// highlight. False when the canvas is not open, or is paused.
+    @discardableResult
+    private func focusCanvas() -> Bool {
+        guard isDrawing, !isDrawingPaused else {
+            return false
+        }
+        drawing.panel.focus()
+        return true
     }
 
     // MARK: - Source and scope
@@ -845,11 +859,7 @@ final class AnnotationController: ObservableObject {
 
     /// The scoped window closed: annotations cover everything again, with no mode on.
     private func scopeEnded() {
-        // A clip of the window ends with it, at its last frame.
-        dispatch(.captureStopped)
-        if flow.session?.activity == .annotating, flow.session?.pauses.isEmpty == true {
-            dispatch(.togglePause)
-        }
+        dispatch(.windowClosed)
         scope.set(nil)
         notices.show(.windowClosed)
     }
@@ -916,12 +926,10 @@ final class AnnotationController: ObservableObject {
         if hud.isInBrowser {
             hud.showPanel()
         }
-        drawing.hasNoTool = false
         drawing.start()
     }
 
     func setDrawingTool(_ tool: String) {
-        drawing.hasNoTool = false
         drawing.setTool(tool)
         if commentBox.composer != nil {
             commentBox.focus()
@@ -981,10 +989,49 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Puts an edited wireframe's note in the place of the note it was.
-    func replaceDraft(_ draft: Draft) {
-        if let index = drafts.firstIndex(where: { $0.id == draft.id }) {
-            drafts[index] = draft
+    // MARK: - Wireframe
+
+    private func showWireframe() {
+        hover = nil
+        wireframe.start()
+        focusCanvas()
+    }
+
+    func setWireframeTool(_ tool: String) {
+        wireframe.setTool(tool)
+        focusCanvas()
+    }
+
+    /// Done: the components become one note, whose comment box opens, or they replace the
+    /// note that they were shown from; then the mode ends. Nothing drawn: the mode only ends.
+    private func takeWireframe() async {
+        if let taken = await wireframe.take() {
+            keep(taken)
+        }
+        dispatch(.wireframeTaken)
+    }
+
+    private func keep(_ taken: WireframeMode.Taken) {
+        guard let replaced = taken.replaces else {
+            openComposer(taken.note)
+            return
+        }
+        if let index = drafts.firstIndex(where: { $0.id == replaced }) {
+            drafts[index] = drafts[index].redrawn(as: taken.note)
+        }
+        drawing.panel.remove(taken.note.drawingIDs)
+    }
+
+    /// Shows a wireframe note's components again, to edit them: Done then replaces that note,
+    /// with new pictures, and keeps its comment.
+    func editWireframe(_ id: Draft.ID) {
+        guard !isWireframe, let draft = drafts.first(where: { $0.id == id }), let saved = WireframeMode.Saved(draft) else {
+            return
+        }
+        dispatch(.closePreview)
+        dispatch(.startWireframe)
+        if isWireframe {
+            wireframe.show(saved, of: draft)
         }
     }
 

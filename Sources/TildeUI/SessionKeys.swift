@@ -14,9 +14,31 @@ enum KeySurface {
     case canvas
 }
 
+/// What a letter or a digit does for wireframe mode.
+enum WireframeKey: Equatable {
+    /// W starts the mode, also from Draw.
+    case start
+    /// W resumes the mode when it is paused.
+    case resume
+    case tool(String)
+    /// Another letter or digit in the mode does nothing: Draw's tools and colours, and the
+    /// modes' keys, would change the canvas behind the HUD.
+    case ignored
+
+    /// The event of the key; a tool changes no mode.
+    var event: SessionFlow.Event? {
+        switch self {
+        case .start: .startWireframe
+        case .resume: .resume
+        case .tool, .ignored: nil
+        }
+    }
+}
+
 /// What a key does in the session's windows. Each window gives its key to `handleKey` first
 /// and keeps only keys of its own: back and forward in the browser, the end of editing in the
-/// preview. The comment box has no key codes: its text view sends ↩ as the event `submitComment`, Esc
+/// preview. The canvas has keys of its own too: in a text field, and in wireframe mode ⌘Z, ⇧⌘Z,
+/// Delete and the first Esc on a selected component. The comment box has no key codes: its text view sends ↩ as the event `submitComment`, Esc
 /// as `escapePressed` and ⌘↩ as Send. A question takes Esc and ↩ before any window, through
 /// `handleConfirmationKey`.
 extension AnnotationController {
@@ -46,11 +68,7 @@ extension AnnotationController {
             // choosing a window or with nothing to send.
             if isCommand, key == kVK_Return {
                 // In Draw and Wireframe it is their Done.
-                if isDrawing {
-                    finishDrawingMode()
-                } else {
-                    dispatch(.send)
-                }
+                dispatch(isDrawing ? .finishDrawing : .send)
                 return true
             }
             // Space on a note's marker previews it, before Space pauses.
@@ -120,6 +138,11 @@ extension AnnotationController {
             return false
 
         case .canvas:
+            // ⌘↩ is Done in Draw and Wireframe.
+            if isDrawing, key == kVK_Return, event.modifierFlags.contains(.command) {
+                dispatch(.finishDrawing)
+                return true
+            }
             return performShortcut(event)
         }
     }
@@ -127,7 +150,13 @@ extension AnnotationController {
     /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that
     /// enables that button. True when the key is one of them, whether it did anything or not.
     func performShortcut(_ event: NSEvent) -> Bool {
-        if performWireframeShortcut(event) {
+        if let key = wireframeKey(of: event) {
+            if case .tool(let tool) = key {
+                setWireframeTool(tool)
+            }
+            if let next = key.event, !event.isARepeat {
+                dispatch(next)
+            }
             return true
         }
         guard session != nil, confirmation == nil,
@@ -147,6 +176,35 @@ extension AnnotationController {
             dispatch(next)
         }
         return true
+    }
+
+    /// What a key does for wireframe mode, before the keys of the HUD's buttons; nil when the
+    /// key is not one of its keys.
+    private func wireframeKey(of event: NSEvent) -> WireframeKey? {
+        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty, let key = event.charactersIgnoringModifiers else {
+            return nil
+        }
+        return Self.wireframeKey(key.lowercased(), flow: flow)
+    }
+
+    /// The rule of wireframe mode's keys, for a key without ⌘, ⌃ or ⌥, in lower case. W starts
+    /// the mode outside recording mode, and resumes it when it is paused. In the mode, a
+    /// tool's letter chooses the tool, and every other letter and digit does nothing. Under a
+    /// question no key is one of them.
+    nonisolated static func wireframeKey(_ key: String, flow: SessionFlow) -> WireframeKey? {
+        guard let open = flow.session, open.question == nil, key.count == 1, key != " " else {
+            return nil
+        }
+        guard open.canvas == .wireframe else {
+            return key == "w" && !flow.isRecordMode ? .start : nil
+        }
+        if !open.pauses.isEmpty {
+            return key == "w" ? .resume : nil
+        }
+        if let tool = WireframeMode.tools.first(where: { $0.key == key }) {
+            return .tool(tool.tool)
+        }
+        return key.allSatisfy { $0.isLetter || $0.isNumber } ? .ignored : nil
     }
 
     /// Returns whether the key answered the question on screen: Esc, or ↩ alone, typed in one of
@@ -232,10 +290,6 @@ extension AnnotationController {
     func holdChanged(_ output: HoldGesture.Output) {
         switch output {
         case .began:
-            // In wireframe mode ⌥ and a drag copies a component.
-            guard wireframe == nil else {
-                return
-            }
             dispatch(.holdBegan)
             // With the browser in front, its page takes the first click only when it is key.
             if pauses.contains(.hold), NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), browser.window?.isVisible == true {

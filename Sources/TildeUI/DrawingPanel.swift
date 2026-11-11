@@ -60,8 +60,18 @@ final class DrawingPanel {
     }
 
     func stopDrawing() {
-        active?.run("deselect()")
+        deselect()
         active?.stopDrawing()
+    }
+
+    /// No shape is selected, so none shows its handles.
+    func deselect() {
+        active?.run("deselect()")
+    }
+
+    /// No tool: nothing draws until `setTool`.
+    func setNoTool() {
+        active?.run("setNoTool()")
     }
 
     func setTool(_ tool: String) {
@@ -105,13 +115,18 @@ final class DrawingPanel {
         active?.setSnapFrame(frame)
     }
 
-    /// Wireframe mode's tool and fill as JSON, or `null` to leave it.
+    /// Wireframe mode's tool and icons as JSON, or `null` to leave the mode.
     func setWireframe(_ json: String) {
         active?.wireframe = json
     }
 
-    func runWireframe(_ call: String) {
-        active?.run(call)
+    /// Undo and redo of wireframe mode's changes, which the canvas keeps.
+    func undoWireframe() {
+        active?.run("undoWireframe()")
+    }
+
+    func redoWireframe() {
+        active?.run("redoWireframe()")
     }
 
     /// Lines for wireframe shapes to snap to, in Quartz screen coordinates.
@@ -417,11 +432,12 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         webView?.loadHTMLString(page, baseURL: URL(string: "https://drawing.tilde.invalid/"))
     }
 
-    nonisolated private static func page() -> String? {
-        func resource(_ name: String, _ type: String) -> String? {
-            Bundle.main.url(forResource: name, withExtension: type).flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+    /// The canvas's page as one document, from the files in `folder`: the app's resources.
+    nonisolated static func page(in folder: URL? = Bundle.main.resourceURL) -> String? {
+        func resource(_ name: String) -> String? {
+            folder.flatMap { try? String(contentsOf: $0.appendingPathComponent(name), encoding: .utf8) }
         }
-        guard let html = resource("draw", "html"), let script = resource("draw", "js"), let style = resource("draw", "css") else {
+        guard let html = resource("draw.html"), let script = resource("draw.js"), let style = resource("draw.css") else {
             return nil
         }
         return html

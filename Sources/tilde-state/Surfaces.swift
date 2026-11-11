@@ -115,12 +115,24 @@ enum Surfaces {
         if let color = state.drawingColor {
             controller.setDrawingColor(color)
         }
+        if let tool = state.tool {
+            setTool(tool, isWireframe: state.wireframe == true, of: controller)
+        }
         switch state.enlarged {
         case .closeUp: controller.previewCard.expandedImage = .closeUp
         case .context: controller.previewCard.expandedImage = .context
         case nil: controller.previewCard.expandedImage = nil
         }
         return controller
+    }
+
+    private static func setTool(_ tool: String, isWireframe: Bool, of controller: AnnotationController) {
+        switch (tool, isWireframe) {
+        case ("none", true): controller.wireframe.putToolDown()
+        case ("none", false): controller.drawing.putToolDown()
+        case (_, true): controller.wireframe.setTool(tool)
+        case (_, false): controller.drawing.setTool(tool)
+        }
     }
 
     /// The state's notes; with `clip`, the first is a recording.
@@ -146,7 +158,11 @@ enum Surfaces {
         if state.autoPaused == true {
             open.pauses.insert(.otherApp)
         }
-        open.isDrawing = state.drawing ?? false
+        if state.wireframe == true {
+            open.canvas = .wireframe
+        } else if state.drawing == true {
+            open.canvas = .draw
+        }
         open.question = state.confirmation
         if state.preview != nil {
             open.panel = .preview

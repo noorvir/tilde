@@ -2,12 +2,13 @@ import Foundation
 
 /// The flow as the contract rows write it: one flat object, such as
 /// `{"mode": "recording", "clip": "paused", "notes": 2}`. A key left out has its default: a
-/// session annotating. `sending` keeps the session it goes back to in `returnTo`. The same
+/// session annotating. `drawing` is the open canvas, in Draw mode and, with `wireframe`, in
+/// Wireframe mode. `sending` keeps the session it goes back to in `returnTo`. The same
 /// object holds the row's facts, which `SessionFlow.Facts` reads.
 /// An unknown key or value is an error, so a typo cannot test another state.
 extension SessionFlow: Codable {
     private enum Key: String, CodingKey, CaseIterable {
-        case mode, pauses, drawing, panel, question, clip, operation, thenSend, pickerOpen, returnTo
+        case mode, pauses, drawing, wireframe, panel, question, clip, operation, thenSend, pickerOpen, returnTo
         case choosesInPicker, lastOperation
     }
 
@@ -56,7 +57,11 @@ extension SessionFlow: Codable {
     private static func open(from values: KeyedDecodingContainer<Key>, operation: Int, decoder: Decoder) throws -> Open {
         var open = Open()
         open.pauses = Set(try values.decodeIfPresent([PauseReason].self, forKey: .pauses) ?? [])
-        open.isDrawing = try values.decodeIfPresent(Bool.self, forKey: .drawing) ?? false
+        if try values.decodeIfPresent(Bool.self, forKey: .wireframe) ?? false {
+            open.canvas = .wireframe
+        } else if try values.decodeIfPresent(Bool.self, forKey: .drawing) ?? false {
+            open.canvas = .draw
+        }
         open.panel = try values.decodeIfPresent(Panel.self, forKey: .panel)
         open.question = try values.decodeIfPresent(Question.self, forKey: .question)
 
@@ -102,6 +107,7 @@ extension SessionFlow: Codable {
     private static func encode(_ open: Open, to values: inout KeyedEncodingContainer<Key>) throws {
         try values.encode(open.pauses.sorted(), forKey: .pauses)
         try values.encode(open.isDrawing, forKey: .drawing)
+        try values.encode(open.canvas == .wireframe, forKey: .wireframe)
         try values.encodeIfPresent(open.panel, forKey: .panel)
         try values.encodeIfPresent(open.question, forKey: .question)
 
@@ -155,7 +161,7 @@ extension SessionFlow.Facts: Codable {
 }
 
 /// An event as the contract rows write it: its name, and after a colon what it carries, such
-/// as `"clipStarted:1"` or `"begin:browser"`.
+/// as `"clipStarted:1"`.
 extension SessionFlow.Event: Codable {
     init(from decoder: Decoder) throws {
         let text = try decoder.singleValueContainer().decode(String.self)
@@ -163,15 +169,15 @@ extension SessionFlow.Event: Codable {
         let value = parts.count == 2 ? parts[1] : ""
         let operation = Int(value) ?? 0
         let events: [String: SessionFlow.Event] = [
-            "begin": .begin(inBrowser: value == "browser"), "ended": .ended, "escape": .escape, "togglePause": .togglePause, "toggleAnnotating": .toggleAnnotating, "resume": .resume,
+            "begin": .begin, "ended": .ended, "escape": .escape, "togglePause": .togglePause, "toggleAnnotating": .toggleAnnotating, "resume": .resume,
             "startShortcut": .startShortcut, "requestClearAll": .requestClearAll, "requestCancel": .requestCancel, "restore": .restore, "openBrowser": .openBrowser, "deleteNote": .deleteNote, "editNote": .editNote,
             "confirm": .confirm, "dismissConfirmation": .dismissConfirmation, "holdBegan": .holdBegan, "holdEnded": .holdEnded,
             "otherAppInFront": .otherAppInFront, "scopeAppInFront": .scopeAppInFront, "openComment": .openComment, "clickAway": .clickAway,
             "submitComment": .submitComment, "closeComment": .closeComment, "openPreview": .openPreview, "closePreview": .closePreview,
             "toggleList": .toggleList, "startDrawing": .startDrawing, "finishDrawing": .finishDrawing, "undoDrawing": .undoDrawing,
-            "redoDrawing": .redoDrawing, "shapeFinished": .shapeFinished, "toggleRecordingMode": .toggleRecordingMode, "record": .record,
+            "redoDrawing": .redoDrawing, "shapeFinished": .shapeFinished, "startWireframe": .startWireframe, "wireframeTaken": .wireframeTaken, "toggleRecordingMode": .toggleRecordingMode, "record": .record,
             "stop": .stop, "clipStarted": .clipStarted(operation), "clipStartFailed": .clipStartFailed(operation),
-            "clipFinished": .clipFinished(operation), "clipFailed": .clipFailed(operation), "captureStopped": .captureStopped,
+            "clipFinished": .clipFinished(operation), "clipFailed": .clipFailed(operation), "captureStopped": .captureStopped, "windowClosed": .windowClosed,
             "windowButton": .windowButton, "openPicker": .openPicker, "choose": .choose,
             "send": .send, "sendFinished": .sendFinished(operation), "sendFailed": .sendFailed(operation), "sentShown": .sentShown(operation),
             "pushFailed": .pushFailed,

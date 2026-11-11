@@ -1,8 +1,9 @@
 import AppKit
 
-/// Follows the window that a session is limited to: it says when the window may have moved or
-/// resized, when its app quits, and when another app comes to the front. The window list's
-/// reads check the window too, for windows that send no move notifications.
+/// Follows a window, such as the one that a session is limited to or that a wireframe is on:
+/// it says when the window may have moved or resized, when its app quits, and when another
+/// app comes to the front. The window list's reads check the window too, for windows that
+/// send no move notifications.
 @MainActor
 final class ScopeFollower {
     /// Check the window now. `frame`: its frame as the window itself reported it, which can be

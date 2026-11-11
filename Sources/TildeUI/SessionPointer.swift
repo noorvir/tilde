@@ -1,7 +1,8 @@
 import AppKit
 
 /// What the pointer does on the overlay: it highlights the element under it, chooses a
-/// source while choosing, and a click or a drag makes a new note.
+/// source while choosing, and a click or a drag makes a new note. On the drawing canvas, it
+/// finds what a shape or a wireframe's component snaps to, and a press opens a note's label.
 extension AnnotationController {
     /// While choosing a source, a session limited to a window also takes the other windows.
     func allows(_ point: CGPoint) -> Bool {
@@ -19,7 +20,8 @@ extension AnnotationController {
     }
 
     func mouseMoved(to point: CGPoint) {
-        guard commentBox.composer == nil, previewCard.id == nil, wireframe == nil else {
+        // In wireframe mode nothing behind the components is highlighted.
+        guard commentBox.composer == nil, previewCard.id == nil, !isWireframe else {
             return
         }
         hoverPicker.pointerMoved(isOverPanel: isOverPanel(point))
@@ -95,6 +97,36 @@ extension AnnotationController {
                 openComposer(NewNote(picked, at: point))
             }
         }
+    }
+
+    // MARK: - The drawing canvas
+
+    /// The pointer moved on the canvas, at a Quartz point: over a note's label nothing snaps;
+    /// else Draw snaps to the element under it, and Wireframe to the lines of the layout.
+    func canvasPointerMoved(to point: CGPoint) {
+        let isOverLabel = tracker.label(at: point) != nil
+        if isOverLabel {
+            hover = nil
+        }
+        if isWireframe, !isOverLabel {
+            drawing.panel.setOverLabel(false)
+            wireframe.pointerMoved(to: point)
+            return
+        }
+        drawing.pointerMoved(to: point, isOverLabel: isOverLabel)
+    }
+
+    /// A press on the canvas, at a Quartz point. True: it opened the preview of the note
+    /// whose label is there, and the canvas does not get it.
+    func canvasPressed(at point: CGPoint) -> Bool {
+        if isWireframe {
+            wireframe.pressed(at: point)
+        }
+        guard let id = tracker.label(at: point) else {
+            return false
+        }
+        preview(id)
+        return true
     }
 
     func dragEnded(with rect: CGRect) {

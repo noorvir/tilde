@@ -43,6 +43,16 @@ enum NoteCaptures {
         return await Captures(image: image, contextImage: wholeScreen)
     }
 
+    /// A wireframe's area of the screen as it is with the wireframe on it, and as it is under
+    /// it. `canvas` has the canvases' windows; `page` has the window of Tilde's browser, which
+    /// both pictures keep.
+    @MainActor
+    static func ofWireframe(area: CGRect, canvas: Set<CGWindowID>, page: Set<CGWindowID>) async -> Captures {
+        async let over = ScreenCapture.png(of: area, outline: nil, keeping: canvas.union(page), maxSide: 2048)
+        async let under = ScreenCapture.png(of: area, outline: nil, keeping: page, maxSide: 2048)
+        return await Captures(image: over, contextImage: under)
+    }
+
     /// What the close-up shows: an element (`outline` set) with 4 pt around it so its outline
     /// fits, or a region exactly.
     static func closeUpRect(frame: CGRect, outline: CGRect?) -> CGRect {
