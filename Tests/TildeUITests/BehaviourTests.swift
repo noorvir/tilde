@@ -550,11 +550,64 @@ struct BehaviourTests {
         #expect(condition())
     }
 
-    private func key(_ code: UInt16) throws -> NSEvent {
+    private func key(_ code: UInt16, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
-            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil,
             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code
         ))
+    }
+
+    // MARK: - Keys in the browser and the preview
+
+    /// In Tilde's browser, Esc and ↩ are the session's unless a text field has the keyboard, ↩
+    /// only answers a question, and ⌘↩ sends from a text field too.
+    @Test func theBrowserGivesEscReturnAndSendToTheSession() throws {
+        let typing = KeySurface.browser(isTyping: true, isInPage: false)
+        let page = KeySurface.browser(isTyping: false, isInPage: true)
+        open(drafts: Fixtures.drafts(1))
+
+        #expect(!controller.handleKey(try key(53), in: typing))
+        #expect(controller.pauses.isEmpty)
+        #expect(controller.handleKey(try key(53), in: page))
+        #expect(controller.pauses == [.user])
+
+        #expect(!controller.handleKey(try key(36), in: page))
+        controller.dispatch(.requestClearAll)
+        #expect(!controller.handleKey(try key(36), in: typing))
+        #expect(controller.handleKey(try key(36), in: page))
+        #expect(controller.drafts.isEmpty)
+
+        open(drafts: Fixtures.drafts(1))
+        #expect(controller.handleKey(try key(36, modifiers: .command), in: typing))
+        #expect(HUDView.status(of: controller).title == "Sending")
+
+        // Without a session, the browser keeps every key.
+        controller.setStateForTesting(session: nil, mode: .idle)
+        #expect(!controller.handleKey(try key(53), in: page))
+        #expect(!controller.handleKey(try key(36, modifiers: .command), in: page))
+    }
+
+    /// In the preview, the arrows step through the notes unless the comment is edited, and Esc
+    /// goes back from an enlarged image, then closes.
+    @Test func thePreviewStepsWithArrowsAndClosesWithEsc() throws {
+        let drafts = Fixtures.drafts(3)
+        controller.setStateForTesting(
+            session: Fixtures.session(), drafts: drafts, mode: .open(SessionFlow.Open(panel: .preview)), previewID: drafts[0].id
+        )
+
+        #expect(controller.handleKey(try key(124), in: .preview(isTyping: false)))
+        #expect(controller.previewID == drafts[1].id)
+        #expect(controller.handleKey(try key(123), in: .preview(isTyping: false)))
+        #expect(controller.previewID == drafts[0].id)
+        #expect(!controller.handleKey(try key(124), in: .preview(isTyping: true)))
+        #expect(controller.previewID == drafts[0].id)
+
+        controller.expandedPreviewImage = .context
+        #expect(controller.handleKey(try key(53), in: .preview(isTyping: true)))
+        #expect(controller.expandedPreviewImage == nil)
+        #expect(controller.previewID == drafts[0].id)
+        #expect(controller.handleKey(try key(53), in: .preview(isTyping: false)))
+        #expect(controller.previewID == nil)
     }
 
     // MARK: - Shortcuts
@@ -704,6 +757,33 @@ struct BehaviourTests {
 
         #expect(controller.scope.window == nil)
         #expect(controller.notices.notice?.rawValue == "Window closed")
+    }
+
+    /// A session waits 0.8 s for the window of Tilde's browser. A window that never comes
+    /// leaves the session with everything on screen; a source chosen meanwhile ends the wait.
+    @Test func aBrowserWindowThatNeverComesEndsTheWait() async throws {
+        func scope() -> SessionScope {
+            let browser = BrowserController()
+            return SessionScope(picker: ElementPicker(browser: browser), browser: browser)
+        }
+        let waiting = scope()
+        let chosen = scope()
+        var missing = 0
+        var missingAfterChoice = 0
+        waiting.onBrowserMissing = { missing += 1 }
+        chosen.onBrowserMissing = { missingAfterChoice += 1 }
+
+        waiting.limitToBrowser()
+        chosen.limitToBrowser()
+        chosen.choose(.screen(1))
+        waiting.windowsRead()
+        #expect(missing == 0)
+        try await Task.sleep(for: .seconds(1))
+
+        #expect(missing == 1)
+        #expect(waiting.window == nil)
+        #expect(missingAfterChoice == 0)
+        #expect(chosen.source == .screen(1))
     }
 
     // MARK: - HUD subtitle
