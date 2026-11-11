@@ -115,7 +115,7 @@ struct BehaviourTests {
         #expect(FileManager.default.fileExists(atPath: video.path))
         let record = try #require(controller.archive.record(session.id))
         #expect(record.notes.count == 2)
-        let restored = AnnotationController.drafts(from: record, archive: controller.archive, into: "0f0f0f0f")
+        let restored = SessionSaver.drafts(from: record, archive: controller.archive, into: "0f0f0f0f")
         #expect(restored.compactMap(Fixtures.video).count == 1)
     }
 
@@ -408,18 +408,18 @@ struct BehaviourTests {
 
     @Test func closeUpIsTheElementPlusFourPoints() {
         let element = CGRect(x: 100, y: 50, width: 84, height: 22)
-        #expect(AnnotationController.closeUpRect(frame: element, outline: element) == CGRect(x: 96, y: 46, width: 92, height: 30))
+        #expect(NoteCaptures.closeUpRect(frame: element, outline: element) == CGRect(x: 96, y: 46, width: 92, height: 30))
 
         let region = CGRect(x: 10, y: 20, width: 300, height: 200)
-        #expect(AnnotationController.closeUpRect(frame: region, outline: nil) == region)
+        #expect(NoteCaptures.closeUpRect(frame: region, outline: nil) == region)
     }
 
     @Test func regionContextNeedsEightyPercentInsideTheWindow() {
         let window = CGRect(x: 0, y: 0, width: 1000, height: 800)
-        #expect(AnnotationController.isMostlyInside(CGRect(x: 100, y: 100, width: 200, height: 100), window))
-        #expect(AnnotationController.isMostlyInside(CGRect(x: 840, y: 100, width: 200, height: 100), window))
-        #expect(!AnnotationController.isMostlyInside(CGRect(x: 900, y: 100, width: 200, height: 100), window))
-        #expect(!AnnotationController.isMostlyInside(CGRect(x: 2000, y: 100, width: 200, height: 100), window))
+        #expect(NoteCaptures.isMostlyInside(CGRect(x: 100, y: 100, width: 200, height: 100), window))
+        #expect(NoteCaptures.isMostlyInside(CGRect(x: 840, y: 100, width: 200, height: 100), window))
+        #expect(!NoteCaptures.isMostlyInside(CGRect(x: 900, y: 100, width: 200, height: 100), window))
+        #expect(!NoteCaptures.isMostlyInside(CGRect(x: 2000, y: 100, width: 200, height: 100), window))
     }
 
     // MARK: - HUD placement

@@ -3,37 +3,6 @@ import AppKit
 import Combine
 import os
 
-/// An annotation the user has added but not yet sent. `annotation.image` fills in when
-/// `capture` finishes; sending waits for every capture.
-struct Draft: Identifiable {
-    var annotation: Annotation
-    /// From a saved session, with no window or page to confirm where it belongs.
-    var isRestored = false
-    /// Quartz point where the numbered marker sits.
-    var marker: CGPoint
-    let chip: String
-    let capture: Task<Captures, Never>
-    /// Where the annotation is on its web page, for annotations in Tilde's browser.
-    var anchor: PageAnchor?
-    /// The window it is on, so windows in front of that window cover it.
-    var sourceWindow: Int?
-    /// What its area looked like when it was made, to hide it when that content goes.
-    var fingerprint: Task<NoteFingerprint?, Never>?
-    /// The page it was made on.
-    var page: Task<PageIdentity?, Never>?
-    /// The app of its window.
-    var sourcePID: pid_t?
-    /// The part of its window that the picture check looks at, when that is not its frame.
-    var pictureArea: CGRect?
-
-    var id: UUID { annotation.id }
-}
-
-enum PreviewImage {
-    case closeUp
-    case context
-}
-
 /// The short notes in the HUD's subtitle, for a moment. Each fits the pill in full, which the
 /// subtitle test checks for the whole list.
 enum Notice: String, CaseIterable {
@@ -47,38 +16,6 @@ enum Notice: String, CaseIterable {
 @MainActor
 final class HoverHighlight: ObservableObject {
     @Published var picked: Picked?
-}
-
-/// Screenshots taken when a target is picked, before the user finishes the comment.
-struct Captures: Sendable {
-    let image: Data?
-    let contextImage: Data?
-}
-
-/// The comment box that is open: for a new target, or to edit an existing draft.
-enum Composer {
-    case new(Pending)
-    case edit(Draft.ID)
-}
-
-struct Pending {
-    var target: Target
-    var frame: CGRect
-    var marker: CGPoint
-    let chip: String
-    let capture: Task<Captures, Never>
-    var anchor: PageAnchor?
-    var tracked: TrackedElement?
-    var sourceWindow: Int?
-    var fingerprint: Task<NoteFingerprint?, Never>?
-    var page: Task<PageIdentity?, Never>?
-    var sourcePID: pid_t?
-    var pictureArea: CGRect?
-    var drawingIDs: [String] = []
-    /// The shape changed after its picture was taken.
-    var isDrawingEdited = false
-    /// Where the shape is; `frame` is what its label is attached to.
-    var drawingBounds: CGRect?
 }
 
 /// Runs annotate mode for the active session: hover, pick, comment, send.
@@ -138,7 +75,7 @@ final class AnnotationController: ObservableObject {
             }
             browser.anchors = Dictionary(uniqueKeysWithValues: drafts.compactMap { draft in draft.anchor.map { (draft.id, $0) } })
             tracker.notes = drafts
-            scheduleSave()
+            saver.saveSoon()
         }
     }
     /// The element under the pointer. It changes at pointer rate and only the overlay draws
@@ -156,7 +93,10 @@ final class AnnotationController: ObservableObject {
     @Published var sentStatus = SentStatus.done
     /// The comment box's data while `flow` has it open.
     @Published private(set) var composer: Composer? {
-        didSet { tracker.isHeld = composer != nil }
+        didSet {
+            tracker.isHeld = composer != nil
+            saver.isHeld = composer != nil
+        }
     }
     private var holdMonitor: HoldMonitor?
 
@@ -263,16 +203,12 @@ final class AnnotationController: ObservableObject {
 
     /// Where sessions are saved while in progress and kept afterwards.
     let archive: SessionArchive
+    let saver: SessionSaver
     /// Where sent reports go, and where a report without an agent is copied; tests give their own.
     var inbox = inboxRoot
     var pasteboard = NSPasteboard.general
     /// Keeps how the user last chose a window across launches; nil keeps it only in memory.
     private let defaults: UserDefaults?
-    /// When the session on screen started, for its saved record.
-    private var sessionStarted = Date()
-    private var saveTask: Task<Void, Never>?
-    private var checkpointTimer: Timer?
-    private var sleepObserver: NSObjectProtocol?
     /// A saved session whose notes the next session starts with.
     private var pendingRestore: SessionRecord?
 
@@ -283,6 +219,7 @@ final class AnnotationController: ObservableObject {
         self.store = store
         self.browser = browser
         self.archive = archive
+        saver = SessionSaver(archive: archive)
         self.defaults = defaults
         self.shortcuts = shortcuts ?? ShortcutStore()
         picker = ElementPicker(browser: browser)
@@ -293,6 +230,7 @@ final class AnnotationController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
+        saver.snapshot = { [weak self] in self?.snapshot }
         doubleTap = DoubleTapMonitor { [weak self] in
             guard let self else {
                 return []
@@ -376,15 +314,15 @@ final class AnnotationController: ObservableObject {
         drawingPanel.prepare()
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
 
-        sessionStarted = Date()
+        var created = Date()
         if let record = pendingRestore {
             pendingRestore = nil
             if record.id == session.id {
-                sessionStarted = record.created
+                created = record.created
             }
-            drafts = Self.drafts(from: record, archive: archive, into: session.id)
+            drafts = SessionSaver.drafts(from: record, archive: archive, into: session.id)
         }
-        startCheckpoints()
+        saver.start(created: created)
         startHoldMonitor()
         tracker.pageWindow = { [weak self] in
             guard let self, !pageNotes.isEmpty else {
@@ -404,7 +342,7 @@ final class AnnotationController: ObservableObject {
         }
         picker.windows.onInput = { [weak self] in self?.tracker.somethingChanged() }
         picker.windows.start()
-        saveSession()
+        saver.save()
 
         if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
             returnApp = frontmost
@@ -428,7 +366,7 @@ final class AnnotationController: ObservableObject {
     /// otherwise it goes at once.
     private func end() {
         stopAnnotating()
-        stopCheckpoints()
+        saver.stop()
         session = nil
         drafts = []
         setSource(nil)
@@ -537,7 +475,7 @@ final class AnnotationController: ObservableObject {
         } else {
             sentText = "Sent to \(session.client)"
         }
-        saveSession(state: .sent, reportFolder: folder)
+        saver.save(state: .sent, reportFolder: folder)
         store.finish(session.id, with: .sent(feedback, folder: folder))
         end()
 
@@ -619,7 +557,7 @@ final class AnnotationController: ObservableObject {
         log.notice("session \(session.id, privacy: .public) cancelled")
         // A cancelled session keeps its notes in History, stopped recordings included; only a
         // clip still in progress goes, with the session's end.
-        saveSession(state: .cancelled)
+        saver.save(state: .cancelled)
         store.finish(session.id, with: .cancelled)
         dispatch(.ended)
     }
@@ -771,11 +709,11 @@ final class AnnotationController: ObservableObject {
         let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped
         let origin = (link.window?.frame ?? screen ?? drawing.bounds).origin
         let captures = await drawingCaptures(of: drawing.bounds, in: link.window?.frame)
-        openComposer(
+        openComposer(NewNote(
             target: .drawing(shapes: DrawingShapes.encode(drawing.shapes, origin: origin, element: link.element)), frame: link.frame,
-            marker: link.marker, chip: "Drawing", outline: nil, window: link.window, anchor: link.anchor, tracked: link.tracked,
+            marker: link.marker, chip: "Drawing", window: link.window, anchor: link.anchor, tracked: link.tracked,
             pictureArea: link.pictureArea, captures: captures, drawingIDs: drawing.ids
-        )
+        ))
         drawingPanel.editShapes(drawing.ids)
     }
 
@@ -825,11 +763,7 @@ final class AnnotationController: ObservableObject {
     /// The window (or else the screen) and the whole screen, with the drawings on them.
     private func drawingCaptures(of bounds: CGRect, in windowFrame: CGRect?) async -> Captures {
         let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
-        async let image = ScreenCapture.png(of: windowFrame ?? screen, outline: nil, keeping: keeping, maxSide: 1600)
-        async let wholeScreen = ScreenCapture.png(of: screen, outline: nil, keeping: keeping, maxSide: 2048)
-        return await Captures(image: image, contextImage: wholeScreen)
+        return await NoteCaptures.ofDrawing(bounds: bounds, in: windowFrame, keeping: keeping)
     }
 
     /// The shape of the open comment changed: its link and the comment box go with it. Its
@@ -1184,117 +1118,12 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - Saving and restoring
 
-    /// Saves the session about a second after a change, so a burst of changes is one write.
-    private func scheduleSave() {
-        guard session != nil else {
-            return
-        }
-        saveTask?.cancel()
-        saveTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            if !Task.isCancelled {
-                self?.saveSession()
-            }
-        }
-    }
-
-    /// Saves every 10 seconds while a session is on screen, and before the Mac sleeps.
-    private func startCheckpoints() {
-        checkpointTimer?.invalidate()
-        checkpointTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard self?.composer == nil else {
-                    return
-                }
-                self?.saveSession()
-            }
-        }
-        if sleepObserver == nil {
-            sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.saveSession()
-                }
-            }
-        }
-    }
-
-    private func stopCheckpoints() {
-        checkpointTimer?.invalidate()
-        checkpointTimer = nil
-        saveTask?.cancel()
-        saveTask = nil
-    }
-
-    /// Saves the session on screen with its notes; images follow once their captures are done.
-    private func saveSession(state: SessionRecord.State = .active, reportFolder: URL? = nil) {
-        guard let record = currentRecord(state: state, reportFolder: reportFolder) else {
-            return
-        }
-        archive.save(record)
-        let drafts = self.drafts
-        let archive = self.archive
-        Task {
-            var images: [String: Data] = [:]
-            for draft in drafts {
-                let captures = await draft.capture.value
-                images[SessionArchive.imageName(draft.id)] = captures.image
-                images[SessionArchive.contextImageName(draft.id)] = captures.contextImage
-            }
-            if !images.isEmpty {
-                archive.saveImages(images, of: record.id)
-            }
-        }
-    }
-
-    /// Saves what is on screen at once, without images still being captured, such as when
-    /// Tilde quits.
-    func saveBeforeQuitting() {
-        if let record = currentRecord(state: .active, reportFolder: nil) {
-            archive.save(record)
-        }
-        archive.flush()
-    }
-
-    private func currentRecord(state: SessionRecord.State, reportFolder: URL?) -> SessionRecord? {
+    /// The session on screen as it is now, for its saved record.
+    private var snapshot: SessionSaver.Snapshot? {
         guard let session else {
             return nil
         }
-        let notes = drafts.map { draft in
-            SessionRecord.Note(
-                id: draft.id, comment: draft.annotation.comment, target: draft.annotation.target, frame: draft.annotation.frame,
-                marker: draft.marker, chip: draft.chip, anchor: draft.anchor
-            )
-        }
-        return SessionRecord(
-            id: session.id, created: sessionStarted, updated: Date(), client: session.client, node: session.node, isLocal: session.isLocal, state: state,
-            pageURL: isInBrowser ? browser.pageURL : nil, scopeApp: scopeName, notes: notes, reportFolder: reportFolder?.path
-        )
-    }
-
-    /// Notes of a saved session as drafts, with their saved images.
-    /// A recording comes too while its file is there; into another session, the file is
-    /// linked into that session's folder, so that each session owns its recordings.
-    static func drafts(from record: SessionRecord, archive: SessionArchive, into id: String) -> [Draft] {
-        record.notes.compactMap { note in
-            var target = note.target
-            if case .recording(let video, let seconds, let source) = note.target {
-                guard FileManager.default.fileExists(atPath: video.path) else {
-                    return nil
-                }
-                if record.id != id {
-                    target = .recording(video: archive.adopt(video, into: id), seconds: seconds, source: source)
-                }
-            }
-            let images = archive.images(of: note, in: record.id)
-            let captures = Captures(image: images.image, contextImage: images.contextImage)
-            // The preview and the list show the annotation's own images.
-            let annotation = Annotation(
-                id: note.id, comment: note.comment, target: target, frame: note.frame, image: images.image, contextImage: images.contextImage
-            )
-            var draft = Draft(annotation: annotation, marker: note.marker, chip: note.chip, capture: Task { captures }, anchor: note.anchor)
-            draft.isRestored = true
-            return draft
-        }
+        return SessionSaver.Snapshot(session: session, drafts: drafts, pageURL: isInBrowser ? browser.pageURL : nil, scopeApp: scopeName)
     }
 
     /// Brings back a saved session's notes, also a sent one, to edit and send again: into the
@@ -1302,7 +1131,6 @@ final class AnnotationController: ObservableObject {
     /// browser session). An unfinished or cancelled one is marked restored, so it is not
     /// offered again; a sent one stays sent.
     func restore(_ record: SessionRecord) {
-
         if session != nil {
             // Notes on screen are replaced only after the HUD asks; the saved session is kept
             // only when the flow takes the restore.
@@ -1319,27 +1147,17 @@ final class AnnotationController: ObservableObject {
             ])
             return
         }
-        markRestored(record)
+        saver.markRestored(record)
         pendingRestore = record
         _ = store.start(client: "You", url: record.pageURL.flatMap(URL.init(string:)), isLocal: true)
-    }
-
-    private func markRestored(_ record: SessionRecord) {
-        guard record.state != .sent else {
-            return
-        }
-        var old = record
-        old.state = .restored
-        old.updated = Date()
-        archive.save(old)
     }
 
     /// The session on screen takes a saved session's notes, in their order, and its page in
     /// Tilde's browser.
     private func replaceDrafts(with record: SessionRecord) {
-        markRestored(record)
+        saver.markRestored(record)
         if let session {
-            drafts = Self.drafts(from: record, archive: archive, into: session.id)
+            drafts = SessionSaver.drafts(from: record, archive: archive, into: session.id)
         }
         if let page = record.pageURL.flatMap(URL.init(string:)), browser.pageURL != record.pageURL {
             openBrowser(at: page)
@@ -1355,14 +1173,6 @@ final class AnnotationController: ObservableObject {
         pendingRestore = record
         _ = store.start(id: record.id, client: record.client, node: record.node, url: record.pageURL.flatMap(URL.init(string:)))
         return true
-    }
-
-    /// Keeps an unfinished session in the history as cancelled.
-    func discard(_ record: SessionRecord) {
-        var old = record
-        old.state = .cancelled
-        old.updated = Date()
-        archive.save(old)
     }
 
     // MARK: - Overlays and pause
@@ -1723,7 +1533,7 @@ final class AnnotationController: ObservableObject {
             layoutOverlays()
         }
         placeHUD()
-        scheduleSave()
+        saver.saveSoon()
         guard let window else {
             return
         }
@@ -2001,11 +1811,11 @@ final class AnnotationController: ObservableObject {
             }
             let isWholeWindow = Self.isWholeWindow(picked)
             let marker = isWholeWindow ? point : CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
-            openComposer(
+            openComposer(NewNote(
                 target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame,
                 window: picked.window, anchor: picked.anchor, tracked: isWholeWindow ? nil : picked.tracked,
                 pictureArea: isWholeWindow ? Self.pictureArea(around: point) : nil
-            )
+            ))
         }
     }
 
@@ -2030,126 +1840,33 @@ final class AnnotationController: ObservableObject {
         let isOverBrowser = window?.number == browser.windowNumber
         Task {
             let anchor = isOverBrowser ? await browser.regionAnchor(for: rect) : nil
-            openComposer(target: .region, frame: rect, marker: marker, chip: "Region", outline: nil, window: window, anchor: anchor)
+            openComposer(NewNote(target: .region, frame: rect, marker: marker, chip: "Region", window: window, anchor: anchor))
         }
     }
 
-    /// Opens the comment box for a new target and starts its screenshots. `window` is the
-    /// window the target belongs to. For an element (`outline` set), both screenshots come
-    /// from that window alone, so no other window, Tilde's included, can cover them.
-    private func openComposer(
-        target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor? = nil,
-        tracked: TrackedElement? = nil, pictureArea: CGRect? = nil, captures: Captures? = nil, drawingIDs: [String] = []
-    ) {
+    /// Opens the comment box for a new target and starts its screenshots.
+    private func openComposer(_ note: NewNote) {
         // The session may have moved on while the target was picked: then nothing opens.
         var isShown = false
         dispatch(.openComment, with: [.showComment: { [self] in
             isShown = true
-            showComposer(
-                target: target, frame: frame, marker: marker, chip: chip, outline: outline, window: window, anchor: anchor, tracked: tracked,
-                pictureArea: pictureArea, captures: captures, drawingIDs: drawingIDs
-            )
+            showComposer(note)
         }])
         if !isShown {
-            drawingPanel.remove(drawingIDs)
+            drawingPanel.remove(note.drawingIDs)
         }
     }
 
-    private func showComposer(
-        target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor?,
-        tracked: TrackedElement?, pictureArea: CGRect?, captures: Captures?, drawingIDs: [String]
-    ) {
-        let closeUpRect = Self.closeUpRect(frame: frame, outline: outline)
-        let keeping = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
-        let browser = self.browser
-        let capturesContext = session?.capturesContext ?? false
-        let isInBrowserPage = window != nil && window?.number == browser.windowNumber
-        let pageFrame = browser.pageFrame?.flipped
-        let capture = Task {
-            if let captures {
-                return captures
-            }
-            // Tilde's browser draws its page itself, with no Screen Recording; the visible part
-            // of the page is the context, like a whole window elsewhere.
-            if isInBrowserPage || !ScreenCapture.isAllowed {
-                let image = await browser.snapshot(of: closeUpRect, outline: outline)
-                var contextImage: Data?
-                if isInBrowserPage, capturesContext, let pageFrame {
-                    contextImage = await browser.snapshot(of: pageFrame, outline: frame, maxSide: 1024)
-                }
-                return Captures(image: image, contextImage: contextImage)
-            }
-
-            async let image = Self.closeUpImage(of: closeUpRect, outline: outline, window: window, keeping: keeping)
-            async let contextImage = Self.contextImage(of: frame, isRegion: outline == nil, window: window, keeping: keeping, enabled: capturesContext)
-            return await Captures(image: image, contextImage: contextImage)
-        }
-
+    private func showComposer(_ note: NewNote) {
+        let pending = Pending(note, browser: browser, withContext: session?.capturesContext ?? false)
         hover = nil
-        // Pages in Tilde's browser report their elements; other windows are compared by picture.
-        var fingerprint: Task<NoteFingerprint?, Never>?
-        var page: Task<PageIdentity?, Never>?
-        if anchor == nil, let window {
-            let windowID = CGWindowID(window.number)
-            let area = pictureArea ?? frame
-            fingerprint = Task { await NoteFingerprint.capture(window: windowID, area: area) }
-            let read = Task.detached { PageIdentity.read(pid: window.pid, windowFrame: window.frame) }
-            page = read
-            offerBrowser(window: window, page: read)
+        if let window = note.window, let page = pending.page {
+            offerBrowser(window: window, page: page)
         }
-        composer = .new(Pending(
-            target: target, frame: frame, marker: marker, chip: chip, capture: capture, anchor: anchor, tracked: tracked,
-            sourceWindow: window?.number, fingerprint: fingerprint, page: page, sourcePID: window?.pid, pictureArea: pictureArea,
-            drawingIDs: drawingIDs
-        ))
-        log.notice("comment opened for \(chip, privacy: .public)")
+        composer = .new(pending)
+        log.notice("comment opened for \(note.chip, privacy: .public)")
         commentText = ""
-        commentPanel.show(chip: chip, isEditing: false, near: marker, below: frame)
-    }
-
-    /// What the close-up shows: an element (`outline` set) with 4 pt around it so its outline
-    /// fits, or a region exactly.
-    nonisolated static func closeUpRect(frame: CGRect, outline: CGRect?) -> CGRect {
-        outline.map { $0.insetBy(dx: -4, dy: -4) } ?? frame
-    }
-
-    /// Whether at least 80% of a region lies inside a window, so the window is its context.
-    nonisolated static func isMostlyInside(_ region: CGRect, _ window: CGRect) -> Bool {
-        let inside = window.intersection(region)
-        return !inside.isNull && inside.width * inside.height >= 0.8 * region.width * region.height
-    }
-
-    /// The target alone: an element from its own window, or a region from the screen. An
-    /// element whose window cannot be captured, such as one that just closed, has no picture:
-    /// the screen there may show another window.
-    nonisolated private static func closeUpImage(
-        of rect: CGRect, outline: CGRect?, window: ElementPicker.WindowInfo?, keeping: Set<CGWindowID>
-    ) async -> Data? {
-        if let outline, let window {
-            return await ScreenCapture.png(ofWindow: CGWindowID(window.number), area: rect, outline: outline, maxSide: 1200)
-        }
-        return await ScreenCapture.png(of: rect, outline: outline, keeping: keeping, maxSide: 1200)
-    }
-
-    /// The whole window the target belongs to, with the target outlined. For a region: the
-    /// window that holds most of it, or else its screen. Nil when `enabled` is false.
-    nonisolated private static func contextImage(
-        of frame: CGRect, isRegion: Bool, window: ElementPicker.WindowInfo?, keeping: Set<CGWindowID>, enabled: Bool
-    ) async -> Data? {
-        guard enabled else {
-            return nil
-        }
-
-        if let window {
-            if !isRegion || isMostlyInside(frame, window.frame) {
-                return await ScreenCapture.png(ofWindow: CGWindowID(window.number), area: window.frame, outline: frame, maxSide: 1024)
-            }
-        }
-
-        let center = CGPoint(x: frame.midX, y: frame.midY).flipped
-        let screen = NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.screens.first
-        let bounds = screen?.frame.flipped ?? frame
-        return await ScreenCapture.png(of: bounds, outline: frame, keeping: keeping, maxSide: 1024)
+        commentPanel.show(chip: note.chip, isEditing: false, near: note.marker, below: note.frame)
     }
 
     // MARK: - Comments

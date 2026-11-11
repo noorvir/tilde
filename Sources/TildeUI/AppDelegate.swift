@@ -39,7 +39,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_ notification: Notification) {
         nodes?.stopLinks()
-        controller.saveBeforeQuitting()
+        controller.saver.saveBeforeQuitting()
     }
 
     /// An agent waiting again for its session after Tilde restarted gets it back with its
@@ -65,13 +65,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             controller.restore(record)
         } onDiscard: { record in
-            controller.discard(record)
+            controller.saver.discard(record)
         }
         restoreToast = toast
 
         let unfinished = controller.archive.all().filter { $0.state == .active }
         for empty in unfinished where empty.notes.isEmpty {
-            controller.discard(empty)
+            controller.saver.discard(empty)
         }
         if let newest = unfinished.first(where: { !$0.notes.isEmpty }) {
             toast.show(newest)

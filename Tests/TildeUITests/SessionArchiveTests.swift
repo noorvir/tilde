@@ -29,7 +29,7 @@ struct SessionArchiveTests {
         archive.saveImages([SessionArchive.imageName(note.id): Data([7]), SessionArchive.contextImageName(note.id): Data([8])], of: record.id)
         archive.flush()
 
-        let drafts = AnnotationController.drafts(from: record, archive: archive, into: record.id)
+        let drafts = SessionSaver.drafts(from: record, archive: archive, into: record.id)
 
         // The preview and the list read the annotation's images; the report reads the captures.
         #expect(drafts.first?.annotation.image == Data([7]))
@@ -181,13 +181,13 @@ struct SessionArchiveTests {
             id: clip.id, comment: "", target: clip.annotation.target, frame: clip.annotation.frame, marker: .zero, chip: clip.chip, anchor: nil
         )]
 
-        let drafts = AnnotationController.drafts(from: record, archive: archive, into: "0e0e0e0e")
+        let drafts = SessionSaver.drafts(from: record, archive: archive, into: "0e0e0e0e")
         let video = try #require(drafts.first.flatMap(Fixtures.video))
         #expect(video.deletingLastPathComponent() == archive.folder("0e0e0e0e"))
         #expect(FileManager.default.fileExists(atPath: video.path))
 
         try FileManager.default.removeItem(at: try #require(Fixtures.video(of: clip)))
-        #expect(AnnotationController.drafts(from: record, archive: archive, into: record.id).isEmpty)
+        #expect(SessionSaver.drafts(from: record, archive: archive, into: record.id).isEmpty)
     }
 
     /// Recordings no note has, such as one in progress when Tilde quit, go at launch.
