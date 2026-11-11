@@ -95,6 +95,11 @@ final class DrawingPanel {
         active?.resumeDrawing()
     }
 
+    /// The canvas takes the keyboard, and with it the pointer's moves.
+    func focus() {
+        active?.focus()
+    }
+
     /// The element to snap to, in Quartz screen coordinates.
     func setSnapFrame(_ frame: CGRect?) {
         active?.setSnapFrame(frame)
@@ -268,6 +273,10 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     func hide() {
         panel?.ignoresMouseEvents = true
         panel?.orderOut(nil)
+    }
+
+    func focus() {
+        panel?.makeKey()
     }
 
     func resumeDrawing() {

@@ -9,7 +9,7 @@ struct Wireframe: Equatable {
     /// The window of the first press: the components keep their place on it when it moves.
     var window: ElementPicker.WindowInfo?
 
-    /// Card stands in for any component not in the list.
+    /// Card, Rectangle and Circle stand in for any component not in the list.
     static let tools = [
         (tool: "section", symbol: "rectangle.split.3x1", key: "s", help: "Section"),
         (tool: "card", symbol: "square.text.square", key: "c", help: "Card"),
@@ -17,6 +17,8 @@ struct Wireframe: Equatable {
         (tool: "button", symbol: "capsule", key: "b", help: "Button"),
         (tool: "dropdown", symbol: "chevron.down.square", key: "d", help: "Dropdown"),
         (tool: "list", symbol: "list.bullet.rectangle", key: "l", help: "List"),
+        (tool: "rectangle", symbol: "rectangle", key: "r", help: "Rectangle"),
+        (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
     ]
 
     var json: String {
@@ -92,14 +94,27 @@ extension AnnotationController {
             return
         }
         drawingPanel.setSnapFrame(nil)
+        hover = nil
         let next = Wireframe()
         wireframe = next
         drawingPanel.setWireframe(next.json)
+        _ = focusWireframeCanvas()
+    }
+
+    /// In wireframe mode the canvas, not the overlay, takes the keyboard and so the pointer's
+    /// moves: the cursor ring shows at once, and the screen behind shows no hover highlight.
+    func focusWireframeCanvas() -> Bool {
+        guard wireframe != nil else {
+            return false
+        }
+        drawingPanel.focus()
+        return true
     }
 
     func setWireframeTool(_ tool: String) {
         wireframe?.tool = tool
         drawingPanel.setWireframe(wireframe?.json ?? "null")
+        _ = focusWireframeCanvas()
     }
 
     func undoWireframe() {

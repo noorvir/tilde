@@ -2282,7 +2282,7 @@ final class AnnotationController: ObservableObject {
     // MARK: - Picking
 
     func mouseMoved(to point: CGPoint) {
-        guard composer == nil, previewID == nil else {
+        guard composer == nil, previewID == nil, wireframe == nil else {
             return
         }
         if !hasLoggedMove {
@@ -2742,6 +2742,9 @@ final class AnnotationController: ObservableObject {
 
     func makeOverlayKey() {
         guard overlayTakesInput, composer == nil, previewID == nil else {
+            return
+        }
+        if focusWireframeCanvas() {
             return
         }
         let pointer = NSEvent.mouseLocation

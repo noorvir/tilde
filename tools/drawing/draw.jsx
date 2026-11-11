@@ -37,8 +37,9 @@ function describe(element) {
   if (element.customData?.tildeWireframe) {
     shape.type = element.customData.tildeWireframe;
     delete shape.color;
-    if (element.customData.label) shape.label = element.customData.label;
-    if (element.customData.borders) shape.borders = element.customData.borders;
+    for (const key of ["label", "borders", "rows", "columns", "filled"]) {
+      if (element.customData[key] !== undefined) shape[key] = element.customData[key];
+    }
   }
   if (element.type === "text") shape.text = element.text;
   if (element.type === "arrow") {
@@ -180,7 +181,8 @@ window.tildeDraw = {
   },
 };
 
-// Wireframe mode: skeletons of components (section, card, table, button, dropdown, list) over
+// Wireframe mode: skeletons of components (section, card, table, button, dropdown, list, and
+// plain rectangles and ellipses) over
 // the screen, sent together as one note. Its shapes stay until Done takes them all. Each
 // component is a group of flat elements, made again whole when its label changes.
 let wireframe = null;
@@ -203,11 +205,23 @@ const block = (x, y, width, height, backgroundColor, more = {}) => ({
 });
 const bar = (x, y, width, height, backgroundColor = skeleton.bar) => block(x, y, width, height, backgroundColor, { roundness: { type: 2 } });
 const rule = (x, y, width) => ({ type: "line", x, y, width, height: 0, points: [[0, 0], [width, 0]], ...flat, strokeColor: skeleton.line });
-const dot = (x, y, size, backgroundColor = skeleton.bar) => ({ type: "ellipse", x, y, width: size, height: size, ...flat, strokeColor: "transparent", backgroundColor });
 
-// The parts of a component in its rect, behind its label; `hasLabel` leaves out the bars that
-// a label stands in for. A section is a region of a page with the `borders` named.
-function componentParts(kind, { x, y, width, height }, hasLabel, borders) {
+// The rows (and a table's header and columns) of a component: as many as `data` says, else as
+// many as fit its size. They always fill it.
+function rowsOf(kind, { width, height }, data) {
+  if (kind === "table") {
+    const header = clamp(height * 0.14, 18, 34);
+    const rows = data.rows ?? clamp(Math.round((height - header) / 32), 1, 30);
+    return { header, rows, columns: data.columns ?? clamp(Math.floor(width / 110), 2, 5) };
+  }
+  return { rows: data.rows ?? clamp(Math.round(height / 40), 1, 30) };
+}
+
+// The parts of a component in its rect, behind its label; with a label, the bars it stands in
+// for are left out. `data`: the label, a section's `borders`, the `rows` and `columns` of a
+// table or list, whether a rectangle or ellipse is `filled`.
+function componentParts(kind, { x, y, width, height }, data) {
+  const hasLabel = Boolean(data.label);
   const pad = clamp(Math.min(width, height) * 0.12, 6, 16);
   const barHeight = clamp(height * 0.08, 5, 10);
   const parts = [];
@@ -215,7 +229,7 @@ function componentParts(kind, { x, y, width, height }, hasLabel, borders) {
     case "section": {
       parts.push(block(x, y, width, height, skeleton.surface));
       const edges = { top: [[0, 0], [width, 0]], right: [[width, 0], [width, height]], bottom: [[0, height], [width, height]], left: [[0, 0], [0, height]] };
-      for (const border of borders) {
+      for (const border of data.borders) {
         const [[startX, startY], [endX, endY]] = edges[border];
         parts.push({ type: "line", x: x + startX, y: y + startY, width: endX - startX, height: endY - startY, points: [[0, 0], [endX - startX, endY - startY]], ...flat, strokeWidth: 2, strokeColor: skeleton.border });
       }
@@ -233,14 +247,12 @@ function componentParts(kind, { x, y, width, height }, hasLabel, borders) {
       break;
     }
     case "table": {
-      const header = clamp(height * 0.14, 18, 34);
-      const row = clamp(header * 1.1, 18, 40);
-      const columns = clamp(Math.floor(width / 110), 2, 5);
+      const { header, rows, columns } = rowsOf(kind, { width, height }, data);
+      const row = (height - header) / rows;
       const column = width / columns;
-      const cell = clamp(row * 0.28, 4, 8);
+      const cell = clamp(row * 0.28, 3, 8);
       parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.line }));
       parts.push(block(x, y, width, header, skeleton.block));
-      const rows = clamp(Math.floor((height - header) / row), 0, 12);
       for (let column_ = 0; column_ < columns; column_++) {
         parts.push(bar(x + column_ * column + pad, y + (header - cell) / 2, column * 0.5, cell, skeleton.darkBar));
       }
@@ -268,33 +280,48 @@ function componentParts(kind, { x, y, width, height }, hasLabel, borders) {
       break;
     }
     case "list": {
-      const row = clamp(Math.min(height / 3, 56), 28, 56);
-      const avatar = row * 0.56;
+      const { rows } = rowsOf(kind, { width, height }, data);
+      const row = height / rows;
+      const line = clamp(row * 0.3, 4, 12);
       parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.line }));
-      const rows = clamp(Math.floor(height / row), 1, 10);
       for (let index = 0; index < rows; index++) {
         const top = y + index * row;
         if (index > 0) parts.push(rule(x + pad, top, width - 2 * pad));
-        parts.push(dot(x + pad, top + (row - avatar) / 2, avatar));
-        const textLeft = x + pad * 2 + avatar;
-        const textWidth = width - textLeft + x - pad;
-        parts.push(bar(textLeft, top + row / 2 - barHeight - 2, textWidth * 0.55, barHeight, skeleton.darkBar));
-        parts.push(bar(textLeft, top + row / 2 + 3, textWidth * 0.35, barHeight * 0.8));
+        parts.push(bar(x + pad, top + (row - line) / 2, width - 2 * pad, line));
       }
       break;
     }
+    case "rectangle":
+      parts.push(data.filled ? block(x, y, width, height, skeleton.block, { roundness: { type: 3 } })
+        : block(x, y, width, height, "transparent", { strokeColor: skeleton.border, strokeWidth: 2, roundness: { type: 3 } }));
+      break;
+    case "ellipse":
+      parts.push({
+        type: "ellipse", x, y, width, height, ...flat, strokeWidth: 2,
+        strokeColor: data.filled ? "transparent" : skeleton.border, backgroundColor: data.filled ? skeleton.block : "transparent",
+      });
+      break;
   }
   return parts;
 }
 
 // Buttons, dropdowns and cards show a label on themselves; the rest on a chip, over their rows.
-const plainLabels = new Set(["button", "dropdown", "card"]);
+const plainLabels = new Set(["button", "dropdown", "card", "rectangle", "ellipse"]);
 
 const allBorders = ["top", "right", "bottom", "left"];
+// A new rectangle or ellipse is filled as the last one set.
+let isFilled = true;
 
-function wireframeElements(kind, rect, label, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`], borders = allBorders) {
-  const skeletons = componentParts(kind, rect, Boolean(label), borders);
-  skeletons[0].customData = { tildeWireframe: kind, label, ...(kind === "section" ? { borders } : {}) };
+function newData(kind) {
+  if (kind === "section") return { borders: allBorders };
+  if (kind === "rectangle" || kind === "ellipse") return { filled: isFilled };
+  return {};
+}
+
+function wireframeElements(kind, rect, data, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`]) {
+  const { label } = data;
+  const skeletons = componentParts(kind, rect, data);
+  skeletons[0].customData = { ...data, tildeWireframe: kind };
   const elements = convertToExcalidrawElements(skeletons);
   if (label) {
     const fontSize = plainLabels.has(kind) ? clamp(rect.height * 0.32, 12, 20) : 15;
@@ -332,7 +359,7 @@ function finishWireframeShape() {
     if (component) editLabel(component);
     return;
   }
-  const elements = wireframeElements(wireframe.tool, box);
+  const elements = wireframeElements(wireframe.tool, box, newData(wireframe.tool));
   api.updateScene({ elements: [...rest, ...elements], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
 }
 
@@ -370,7 +397,7 @@ function rebuild(group, rect, data) {
   const all = api.getSceneElementsIncludingDeleted();
   const index = all.findIndex((element) => element.groupIds.includes(group));
   const rest = all.filter((element) => !element.groupIds.includes(group));
-  rest.splice(index, 0, ...wireframeElements(data.tildeWireframe, rect, data.label, [group], data.borders));
+  rest.splice(index, 0, ...wireframeElements(data.tildeWireframe, rect, data, [group]));
   api.updateScene({ elements: rest, captureUpdate: "NEVER" });
 }
 
@@ -388,7 +415,8 @@ labelField.addEventListener("blur", () => {
 });
 
 // Editing a component after it is drawn: over one, a chip at its top left moves it (a click on
-// it edits the label; a section's chip also sets its borders), and a handle at its bottom right
+// it edits the label; its controls set a section's borders, the rows and columns of a table or
+// list, and the fill of a rectangle or ellipse), and a handle at its bottom right
 // resizes it, both with snapping. Only components not sent yet can change.
 const handleOutline = document.createElement("div");
 handleOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:1px solid #2F76FF";
@@ -403,7 +431,10 @@ let hoveredGroup = null;
 let adjusting = null;
 
 const isHandle = (target) => Boolean(target?.closest?.("[data-wireframe-handle]"));
-const kindNames = { section: "Section", card: "Card", table: "Table", button: "Button", dropdown: "Dropdown", list: "List" };
+const kindNames = {
+  section: "Section", card: "Card", table: "Table", button: "Button", dropdown: "Dropdown", list: "List", rectangle: "Rectangle", ellipse: "Circle",
+};
+const chipButton = "display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 2px;border-radius:5px;cursor:pointer";
 
 function componentAt(x, y) {
   return live().filter((element) => {
@@ -416,7 +447,47 @@ function componentAt(x, y) {
 function borderToggle(side, isOn) {
   const lines = { top: "M3 3H13", right: "M13 3V13", bottom: "M3 13H13", left: "M3 3V13" };
   const title = `${side[0].toUpperCase()}${side.slice(1)} border`;
-  return `<span data-border="${side}" title="${title}" style="display:flex;padding:2px;border-radius:5px;cursor:pointer"><svg width="16" height="16"><rect x="3" y="3" width="10" height="10" fill="none" stroke="rgba(255,255,255,.3)"/><path d="${lines[side]}" stroke="${isOn ? "#fff" : "rgba(255,255,255,.3)"}" stroke-width="${isOn ? 2.5 : 1}" stroke-linecap="round"/></svg></span>`;
+  return `<span data-action="border:${side}" title="${title}" style="${chipButton}"><svg width="16" height="16"><rect x="3" y="3" width="10" height="10" fill="none" stroke="rgba(255,255,255,.3)"/><path d="${lines[side]}" stroke="${isOn ? "#fff" : "rgba(255,255,255,.3)"}" stroke-width="${isOn ? 2.5 : 1}" stroke-linecap="round"/></svg></span>`;
+}
+
+// − and + around a count of rows or columns.
+function stepper(name, value) {
+  const unit = name === "rows" ? "rows" : "cols";
+  return `<span data-action="${name}:-1" title="Fewer ${name}" style="${chipButton};margin-left:6px">−</span><span style="min-width:40px;text-align:center">${value} ${unit}</span><span data-action="${name}:1" title="More ${name}" style="${chipButton}">+</span>`;
+}
+
+function fillToggle(isOn) {
+  const square = `<svg width="12" height="12"><rect x="1" y="1" width="10" height="10" rx="2" fill="${isOn ? "#fff" : "none"}" stroke="#fff" stroke-width="1.5"/></svg>`;
+  return `<span data-action="filled" title="Filled or outline" style="${chipButton};gap:4px;margin-left:6px;padding:0 6px;background:rgba(255,255,255,.12)">${square}${isOn ? "Filled" : "Outline"}</span>`;
+}
+
+function chipControls(frame) {
+  const data = frame.customData;
+  const kind = data.tildeWireframe;
+  if (data.borders) return allBorders.map((side) => borderToggle(side, data.borders.includes(side))).join("");
+  if (kind === "table" || kind === "list") {
+    const counts = rowsOf(kind, frame, data);
+    return stepper("rows", counts.rows) + (kind === "table" ? stepper("columns", counts.columns) : "");
+  }
+  if (kind === "rectangle" || kind === "ellipse") return fillToggle(data.filled);
+  return "";
+}
+
+// The data of a component after a press on one of its chip's controls.
+function changedData(frame, action) {
+  const data = { ...frame.customData };
+  const [name, value] = action.split(":");
+  if (name === "border") {
+    const borders = data.borders.includes(value) ? data.borders.filter((border) => border !== value) : [...data.borders, value];
+    data.borders = allBorders.filter((border) => borders.includes(border));
+  } else if (name === "filled") {
+    data.filled = !data.filled;
+    isFilled = data.filled;
+  } else {
+    const count = rowsOf(data.tildeWireframe, frame, data)[name];
+    data[name] = clamp(count + Number(value), 1, name === "columns" ? 8 : 30);
+  }
+  return data;
 }
 
 function showHandles() {
@@ -426,12 +497,12 @@ function showHandles() {
   chip.style.display = isShown ? "flex" : "none";
   resizer.style.display = isShown ? "block" : "none";
   if (!isShown) return;
-  const { tildeWireframe: kind, borders } = frame.customData;
+  const kind = frame.customData.tildeWireframe;
   Object.assign(handleOutline.style, { left: `${frame.x}px`, top: `${frame.y}px`, width: `${frame.width}px`, height: `${frame.height}px` });
   // Over the component's top edge, so the pointer reaches it without leaving the component.
   Object.assign(chip.style, { left: `${frame.x}px`, top: `${frame.y >= 24 ? frame.y - 20 : frame.y + 4}px` });
   Object.assign(resizer.style, { left: `${frame.x + frame.width}px`, top: `${frame.y + frame.height}px` });
-  const content = `<span style="margin-right:4px">⠿ ${kindNames[kind]}</span>${borders ? allBorders.map((side) => borderToggle(side, borders.includes(side))).join("") : ""}`;
+  const content = `<span style="margin-right:4px">⠿ ${kindNames[kind]}</span>${chipControls(frame)}`;
   if (chip.innerHTML !== content) chip.innerHTML = content;
 }
 
@@ -518,10 +589,9 @@ function editWireframe(event) {
   hideGuides();
   const frame = hoveredGroup ? frameOf(hoveredGroup) : null;
   if (event.type !== "pointerdown" || !frame) return true;
-  const side = event.target.closest("[data-border]")?.dataset.border;
-  if (side) {
-    const borders = frame.customData.borders.includes(side) ? frame.customData.borders.filter((border) => border !== side) : [...frame.customData.borders, side];
-    rebuild(hoveredGroup, frame, { ...frame.customData, borders: allBorders.filter((border) => borders.includes(border)) });
+  const action = event.target.closest("[data-action]")?.dataset.action;
+  if (action) {
+    rebuild(hoveredGroup, frame, changedData(frame, action));
     showHandles();
     return true;
   }
