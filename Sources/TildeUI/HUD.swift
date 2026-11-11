@@ -436,10 +436,10 @@ struct HUDView: View {
             }
         }
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
-        HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
+        HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: ["⌘Z"], help: "Undo") {
             controller.undoWireframe()
         }
-        HUDButton(image: Image(systemName: "arrow.uturn.forward"), help: "Redo") {
+        HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: ["⇧⌘Z"], help: "Redo") {
             controller.redoWireframe()
         }
         Spacer(minLength: 0)

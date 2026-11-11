@@ -118,7 +118,7 @@ window.tildeDraw = {
     if (!elements.length) return "";
     elements.forEach((element) => taken.add(element.id));
     api.history.clear();
-    wireframeUndone.length = 0;
+    clearHistory();
     return JSON.stringify(elements.filter((element) => !isPart(element)).map(describe));
   },
   // With the parts of each shape: a wireframe box is several elements in one group.
@@ -133,11 +133,12 @@ window.tildeDraw = {
     if (!state) {
       if (!wasOn) return;
       adjusting = null;
+      if (labelled) endLabel(false);
       hideHandles();
       setWireframeWindow(null);
+      moveCursor.textContent = "";
       changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), () => ({ isDeleted: true }));
-      wireframeUndone.length = 0;
-      if (labelled) endLabel(false);
+      clearHistory();
       api.updateScene({ appState: { currentItemStrokeStyle: "solid", currentItemStrokeWidth: 2, currentItemRoundness: "round", selectedElementIds: {} }, captureUpdate: "NEVER" });
       return;
     }
@@ -151,17 +152,22 @@ window.tildeDraw = {
     drawingTool = "rectangle";
     if (!editing) api.setActiveTool({ type: drawingTool, locked: true });
   },
-  // The last wireframe shape not taken yet goes, and comes back with redo.
   undoWireframe() {
-    const last = live().filter((element) => !taken.has(element.id)).pop();
-    if (!last) return;
-    const ids = withGroups([last.id]);
-    wireframeUndone.push(ids);
-    changeElements(ids, () => ({ isDeleted: true }));
+    restoreScene(wireframeHistory.undo, wireframeHistory.redo);
   },
   redoWireframe() {
-    const ids = wireframeUndone.pop();
-    if (ids) changeElements(ids, () => ({ isDeleted: false }));
+    restoreScene(wireframeHistory.redo, wireframeHistory.undo);
+  },
+  // The components of a wireframe note, to edit it again: its shapes as the report gives them,
+  // and their origin in points from the top left of the canvas.
+  restoreWireframe({ shapes, origin: [left, top] }) {
+    const elements = shapes.filter((shape) => kindNames[shape.type]).flatMap((shape) => {
+      const [x, y, width, height] = shape.rect;
+      const data = Object.fromEntries(["label", "borders", "rows", "columns", "filled"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
+      return wireframeElements(shape.type, { x: x + left, y: y + top, width, height }, data);
+    });
+    api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
+    clearHistory();
   },
   setWireframeWindow,
   // Lines to snap to, in points from the top left of the canvas: `rects` add to those seen
@@ -187,7 +193,29 @@ window.tildeDraw = {
 // component is a group of flat elements, made again whole when its label changes.
 let wireframe = null;
 let wireframePress = null;
-const wireframeUndone = [];
+
+// Undo and redo in wireframe mode: the whole scene as it was before each change.
+const wireframeHistory = { undo: [], redo: [] };
+
+function record(scene = api.getSceneElementsIncludingDeleted()) {
+  wireframeHistory.undo.push(scene);
+  if (wireframeHistory.undo.length > 200) wireframeHistory.undo.shift();
+  wireframeHistory.redo.length = 0;
+}
+
+function clearHistory() {
+  wireframeHistory.undo.length = 0;
+  wireframeHistory.redo.length = 0;
+}
+
+function restoreScene(from, to) {
+  if (labelled) endLabel(true);
+  const scene = from.pop();
+  if (!scene) return;
+  to.push(api.getSceneElementsIncludingDeleted());
+  api.updateScene({ elements: scene, captureUpdate: "NEVER" });
+  showHandles();
+}
 const skeleton = { block: "#EEEFF2", bar: "#DADCE1", darkBar: "#C9CCD2", line: "#D3D5DA", surface: "#FAFAFB", border: "#A9ADB5", text: "#4A4D55" };
 
 const isPart = (element) => element.customData?.tildePart === true;
@@ -221,7 +249,7 @@ function rowsOf(kind, { width, height }, data) {
 // for are left out. `data`: the label, a section's `borders`, the `rows` and `columns` of a
 // table or list, whether a rectangle or ellipse is `filled`.
 function componentParts(kind, { x, y, width, height }, data) {
-  const hasLabel = Boolean(data.label);
+  const hasLabel = Boolean(data.label) || data.isLabelling;
   const pad = clamp(Math.min(width, height) * 0.12, 6, 16);
   const barHeight = clamp(height * 0.08, 5, 10);
   const parts = [];
@@ -346,7 +374,6 @@ function finishWireframeShape() {
   wireframePress = null;
   if (!press || !wireframe) return;
   const created = live().filter((element) => !press.ids.has(element.id));
-  if (created.length) wireframeUndone.length = 0;
   const box = created.find((element) => element.type === "rectangle" && !element.customData);
   const rest = api.getSceneElementsIncludingDeleted().filter((element) => element.id !== box?.id);
   // Excalidraw keeps no rectangle for a click.
@@ -360,35 +387,61 @@ function finishWireframeShape() {
     return;
   }
   const elements = wireframeElements(wireframe.tool, box, newData(wireframe.tool));
+  record(rest);
   api.updateScene({ elements: [...rest, ...elements], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
 }
 
-// The label field over the centre of a component: Return or a click elsewhere keeps what was
-// typed, Esc does not.
+// The label typed in place: at the centre of the component, in the label's own font and size,
+// as wide as its text, on the label's chip where the component has one. Return or a click
+// elsewhere keeps it, Esc does not.
 const labelField = document.createElement("input");
-labelField.style.cssText = "position:fixed;z-index:10000;transform:translate(-50%,-50%);min-width:120px;padding:5px 10px;border:1.5px solid #2F76FF;border-radius:8px;background:#fff;color:#4A4D55;font:15px Helvetica,sans-serif;text-align:center;outline:none;display:none";
+labelField.id = "tilde-label";
 labelField.placeholder = "Label";
-document.addEventListener("DOMContentLoaded", () => document.body.append(labelField));
+labelField.style.cssText = "position:fixed;z-index:10000;transform:translate(-50%,-50%);box-sizing:content-box;margin:0;color:#4A4D55;font-family:Helvetica,sans-serif;text-align:center;outline:none;caret-color:#2F76FF;display:none";
+const labelStyle = document.createElement("style");
+labelStyle.textContent = "#tilde-label::placeholder { color: #A9ADB5; } [data-kind]:hover, [data-action]:hover { background: rgba(255,255,255,.14); }";
+document.addEventListener("DOMContentLoaded", () => document.body.append(labelField, labelStyle));
+const measure = document.createElement("canvas").getContext("2d");
+// { group, label } of the component whose label is typed.
 let labelled = null;
+let labelBefore = null;
+
+function sizeLabelField() {
+  measure.font = `${labelField.style.fontSize} Helvetica, sans-serif`;
+  labelField.style.width = `${Math.ceil(measure.measureText(labelField.value || labelField.placeholder).width) + 2}px`;
+}
+labelField.addEventListener("input", sizeLabelField);
 
 function editLabel(component) {
-  labelled = component;
-  labelField.value = component.customData.label ?? "";
-  labelField.style.left = `${component.x + component.width / 2}px`;
-  labelField.style.top = `${component.y + component.height / 2}px`;
-  labelField.style.display = "block";
+  const data = component.customData;
+  const group = component.groupIds[0];
+  labelBefore = api.getSceneElementsIncludingDeleted();
+  labelled = { group, label: data.label };
+  hideHandles();
+  // The component without its label meanwhile: the field shows it in its place.
+  rebuild(group, component, { ...data, label: undefined, isLabelling: true });
+  const isPlain = plainLabels.has(data.tildeWireframe);
+  Object.assign(labelField.style, {
+    left: `${component.x + component.width / 2}px`, top: `${component.y + component.height / 2}px`,
+    fontSize: `${isPlain ? clamp(component.height * 0.32, 12, 20) : 15}px`, padding: isPlain ? "0" : "5px 10px",
+    background: isPlain ? "transparent" : "#fff", border: isPlain ? "0" : `1px solid ${skeleton.line}`, borderRadius: "6px", display: "block",
+  });
+  labelField.value = data.label ?? "";
+  sizeLabelField();
   labelField.focus();
   labelField.select();
 }
 
 function endLabel(isKept) {
-  const component = labelled;
+  const editingLabel = labelled;
   labelled = null;
   labelField.style.display = "none";
   labelField.blur();
-  if (!isKept || !component) return;
-  const frame = frameOf(component.groupIds[0]) ?? component;
-  rebuild(frame.groupIds[0], frame, { ...frame.customData, label: labelField.value.trim() || undefined });
+  const frame = editingLabel && frameOf(editingLabel.group);
+  if (!frame) return;
+  const label = isKept ? labelField.value.trim() || undefined : editingLabel.label;
+  rebuild(editingLabel.group, frame, { ...frame.customData, label, isLabelling: undefined });
+  if (label !== editingLabel.label) record(labelBefore);
 }
 
 // A component made again whole in `rect`, with `data` (kind, label, borders), at the same place
@@ -414,10 +467,12 @@ labelField.addEventListener("blur", () => {
   if (labelled) endLabel(true);
 });
 
-// Editing a component after it is drawn: over one, a chip at its top left moves it (a click on
-// it edits the label; its controls set a section's borders, the rows and columns of a table or
-// list, and the fill of a rectangle or ellipse), and a handle at its bottom right
-// resizes it, both with snapping. Only components not sent yet can change.
+// Editing a component after it is drawn. Over one, it shows as selected: a drag on it moves it
+// (a section only by its chip: a drag on a section draws in it; ⌥ draws on any component) and a
+// click edits its label. A chip at its top left moves it too; a click on its name changes the
+// kind, and its controls set a section's borders, the rows and columns of a table or list, the
+// fill of a rectangle or ellipse, or delete it. A handle at its bottom right resizes it. Moves
+// and resizes snap. Only components not sent yet can change; each change can be undone.
 const handleOutline = document.createElement("div");
 handleOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:1px solid #2F76FF";
 const chip = document.createElement("div");
@@ -426,9 +481,15 @@ chip.style.cssText = "position:fixed;z-index:9999;display:none;align-items:cente
 const resizer = document.createElement("div");
 resizer.dataset.wireframeHandle = "";
 resizer.style.cssText = "position:fixed;z-index:9999;display:none;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff;cursor:nwse-resize";
-document.addEventListener("DOMContentLoaded", () => document.body.append(handleOutline, chip, resizer));
+const typeMenu = document.createElement("div");
+typeMenu.dataset.wireframeHandle = "";
+typeMenu.style.cssText = "position:fixed;z-index:10000;display:none;flex-direction:column;padding:4px;border-radius:10px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif;user-select:none";
+const moveCursor = document.createElement("style");
+document.addEventListener("DOMContentLoaded", () => document.body.append(handleOutline, chip, resizer, typeMenu, moveCursor));
 let hoveredGroup = null;
 let adjusting = null;
+let isTypeMenuOpen = false;
+let isOverMovable = false;
 
 const isHandle = (target) => Boolean(target?.closest?.("[data-wireframe-handle]"));
 const kindNames = {
@@ -473,6 +534,23 @@ function chipControls(frame) {
   return "";
 }
 
+const deleteButton = `<span data-action="delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="12" height="12"><path d="M3 3L9 9M9 3L3 9" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
+
+// A new kind keeps the rect and the label, and the fill or rows where the new kind has them.
+function changedKind(frame, kind) {
+  const old = frame.customData;
+  const data = { ...newData(kind), label: old.label };
+  if ("filled" in data && old.filled !== undefined) data.filled = old.filled;
+  if ((kind === "table" || kind === "list") && old.rows !== undefined) data.rows = old.rows;
+  return data;
+}
+
+function deleteComponent(group) {
+  record();
+  changeElements(live().filter((element) => element.groupIds.includes(group)).map((element) => element.id), () => ({ isDeleted: true }));
+  hideHandles();
+}
+
 // The data of a component after a press on one of its chip's controls.
 function changedData(frame, action) {
   const data = { ...frame.customData };
@@ -496,19 +574,47 @@ function showHandles() {
   handleOutline.style.display = isShown ? "block" : "none";
   chip.style.display = isShown ? "flex" : "none";
   resizer.style.display = isShown ? "block" : "none";
+  typeMenu.style.display = isShown && isTypeMenuOpen ? "flex" : "none";
   if (!isShown) return;
   const kind = frame.customData.tildeWireframe;
   Object.assign(handleOutline.style, { left: `${frame.x}px`, top: `${frame.y}px`, width: `${frame.width}px`, height: `${frame.height}px` });
   // Over the component's top edge, so the pointer reaches it without leaving the component.
-  Object.assign(chip.style, { left: `${frame.x}px`, top: `${frame.y >= 24 ? frame.y - 20 : frame.y + 4}px` });
+  const chipTop = frame.y >= 24 ? frame.y - 20 : frame.y + 4;
+  Object.assign(chip.style, { left: `${frame.x}px`, top: `${chipTop}px` });
   Object.assign(resizer.style, { left: `${frame.x + frame.width}px`, top: `${frame.y + frame.height}px` });
-  const content = `<span style="margin-right:4px">⠿ ${kindNames[kind]}</span>${chipControls(frame)}`;
+  Object.assign(typeMenu.style, { left: `${frame.x}px`, top: `${chipTop + 25}px` });
+  const content = `<span title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>${chipControls(frame)}${deleteButton}`;
   if (chip.innerHTML !== content) chip.innerHTML = content;
+  const items = Object.entries(kindNames).map(([value, name]) => {
+    const background = value === kind ? "background:rgba(255,255,255,.2);" : "";
+    return `<span data-kind="${value}" style="${background}padding:5px 12px;border-radius:6px;cursor:pointer">${name}</span>`;
+  }).join("");
+  if (typeMenu.innerHTML !== items) typeMenu.innerHTML = items;
 }
 
 function hideHandles() {
   hoveredGroup = null;
+  isTypeMenuOpen = false;
   showHandles();
+}
+
+function startAdjusting(event, frame, mode, from) {
+  hoveredGroup = frame.groupIds[0];
+  isTypeMenuOpen = false;
+  const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+  adjusting = {
+    mode, from, group: hoveredGroup, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false,
+    before: api.getSceneElementsIncludingDeleted(),
+  };
+  event.target.setPointerCapture?.(event.pointerId);
+  cursorRing.style.display = "none";
+  showHandles();
+}
+
+// The component a press on it moves: not a section, which is drawn in, nor with ⌥.
+function movableAt(event) {
+  const component = componentAt(event.clientX, event.clientY);
+  return component && component.customData.tildeWireframe !== "section" && !event.altKey ? component : null;
 }
 
 // The nearest snap of any of `values` (a component's edges and centre on one axis), with the
@@ -517,7 +623,7 @@ function nearestOf(lines, values) {
   let best = null;
   for (const value of values) {
     const line = nearest(lines, value);
-    if (line && (!best || line.distance < best.distance)) best = { ...line, shift: line.value - value };
+    if (line && (!best || line.score < best.score)) best = { ...line, shift: line.value - value };
   }
   return best;
 }
@@ -527,7 +633,10 @@ function adjust(event) {
   const pointer = { x: event.clientX, y: event.clientY };
   const dx = pointer.x - start.x;
   const dy = pointer.y - start.y;
-  if (Math.hypot(dx, dy) >= 3) adjusting.moved = true;
+  if (!adjusting.moved && Math.hypot(dx, dy) >= 3) {
+    adjusting.moved = true;
+    record(adjusting.before);
+  }
   if (!adjusting.moved) return;
   const now = performance.now();
   if (now - pointerAt > 50) {
@@ -566,19 +675,34 @@ function editWireframe(event) {
     event.preventDefault();
     if (event.type === "pointermove") adjust(event);
     if (event.type === "pointerup") {
+      const { from, moved } = adjusting;
       const frame = frameOf(adjusting.group);
-      const isClick = !adjusting.moved && adjusting.mode === "move";
       adjusting = null;
       hideGuides();
-      if (isClick && frame) editLabel(frame);
+      if (!moved && frame && from === "body") editLabel(frame);
+      if (!moved && from === "chip") isTypeMenuOpen = !isTypeMenuOpen;
       showHandles();
     }
     return true;
   }
+  if (event.type === "pointerdown" && labelled && event.target !== labelField) endLabel(true);
   if (!isHandle(event.target)) {
-    if (event.type === "pointerdown") hideHandles();
+    if (event.type === "pointerdown") {
+      const component = movableAt(event);
+      if (component) {
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        startAdjusting(event, component, "move", "body");
+        return true;
+      }
+      hideHandles();
+    }
     if (event.type === "pointermove" && !isPressed) {
-      hoveredGroup = componentAt(event.clientX, event.clientY)?.groupIds[0] ?? null;
+      const group = componentAt(event.clientX, event.clientY)?.groupIds[0] ?? null;
+      if (group !== hoveredGroup) isTypeMenuOpen = false;
+      hoveredGroup = group;
+      isOverMovable = Boolean(movableAt(event)) && !labelled;
+      moveCursor.textContent = isOverMovable ? "canvas { cursor: move !important; }" : "";
       showHandles();
     }
     return false;
@@ -590,14 +714,26 @@ function editWireframe(event) {
   const frame = hoveredGroup ? frameOf(hoveredGroup) : null;
   if (event.type !== "pointerdown" || !frame) return true;
   const action = event.target.closest("[data-action]")?.dataset.action;
+  if (action === "delete") {
+    deleteComponent(hoveredGroup);
+    return true;
+  }
   if (action) {
+    record();
     rebuild(hoveredGroup, frame, changedData(frame, action));
     showHandles();
     return true;
   }
-  const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
-  adjusting = { mode: resizer.contains(event.target) ? "resize" : "move", group: hoveredGroup, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false };
-  event.target.setPointerCapture?.(event.pointerId);
+  const kind = event.target.closest("[data-kind]")?.dataset.kind;
+  if (kind) {
+    record();
+    rebuild(hoveredGroup, frame, changedKind(frame, kind));
+    isTypeMenuOpen = false;
+    showHandles();
+    return true;
+  }
+  if (typeMenu.contains(event.target)) return true;
+  startAdjusting(event, frame, resizer.contains(event.target) ? "resize" : "move", resizer.contains(event.target) ? "resizer" : "chip");
   return true;
 }
 
@@ -618,6 +754,10 @@ function setWireframeWindow(rect) {
   const dy = before ? top - before[1] : 0;
   if (!dx && !dy) return;
   changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), (element) => ({ x: element.x + dx, y: element.y + dy }));
+  const shift = (scene) => scene.map((element) => (taken.has(element.id) ? element : { ...element, x: element.x + dx, y: element.y + dy }));
+  for (const stack of [wireframeHistory.undo, wireframeHistory.redo]) stack.forEach((scene, index) => { stack[index] = shift(scene); });
+  if (labelBefore) labelBefore = shift(labelBefore);
+  if (adjusting) adjusting.before = shift(adjusting.before);
   // The lines seen near the pointer were where the window was.
   snapRects.clear();
   if (labelled) {
@@ -629,7 +769,8 @@ function setWireframeWindow(rect) {
 
 // Wireframe snapping: x and y each go to the nearest line within reach: edges of the elements
 // seen near the pointer, thirds and halves of the screen, the window and the containers under
-// the pointer, and edges and centres of the shapes drawn.
+// the pointer (blue guides), and edges and centres of the shapes drawn (orange guides), which
+// win over the page's lines within reach so that shapes line up with each other.
 const wireframeReach = 8;
 const snapRects = new Map();
 let snapAreas = [];
@@ -654,8 +795,8 @@ function snapLines(pointer, except) {
   const drawing = api.getAppState().newElement?.id;
   for (const element of live()) {
     if (element.id === drawing || !element.customData?.tildeWireframe || element.groupIds.includes(except)) continue;
-    lines.x.push({ value: element.x }, { value: element.x + element.width / 2 }, { value: element.x + element.width });
-    lines.y.push({ value: element.y }, { value: element.y + element.height / 2 }, { value: element.y + element.height });
+    lines.x.push({ value: element.x, own: true }, { value: element.x + element.width / 2, own: true }, { value: element.x + element.width, own: true });
+    lines.y.push({ value: element.y, own: true }, { value: element.y + element.height / 2, own: true }, { value: element.y + element.height, own: true });
   }
   return lines;
 }
@@ -664,7 +805,8 @@ function nearest(lines, value) {
   let best = null;
   for (const line of lines) {
     const distance = Math.abs(line.value - value);
-    if (distance <= wireframeReach && (!best || distance < best.distance)) best = { ...line, distance };
+    const score = distance - (line.own ? 3 : 0);
+    if (distance <= wireframeReach && (!best || score < best.score)) best = { ...line, distance, score };
   }
   return best;
 }
@@ -685,8 +827,15 @@ function hideGuides() {
   for (const element of [guideX, guideY, guideLabel, snapRing]) element.style.display = "none";
 }
 
+const guideColours = { page: "#2F76FF", own: "#FF8A00" };
+
 function showGuides(x, y, point) {
   isWireframeSnapped = Boolean(x || y);
+  guideX.style.borderLeftColor = x?.own ? guideColours.own : guideColours.page;
+  guideY.style.borderTopColor = y?.own ? guideColours.own : guideColours.page;
+  const ringColour = [x, y].filter(Boolean).every((line) => line.own) ? guideColours.own : guideColours.page;
+  snapRing.style.borderColor = ringColour;
+  snapRing.style.background = `color-mix(in srgb, ${ringColour} 25%, transparent)`;
   guideX.style.display = x ? "block" : "none";
   guideY.style.display = y ? "block" : "none";
   snapRing.style.display = isWireframeSnapped ? "block" : "none";
@@ -711,7 +860,7 @@ function snapPointer(event) {
     wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY };
   }
   const tool = api?.getAppState().activeTool.type;
-  if (tool !== "rectangle" || event.metaKey || editing || labelled) {
+  if (tool !== "rectangle" || event.metaKey || editing || labelled || isOverMovable) {
     hideGuides();
     return;
   }
@@ -752,6 +901,20 @@ document.addEventListener("keydown", (event) => {
     event.stopPropagation();
     event.preventDefault();
   }
+}, true);
+
+// In wireframe mode ⌘Z and ⇧⌘Z undo and redo its changes, and Delete deletes the component
+// under the pointer; Excalidraw's own history knows none of them.
+document.addEventListener("keydown", (event) => {
+  if (!wireframe || isTextField(event.target)) return;
+  const isUndo = event.metaKey && event.key.toLowerCase() === "z";
+  const isDelete = (event.key === "Backspace" || event.key === "Delete") && hoveredGroup;
+  if (!isUndo && !isDelete) return;
+  event.stopPropagation();
+  event.preventDefault();
+  if (isDelete) deleteComponent(hoveredGroup);
+  else if (event.shiftKey) window.tildeDraw.redoWireframe();
+  else window.tildeDraw.undoWireframe();
 }, true);
 
 document.addEventListener("keydown", (event) => {
@@ -802,7 +965,8 @@ const cursorTools = new Set([...drawingTools, "freedraw"]);
 
 function showCursorRing(event, isSnapping) {
   const tool = api?.getAppState().activeTool.type;
-  const isShown = cursorTools.has(tool) && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target);
+  const isShown = cursorTools.has(tool) && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target)
+    && !(wireframe && isOverMovable);
   cursorRing.style.display = isShown ? "block" : "none";
   if (!isShown) return;
   // Wireframe shapes have their own colours: the ring is Tilde's blue.

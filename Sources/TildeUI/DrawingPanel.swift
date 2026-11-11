@@ -140,6 +140,17 @@ final class DrawingPanel {
         active.run("setWireframeWindow(\(Self.json(values)))")
     }
 
+    /// A wireframe note's shapes, as its report has them, from `origin` in Quartz screen
+    /// coordinates.
+    func restoreWireframe(shapes: [[String: Any]], origin: CGPoint) {
+        guard let active else {
+            return
+        }
+        let canvasOrigin = active.frame.flipped.origin
+        let state: [String: Any] = ["shapes": shapes, "origin": [origin.x - canvasOrigin.x, origin.y - canvasOrigin.y]]
+        active.restoredWireframe = Self.json(state)
+    }
+
     /// The shapes with these ids, wherever they are.
     func shapes(_ ids: [String]) async -> [[String: Any]] {
         for canvas in canvases {
@@ -212,6 +223,15 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     var wireframe = "null" {
         didSet {
             run("setWireframe(\(wireframe))")
+        }
+    }
+    /// A wireframe note's components to show again once the page is ready.
+    var restoredWireframe: String? {
+        didSet {
+            if isReady, let restoredWireframe {
+                run("restoreWireframe(\(restoredWireframe))")
+                self.restoredWireframe = nil
+            }
         }
     }
     var onEscape: () -> Void = {}
@@ -363,6 +383,10 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
                 setColor(pendingColor)
             }
             run("setWireframe(\(wireframe))")
+            if let restoredWireframe {
+                run("restoreWireframe(\(restoredWireframe))")
+                self.restoredWireframe = nil
+            }
         case "escape":
             onEscape()
         case "shape":

@@ -8,6 +8,8 @@ struct Wireframe: Equatable {
     var tool = "card"
     /// The window of the first press: the components keep their place on it when it moves.
     var window: ElementPicker.WindowInfo?
+    /// The note being edited again: Done updates it instead of making a new one.
+    var note: Draft.ID?
 
     /// Card, Rectangle and Circle stand in for any component not in the list.
     static let tools = [
@@ -175,7 +177,7 @@ extension AnnotationController {
         try? await Task.sleep(for: .milliseconds(100))
         let bounds = drawing.bounds
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let chosen = self.wireframe?.window.flatMap { picker.currentWindow(number: $0.number) }
+        let chosen = wireframe?.window.flatMap { picker.currentWindow(number: $0.number) }
         let window = chosen ?? scope ?? picker.window(at: center)
         let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
         // The wireframe's window; else the window when the wireframe is in it, else the whole screen.
@@ -189,8 +191,15 @@ extension AnnotationController {
 
         var shapes = (try? JSONSerialization.jsonObject(with: Data(DrawingShapes.encode(drawing.shapes, origin: area.origin, element: nil).utf8))) as? [String: Any] ?? [:]
         shapes["wireframe"] = "A wireframe of the change: the image shows it drawn over the screen, the context image the screen under it."
+        shapes["originIs"] = chosen == nil ? "screen" : "window"
+        let target = Target.drawing(shapes: DrawingPanel.json(shapes))
+        if let note = wireframe?.note {
+            updateWireframeNote(note, target: target, frame: bounds, window: window, captures: captures)
+            drawingPanel.remove(drawing.ids)
+            return
+        }
         openComposer(
-            target: .drawing(shapes: DrawingPanel.json(shapes)), frame: bounds, marker: CGPoint(x: bounds.maxX, y: bounds.minY),
+            target: target, frame: bounds, marker: CGPoint(x: bounds.maxX, y: bounds.minY),
             chip: "Wireframe", outline: nil, window: window, captures: captures, drawingIDs: drawing.ids
         )
     }
@@ -201,6 +210,10 @@ extension AnnotationController {
         guard wireframe != nil, wireframe?.window == nil, let window = picker.window(at: point, in: scope) else {
             return
         }
+        followWireframeWindow(window)
+    }
+
+    private func followWireframeWindow(_ window: ElementPicker.WindowInfo) {
         wireframe?.window = window
         drawingPanel.setWireframeWindow(window.frame)
         Task {
@@ -215,6 +228,48 @@ extension AnnotationController {
                 drawingPanel.setWireframeWindow(now.frame)
             }
         }
+    }
+
+    /// Shows a wireframe note's components again, on its window where it was on one, to edit
+    /// them: Done then updates that note, with new pictures, and keeps its comment.
+    func editWireframe(_ id: Draft.ID) {
+        guard wireframe == nil, let draft = drafts.first(where: { $0.id == id }), case .drawing(let json) = draft.annotation.target,
+              let saved = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any], saved["wireframe"] != nil,
+              let shapes = saved["shapes"] as? [[String: Any]], let origin = saved["origin"] as? [Double], origin.count == 2
+        else {
+            return
+        }
+        closePreview()
+        startWireframe()
+        guard wireframe != nil else {
+            return
+        }
+        wireframe?.note = id
+        // Shapes on a window are from its top left, which may have moved since.
+        let window = saved["originIs"] as? String == "window" ? draft.sourceWindow.flatMap { picker.currentWindow(number: $0) } : nil
+        drawingPanel.restoreWireframe(shapes: shapes, origin: window?.frame.origin ?? CGPoint(x: origin[0], y: origin[1]))
+        if let window {
+            followWireframeWindow(window)
+        }
+    }
+
+    private func updateWireframeNote(_ id: Draft.ID, target: Target, frame: CGRect, window: ElementPicker.WindowInfo?, captures: Captures) {
+        guard let index = drafts.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        let old = drafts[index]
+        let annotation = Annotation(
+            id: old.id, comment: old.annotation.comment, target: target, frame: frame, image: captures.image, contextImage: captures.contextImage
+        )
+        var fingerprint = old.fingerprint
+        if let window {
+            fingerprint = Task { await NoteFingerprint.capture(window: CGWindowID(window.number), area: frame) }
+        }
+        drafts[index] = Draft(
+            annotation: annotation, marker: CGPoint(x: frame.maxX, y: frame.minY), chip: old.chip, capture: Task { captures }, anchor: old.anchor,
+            sourceWindow: window?.number ?? old.sourceWindow, fingerprint: fingerprint, page: old.page, sourcePID: window?.pid ?? old.sourcePID,
+            pictureArea: old.pictureArea
+        )
     }
 
     /// The lines under the pointer to snap to, from Accessibility; in Tilde's browser, the

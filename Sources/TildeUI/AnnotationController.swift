@@ -126,7 +126,7 @@ final class AnnotationController: ObservableObject {
     }
     private var sentText = ""
     @Published private(set) var session: SessionStore.Session?
-    @Published private(set) var drafts: [Draft] = [] {
+    @Published var drafts: [Draft] = [] {
         didSet {
             // Send and the questions read the count; it changes with the notes, not later.
             flow.notes = drafts.count
