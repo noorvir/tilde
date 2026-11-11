@@ -176,7 +176,7 @@ enum Transitions {
                 result.hosts = RemotePush.sshHosts(inConfig: config)
             }
             if let distance = row.labelDistance {
-                result.isOnLabel = AnnotationController.isOnLabel(distance: distance)
+                result.isOnLabel = NoteTracker.isOnLabel(distance: distance)
             }
             if let element = row.elementFrame, let window = row.windowFrame {
                 let frame = CGRect(x: element[0], y: element[1], width: element[2], height: element[3])

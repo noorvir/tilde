@@ -122,7 +122,7 @@ final class AnnotationController: ObservableObject {
     private let store: SessionStore
     let browser: BrowserController
     let shortcuts: ShortcutStore
-    private let picker: ElementPicker
+    let picker: ElementPicker
     private lazy var overlays = OverlayStack { [unowned self] frame, level, isWindowSized in
         OverlayWindow(frame: frame, level: level, isWindowSized: isWindowSized, controller: self)
     }
@@ -133,16 +133,11 @@ final class AnnotationController: ObservableObject {
     /// Views observe the controller; it sends on the changes of the parts that the HUD shows.
     private var partChanges: [AnyCancellable] = []
 
-    /// Whether the last pointer move was over Tilde's own UI; a pick that finishes after the
-    /// pointer moved onto the UI must not highlight what is under it.
-    private var isPointerOverPanel = false
     /// The app that was in front when an agent's session opened Tilde's browser. The session
     /// ends with the browser closed and this app in front again, so the user is back in the chat.
     private var returnApp: NSRunningApplication?
     /// The next session that starts from Tilde is limited to the browser window.
     private var scopesNextLocalSessionToBrowser = false
-    /// Logs the first pointer move after each resume, to measure how soon hover works.
-    private var hasLoggedMove = false
     /// The icon of the agent app with this display name, for the HUD; nil when unknown.
     var clientIcon: (String) -> NSImage? = { _ in nil }
     /// The status of the remote machine with this name, for the HUD's machine icon.
@@ -174,7 +169,7 @@ final class AnnotationController: ObservableObject {
         hoverPicker = HoverPicker(picker: picker)
         scope = SessionScope(picker: picker, browser: browser)
         drawing = DrawingNotes(picker: picker)
-        tracker = NoteTracker(windows: picker.windows)
+        tracker = NoteTracker(windows: picker.windows, browser: browser)
         flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
         subscription = store.$sessions
@@ -194,7 +189,7 @@ final class AnnotationController: ObservableObject {
         scope.onBrowserMissing = { [weak self] in self?.placeHUD() }
         typedComments.onPause = { [weak self] in self?.saveTypedComments() }
         drawing.scope = { [weak self] in self?.scope.window }
-        drawing.isOnLabel = { [weak self] point in self?.noteLabel(at: point) != nil }
+        drawing.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         let canvas = drawing.panel
         canvas.onEscape = { [weak self] in self?.escapePressed() }
         canvas.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
@@ -210,7 +205,7 @@ final class AnnotationController: ObservableObject {
             guard let self else {
                 return
             }
-            let isOverLabel = noteLabel(at: point) != nil
+            let isOverLabel = tracker.label(at: point) != nil
             if isOverLabel {
                 hover = nil
             }
@@ -218,7 +213,7 @@ final class AnnotationController: ObservableObject {
         }
         canvas.onKey = { [weak self] in self?.handleKey($0, in: .canvas) ?? false }
         canvas.onPress = { [weak self] point in
-            guard let self, let id = self.noteLabel(at: point) else {
+            guard let self, let id = tracker.label(at: point) else {
                 return false
             }
             self.preview(id)
@@ -230,7 +225,7 @@ final class AnnotationController: ObservableObject {
             guard let self else {
                 return false
             }
-            return composer == nil && !isPointerOverPanel && !isPickingWindow
+            return composer == nil && !isPickingWindow
         }
         hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
         keyMonitors.onDoubleTap = { [weak self] key in self?.doubleTapped(key) }
@@ -278,12 +273,6 @@ final class AnnotationController: ObservableObject {
         }
         saver.start(created: created)
         keyMonitors.startHold()
-        tracker.pageWindow = { [weak self] in
-            guard let self, !pageNotes.isEmpty else {
-                return nil
-            }
-            return browser.windowNumber
-        }
         // Also when the stack is the same: the browser's page notes can have come or gone.
         picker.windows.onRead = { [weak self] isChanged in
             self?.tracker.refreshCovers()
@@ -729,20 +718,6 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    // MARK: - Labels of notes
-
-    /// The note whose numbered label is at this point.
-    func noteLabel(at point: CGPoint) -> Draft.ID? {
-        let labels = drafts.filter { $0.anchor == nil }.compactMap { draft in tracker.marker(of: draft).map { (draft.id, $0) } }
-            + anchoredNotes.map { ($0.draft.id, $0.marker) }
-        return labels.last { Self.isOnLabel(distance: hypot($0.1.x - point.x, $0.1.y - point.y)) }?.0
-    }
-
-    /// A label's circle has a radius of 10 points; 8 more around it make it easy to hit.
-    nonisolated static func isOnLabel(distance: CGFloat) -> Bool {
-        distance <= 18
-    }
-
     // MARK: - Saving and restoring
 
     /// The session on screen as it is now, for its saved record.
@@ -804,38 +779,6 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - Overlays and pause
 
-    /// A note on the open page of Tilde's browser, where it is on screen now.
-    struct PageNote {
-        let number: Int
-        let draft: Draft
-        /// Quartz screen frame of its element or region.
-        let frame: CGRect
-
-        var marker: CGPoint {
-            CGPoint(x: frame.maxX, y: frame.minY)
-        }
-    }
-
-    /// Notes on the browser's open page, for the overlay to draw like other notes while the
-    /// notes panel is hidden; with the panel open, the browser draws them with their cards.
-    var pageNotes: [PageNote] {
-        browser.showsNotes ? [] : anchoredNotes
-    }
-
-    /// Notes attached to the page in Tilde's browser, where they are now.
-    private var anchoredNotes: [PageNote] {
-        guard let page = browser.pageFrame?.flipped else {
-            return []
-        }
-        return drafts.enumerated().compactMap { index, draft in
-            // No height: scrolled out of its panel.
-            guard let rect = browser.anchorRects[draft.id], rect.height > 0 else {
-                return nil
-            }
-            return PageNote(number: index + 1, draft: draft, frame: rect.offsetBy(dx: page.minX, dy: page.minY))
-        }
-    }
-
     /// The HUD goes in the browser's toolbar while the session is limited to the browser, and
     /// floats over the screen otherwise.
     private func placeHUD() {
@@ -887,8 +830,7 @@ final class AnnotationController: ObservableObject {
         if pauses.isEmpty {
             notices.clearPause()
         }
-        hoverPicker.logNextHighlight()
-        hasLoggedMove = false
+        hoverPicker.logNext()
         log.notice("annotating \(self.pauses.isEmpty ? "on" : "paused", privacy: .public) (\(String(describing: self.pauses), privacy: .public), overlays \(self.overlays.count))")
         hover = nil
         overlays.orderAbove(scope.window?.number)
@@ -933,33 +875,13 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
-        let recordingSource = clipSource
-        let name: String
-        let frame: CGRect
-        switch recordingSource {
-        case .window(let window):
-            name = "\(scope.name ?? window.app) window"
-            frame = window.frame
-        case .screen(let display):
-            name = SourcePickerModel.name(of: display)
-            frame = NSScreen.screens.first { $0.displayID == display }?.frame.flipped ?? .zero
-        case .phone(let phone):
-            name = phone.name
-            frame = .zero
-        }
-
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
-            recordingSource, name: name, frame: frame, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
+            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
         )
     }
 
     // MARK: - Window scope
-
-    /// While choosing a source, a session limited to a window also takes the other windows.
-    func allows(_ point: CGPoint) -> Bool {
-        SessionScope.allows(point, scope: isPickingWindow ? nil : scope.window?.frame)
-    }
 
     /// The overlays cover every screen while choosing, and the floating HUD shows the picker.
     private func pickingChanged() {
@@ -1050,125 +972,10 @@ final class AnnotationController: ObservableObject {
         }])
     }
 
-    // MARK: - Picking
-
-    func mouseMoved(to point: CGPoint) {
-        guard composer == nil, previewID == nil else {
-            return
-        }
-        if !hasLoggedMove {
-            hasLoggedMove = true
-            log.notice("first pointer move on the overlay")
-        }
-        isPointerOverPanel = isOverPanel(point)
-        if isPointerOverPanel || !allows(point) || noteLabel(at: point) != nil {
-            hoverPicker.clear()
-            return
-        }
-        if isPickingWindow {
-            hover = isSourcePickerOpen ? nil : picker.windowTarget(at: point)
-            return
-        }
-
-        hoverPicker.pick(at: point)
-    }
-
-    /// Picks again under the pointer after the page moved under it, such as on scroll, so the
-    /// hover highlight stays on the element.
-    func refreshHover() {
-        guard hover != nil else {
-            return
-        }
-        mouseMoved(to: NSEvent.mouseLocation.flipped)
-    }
-
-    /// Scrolling always goes to the window under the pointer, as if Tilde were not there; the
-    /// hover highlight then follows the page. Tilde's browser reports its own scrolling.
-    func scroll(_ event: NSEvent, at point: CGPoint) {
-        guard let window = picker.window(at: point) else {
-            return
-        }
-        ScrollForwarder.forward(event, at: point, to: window)
-        if window.number != browser.windowNumber {
-            tracker.scrolled()
-            hoverPicker.scrolled()
-        }
-    }
-
-    func mouseExited() {
-        hoverPicker.clear()
-    }
-
-    func click(at point: CGPoint) {
-        if previewID != nil {
-            dispatch(.closePreview)
-            return
-        }
-        if isPickingWindow {
-            guard !isSourcePickerOpen else {
-                return
-            }
-            // A window, or outside windows the screen.
-            if let window = picker.window(at: point) {
-                choose(.window(window))
-            } else if let display = NSScreen.screens.first(where: { $0.frame.contains(point.flipped) })?.displayID {
-                choose(.screen(display))
-            }
-            return
-        }
-        guard allows(point) else {
-            return
-        }
-        if composer != nil {
-            dispatch(.clickAway)
-            return
-        }
-
-        Task {
-            var picked = hover
-            if picked?.frame.contains(point) != true {
-                picked = await picker.pick(at: point, in: scope.window)
-            }
-            guard let picked else {
-                return
-            }
-            let isWholeWindow = picked.isWholeWindow
-            let marker = isWholeWindow ? point : CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
-            openComposer(NewNote(
-                target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame,
-                window: picked.window, anchor: picked.anchor, tracked: isWholeWindow ? nil : picked.tracked,
-                pictureArea: isWholeWindow ? NoteFingerprint.area(around: point) : nil
-            ))
-        }
-    }
-
-    func dragEnded(with rect: CGRect) {
-        if previewID != nil {
-            dispatch(.closePreview)
-            return
-        }
-        // While choosing, only a click chooses.
-        if isPickingWindow {
-            return
-        }
-        guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
-            return
-        }
-        if composer != nil {
-            dispatch(.clickAway)
-            return
-        }
-        let marker = CGPoint(x: rect.maxX, y: rect.minY)
-        let window = scope.window ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
-        let isOverBrowser = window?.number == browser.windowNumber
-        Task {
-            let anchor = isOverBrowser ? await browser.regionAnchor(for: rect) : nil
-            openComposer(NewNote(target: .region, frame: rect, marker: marker, chip: "Region", window: window, anchor: anchor))
-        }
-    }
+    // MARK: - Comments
 
     /// Opens the comment box for a new target and starts its screenshots.
-    private func openComposer(_ note: NewNote) {
+    func openComposer(_ note: NewNote) {
         // The session may have moved on while the target was picked: then nothing opens.
         var isShown = false
         dispatch(.openComment, with: [.showComment: { [self] in
@@ -1191,8 +998,6 @@ final class AnnotationController: ObservableObject {
         commentText = ""
         commentPanel.show(chip: note.chip, isEditing: false, near: note.marker, below: note.frame)
     }
-
-    // MARK: - Comments
 
     func edit(_ id: Draft.ID) {
         guard let draft = drafts.first(where: { $0.id == id }) else {
@@ -1228,19 +1033,16 @@ final class AnnotationController: ObservableObject {
             }
 
         case .new(let pending):
-            let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
             let capture = drawing.finish(pending, windowFrame: pending.sourceWindow.flatMap { tracker.windowFrames[$0] })
-            drafts.append(Draft(
-                annotation: annotation, marker: pending.marker, chip: pending.chip, capture: capture, anchor: pending.anchor,
-                sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
-            ))
+            let draft = Draft(pending, comment: comment, capture: capture)
+            drafts.append(draft)
             tracker.notesAdded()
             if let tracked = pending.tracked {
-                tracker.follow(annotation.id, element: tracked)
+                tracker.follow(draft.id, element: tracked)
             }
             Task {
                 let captures = await capture.value
-                guard let index = drafts.firstIndex(where: { $0.id == annotation.id }) else {
+                guard let index = drafts.firstIndex(where: { $0.id == draft.id }) else {
                     return
                 }
                 let current = drafts[index].annotation

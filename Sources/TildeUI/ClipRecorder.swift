@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import os
 import TildeCore
 
@@ -22,9 +22,23 @@ final class ClipRecorder {
     private var endedEarly: Set<URL> = []
     private let log = Logger(subsystem: "dev.tilde.app", category: "recording")
 
-    /// Starts recording `source` into `video` for the flow's start `operation`. `name` and
-    /// `frame` say in the report what it shows.
-    func start(_ source: RecordingSource, name: String, frame: CGRect, into video: URL, browserWindow: Int?, operation: Int) {
+    /// Starts recording `source` into `video` for the flow's start `operation`. `windowName`:
+    /// the name of a window's app as the HUD shows it.
+    func start(_ source: RecordingSource, windowName: String?, into video: URL, browserWindow: Int?, operation: Int) {
+        // What the report says the clip shows.
+        let name: String
+        let frame: CGRect
+        switch source {
+        case .window(let window):
+            name = "\(windowName ?? window.app) window"
+            frame = window.frame
+        case .screen(let display):
+            name = SourcePickerModel.name(of: display)
+            frame = NSScreen.screens.first { $0.displayID == display }?.frame.flipped ?? .zero
+        case .phone(let phone):
+            name = phone.name
+            frame = .zero
+        }
         let sourceEnded: @Sendable () -> Void = { [weak self] in
             Task { @MainActor in
                 self?.sourceEnded(video)

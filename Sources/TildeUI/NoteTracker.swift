@@ -3,7 +3,8 @@ import AppKit
 /// Where each note of the session is on screen now, and whether it shows: a note on an element
 /// of another app follows that element; a note hides behind windows in front of its window,
 /// with its window, and when its content is gone from its window, such as after a page change.
-/// The overlay draws from it.
+/// A note on a page in Tilde's browser is where the browser finds its element. The overlay
+/// draws from it.
 @MainActor
 final class NoteTracker: ObservableObject {
     /// Where followed elements are; a note missing here but in `hidden` scrolled out of view or
@@ -37,12 +38,11 @@ final class NoteTracker: ObservableObject {
             }
         }
     }
-    /// The window of Tilde's browser while the overlay draws the notes of its page.
-    var pageWindow: () -> Int? = { nil }
     /// Annotating is paused: the user works in their apps.
     var isPaused = false
 
     private let windows: WindowStack
+    private let browser: BrowserController
     private var elements: [Draft.ID: TrackedElement] = [:]
     /// Notes whose element the app no longer reports: only the picture can confirm their content.
     private var goneElements: Set<Draft.ID> = []
@@ -59,8 +59,9 @@ final class NoteTracker: ObservableObject {
     private var isChanged = true
     private var lastRound = Date.distantPast
 
-    init(windows: WindowStack) {
+    init(windows: WindowStack, browser: BrowserController) {
         self.windows = windows
+        self.browser = browser
     }
 
     /// Notes were added: their windows and content are checked from now on.
@@ -145,6 +146,54 @@ final class NoteTracker: ObservableObject {
         return elements[draft.id] != nil ? CGPoint(x: frame.maxX, y: frame.minY) : draft.marker
     }
 
+    // MARK: - Notes on a page in Tilde's browser
+
+    /// A note on the open page of Tilde's browser, where it is on screen now.
+    struct PageNote {
+        let number: Int
+        let draft: Draft
+        /// Quartz screen frame of its element or region.
+        let frame: CGRect
+
+        var marker: CGPoint {
+            CGPoint(x: frame.maxX, y: frame.minY)
+        }
+    }
+
+    /// Notes on the browser's open page, for the overlay to draw like other notes while the
+    /// notes panel is hidden; with the panel open, the browser draws them with their cards.
+    var pageNotes: [PageNote] {
+        browser.showsNotes ? [] : anchoredNotes
+    }
+
+    /// Notes attached to the page in Tilde's browser, where they are now.
+    private var anchoredNotes: [PageNote] {
+        guard let page = browser.pageFrame?.flipped else {
+            return []
+        }
+        return notes.enumerated().compactMap { index, draft in
+            // No height: scrolled out of its panel.
+            guard let rect = browser.anchorRects[draft.id], rect.height > 0 else {
+                return nil
+            }
+            return PageNote(number: index + 1, draft: draft, frame: rect.offsetBy(dx: page.minX, dy: page.minY))
+        }
+    }
+
+    // MARK: - Labels
+
+    /// The note whose numbered label is at this point.
+    func label(at point: CGPoint) -> Draft.ID? {
+        let labels = notes.filter { $0.anchor == nil }.compactMap { draft in marker(of: draft).map { (draft.id, $0) } }
+            + anchoredNotes.map { ($0.draft.id, $0.marker) }
+        return labels.last { Self.isOnLabel(distance: hypot($0.1.x - point.x, $0.1.y - point.y)) }?.0
+    }
+
+    /// A label's circle has a radius of 10 points; 8 more around it make it easy to hit.
+    nonisolated static func isOnLabel(distance: CGFloat) -> Bool {
+        distance <= 18
+    }
+
     // MARK: - Windows in front of notes
 
     struct StackWindow: Equatable {
@@ -175,7 +224,8 @@ final class NoteTracker: ObservableObject {
             return
         }
         var withNotes = Set(notes.compactMap(\.sourceWindow))
-        if let page = pageWindow() {
+        // The window of Tilde's browser, while the overlay draws the notes of its page.
+        if !pageNotes.isEmpty, let page = browser.windowNumber {
             withNotes.insert(page)
         }
         guard !withNotes.isEmpty else {

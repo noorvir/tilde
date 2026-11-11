@@ -83,6 +83,33 @@ struct NewNote {
     var drawingIDs: [String] = []
 }
 
+extension NewNote {
+    /// A note on a picked element, for a click at `point`. In a window that shows no elements,
+    /// the label is at the point, and only the picture around it tells whether the note is
+    /// still on screen.
+    init(_ picked: Picked, at point: CGPoint) {
+        let isWholeWindow = picked.isWholeWindow
+        let marker = isWholeWindow ? point : CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
+        self.init(
+            target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame,
+            window: picked.window, anchor: picked.anchor, tracked: isWholeWindow ? nil : picked.tracked,
+            pictureArea: isWholeWindow ? NoteFingerprint.area(around: point) : nil
+        )
+    }
+}
+
+extension Draft {
+    /// The note of a comment box with its comment. `capture`: its screenshots, which can be
+    /// newer than the ones of `pending`.
+    init(_ pending: Pending, comment: String, capture: Task<Captures, Never>) {
+        let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
+        self.init(
+            annotation: annotation, marker: pending.marker, chip: pending.chip, capture: capture, anchor: pending.anchor,
+            sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
+        )
+    }
+}
+
 extension Pending {
     /// A new target with its screenshots started, and, outside Tilde's browser, what its area
     /// looks like and which page it is on, to tell later whether it still shows.

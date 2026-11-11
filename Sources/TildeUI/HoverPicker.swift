@@ -19,9 +19,11 @@ final class HoverPicker {
     }
     /// The window that the session is limited to.
     var scope: () -> ElementPicker.WindowInfo? = { nil }
-    /// Whether a pick that finishes now still shows: the pointer can have moved onto Tilde's
-    /// UI meanwhile, or a comment box opened.
+    /// Whether a pick that finishes now still shows: a comment box can have opened meanwhile.
     var shows: () -> Bool = { true }
+    /// Whether the last pointer move was over Tilde's own UI; a pick that finishes after the
+    /// pointer moved onto the UI must not highlight what is under it.
+    private(set) var isOverPanel = false
     /// A scroll ended: the page moved under the pointer.
     var onScrollEnded: () -> Void = {}
 
@@ -29,12 +31,23 @@ final class HoverPicker {
     private var latestPoint: CGPoint?
     private var task: Task<Void, Never>?
     private let scrollTime = Countdown()
-    /// Logs the first highlight after each resume, to measure how soon hover works.
+    /// Logs the first pointer move and the first highlight after each resume, to measure how
+    /// soon hover works.
+    private var hasLoggedMove = false
     private var hasLoggedHighlight = false
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
 
     init(picker: ElementPicker) {
         self.picker = picker
+    }
+
+    /// The pointer moved on the overlay, over Tilde's own UI or not.
+    func pointerMoved(isOverPanel: Bool) {
+        self.isOverPanel = isOverPanel
+        if !hasLoggedMove {
+            hasLoggedMove = true
+            log.notice("first pointer move on the overlay")
+        }
     }
 
     /// Highlights the element at a point, after the pick under way.
@@ -56,7 +69,7 @@ final class HoverPicker {
                     hasLoggedHighlight = true
                     log.notice("first highlight \(picked?.chip ?? "", privacy: .public)")
                 }
-                if shows() {
+                if !isOverPanel, shows() {
                     self.picked = picked
                 }
             }
@@ -85,7 +98,8 @@ final class HoverPicker {
         }
     }
 
-    func logNextHighlight() {
+    func logNext() {
+        hasLoggedMove = false
         hasLoggedHighlight = false
     }
 }

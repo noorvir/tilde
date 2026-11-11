@@ -123,7 +123,7 @@ final class OverlayView: NSView {
             cursor = nil
         } else if controller.isOverPanel(point) || controller.previewID != nil || !controller.allows(point) {
             cursor = .arrow
-        } else if controller.noteLabel(at: point) != nil {
+        } else if controller.tracker.label(at: point) != nil {
             cursor = .pointingHand
         } else {
             cursor = .crosshair
@@ -175,7 +175,7 @@ final class OverlayView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let point = screenPoint(event)
         updateCursor(at: point, source: "mouseMoved")
-        let marker = controller.noteLabel(at: point)
+        let marker = controller.tracker.label(at: point)
         if marker != hoveredMarker {
             hoveredMarker = marker
             needsDisplay = true
@@ -223,7 +223,7 @@ final class OverlayView: NSView {
         let viewPoint = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
         if let rect = dragRect, rect.width >= 8, rect.height >= 8 {
             controller.dragEnded(with: rect)
-        } else if let id = controller.noteLabel(at: point) {
+        } else if let id = controller.tracker.label(at: point) {
             controller.preview(id)
         } else if let card = noteCards.last(where: { $0.rect.contains(viewPoint) }) {
             controller.showNoteInPanel(card.id)
@@ -280,7 +280,7 @@ final class OverlayView: NSView {
 
         // Page notes show their comment already.
         if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.composer == nil,
-           !controller.pageNotes.contains(where: { $0.draft.id == id })
+           !controller.tracker.pageNotes.contains(where: { $0.draft.id == id })
         {
             if let marker = controller.tracker.marker(of: draft) {
                 drawTooltip(Self.commentText(draft), at: marker)
@@ -313,7 +313,7 @@ final class OverlayView: NSView {
             notes.append(Note(number: index + 1, draft: draft, frame: frame, marker: marker, window: draft.sourceWindow, isOnPage: false))
         }
         let browserWindow = controller.browser.windowNumber
-        for note in controller.pageNotes {
+        for note in controller.tracker.pageNotes {
             notes.append(Note(number: note.number, draft: note.draft, frame: note.frame, marker: note.marker, window: browserWindow, isOnPage: true))
         }
         notes = notes.filter { note in note.window.map { !controller.tracker.hiddenWindows.contains($0) } ?? true }
