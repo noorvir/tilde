@@ -351,7 +351,7 @@ struct HUDView: View {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: controller.dismissBrowserAccessory)
                     .transition(Self.zoom)
             }
-            if controller.isHUDShown, let notice = controller.pauseNotice {
+            if controller.isHUDShown, let notice = controller.notices.pause {
                 PauseCard(notice: notice, controller: controller)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -380,7 +380,7 @@ struct HUDView: View {
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
         .animation(HUDPanel.motion, value: controller.sentConfirmation)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
-        .animation(.easeOut(duration: 0.15), value: controller.pauseNotice)
+        .animation(.easeOut(duration: 0.15), value: controller.notices.pause)
         .animation(.spring(duration: 0.28), value: controller.browserAccessoryURL)
     }
 
@@ -420,7 +420,7 @@ struct HUDView: View {
         HStack(spacing: 4) {
             if let confirmation = controller.sentConfirmation {
                 HStack(spacing: PillMetrics.iconGap) {
-                    switch controller.sentStatus {
+                    switch controller.notices.sentStatus {
                     case .done:
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -859,7 +859,7 @@ struct HUDView: View {
     }
 
     private var subtitleState: SubtitleState {
-        if let notice = controller.notice {
+        if let notice = controller.notices.notice {
             return .notice(notice.rawValue)
         }
         if controller.isPickingWindow {
@@ -1182,7 +1182,7 @@ struct HUDAccessoryBrowserBar: View {
 /// A card below the HUD after it paused: how to go on. It goes after 10 seconds, or at
 /// once on resume, discard or send; the pointer on it keeps it.
 struct PauseCard: View {
-    let notice: AnnotationController.PauseNotice
+    let notice: PauseNotice
     @ObservedObject var controller: AnnotationController
 
     var body: some View {
@@ -1200,7 +1200,7 @@ struct PauseCard: View {
         .frame(maxWidth: HUDView.width, alignment: .leading)
         .hudCard(cornerRadius: 12)
         .fixedSize()
-        .onHover { controller.holdPauseNotice($0) }
+        .onHover { controller.notices.holdPause($0) }
     }
 
     private var text: String {

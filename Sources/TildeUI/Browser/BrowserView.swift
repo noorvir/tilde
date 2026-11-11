@@ -49,7 +49,7 @@ private struct EmbeddedPauseCard: View {
     @ObservedObject var controller: AnnotationController
 
     var body: some View {
-        if controller.isHUDInBrowser, let notice = controller.pauseNotice {
+        if controller.isHUDInBrowser, let notice = controller.notices.pause {
             AboveAppKit {
                 PauseCard(notice: notice, controller: controller)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)

@@ -111,7 +111,7 @@ enum Surfaces {
         }
         apply(state, drafts: try drafts(state), to: controller)
         controller.showsList = state.list ?? false
-        controller.sentStatus = state.sentStatus == .failed ? .failed : .done
+        controller.notices.showSent(state.sent ?? "", status: state.sentStatus == .failed ? .failed : .done)
         if let color = state.drawingColor {
             controller.setDrawingColor(color)
         }
@@ -134,7 +134,7 @@ enum Surfaces {
     }
 
     private static func apply(_ state: UIState, drafts: [Draft], composer: Composer? = nil, to controller: AnnotationController) {
-        let notice: AnnotationController.PauseNotice? = switch state.pauseNotice {
+        let notice: PauseNotice? = switch state.pauseNotice {
         case .escape: .escape
         case .otherApp: .otherApp
         case nil: nil

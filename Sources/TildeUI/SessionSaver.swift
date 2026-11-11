@@ -24,7 +24,7 @@ final class SessionSaver {
 
     /// When the session on screen started.
     private var created = Date()
-    private var saveTask: Task<Void, Never>?
+    private let saveTime = Countdown()
     private var checkpointTimer: Timer?
     private var sleepObserver: NSObjectProtocol?
 
@@ -56,8 +56,7 @@ final class SessionSaver {
     func stop() {
         checkpointTimer?.invalidate()
         checkpointTimer = nil
-        saveTask?.cancel()
-        saveTask = nil
+        saveTime.cancel()
     }
 
     /// Saves about a second after the last change, so a burst of changes is one write.
@@ -65,12 +64,8 @@ final class SessionSaver {
         guard snapshot() != nil else {
             return
         }
-        saveTask?.cancel()
-        saveTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
-            if !Task.isCancelled {
-                self?.save()
-            }
+        saveTime.start(1) { [weak self] in
+            self?.save()
         }
     }
 

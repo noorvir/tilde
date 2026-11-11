@@ -3,16 +3,6 @@ import AppKit
 import Combine
 import os
 
-/// The short notes in the HUD's subtitle, for a moment. Each fits the pill in full, which the
-/// subtitle test checks for the whole list.
-enum Notice: String, CaseIterable {
-    case windowClosed = "Window closed"
-    case recordingFailed = "Recording failed"
-    case recordingNotSaved = "Recording not saved"
-    case recordingStopped = "Recording stopped"
-    case reportNotSaved = "Report not saved"
-}
-
 @MainActor
 final class HoverHighlight: ObservableObject {
     @Published var picked: Picked?
@@ -60,11 +50,10 @@ final class AnnotationController: ObservableObject {
     /// The confirmation after Send, such as "Sent to Codex", while it shows.
     var sentConfirmation: String? {
         if case .sent = mode {
-            return sentText
+            return notices.sentText
         }
         return nil
     }
-    private var sentText = ""
     @Published private(set) var session: SessionStore.Session?
     @Published private(set) var drafts: [Draft] = [] {
         didSet {
@@ -85,12 +74,6 @@ final class AnnotationController: ObservableObject {
         get { hoverHighlight.picked }
         set { hoverHighlight.picked = newValue }
     }
-    /// How the confirmation after Send reads: done, or a copy's images that did not reach a
-    /// remote machine.
-    enum SentStatus {
-        case done, failed
-    }
-    @Published var sentStatus = SentStatus.done
     /// The comment box's data while `flow` has it open.
     @Published private(set) var composer: Composer? {
         didSet {
@@ -100,13 +83,6 @@ final class AnnotationController: ObservableObject {
     }
     private var holdMonitor: HoldMonitor?
 
-    /// Why annotating just paused, for the note below the HUD.
-    enum PauseNotice: Equatable {
-        case escape
-        case otherApp
-    }
-
-    @Published private(set) var pauseNotice: PauseNotice?
     /// The page in another browser that the browser accessory bar under the HUD offers to
     /// open in Tilde's browser, until it is dismissed or opened; nil for no bar.
     @Published private(set) var browserAccessoryURL: URL?
@@ -117,7 +93,6 @@ final class AnnotationController: ObservableObject {
     static let browserBundleIDs: Set<String> = [
         "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.microsoft.edgemac", "com.brave.Browser",
     ]
-    private var pauseNoticeTimer: Timer?
     /// The HUD is in the toolbar of Tilde's browser, as the session is limited to it, and the
     /// floating HUD is hidden. It stays there through the Sent confirmation.
     @Published private(set) var isHUDInBrowser = false
@@ -151,8 +126,8 @@ final class AnnotationController: ObservableObject {
     }()
     /// The source picker under the HUD while choosing.
     let sourcePicker = SourcePickerModel()
-    /// A short note in the HUD subtitle, such as that the scoped window closed.
-    @Published private(set) var notice: Notice?
+    /// What the HUD says for a moment: a notice, the note after a pause, the confirmation after Send.
+    let notices = Notices()
     /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
     /// when it appears and collapses into it before the panel hides.
     @Published var isHUDShown = false
@@ -177,6 +152,8 @@ final class AnnotationController: ObservableObject {
     private lazy var commentPanel = CommentPanel(controller: self)
     private lazy var previewPanel = PreviewPanel(controller: self)
     private var subscription: AnyCancellable?
+    /// Views observe the controller; it sends on the changes of the parts that the HUD shows.
+    private var partChanges: [AnyCancellable] = []
 
     private var latestHoverPoint: CGPoint?
     /// Whether the last pointer move was over Tilde's own UI; a pick that finishes after the
@@ -204,9 +181,7 @@ final class AnnotationController: ObservableObject {
     /// Where sessions are saved while in progress and kept afterwards.
     let archive: SessionArchive
     let saver: SessionSaver
-    /// Where sent reports go, and where a report without an agent is copied; tests give their own.
-    var inbox = inboxRoot
-    var pasteboard = NSPasteboard.general
+    var sender = ReportSender()
     /// Keeps how the user last chose a window across launches; nil keeps it only in memory.
     private let defaults: UserDefaults?
     /// A saved session whose notes the next session starts with.
@@ -230,6 +205,8 @@ final class AnnotationController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
+        notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
+        partChanges = [notices.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }]
         saver.snapshot = { [weak self] in self?.snapshot }
         doubleTap = DoubleTapMonitor { [weak self] in
             guard let self else {
@@ -387,16 +364,9 @@ final class AnnotationController: ObservableObject {
         }
 
         if case .sent(let operation) = mode {
-            hideConfirmation(operation, after: 1.6)
+            notices.endSent(operation, after: 1.6)
         } else {
             hideHUD()
-        }
-    }
-
-    /// Hides the HUD after Send's confirmation, unless another one shows by then.
-    private func hideConfirmation(_ operation: Int, after seconds: TimeInterval) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            self?.dispatch(.sentShown(operation))
         }
     }
 
@@ -412,8 +382,7 @@ final class AnnotationController: ObservableObject {
         stopHoldMonitor()
         picker.windows.stop()
         tracker.stop()
-        pauseNotice = nil
-        pauseNoticeTimer?.invalidate()
+        notices.clearPause()
         drawingPanel.endSession()
         commentPanel.close()
         previewPanel.close()
@@ -440,62 +409,47 @@ final class AnnotationController: ObservableObject {
         }
         let drafts = self.drafts
         Task {
-            var annotations: [Annotation] = []
-            for draft in drafts {
-                let captures = await draft.capture.value
-                let annotation = draft.annotation
-                annotations.append(Annotation(
-                    id: annotation.id, comment: annotation.comment, target: annotation.target, frame: annotation.frame,
-                    image: captures.image, contextImage: captures.contextImage
-                ))
-            }
-
-            let feedback = Feedback(annotations: annotations)
-            let folder: URL
+            let report: ReportSender.Report
             do {
-                let inbox = self.inbox
-                folder = try await Task.detached { try saveToInbox(feedback, sessionID: session.id, node: session.node, root: inbox) }.value
+                report = try await sender.save(drafts, of: session)
             } catch {
                 log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
                 dispatch(.sendFailed(operation))
                 return
             }
             dispatch(.sendFinished(operation), with: [.finishSend: { [self] in
-                finishSend(session, feedback: feedback, folder: folder)
+                finishSend(session, report)
             }])
         }
     }
 
-    private func finishSend(_ session: SessionStore.Session, feedback: Feedback, folder: URL) {
-        log.notice("session \(session.id, privacy: .public) sent with \(feedback.annotations.count) annotations")
-        sentStatus = .done
+    private func finishSend(_ session: SessionStore.Session, _ report: ReportSender.Report) {
+        log.notice("session \(session.id, privacy: .public) sent with \(report.feedback.annotations.count) annotations")
         if session.isLocal {
-            copyReport(feedback, folder: folder)
-            sentText = "Copied"
+            sender.copy(report)
+            notices.showSent("Copied", status: .done)
         } else {
-            sentText = "Sent to \(session.client)"
+            notices.showSent("Sent to \(session.client)", status: .done)
         }
-        saver.save(state: .sent, reportFolder: folder)
-        store.finish(session.id, with: .sent(feedback, folder: folder))
+        saver.save(state: .sent, reportFolder: report.folder)
+        store.finish(session.id, with: .sent(report.feedback, folder: report.folder))
         end()
 
-        // A copy's images go to the remote machines in the background, so that one paste
-        // works on any of them; a machine they do not reach gets its own short warning.
-        let machines = session.isLocal ? NodeStore().load().map(\.host) : []
-        guard !machines.isEmpty else {
+        // A copy's images go to the remote machines in the background; a machine they do not
+        // reach gets its own short warning.
+        guard session.isLocal else {
             return
         }
         Task {
-            let failed = await Self.push(folder, to: machines, log: log)
+            let failed = await sender.push(report)
             guard !failed.isEmpty else {
                 return
             }
             dispatch(.pushFailed, with: [.showPushFailure: { [self] in
-                sentStatus = .failed
-                sentText = RemotePush.failure(failed)
+                notices.showSent(RemotePush.failure(failed), status: .failed)
                 if case .sent(let operation) = mode {
                     hud.show()
-                    hideConfirmation(operation, after: 4)
+                    notices.endSent(operation, after: 4)
                 }
             }])
         }
@@ -950,9 +904,9 @@ final class AnnotationController: ObservableObject {
             // A key overlay would keep the keyboard; give it back to the user's app.
             NSWorkspace.shared.frontmostApplication?.activate()
         case .takeKeyboard: makeOverlayKey()
-        case .showEscapeNotice: showPauseNotice(.escape)
-        case .showOtherAppNotice: showPauseNotice(.otherApp)
-        case .clearNotice: pauseNotice = nil
+        case .showEscapeNotice: notices.showPause(.escape)
+        case .showOtherAppNotice: notices.showPause(.otherApp)
+        case .clearNotice: notices.clearPause()
         case .endSession: end()
         case .cancelSession: cancelSession()
         case .clearDrafts:
@@ -991,9 +945,9 @@ final class AnnotationController: ObservableObject {
             if case .finishing(let operation, _) = recording {
                 clips.finish(operation: operation)
             }
-        case .showStartFailure: show(notice: .recordingFailed)
-        case .showSaveFailure: show(notice: .recordingNotSaved)
-        case .showSourceGone: show(notice: .recordingStopped)
+        case .showStartFailure: notices.show(.recordingFailed)
+        case .showSaveFailure: notices.show(.recordingNotSaved)
+        case .showSourceGone: notices.show(.recordingStopped)
         case .startPicking:
             showsList = false
             hover = nil
@@ -1008,36 +962,7 @@ final class AnnotationController: ObservableObject {
             hover = nil
             sourcePicker.stopLoading()
         case .startSend: startSend()
-        case .showSendFailure: show(notice: .reportNotSaved)
-        }
-    }
-
-    /// Copies the report of a session without an agent.
-    private func copyReport(_ feedback: Feedback, folder: URL) {
-        let text = reportText(for: feedback, folder: folder, linkFolder: homeRelativePath(folder))
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-    }
-
-    /// Sends a report's folder to each machine; the machines it did not reach.
-    private nonisolated static func push(_ folder: URL, to machines: [String], log: Logger) async -> [String] {
-        await withTaskGroup(of: String?.self) { group in
-            for machine in machines {
-                group.addTask {
-                    do {
-                        try await RemotePush.push(folder, to: machine)
-                        return nil
-                    } catch {
-                        log.error("could not send feedback to \(machine, privacy: .public): \(String(describing: error), privacy: .public)")
-                        return machine
-                    }
-                }
-            }
-            return await group.reduce(into: [String]()) { failed, machine in
-                if let machine {
-                    failed.append(machine)
-                }
-            }
+        case .showSendFailure: notices.show(.reportNotSaved)
         }
     }
 
@@ -1292,36 +1217,9 @@ final class AnnotationController: ObservableObject {
     /// Puts the overlays in step with the pause state; every start, resume and scope change
     /// goes through here. Resuming puts the overlay back above its window, which a click in
     /// that window (such as on the browser's Annotate button) raised over it.
-    /// Shows one pause note at a time, for 10 seconds, when turned on with the hidden
-    /// setting `hudPauseToast` (the HUD's yellow pause button shows the pause instead).
-    private func showPauseNotice(_ notice: PauseNotice) {
-        guard UserDefaults.standard.bool(forKey: "hudPauseToast") else {
-            return
-        }
-        pauseNotice = notice
-        restartPauseNoticeTimer()
-    }
-
-    /// The pointer on the note keeps it; leaving it gives it 10 seconds again.
-    func holdPauseNotice(_ isHeld: Bool) {
-        pauseNoticeTimer?.invalidate()
-        if !isHeld, pauseNotice != nil {
-            restartPauseNoticeTimer()
-        }
-    }
-
-    private func restartPauseNoticeTimer() {
-        pauseNoticeTimer?.invalidate()
-        pauseNoticeTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.pauseNotice = nil
-            }
-        }
-    }
-
     private func applyPause() {
         if pauses.isEmpty {
-            pauseNotice = nil
+            notices.clearPause()
         }
         hasLoggedHover = false
         hasLoggedMove = false
@@ -1685,16 +1583,7 @@ final class AnnotationController: ObservableObject {
         // A clip of the window ends with it, at its last frame.
         dispatch(.captureStopped)
         setScope(nil)
-        show(notice: .windowClosed)
-    }
-
-    private func show(notice: Notice) {
-        self.notice = notice
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            if self?.notice == notice {
-                self?.notice = nil
-            }
-        }
+        notices.show(.windowClosed)
     }
 
     // MARK: - Picking
@@ -2200,11 +2089,9 @@ extension AnnotationController {
         self.previewID = previewID
         self.source = source
         self.isHUDInBrowser = isHUDInBrowser
-        self.pauseNotice = pauseNotice
         self.browserAccessoryURL = browserAccessoryURL
         self.restoreRecord = restoreRecord
-        self.sentText = sentText
-        self.notice = notice
+        notices.setStateForTesting(notice: notice, pause: pauseNotice, sentText: sentText)
         clips.clock = clipClock
         isHUDShown = true
     }

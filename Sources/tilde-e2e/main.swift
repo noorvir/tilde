@@ -377,7 +377,7 @@ final class Harness {
         try check(controller.pauses.contains(.user), "Open Browser starts paused")
         browser.close()
         try await until("the scope ends when the browser closes", timeout: 5) { self.controller.scope == nil }
-        try check(controller.notice == .windowClosed, "the HUD says the window closed")
+        try check(controller.notices.notice == .windowClosed, "the HUD says the window closed")
         controller.requestCancel()
     }
 

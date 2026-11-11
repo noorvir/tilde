@@ -34,8 +34,8 @@ enum Fixtures {
     /// A controller whose reports and copies never reach the user's inbox or clipboard.
     static func controller() async throws -> AnnotationController {
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive(), defaults: nil)
-        controller.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
-        controller.pasteboard = NSPasteboard(name: NSPasteboard.Name("tilde-tests-\(UUID().uuidString)"))
+        controller.sender.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
+        controller.sender.pasteboard = NSPasteboard(name: NSPasteboard.Name("tilde-tests-\(UUID().uuidString)"))
         try await Task.sleep(for: .milliseconds(20))
         return controller
     }

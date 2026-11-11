@@ -317,13 +317,13 @@ struct BehaviourTests {
         controller.send()
         #expect(HUDView.status(of: controller).title == "Sending")
         #expect(controller.sentConfirmation == nil)
-        #expect(controller.pasteboard.string(forType: .string) == nil)
+        #expect(controller.sender.pasteboard.string(forType: .string) == nil)
 
         open(drafts: Fixtures.drafts(1), session: Fixtures.session(isLocal: true))
         controller.send()
         try await until { controller.sentConfirmation != nil }
         #expect(controller.sentConfirmation == "Copied")
-        #expect(controller.pasteboard.string(forType: .string)?.contains("Avatar and name are not vertically centered") == true)
+        #expect(controller.sender.pasteboard.string(forType: .string)?.contains("Avatar and name are not vertically centered") == true)
     }
 
     /// While the report is made, the overlay takes nothing and × and Esc do nothing, so the
@@ -703,7 +703,7 @@ struct BehaviourTests {
         controller.refreshScope()
 
         #expect(controller.scope == nil)
-        #expect(controller.notice?.rawValue == "Window closed")
+        #expect(controller.notices.notice?.rawValue == "Window closed")
     }
 
     // MARK: - HUD subtitle
