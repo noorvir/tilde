@@ -27,9 +27,38 @@ for index in 0..<10 {
     window.contentView?.addSubview(row)
     rows.append(row)
 }
+// A red mark down the left of the content, on the pages "marked" and "glide": where the window
+// is, in each picture of the screen.
+let mark = NSView(frame: NSRect(x: 0, y: 0, width: 6, height: 400))
+mark.wantsLayer = true
+mark.layer?.backgroundColor = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1).cgColor
+mark.isHidden = true
+window.contentView?.addSubview(mark)
 window.orderFrontRegardless()
+
+// "glide": the window moves right at 120 pt a second for 1.5 s, frame by frame, as a window
+// dragged by hand does. Its place follows the clock, and the app takes no nap in the
+// background, which would slow its timers.
+let awake = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Moves its window smoothly")
+var glide: Timer?
+func startGlide() {
+    let start = Date()
+    let origin = window.frame.origin
+    glide = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
+        let elapsed = min(Date().timeIntervalSince(start), 1.5)
+        window.setFrameOrigin(NSPoint(x: origin.x + (120 * elapsed).rounded(), y: origin.y))
+        if elapsed == 1.5 {
+            timer.invalidate()
+        }
+    }
+}
+
 let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     let page = (try? String(contentsOfFile: file, encoding: .utf8)) ?? "a"
+    mark.isHidden = !page.hasPrefix("marked") && !page.hasPrefix("glide")
+    if page.hasPrefix("glide"), glide == nil {
+        startGlide()
+    }
     var words = page.hasPrefix("b") ? wordsB : wordsA
     // Nearly the same page: one row far from the top changed.
     if page.hasPrefix("almost") {
@@ -43,6 +72,6 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         row.stringValue = text
     }
 }
-withExtendedLifetime(timer) {
+withExtendedLifetime((timer, awake)) {
     app.run()
 }

@@ -57,6 +57,18 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
         }
         return HTTPResponse(status: 200, headers: ["Content-Type": "image/png"], body: png)
 
+    case ("POST", "/strip"):
+        // A part of the screen, quicker to take than all of it.
+        let area = CGRect(x: body["x"] as? Double ?? 0, y: body["y"] as? Double ?? 0, width: body["width"] as? Double ?? 0, height: body["height"] as? Double ?? 0)
+        guard let png = await screenshot(of: area) else {
+            return HTTPResponse(status: 500)
+        }
+        return HTTPResponse(status: 200, headers: ["Content-Type": "image/png"], body: png)
+
+    case ("POST", "/row"):
+        let rows = await ScreenRow.record(x: body["x"] as? Double ?? 0, y: body["y"] as? Double ?? 0, width: body["width"] as? Double ?? 0, seconds: body["seconds"] as? Double ?? 1)
+        return json(["scale": ScreenRow.scale, "frames": rows.map { $0.base64EncodedString() }])
+
     case ("POST", "/cursor"):
         // The cursor on screen, whichever app set it.
         let current = NSCursor.currentSystem
@@ -350,7 +362,8 @@ func key(_ code: CGKeyCode, command: Bool, shift: Bool, option: Bool) {
     }
 }
 
-func screenshot() async -> Data? {
+/// The screen, or `area` of it in points.
+func screenshot(of area: CGRect? = nil) async -> Data? {
     guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
           let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
     else {
@@ -359,8 +372,12 @@ func screenshot() async -> Data? {
 
     let filter = SCContentFilter(display: display, excludingWindows: [])
     let configuration = SCStreamConfiguration()
-    configuration.width = Int(display.frame.width * CGFloat(filter.pointPixelScale))
-    configuration.height = Int(display.frame.height * CGFloat(filter.pointPixelScale))
+    let size = area?.size ?? display.frame.size
+    configuration.width = Int(size.width * CGFloat(filter.pointPixelScale))
+    configuration.height = Int(size.height * CGFloat(filter.pointPixelScale))
+    if let area {
+        configuration.sourceRect = area
+    }
     configuration.showsCursor = true
 
     guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) else {
@@ -456,6 +473,58 @@ final class WindowEdges: NSObject, SCStreamOutput, @unchecked Sendable {
         lock.withLock {
             if edges.last != edge {
                 edges.append(edge)
+            }
+        }
+    }
+}
+
+/// Records, frame by frame, one row of pixels of the screen: what the screen shows there in
+/// each frame, as 8-bit BGRA, from `x` for `width` points.
+final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
+    static let scale = 2
+    private let lock = NSLock()
+    private var rows: [Data] = []
+
+    static func record(x: Double, y: Double, width: Double, seconds: Double) async -> [Data] {
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
+              let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
+        else {
+            return []
+        }
+        let recorder = ScreenRow()
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = CGRect(x: x, y: y, width: width, height: 1)
+        configuration.width = Int(width) * scale
+        configuration.height = scale
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.colorSpaceName = CGColorSpace.sRGB
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 120)
+        configuration.showsCursor = false
+        let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: configuration, delegate: nil)
+        let queue = DispatchQueue(label: "row")
+        guard (try? stream.addStreamOutput(recorder, type: .screen, sampleHandlerQueue: queue)) != nil,
+              (try? await stream.startCapture()) != nil
+        else {
+            return []
+        }
+        try? await Task.sleep(for: .seconds(seconds))
+        try? await stream.stopCapture()
+        return recorder.lock.withLock { recorder.rows }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard let pixels = CMSampleBufferGetImageBuffer(buffer) else {
+            return
+        }
+        CVPixelBufferLockBaseAddress(pixels, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixels) else {
+            return
+        }
+        let row = Data(bytes: base, count: CVPixelBufferGetWidth(pixels) * 4)
+        lock.withLock {
+            if rows.last != row {
+                rows.append(row)
             }
         }
     }

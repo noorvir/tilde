@@ -53,6 +53,102 @@ enum Key: Int {
     case rightBracket = 30
     case r = 15
     case space = 49
+    case b = 11
+    case d = 2
+}
+
+/// A picture of the screen, or an image of the app's, read in points.
+struct Picture {
+    typealias Color = (red: Double, green: Double, blue: Double)
+
+    private let bitmap: NSBitmapImageRep
+    private let scale: Double
+    /// Where the picture's top left is: points are read where they are on the screen.
+    private let origin: CGPoint
+
+    /// `width`: the picture's width in points.
+    init(_ data: Data, width: Double, origin: CGPoint = .zero) throws {
+        guard let bitmap = NSBitmapImageRep(data: data) else {
+            throw UXFailure(description: "not a picture")
+        }
+        self.init(bitmap, width: width, origin: origin)
+    }
+
+    /// One row of 8-bit BGRA pixels in sRGB, as the driver records them.
+    init(row: Data, width: Double, origin: CGPoint) throws {
+        let pixels = row.count / 4
+        guard let provider = CGDataProvider(data: row as CFData),
+              let image = CGImage(
+                  width: pixels, height: 1, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: row.count,
+                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                  bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue),
+                  provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+              )
+        else {
+            throw UXFailure(description: "not a row of pixels")
+        }
+        self.init(NSBitmapImageRep(cgImage: image), width: width, origin: origin)
+    }
+
+    private init(_ bitmap: NSBitmapImageRep, width: Double, origin: CGPoint) {
+        self.bitmap = bitmap
+        self.origin = origin
+        scale = Double(bitmap.pixelsWide) / width
+    }
+
+    var size: CGSize {
+        CGSize(width: Double(bitmap.pixelsWide) / scale, height: Double(bitmap.pixelsHigh) / scale)
+    }
+
+    func color(at point: CGPoint) -> Color? {
+        pixel(x: Int((point.x - origin.x) * scale), y: Int((point.y - origin.y) * scale))
+    }
+
+    private func pixel(x: Int, y: Int) -> Color? {
+        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+            return nil
+        }
+        return (Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent))
+    }
+
+    /// How many pixels in the area match, of every `step`th pixel in each direction.
+    func count(in area: CGRect, every step: Int = 2, where matches: (Color) -> Bool) -> Int {
+        var count = 0
+        let area = area.offsetBy(dx: -origin.x, dy: -origin.y)
+        for y in stride(from: Int(area.minY * scale), to: Int(area.maxY * scale), by: step) {
+            for x in stride(from: Int(area.minX * scale), to: Int(area.maxX * scale), by: step) {
+                if let color = pixel(x: x, y: y), matches(color) {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+
+    /// The first point from the left on this row that matches, in points.
+    func firstX(onRow y: Double, from start: Double, to end: Double, where matches: (Color) -> Bool) -> Double? {
+        for x in stride(from: Int((start - origin.x) * scale), to: Int((end - origin.x) * scale), by: 1) {
+            if let color = pixel(x: x, y: Int((y - origin.y) * scale)), matches(color) {
+                return Double(x) / scale + origin.x
+            }
+        }
+        return nil
+    }
+
+    /// Tilde's blue: its outlines, labels and snap guides.
+    static func isTildeBlue(_ color: Color) -> Bool {
+        color.blue > 0.8 && color.red < 0.35 && color.green > 0.25 && color.green < 0.65
+    }
+
+    /// The bluish grey of a wireframe component, unlike the neutral grey of text.
+    static func isWireframe(_ color: Color) -> Bool {
+        color.red > 0.78 && color.red < 0.92 && color.blue - color.red > 0.012 && color.blue - color.red < 0.05
+    }
+
+    /// The fixture's red mark.
+    static func isMark(_ color: Color) -> Bool {
+        color.red > 0.85 && color.green < 0.2 && color.blue < 0.2
+    }
 }
 
 /// The built app in a throwaway environment, driven from outside: real input and the
@@ -165,6 +261,18 @@ final class TildeApp {
         return (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
 
+    /// A picture that the driver makes, such as a part of the screen.
+    private func drivePicture(_ path: String, _ body: [String: Any]) async throws -> Data {
+        var request = URLRequest(url: Self.driver.appendingPathComponent(path), timeoutInterval: 15)
+        request.httpMethod = "POST"
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw UXFailure(description: "no picture from \(path)")
+        }
+        return data
+    }
+
     /// Presses a control of another app by its accessibility name, such as Device Hub's zoom.
     func press(_ name: String, inApp appName: String) async throws {
         let app = try #require(NSWorkspace.shared.runningApplications.first { $0.localizedName == appName })
@@ -275,6 +383,22 @@ final class TildeApp {
         try await drive("mouse", ["type": "dragged", "x": end.x, "y": end.y])
         try await Task.sleep(for: .milliseconds(60))
         try await drive("mouse", ["type": "up", "x": end.x, "y": end.y])
+    }
+
+    /// A drag in its parts, to look at the screen while the button is down.
+    func mouseDown(at point: CGPoint) async throws {
+        try await drive("mouse", ["type": "move", "x": point.x, "y": point.y])
+        try await Task.sleep(for: .milliseconds(50))
+        try await drive("mouse", ["type": "down", "x": point.x, "y": point.y])
+    }
+
+    func mouseDragged(to point: CGPoint) async throws {
+        try await drive("mouse", ["type": "dragged", "x": point.x, "y": point.y])
+        try await Task.sleep(for: .milliseconds(40))
+    }
+
+    func mouseUp(at point: CGPoint) async throws {
+        try await drive("mouse", ["type": "up", "x": point.x, "y": point.y])
     }
 
     func drag(from start: CGPoint, to end: CGPoint) async throws {
@@ -399,26 +523,33 @@ final class TildeApp {
 
     // MARK: - Screen pictures
 
+    /// The whole screen now.
+    func screen() async throws -> Picture {
+        let (data, _) = try await URLSession.shared.data(from: Self.driver.appendingPathComponent("screenshot"))
+        guard let screen = NSScreen.screens.first else {
+            throw UXFailure(description: "no screen")
+        }
+        return try Picture(data, width: screen.frame.width)
+    }
+
+    /// One row of the screen in every frame that it showed for `seconds`, oldest first, without
+    /// repeats: what a user saw there, frame by frame.
+    func recordRow(at y: Double, from x: Double, width: Double, seconds: Double) async throws -> [Picture] {
+        let result = try await drive("row", ["x": x, "y": y, "width": width, "seconds": seconds])
+        let frames = result["frames"] as? [String] ?? []
+        return try frames.compactMap { Data(base64Encoded: $0) }.map { try Picture(row: $0, width: width, origin: CGPoint(x: x, y: y)) }
+    }
+
+    /// An area of the screen now, quicker to take than the whole screen.
+    func screen(in area: CGRect) async throws -> Picture {
+        let data = try await drivePicture("strip", ["x": area.minX, "y": area.minY, "width": area.width, "height": area.height])
+        return try Picture(data, width: area.width, origin: area.origin)
+    }
+
     /// How many Tilde-blue pixels are on screen in this area: notes are drawn, so they have no
     /// accessibility elements to read.
     func bluePixels(in area: CGRect) async throws -> Int {
-        let (data, _) = try await URLSession.shared.data(from: Self.driver.appendingPathComponent("screenshot"))
-        guard let picture = NSBitmapImageRep(data: data), let screen = NSScreen.screens.first else {
-            throw UXFailure(description: "no screenshot")
-        }
-        let scale = Double(picture.pixelsWide) / screen.frame.width
-        var count = 0
-        for y in stride(from: Int(area.minY * scale), to: Int(area.maxY * scale), by: 2) {
-            for x in stride(from: Int(area.minX * scale), to: Int(area.maxX * scale), by: 2) {
-                guard let color = picture.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
-                    continue
-                }
-                if color.blueComponent > 0.8, color.redComponent < 0.35, color.greenComponent > 0.25, color.greenComponent < 0.65 {
-                    count += 1
-                }
-            }
-        }
-        return count
+        try await screen().count(in: area, where: Picture.isTildeBlue)
     }
 
     /// Waits until the area has at least, or at most, this many blue pixels.

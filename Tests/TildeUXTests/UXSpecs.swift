@@ -17,8 +17,11 @@ struct UXSpecs {
     /// on any Mac, so a second click may be needed.
     private func annotate(_ app: TildeApp) async throws {
         try await app.press("Annotate")
-        try await Task.sleep(for: .milliseconds(100))
-        if try await app.seen().contains(where: { $0.name == "Annotate" }) {
+        let end = Date().addingTimeInterval(1)
+        while try await !app.seen().contains(where: { $0.name == "Annotating" }), Date() < end {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        if try await !app.seen().contains(where: { $0.name == "Annotating" }) {
             try await app.press("Annotate")
         }
         try await app.waitToSee("Annotating")
@@ -291,10 +294,12 @@ struct UXSpecs {
             #expect(FileManager.default.fileExists(atPath: remote.appendingPathComponent("feedback.md").path))
 
             // A machine that cannot be reached: the report still copies, with local paths, and
-            // a warning names the machine.
+            // a warning names the machine. The session before ended in recording mode, so this
+            // one starts with no mode.
             try app.setNodes(["no-such-host.invalid"])
             try await app.doubleTap("control")
-            try await app.waitToSee("Annotating")
+            try await app.waitToSee("Paused")
+            try await annotate(app)
             try await app.click(at: CGPoint(x: frame.minX + 80, y: frame.minY + 55))
             try await app.waitToSee("add")
             try await app.type("Stays local")
@@ -375,7 +380,7 @@ struct UXSpecs {
         try await first.doubleTap("control")
         try await first.waitToSee("Annotating")
         try await first.press("Draw")
-        try await first.waitToSee("Done, esc")
+        try await first.waitToSee("Done, ⌘↩")
         try await first.waitToSee("Drawing canvas", timeout: 15)
         let frame = ChangingWindow.frame
         let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
@@ -388,9 +393,13 @@ struct UXSpecs {
         try await first.waitToSee("On the window", timeout: 3)
         try await first.key(.enter)
         try await first.waitNotToSee("add")
-        try await first.key(.escape)
-        try await first.waitNotToSee("Done, esc")
+        // Done ends Draw in no mode; Annotate goes back to annotating, where the notes are
+        // checked while the page changes by itself.
+        try await first.key(.enter, command: true)
+        try await first.waitNotToSee("Done, ⌘↩")
         try await first.waitToSeeText(containing: "1 note")
+        try await first.waitToSee("Paused")
+        try await annotate(first)
         let hud = try await first.waitToSee("Annotating")
         try await first.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
         step("rectangle saved")
@@ -481,9 +490,9 @@ struct UXSpecs {
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
 
-            // Esc goes back to annotating.
+            // Esc leaves recording mode, with no mode.
             try await app.key(.escape)
-            try await app.waitToSee("Annotating")
+            try await app.waitToSee("Paused")
 
             // The record toggle chooses at once: a click on the fixture's window chooses it for
             // the next clip, and the subtitle names it.
@@ -526,6 +535,225 @@ struct UXSpecs {
             step("window clip \(size.width) × \(size.height), window \(bounds.width) × \(bounds.height)")
             #expect(abs(size.width / size.height - bounds.width / bounds.height) < 0.02)
         }
+    }
+
+    // MARK: - Draw
+
+    /// In Draw, Esc on a shape's comment with text asks first, and Esc again keeps the comment
+    /// with the keyboard in it, so typing goes on in the box.
+    @Test func escTwiceOnAShapesCommentKeepsTypingInTheBox() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await app.key(.d)
+            try await app.waitToSee("Done, ⌘↩")
+            try await app.waitToSee("Drawing canvas", timeout: 15)
+            let frame = ChangingWindow.frame
+            try await app.key(.r)
+            try await app.drag(from: CGPoint(x: frame.minX + 100, y: frame.minY + 100), to: CGPoint(x: frame.minX + 300, y: frame.minY + 220))
+            try await app.waitToSee("add", timeout: 15)
+            try await app.type("Keep this")
+            try await app.waitToSee("Keep this", timeout: 3)
+
+            try await app.key(.escape)
+            try await app.waitToSee("Discard comment?")
+            try await app.key(.escape)
+            try await app.waitNotToSee("Discard comment?")
+            try await app.type(" too")
+            try await app.waitToSee("Keep this too", timeout: 3)
+            let focus = try await app.focus()
+            #expect(focus.app == app.pid)
+            #expect(focus.role == "AXTextArea")
+            #expect(focus.value == "Keep this too")
+
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
+            try await app.waitToSeeText(containing: "1 note")
+        }
+    }
+
+    // MARK: - Wireframe
+
+    /// A wireframe drawn on another app's window reaches the agent. W starts wireframe mode, a
+    /// tool's letter chooses the tool, an edge snaps to the window's layout with a guide, Esc
+    /// puts the tool down and the components still move, and they keep to the window while it
+    /// moves. Done asks for the comment at once, and Edit Wireframe in the preview draws the
+    /// note again in place. The agent gets the component and two pictures: the wireframe over
+    /// the window, and the window under it. The next session starts in the mode that was on
+    /// last, and Tilde's browser with no mode.
+    @Test func aWireframeOnAWindowReachesTheAgentWithItsTwoPictures() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Codex")
+            let reply = try await agent.call("start_annotation", ["wait_seconds": 0])
+            let session = try #require(reply.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0 != "." && $0 != " " && $0 != "\n" }))
+            try await app.waitToSee("Annotating")
+
+            try await app.key(.w)
+            try await app.waitToSee("Done, ⌘↩")
+            try await app.waitToSee("Section")
+            try await app.waitToSee("Drawing canvas", timeout: 15)
+            step("wireframe mode")
+
+            // B chooses the button. Its bottom edge, drawn 1 pt below the top of the window's
+            // fourth row, snaps to it, and a guide runs across the screen there.
+            let frame = ChangingWindow.frame
+            let row = frame.minY + 140
+            let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
+            let end = CGPoint(x: start.x + 160, y: row + 1)
+            try await app.key(.b)
+            try await app.mouseDown(at: start)
+            for part in 1...6 {
+                let t = Double(part) / 6
+                try await app.mouseDragged(to: CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t))
+            }
+            let guide = CGRect(x: 1000, y: row - 2, width: 600, height: 3)
+            try await waitFor(app, at: guide, every: 1, Picture.isTildeBlue, atLeast: 150)
+            try await app.mouseUp(at: end)
+            try await waitFor(app, at: CGRect(x: start.x + 20, y: row - 6, width: 120, height: 4), Picture.isWireframe, atLeast: 40)
+            try await waitFor(app, at: CGRect(x: start.x + 20, y: row + 2, width: 120, height: 4), Picture.isWireframe, atMost: 0)
+            step("button snapped")
+
+            // Esc puts the tool down: a drag where nothing is draws nothing, and a drag on the
+            // button moves it.
+            try await app.key(.escape)
+            let empty = CGRect(x: frame.minX + 350, y: frame.minY + 250, width: 80, height: 80)
+            try await app.drag(from: CGPoint(x: empty.minX, y: empty.minY), to: CGPoint(x: empty.maxX, y: empty.maxY))
+            try await Task.sleep(for: .milliseconds(500))
+            try await waitFor(app, at: empty, Picture.isWireframe, atMost: 0)
+            try await app.drag(from: CGPoint(x: start.x + 80, y: start.y + 20), to: CGPoint(x: start.x + 80, y: start.y + 120))
+            try await waitFor(app, at: CGRect(x: start.x + 20, y: start.y + 110, width: 120, height: 20), Picture.isWireframe, atLeast: 200)
+            try await waitFor(app, at: CGRect(x: start.x + 20, y: start.y + 10, width: 120, height: 20), Picture.isWireframe, atMost: 0)
+            step("tool down, button moved")
+
+            // The window glides away and back to rest: in every picture of the screen, the
+            // button keeps its place on the window.
+            try window.show("marked")
+            let middle = start.y + 120
+            func place(on picture: Picture) -> (mark: Double, button: Double)? {
+                guard let mark = picture.firstX(onRow: middle, from: frame.minX - 50, to: frame.maxX + 300, where: Picture.isMark),
+                      let button = picture.firstX(onRow: middle, from: mark + 10, to: mark + 400, where: Picture.isWireframe)
+                else {
+                    return nil
+                }
+                return (mark, button - mark)
+            }
+            // A strip through the button's middle, from left of the window to past where it ends.
+            let strip = CGRect(x: frame.minX - 50, y: middle - 1, width: frame.width + 400, height: 2)
+            var resting: (mark: Double, button: Double)?
+            for _ in 0..<20 where resting == nil {
+                resting = try await place(on: app.screen(in: strip))
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            let before = try #require(resting, "No red mark and button on the window")
+            // Every frame that the screen shows while the window glides 180 pt in 1.5 s.
+            try window.show("glide")
+            let frames = try await app.recordRow(at: middle, from: strip.minX, width: strip.width, seconds: 2.4)
+            var places = frames.compactMap(place)
+            if let place = try await place(on: app.screen(in: strip)) {
+                places.append(place)
+            }
+            let moving = places.filter { $0.mark > before.mark + 4 && $0.mark < before.mark + 176 }
+            #expect(moving.count >= 30, "Too few frames while the window moved: \(places)")
+            // Two apps' windows show their changes one or two frames apart: at 120 pt a second,
+            // the button is never more than 50 ms off (6 pt), and about 20 ms (2.5 pt) on average.
+            let offsets = moving.map { abs($0.button - before.button) }
+            #expect(offsets.allSatisfy { $0 <= 6 }, "The button lags the window: \(moving)")
+            #expect(offsets.reduce(0, +) / Double(max(offsets.count, 1)) <= 2.5, "The button lags the window: \(moving)")
+            let after = try #require(places.last)
+            #expect(after.mark >= before.mark + 178)
+            #expect(abs(after.button - before.button) <= 1)
+            step("button kept to the window in \(moving.count) frames: \(moving.map { String(format: "%.0f", $0.button - before.button) }.joined(separator: " "))")
+
+            // Done opens the comment box, and typing goes in with no click.
+            try await app.key(.enter, command: true)
+            try await app.waitToSee("add")
+            try await app.type("A button here")
+            try await app.waitToSee("A button here", timeout: 3)
+            try await app.key(.enter)
+            try await app.waitNotToSee("add")
+            try await app.waitToSeeText(containing: "1 note")
+            step("comment")
+
+            // Edit Wireframe draws the button again where it was; moved and Done, it replaces
+            // the note.
+            try await app.press("Show notes")
+            try await app.press("A button here")
+            try await app.waitToSee("1 of 1")
+            try await app.press("Edit Wireframe")
+            try await app.waitToSee("Done, ⌘↩")
+            let mark = after.mark
+            let button = CGRect(x: mark + before.button + 10, y: middle - 10, width: 100, height: 20)
+            try await waitFor(app, at: button, Picture.isWireframe, atLeast: 200)
+            try await app.key(.escape)
+            try await app.drag(from: CGPoint(x: button.midX, y: middle), to: CGPoint(x: button.midX, y: middle + 60))
+            let moved = button.offsetBy(dx: 0, dy: 60)
+            try await waitFor(app, at: moved, Picture.isWireframe, atLeast: 200)
+            try await app.key(.enter, command: true)
+            try await app.waitNotToSee("Done, ⌘↩")
+            try await app.waitToSeeText(containing: "1 note")
+            step("edited")
+
+            // The agent gets one note with the button where it was last, and its two pictures:
+            // the button over the window, and the window under it.
+            try await app.key(.enter, command: true)
+            let report = try await agent.call("wait_for_annotation", ["session_id": String(session), "wait_seconds": 15])
+            #expect(report.text.contains("A button here"), "\(report.text)")
+            #expect(report.text.contains("(1 annotations)"), "\(report.text)")
+            #expect(report.text.contains(#""type":"button""#), "\(report.text)")
+            let bounds = try #require(window.bounds)
+            let rectText = try #require(report.text.firstMatch(of: #/"rect":\[([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)\]/#), "\(report.text)")
+            let rect = CGRect(x: Double(rectText.1)!, y: Double(rectText.2)!, width: Double(rectText.3)!, height: Double(rectText.4)!)
+            // On the window, from its top left with the title bar.
+            let shown = CGRect(x: before.button, y: middle + 60 - 20 - bounds.minY, width: 160, height: 40)
+            #expect(abs(rect.minX - shown.minX) <= 4 && abs(rect.minY - shown.minY) <= 4, "\(rect), shown at \(shown)")
+            let folder = try #require(report.text.components(separatedBy: "\n").first { $0.hasPrefix("Saved to: ") }?.dropFirst("Saved to: ".count))
+            let closeUp = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1.png")), width: bounds.width)
+            let context = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1-context.png")), width: bounds.width)
+            let inside = rect.insetBy(dx: 10, dy: 8)
+            let samples = Int(inside.width * inside.height)
+            #expect(abs(closeUp.size.height - bounds.height) <= 1 && abs(context.size.height - bounds.height) <= 1, "\(closeUp.size), \(context.size), window \(bounds.size)")
+            #expect(closeUp.count(in: inside, where: Picture.isWireframe) > samples / 2)
+            #expect(context.count(in: inside, where: Picture.isWireframe) == 0)
+            step("report")
+
+            // The next session starts in the mode that was on last: none, after Done; then
+            // wireframe mode. Tilde's browser starts with no mode.
+            try await app.waitNotToSee("Close", timeout: 5)
+            try await app.doubleTap("control")
+            try await app.waitToSee("Paused")
+            #expect(try await !app.seen().contains { $0.name == "Done, ⌘↩" })
+            try await app.press("Wireframe")
+            try await app.waitToSee("Done, ⌘↩")
+            try await app.press("Close")
+            try await app.waitNotToSee("Close")
+            try await app.doubleTap("control")
+            try await app.waitToSee("Done, ⌘↩")
+            try await app.waitToSee("Annotating")
+            try await app.press("Close")
+            try await app.waitNotToSee("Close")
+            try await app.menu("Open Browser")
+            try await app.waitToSee("Paused", timeout: 15)
+            #expect(try await !app.seen().contains { $0.name == "Done, ⌘↩" })
+            step("start modes")
+        }
+    }
+
+    /// Waits until the area of the screen has at least, or at most, this many pixels that match.
+    private func waitFor(_ app: TildeApp, at area: CGRect, every step: Int = 2, _ matches: (Picture.Color) -> Bool, atLeast: Int = 0, atMost: Int = .max, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let end = Date().addingTimeInterval(6)
+        var last = 0
+        while Date() < end {
+            last = try await app.screen().count(in: area, every: step, where: matches)
+            if last >= atLeast, last <= atMost {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        Issue.record("\(last) pixels in \(area), expected \(atLeast)...\(atMost)", sourceLocation: sourceLocation)
     }
 }
 
