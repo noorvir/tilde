@@ -123,7 +123,9 @@ final class AnnotationController: ObservableObject {
     /// The double tap, the hold key and the answers to a question.
     private let keyMonitors: KeyMonitors
     let picker: ElementPicker
-    // The session's windows show the session, so each is made with the controller.
+
+    // The session's windows show the session: a part that has one makes it with the
+    // controller, the first time it shows.
     /// The comment box next to a new note or one that is edited, while `flow` has it open.
     private(set) lazy var commentBox = CommentBox { [unowned self] in CommentPanel(controller: self) }
     /// The preview card on a note, while `flow` has it open.
