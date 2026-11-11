@@ -7,14 +7,6 @@ enum RecordingSource: Equatable {
     case window(ElementPicker.WindowInfo)
     case phone(Phone)
 
-    /// A screen or window of this Mac, where Tilde can draw notes; a phone is for recording only.
-    var isDrawable: Bool {
-        if case .phone = self {
-            return false
-        }
-        return true
-    }
-
     /// The same while a window moves or resizes.
     var id: String {
         switch self {

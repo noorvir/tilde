@@ -38,7 +38,7 @@ final class AnnotationController: ObservableObject {
     /// While choosing, the source picker is open in full in place of its "Use window picker"
     /// button, and clicks on screen choose nothing.
     var isSourcePickerOpen: Bool {
-        if case .picking(_, true) = flow.session?.activity {
+        if case .picking(isPickerOpen: true) = flow.session?.activity {
             return true
         }
         return false
@@ -855,10 +855,9 @@ final class AnnotationController: ObservableObject {
         overlays.orderAbove(scope.window?.number)
     }
 
-    /// The choice: a window limits the session to it, as clicking it on screen does; a screen
-    /// or phone lifts the limit. A phone only records.
+    /// The choice of what the next clip records, in the picker or by a click on screen.
     func choose(_ source: RecordingSource) {
-        dispatch(.choose(drawable: source.isDrawable), with: [.applySource: { [self] in
+        dispatch(.choose, with: [.applySource: { [self] in
             scope.choose(source)
         }])
     }

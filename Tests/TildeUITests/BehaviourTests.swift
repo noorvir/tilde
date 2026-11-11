@@ -357,7 +357,7 @@ struct BehaviourTests {
             characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
         ))
 
-        open(drafts: Fixtures.drafts(1), activity: .picking(isRecordMode: false, isPickerOpen: false))
+        open(drafts: Fixtures.drafts(1), activity: .picking(isPickerOpen: false))
         view.keyDown(with: send)
         #expect(controller.isPickingWindow)
 
@@ -387,16 +387,18 @@ struct BehaviourTests {
         #expect(ScreenRecorder.videoSize(of: CGSize(width: 3455, height: 2235)) == (2560, 1656))
     }
 
-    /// Annotating takes only sources Tilde can draw on. A phone chosen for recording goes when
-    /// recording mode ends, back to everything on screen.
+    /// Annotating has no source choice: a choice outside recording mode changes nothing. A
+    /// phone chosen for recording goes when recording mode ends, back to everything on screen.
     @Test func aPhoneIsARecordingSourceOnly() {
         let phone = Phone(id: "phone", name: "iPhone")
-        open(activity: .picking(isRecordMode: false, isPickerOpen: false))
+        open()
+        controller.dispatch(.windowButton)
         controller.choose(.phone(phone))
         #expect(controller.scope.source == nil)
-        #expect(controller.isPickingWindow)
+        #expect(!controller.isPickingWindow)
+        #expect(!controller.isRecordMode)
 
-        open(activity: .picking(isRecordMode: true, isPickerOpen: false))
+        open(activity: .picking(isPickerOpen: false))
         controller.choose(.phone(phone))
         #expect(controller.scope.source == .phone(phone))
         controller.dispatch(.toggleRecordingMode)
@@ -429,7 +431,7 @@ struct BehaviourTests {
     /// adding notes never moves a button.
     @Test(arguments: [
         SessionFlow.Activity.annotating, .recording(.ready), .recording(.starting(operation: 0)), .recording(.recording),
-        .recording(.paused), .recording(.finishing(operation: 0, thenSend: false)), .picking(isRecordMode: true, isPickerOpen: false),
+        .recording(.paused), .recording(.finishing(operation: 0, thenSend: false)), .picking(isPickerOpen: false),
     ])
     func everyModeFitsThePillWidth(activity: SessionFlow.Activity) {
         for pauses in [[], [SessionFlow.PauseReason.user]] as [Set<SessionFlow.PauseReason>] {
@@ -699,13 +701,13 @@ struct BehaviourTests {
         #expect(controller.clipSourceName == "Safari")
 
         // While choosing, every window can be clicked, and Esc keeps the choice.
-        open(activity: .picking(isRecordMode: true, isPickerOpen: false), source: .window(Fixtures.window))
+        open(activity: .picking(isPickerOpen: false), source: .window(Fixtures.window))
         #expect(controller.allows(elsewhere))
         controller.escapePressed()
         #expect(controller.isRecordMode)
         #expect(controller.clipSource == .window(Fixtures.window))
 
-        open(activity: .picking(isRecordMode: true, isPickerOpen: false), source: .window(Fixtures.window))
+        open(activity: .picking(isPickerOpen: false), source: .window(Fixtures.window))
         controller.choose(.screen(1))
         #expect(!controller.isPickingWindow)
         #expect(controller.scope.source == .screen(1))
@@ -730,7 +732,7 @@ struct BehaviourTests {
     /// The open picker takes no clicks on screen. "‹ Back" and Esc step back one level: an
     /// app's windows, then the picker, then choosing.
     @Test func theOpenPickerStepsBackOneLevelAtATime() {
-        open(activity: .picking(isRecordMode: true, isPickerOpen: true))
+        open(activity: .picking(isPickerOpen: true))
         controller.click(at: CGPoint(x: -5000, y: -5000))
         #expect(controller.isSourcePickerOpen)
         #expect(controller.scope.source == nil)
@@ -1003,7 +1005,7 @@ struct BehaviourTests {
     }
 
     @Test func escEndsChoosingAWindowFirst() async throws {
-        open(drafts: Fixtures.drafts(1), activity: .picking(isRecordMode: false, isPickerOpen: false))
+        open(drafts: Fixtures.drafts(1), activity: .picking(isPickerOpen: false))
 
         controller.escapePressed()
 

@@ -165,7 +165,7 @@ enum Surfaces {
             open.activity = .recording(clip)
         }
         if state.pickingWindow == true {
-            open.activity = .picking(isRecordMode: clip != nil, isPickerOpen: state.sourcePicker != nil)
+            open.activity = .picking(isPickerOpen: state.sourcePicker != nil)
         }
         var mode = SessionFlow.Mode.open(open)
         if state.sent != nil {

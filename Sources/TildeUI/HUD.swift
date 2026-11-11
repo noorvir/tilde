@@ -773,9 +773,9 @@ struct HUDView: View {
     /// recording mode the record button, red to start or resume a clip and pause while it records.
     static func status(of open: SessionFlow.Open, shortcut: Shortcut?, clock: (since: Date, before: TimeInterval)) -> Status {
         switch open.activity {
-        case .picking(let isRecordMode, _):
+        case .picking:
             var back = open
-            back.activity = isRecordMode ? .recording(.ready) : .annotating
+            back.activity = .recording(.ready)
             var status = status(of: back, shortcut: shortcut, clock: clock)
             status.title = "Choose a window"
             return status
@@ -803,7 +803,7 @@ struct HUDView: View {
     /// Every title the HUD shows, with the widest clock, for the width of the title column.
     static let titles: [String] = {
         let modes: [SessionFlow.Open] = [
-            SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(isRecordMode: true, isPickerOpen: false)),
+            SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(isPickerOpen: false)),
         ] + [SessionFlow.Clip.ready, .starting(operation: 0), .recording, .paused, .finishing(operation: 0, thenSend: false)].map {
             SessionFlow.Open(activity: .recording($0))
         }

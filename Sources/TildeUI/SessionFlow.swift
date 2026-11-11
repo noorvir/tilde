@@ -58,7 +58,7 @@ struct SessionFlow: Equatable {
             activity == .recording(.recording) || activity == .recording(.paused)
         }
 
-        /// Whether a source can be chosen now: not while a clip keeps its source.
+        /// Whether the session's source can change now: not while a clip keeps its source.
         var canPick: Bool {
             switch activity {
             case .annotating, .recording(.ready), .picking: true
@@ -74,7 +74,7 @@ struct SessionFlow: Equatable {
         /// Choosing what to record, in recording mode with no clip in progress; the session
         /// goes back there after the choice. The picker is open in full, or only its "Use
         /// window picker" button shows.
-        case picking(isRecordMode: Bool, isPickerOpen: Bool)
+        case picking(isPickerOpen: Bool)
     }
 
     /// The clip of recording mode.
@@ -136,8 +136,8 @@ struct SessionFlow: Equatable {
         /// The recorded window, screen or phone stopped sending frames.
         case captureStopped
         case windowButton, openPicker
-        /// A window or screen (drawable) or a phone was chosen.
-        case choose(drawable: Bool)
+        /// A window, a screen or a phone was chosen to record.
+        case choose
         case send, sendFinished(Int), sendFailed(Int), sentShown(Int), pushFailed
     }
 
@@ -194,7 +194,7 @@ struct SessionFlow: Equatable {
     /// Recording mode, also while choosing the source of its next clip.
     var isRecordMode: Bool {
         switch session?.activity {
-        case .recording, .picking(isRecordMode: true, _): true
+        case .recording, .picking: true
         default: false
         }
     }
@@ -211,8 +211,9 @@ struct SessionFlow: Equatable {
         session?.holdsClip ?? false
     }
 
-    /// The window button works: annotating, recording mode with no clip in progress, or
-    /// choosing. The source of a clip in progress stays until Stop.
+    /// Whether the session's source can change now: Tilde's browser can limit the session, a
+    /// restore can open its page and recording mode can choose. The source of a clip in
+    /// progress stays until Stop.
     var canPick: Bool {
         guard case .open(let open) = mode else {
             return false
@@ -312,8 +313,8 @@ struct SessionFlow: Equatable {
             return effects
         case .open(var open):
             let effects: [Effect]
-            if case .picking(let isRecordMode, let isPickerOpen) = open.activity {
-                effects = handlePicking(event, isRecordMode: isRecordMode, isPickerOpen: isPickerOpen, &open)
+            if case .picking(let isPickerOpen) = open.activity {
+                effects = handlePicking(event, isPickerOpen: isPickerOpen, &open)
             } else if let question = open.question, !Self.isAnswer(event, to: question) {
                 // A question waits for its answer; nothing else acts under it.
                 effects = []
@@ -397,13 +398,13 @@ struct SessionFlow: Equatable {
     /// While choosing, only the source name, Esc (or the picker's Back), the picker, a choice
     /// and the record toggle act, and the front app and hold key keep the pause the session
     /// goes back to; nothing else does anything.
-    private mutating func handlePicking(_ event: Event, isRecordMode: Bool, isPickerOpen: Bool, _ open: inout Open) -> [Effect] {
-        let back: Activity = isRecordMode ? .recording(.ready) : .annotating
+    private mutating func handlePicking(_ event: Event, isPickerOpen: Bool, _ open: inout Open) -> [Effect] {
+        let back = Activity.recording(.ready)
         switch event {
         case .escape:
             // One level back at a time, as in the preview: the open picker, then choosing.
             if isPickerOpen {
-                open.activity = .picking(isRecordMode: isRecordMode, isPickerOpen: false)
+                open.activity = .picking(isPickerOpen: false)
                 choosesInPicker = false
                 return [.closePicker]
             }
@@ -413,24 +414,18 @@ struct SessionFlow: Equatable {
             open.activity = back
             return [.stopPicking]
         case .openPicker:
-            open.activity = .picking(isRecordMode: isRecordMode, isPickerOpen: true)
+            open.activity = .picking(isPickerOpen: true)
             choosesInPicker = true
             return [.openPicker]
         case .toggleRecordingMode:
             // Choosing ends with no change, and the toggle goes back to annotating.
             open.activity = back
             return [.stopPicking] + handleOpen(.toggleRecordingMode, &open)
-        case .choose(let drawable):
-            // A phone only records; annotating takes only what it can draw on.
-            guard drawable || isRecordMode else {
-                return []
-            }
+        case .choose:
             open.activity = back
             return [.applySource, .stopPicking]
         case .holdEnded:
             return endHold(&open)
-        case .otherAppInFront:
-            return isRecordMode ? [] : pauseForOtherApp(&open)
         case .scopeAppInFront:
             return endOtherAppPause(&open)
         case .ended:
@@ -781,7 +776,7 @@ struct SessionFlow: Equatable {
     }
 
     private func startPicking(_ open: inout Open) -> [Effect] {
-        open.activity = .picking(isRecordMode: true, isPickerOpen: choosesInPicker)
+        open.activity = .picking(isPickerOpen: choosesInPicker)
         return [.startPicking] + (choosesInPicker ? [.openPicker] : [])
     }
 

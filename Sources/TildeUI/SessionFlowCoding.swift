@@ -7,7 +7,7 @@ import Foundation
 /// An unknown key or value is an error, so a typo cannot test another state.
 extension SessionFlow: Codable {
     private enum Key: String, CodingKey, CaseIterable {
-        case mode, pauses, drawing, panel, question, clip, operation, thenSend, recordMode, pickerOpen, returnTo
+        case mode, pauses, drawing, panel, question, clip, operation, thenSend, pickerOpen, returnTo
         case choosesInPicker, lastOperation
     }
 
@@ -72,10 +72,7 @@ extension SessionFlow: Codable {
             }
             open.activity = .recording(clip)
         case "picking":
-            open.activity = .picking(
-                isRecordMode: try values.decodeIfPresent(Bool.self, forKey: .recordMode) ?? false,
-                isPickerOpen: try values.decodeIfPresent(Bool.self, forKey: .pickerOpen) ?? false
-            )
+            open.activity = .picking(isPickerOpen: try values.decodeIfPresent(Bool.self, forKey: .pickerOpen) ?? false)
         default:
             open.activity = .annotating
         }
@@ -111,9 +108,8 @@ extension SessionFlow: Codable {
         switch open.activity {
         case .annotating:
             try values.encode("annotating", forKey: .mode)
-        case .picking(let isRecordMode, let isPickerOpen):
+        case .picking(let isPickerOpen):
             try values.encode("picking", forKey: .mode)
-            try values.encode(isRecordMode, forKey: .recordMode)
             try values.encode(isPickerOpen, forKey: .pickerOpen)
         case .recording(let clip):
             try values.encode("recording", forKey: .mode)
@@ -159,7 +155,7 @@ extension SessionFlow.Facts: Codable {
 }
 
 /// An event as the contract rows write it: its name, and after a colon what it carries, such
-/// as `"clipStarted:1"`, `"choose:phone"` or `"begin:browser"`.
+/// as `"clipStarted:1"` or `"begin:browser"`.
 extension SessionFlow.Event: Codable {
     init(from decoder: Decoder) throws {
         let text = try decoder.singleValueContainer().decode(String.self)
@@ -176,7 +172,7 @@ extension SessionFlow.Event: Codable {
             "redoDrawing": .redoDrawing, "shapeFinished": .shapeFinished, "toggleRecordingMode": .toggleRecordingMode, "record": .record,
             "stop": .stop, "clipStarted": .clipStarted(operation), "clipStartFailed": .clipStartFailed(operation),
             "clipFinished": .clipFinished(operation), "clipFailed": .clipFailed(operation), "captureStopped": .captureStopped,
-            "windowButton": .windowButton, "openPicker": .openPicker, "choose": .choose(drawable: value != "phone"),
+            "windowButton": .windowButton, "openPicker": .openPicker, "choose": .choose,
             "send": .send, "sendFinished": .sendFinished(operation), "sendFailed": .sendFailed(operation), "sentShown": .sentShown(operation),
             "pushFailed": .pushFailed,
         ]

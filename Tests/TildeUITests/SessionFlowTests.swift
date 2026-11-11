@@ -20,7 +20,7 @@ struct SessionFlowTests {
         let activities: [SessionFlow.Activity] = [
             .annotating, .recording(.ready), .recording(.starting(operation: 3)), .recording(.recording), .recording(.paused),
             .recording(.finishing(operation: 3, thenSend: false)), .recording(.finishing(operation: 3, thenSend: true)),
-            .picking(isRecordMode: false, isPickerOpen: false), .picking(isRecordMode: true, isPickerOpen: true),
+            .picking(isPickerOpen: false), .picking(isPickerOpen: true),
         ]
         var opens: [Open] = []
         for activity in activities {
@@ -73,7 +73,7 @@ struct SessionFlowTests {
         .scopeAppInFront, .openComment, .clickAway, .submitComment, .closeComment, .openPreview, .closePreview, .toggleList,
         .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .toggleRecordingMode, .record, .stop,
         .clipStarted(3), .clipStarted(2), .clipStartFailed(3), .clipStartFailed(2), .clipFinished(3), .clipFinished(2),
-        .clipFailed(3), .clipFailed(2), .captureStopped, .windowButton, .openPicker, .choose(drawable: true), .choose(drawable: false),
+        .clipFailed(3), .clipFailed(2), .captureStopped, .windowButton, .openPicker, .choose,
         .send, .sendFinished(3), .sendFinished(2), .sendFailed(3), .sendFailed(2), .sentShown(3), .sentShown(2), .pushFailed,
     ]
 
