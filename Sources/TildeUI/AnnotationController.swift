@@ -1877,6 +1877,15 @@ final class AnnotationController: ObservableObject {
         dispatch(.toggleRecordingMode)
     }
 
+    /// Annotation mode: annotating, not paused and not drawing.
+    var isAnnotating: Bool {
+        flow.session?.activity == .annotating && flow.session?.pauses.isEmpty == true && !isDrawing
+    }
+
+    func toggleAnnotating() {
+        dispatch(.toggleAnnotating)
+    }
+
     /// The leading button in recording mode: starts a clip, pauses it, resumes it.
     func toggleRecord() {
         dispatch(.record)
@@ -2266,10 +2275,13 @@ final class AnnotationController: ObservableObject {
     /// newer request makes an older one stale.
     private var browserScopeRequest = 0
 
-    /// The scoped window closed: annotations cover everything again.
+    /// The scoped window closed: annotations cover everything again, with no mode on.
     private func endScope() {
         // A clip of the window ends with it, at its last frame.
         dispatch(.captureStopped)
+        if flow.session?.activity == .annotating, flow.session?.pauses.isEmpty == true {
+            dispatch(.togglePause)
+        }
         setScope(nil)
         show(notice: .windowClosed)
     }

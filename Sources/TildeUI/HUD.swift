@@ -549,8 +549,13 @@ struct HUDView: View {
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
+            HUDButton(image: Image(systemName: "hand.point.up.left"), isOn: controller.isAnnotating, keys: keys(.annotationMode), help: "Annotate") {
+                controller.toggleAnnotating()
+            }
+            .disabled(!flow.accepts(.toggleAnnotating))
+
             // Recording mode starts by choosing what to record.
-            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, keys: recordToggleKeys, help: controller.isRecordMode ? "Annotate" : "Record screen") {
+            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, keys: recordToggleKeys, help: "Record screen") {
                 controller.toggleRecordingMode()
             }
             .disabled(status.isBusy)

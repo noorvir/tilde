@@ -238,7 +238,7 @@ final class ShortcutStore: ObservableObject {
             switch self {
             case .startAnnotation: "Starts a session, or resumes a paused one"
             case .togglePause: "Esc also pauses; Esc again discards"
-            case .annotationMode: "Back to annotating from recording mode"
+            case .annotationMode: "Annotation mode on or off"
             case .recordingMode: "Into or out of recording mode, as the record toggle"
             case .drawingMode: "Starts drawing, as Draw; Esc ends it"
             case .pauseOrResume: "Pauses or resumes, or records in recording mode"
