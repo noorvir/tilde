@@ -249,17 +249,8 @@ final class AnnotationController: ObservableObject {
     private var returnApp: NSRunningApplication?
     /// The next session that starts from Tilde is limited to the browser window.
     private var scopesNextLocalSessionToBrowser = false
-    /// Ends the scope when the scoped window's app quits.
-    private var terminationObserver: NSObjectProtocol?
-    /// A slow check of the scoped window, for windows that send no move notifications.
-    private var scopeTimer: Timer?
-    /// Follows the scoped window as it moves, resizes or closes.
-    private var windowObserver: WindowObserver?
-    /// Checks the scoped window at display rate for a moment after it moved.
-    private var followTimer: Timer?
-    private var followsUntil = Date.distantPast
-    private var activationObserver: NSObjectProtocol?
-    private var pageObserver: NSObjectProtocol?
+    /// Follows the window that the session is limited to.
+    private let scopeFollower = ScopeFollower()
     private var hoverAfterScroll: Task<Void, Never>?
     /// Logs the first highlight after each resume, to measure how soon hover works.
     private var hasLoggedHover = false
@@ -404,6 +395,9 @@ final class AnnotationController: ObservableObject {
         // Also when the stack is the same: the browser's page notes can have come or gone.
         picker.windows.onRead = { [weak self] isChanged in
             self?.tracker.refreshCovers()
+            // Also for windows that send no move notifications, and for a window that came
+            // forward over its overlay.
+            self?.refreshScope()
             if isChanged {
                 self?.tracker.somethingChanged()
             }
@@ -1724,69 +1718,23 @@ final class AnnotationController: ObservableObject {
         // The front app now counts for the new window.
         dispatch(.scopeAppInFront)
         hover = nil
-        scopeTimer?.invalidate()
-        scopeTimer = nil
-        windowObserver?.invalidate()
-        windowObserver = nil
-        followTimer?.invalidate()
-        followTimer = nil
-        if let activationObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
-        }
-        activationObserver = nil
-        if let pageObserver {
-            NotificationCenter.default.removeObserver(pageObserver)
-        }
-        pageObserver = nil
+        scopeFollower.stop()
         if isOpen, !overlays.isEmpty {
             layoutOverlays()
         }
         placeHUD()
         scheduleSave()
-        if let terminationObserver {
-            NSWorkspace.shared.notificationCenter.removeObserver(terminationObserver)
-        }
-        terminationObserver = nil
         guard let window else {
             return
         }
-        terminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            MainActor.assumeIsolated {
-                if let self, app?.processIdentifier == window.pid, self.scope?.pid == window.pid {
-                    self.endScope()
-                }
+        scopeFollower.onCheck = { [weak self] frame in self?.refreshScope(frame: frame) }
+        scopeFollower.onAppQuit = { [weak self] in
+            if self?.scope?.pid == window.pid {
+                self?.endScope()
             }
         }
-        windowObserver = WindowObserver(window: window) { [weak self] frame in
-            self?.windowMoved(to: frame)
-        }
-        // The browser's page also moves in its window, such as when the notes panel opens.
-        if window.number == browser.windowNumber {
-            browser.webView.postsFrameChangedNotifications = true
-            pageObserver = NotificationCenter.default.addObserver(
-                forName: NSView.frameDidChangeNotification, object: browser.webView, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.refreshScope()
-                }
-            }
-        }
-        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-            MainActor.assumeIsolated {
-                self?.frontmostAppChanged(to: app?.processIdentifier)
-            }
-        }
-        scopeTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshScope()
-            }
-        }
+        scopeFollower.onFrontApp = { [weak self] pid in self?.frontmostAppChanged(to: pid) }
+        scopeFollower.start(window, page: window.number == browser.windowNumber ? browser.webView : nil)
         frontmostAppChanged(to: Self.frontmostPID)
     }
 
@@ -1797,26 +1745,6 @@ final class AnnotationController: ObservableObject {
             return ProcessInfo.processInfo.processIdentifier
         }
         return NSWorkspace.shared.frontmostApplication?.processIdentifier
-    }
-
-    /// The window moved or resized: follow it at once, then at display rate for 300 ms, as
-    /// move notifications can come in bursts and end before the last frame.
-    private func windowMoved(to frame: CGRect?) {
-        refreshScope(frame: frame)
-        followsUntil = Date().addingTimeInterval(0.3)
-        guard followTimer == nil else {
-            return
-        }
-        followTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] timer in
-            MainActor.assumeIsolated {
-                guard let self, Date() < self.followsUntil else {
-                    timer.invalidate()
-                    self?.followTimer = nil
-                    return
-                }
-                self.refreshScope()
-            }
-        }
     }
 
     /// Takes the window's new frame, or ends the scope with a note when the window is gone,
