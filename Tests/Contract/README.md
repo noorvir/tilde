@@ -4,7 +4,7 @@ What Tilde's UI must do, in plain files. No test here imports Tilde's code: a re
 the same files through the same tool and give the same results.
 
 `scripts/ui-check.sh` runs both layers, in seconds, with no screen, mouse or keyboard. It fails above 60 s (goal 30 s).
-Run it on every commit.
+Run it on every commit: `scripts/check.sh` runs it after `swift test`.
 
 | Layer | Files | Meaning |
 |---|---|---|
@@ -15,6 +15,7 @@ Run it on every commit.
 - **Checker:** `tilde-ui-check` uses no code of Tilde.
 - **New UI state:** add a state file, run `scripts/ui-check.sh --record <name>`, look at the picture, commit it. A picture records what you approve, bugs too.
 - **New rule:** add a row. A key left out of `expect` is not checked.
+- **Typos:** a key or a value that a picture state or a session row does not have is an error.
 - **Single keys:** a row with `key` (the default name, such as `"R"` or `"Space"`) in place of
   `event` presses that key while Tilde has the keyboard; `keyAction` is the action it chose
   (such as `rectangleTool`), or null for none.

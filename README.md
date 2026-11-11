@@ -155,7 +155,7 @@ the MCP server's instructions, so agents without skills get it too. It lives onl
 `Sources/TildeSkill/Skill.swift`.
 
 - Resources `tilde://feedback/latest` and one per recent batch hold sent feedback, for
-  example after ⌃⌥A and Send. In Claude Code, type `@tilde:` to attach one. They carry the
+  example after a session that you started yourself. In Claude Code, type `@tilde:` to attach one. They carry the
   report as text and the screenshots as PNG blobs; the report gives the inbox folder, so an
   agent can also open the PNG files.
 - While a tool call waits for you, Tilde streams progress such as "Tilde is open on the
@@ -176,7 +176,7 @@ and brings the agent's app (the one in front when the session started) back to t
 
 ## Annotate
 
-Agents start a session with `start_annotation`. To start one yourself, press ⌃⌥A
+Agents start a session with `start_annotation`. To start one yourself, tap ⌃ twice
 or choose Start Annotation in the menu-bar menu. Use this to send feedback to any
 agent by paste, or to try Tilde without an agent.
 
@@ -193,7 +193,7 @@ agent by paste, or to try Tilde without an agent.
 | Record button (HUD) | Goes to recording mode and lets you choose a screen, window or phone to record; click the source name under the title to choose again before Record. Click the button again to go back to annotating. |
 | Open Browser (menu) | Opens Tilde's browser and limits annotating to it; starts paused so you can browse first |
 | Open in Tilde's browser (under the HUD) | Shows once a session after your first click on a page in Chrome, Safari, Arc, Edge or Brave, and stays until you use it or dismiss it with ×. Opens that page in Tilde's browser, where you pick exact page elements and send their HTML and styles. Your notes stay |
-| ⌃⌥P or Pause (HUD) | Lets you use your apps; markers stay. Press again, or Annotate in the HUD, to go on |
+| Pause (HUD), or Esc with no box open | Lets you use your apps; markers stay. Annotate in the HUD, or ⌃ twice, goes on |
 | Clear all (HUD trash) | Deletes all annotations and keeps the session; asks first |
 | Cancel (HUD X or menu) | Closes the session without sending; the HUD asks first when there are annotations |
 | Drag the HUD pill | Moves the HUD on that screen. An outline shows the home position; the pill snaps there when close. Settings → General → HUD position → Reset also puts it back |
@@ -235,8 +235,11 @@ Every sent batch is also saved to `~/.tilde/inbox/<time>_<session>/` as
 ## Development
 
 ```sh
-swift test           # unit, behaviour and snapshot tests (about 10 s)
-scripts/e2e.sh       # full flow in one process, no permissions needed
+scripts/check.sh      # before every commit: the next two, about 30 s, no screen
+swift test            # unit and behaviour tests (about 10 s)
+scripts/ui-check.sh   # the UI contract: a picture of each state, a row for each rule
+scripts/ux-vm.sh      # the UX specs: the built app with real input, in a VM
+scripts/e2e.sh        # full flow in one process with synthesized events
 ```
 
 ### Testing
@@ -245,26 +248,28 @@ scripts/e2e.sh       # full flow in one process, no permissions needed
 |---|---|---|
 | `TildeCoreTests` | MCP session contract, HTTP server, node socket, the `tilde-mcp` stdio bridge, report path compaction | `swift test --filter TildeCoreTests` |
 | `TildeInstallerTests` | Install, merge, idempotency, uninstall, Codex TOML and linked skills folders, in a temporary home | `swift test --filter TildeInstallerTests` |
-| `TildeUITests/BehaviourTests` | Confirm flows, Esc/Return in the confirm state, single delete, close-up and context rules, HUD home, snap distance, on-screen limits | `swift test --filter BehaviourTests` |
-| `TildeUITests/SnapshotTests` | Pixel snapshots of every HUD state, the list, the comment box, the preview, a tooltip, the home outline and the overlay | `swift test --filter SnapshotTests` |
+| `TildeUITests` | What the controller does with no window on screen: the session flow, confirm flows, keys, saved sessions, note tracking rules, node links, the recorder, the Copy setup snippets | `swift test --filter TildeUITests` |
+| UI contract, `Tests/Contract` | A picture of each state of the HUD, the list, the comment box, the preview, tooltips, the overlay, the browser toolbar and Settings; a row for each rule (state plus event gives state) | `scripts/ui-check.sh` |
+| UX specs, `Tests/TildeUXTests` | A few flows that only the built app with real input and real apps can prove; they take over the screen | `scripts/ux-vm.sh` in the VM, `scripts/ux.sh` on this Mac |
 | `scripts/e2e.sh` | The whole flow with synthesized events: hover, click, comment, preview, region, send, inbox, agent result, capture shapes | `scripts/e2e.sh` |
 
-Snapshots render offscreen at 2× into sRGB on a grey background, with fixed fake data and
-generated images, and compare with the PNGs in `Tests/Snapshots/`. A pixel counts as
-different when a channel differs by more than 2 of 255; a snapshot fails when more than
-0.1% of its pixels differ. On failure, `<name>.actual.png` and `<name>.diff.png` (changes in
-red) are written to `.build/snapshot-failures/`.
+`scripts/check.sh` runs `swift test` and `scripts/ui-check.sh`; neither uses the screen, the
+mouse or the keyboard.
 
-Text rendering changes between macOS versions, so the references belong to the macOS
-version in `Tests/Snapshots/manifest.json`. On another version the tests stop with a
-message to record again. After an intended design change, or on a new macOS version:
+The UI contract draws each state offscreen at 2× and compares it with its picture in
+`Tests/Contract/pictures/macos-<version>/`. Text rendering changes between macOS versions,
+so the pictures belong to one macOS and SDK (`recorded-on.txt`): on that setup every pixel
+must be the same, on a close one a channel may differ by 2 in at most 0.1 % of the pixels,
+and on another macOS no picture is compared. A picture that differs is written to
+`.build/ui-check/<name>.png`. After an intended design change, look at it, then record it,
+only on the macOS the pictures are for:
 
 ```sh
-TILDE_RECORD_SNAPSHOTS=1 swift test --filter SnapshotTests
+scripts/ui-check.sh --record <name>
 ```
 
-Then look at the changed PNGs in `git diff` before you commit them. The UI tests need a
-logged-in Mac with a window server; they do not run headless.
+Then look at the changed PNGs in `git diff` before you commit them. `Tests/Contract/README.md`
+and `Tests/TildeUXTests/README.md` say how to add a state, a row or a flow.
 
 `scripts/e2e.sh` runs the real MCP server, browser, overlay, HUD and comment box.
 It drives them with synthesized AppKit events, acts as the agent, and writes
