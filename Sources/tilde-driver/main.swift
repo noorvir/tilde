@@ -14,6 +14,7 @@ import CoreVideo
 //   POST /tap   {"key": "control|option|shift|command|function"}  a modifier pressed and released
 //   POST /ax    {"pid": 123}               the app's windows and menu bar extras as a JSON tree
 //   POST /press {"pid": 123, "name": "..."} AXPress on the first element with that name
+//   POST /focus                        the app in front, its focused element and the system's
 //   POST /window {"pid": 123, "title": "..."} a picture of that window, as base64 PNG
 // Coordinates are Quartz screen points (top-left origin of the main display).
 
@@ -84,6 +85,14 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
         let pid = pid_t(body["pid"] as? Int ?? 0)
         maxDepth = body["depth"] as? Int ?? 40
         return json(["tree": roots(of: pid).map { node($0, depth: 0) }])
+
+    case ("POST", "/focus"):
+        var result: [String: Any] = ["system": focusedElement(of: AXUIElementCreateSystemWide()) as Any]
+        if let front = NSWorkspace.shared.frontmostApplication {
+            result["front"] = Int(front.processIdentifier)
+            result["inFront"] = focusedElement(of: AXUIElementCreateApplication(front.processIdentifier))
+        }
+        return json(result)
 
     case ("POST", "/window"):
         return json(["png": windowPicture(pid: body["pid"] as? Int ?? 0, title: body["title"] as? String ?? "") as Any])
@@ -187,6 +196,22 @@ func axName(_ element: AXUIElement) -> String? {
         }
     }
     return nil
+}
+
+/// The element with the keyboard in an app, or on the whole Mac for the system-wide element,
+/// as a tool that pastes text reads it.
+func focusedElement(of owner: AXUIElement) -> [String: Any]? {
+    guard let element: AXUIElement = axValue(owner, kAXFocusedUIElementAttribute) else {
+        return nil
+    }
+    var pid: pid_t = 0
+    AXUIElementGetPid(element, &pid)
+    var isSettable: DarwinBoolean = false
+    AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &isSettable)
+    return [
+        "pid": Int(pid), "role": axValue(element, kAXRoleAttribute) as String? ?? "",
+        "value": axValue(element, kAXValueAttribute) as String? ?? "", "editable": isSettable.boolValue,
+    ]
 }
 
 nonisolated(unsafe) var maxDepth = 40

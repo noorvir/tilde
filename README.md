@@ -213,7 +213,8 @@ shows its key, and Settings → Shortcuts changes them.
 
 While drawing, only the drawing keys work; D and Space do nothing. Done or Esc ends drawing.
 
-Tilde does not take focus from your app while you annotate.
+Tilde does not take focus from your app while you annotate. It is the app in front only
+while you write a comment, so that a dictation app pastes into the comment box.
 
 **iOS Simulator (Xcode 27 Device Hub):** drag a region on the device screen. A click
 gives only the whole device view. Device Hub exposes the iOS elements to Accessibility,

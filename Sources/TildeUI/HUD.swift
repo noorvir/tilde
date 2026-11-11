@@ -218,7 +218,8 @@ final class HUDPanel {
     }
 }
 
-/// Borderless panel that can take keyboard focus without activating other windows.
+/// Borderless panel that can take keyboard focus without activating other windows. While one
+/// of its text views has the keyboard, Tilde is the app in front; see `TextEntryFront`.
 class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 
@@ -227,6 +228,36 @@ class FloatingPanel: NSPanel {
             return
         }
         super.sendEvent(event)
+    }
+
+    override func becomeKey() {
+        super.becomeKey()
+        textEntryChanged()
+    }
+
+    @discardableResult
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let isMade = super.makeFirstResponder(responder)
+        textEntryChanged()
+        return isMade
+    }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        TextEntryFront.giveBack(from: self)
+    }
+
+    /// Another window with the keyboard changes nothing: the text view gets it back, or the
+    /// panel closes.
+    private func textEntryChanged() {
+        guard isKeyWindow else {
+            return
+        }
+        if firstResponder is NSTextView {
+            TextEntryFront.take(for: self)
+        } else {
+            TextEntryFront.giveBack(from: self)
+        }
     }
 }
 

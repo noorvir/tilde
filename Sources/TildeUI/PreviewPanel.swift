@@ -169,13 +169,11 @@ final class PreviewPanel {
 }
 
 /// Panel that handles navigation keys before its views, so a focused control cannot take them.
-private final class KeyPanel: NSPanel {
+private final class KeyPanel: FloatingPanel {
     var onKey: ((NSEvent) -> Bool)?
 
-    override var canBecomeKey: Bool { true }
-
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, onKey?(event) == true || insertNewlineOnShiftReturn(event, in: self) {
+        if event.type == .keyDown, onKey?(event) == true {
             return
         }
         super.sendEvent(event)

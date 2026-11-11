@@ -217,6 +217,13 @@ final class TildeApp {
         try await Task.sleep(for: .milliseconds(30))
     }
 
+    /// Puts text on the clipboard and presses ⌘V, as a dictation app does with what it heard.
+    func paste(_ text: String) async throws {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        try await key(.v, command: true)
+    }
+
     func doubleTap(_ modifier: String) async throws {
         try await drive("tap", ["key": modifier])
         try await Task.sleep(for: .milliseconds(80))
@@ -342,6 +349,73 @@ final class TildeApp {
         let names = try await seen().compactMap(\.name)
         Issue.record("No text with \"\(part)\" on screen. On screen: \(names.prefix(40))", sourceLocation: sourceLocation)
         throw UXFailure(description: "\(part) is not on screen")
+    }
+
+    // MARK: - The app in front
+
+    /// A text field with the keyboard, as Accessibility reports it.
+    struct Focus: Equatable {
+        let pid: Int
+        let role: String
+        let value: String
+        let isEditable: Bool
+
+        init?(_ json: Any?) {
+            guard let json = json as? [String: Any] else {
+                return nil
+            }
+            pid = json["pid"] as? Int ?? 0
+            role = json["role"] as? String ?? ""
+            value = json["value"] as? String ?? ""
+            isEditable = json["editable"] as? Bool ?? false
+        }
+    }
+
+    /// Waits until Tilde is the app in front and its text field with this text has the
+    /// keyboard, both for the app in front and for the whole Mac: where a tool that pastes
+    /// text looks for what it pasted.
+    func waitForTextInFront(_ text: String, timeout: Double = 5, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let end = Date().addingTimeInterval(timeout)
+        var last: [String: Any] = [:]
+        while Date() < end {
+            last = try await drive("focus", [:])
+            let fields = [Focus(last["inFront"]), Focus(last["system"])]
+            let isTyped = fields.allSatisfy { $0?.pid == pid && $0?.isEditable == true && $0?.value == text && ["AXTextArea", "AXTextField"].contains($0?.role) }
+            if last["front"] as? Int == pid, isTyped {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        await saveFailure(named: "front-\(sourceLocation.line)")
+        Issue.record("Tilde (\(pid)) is not in front with \"\(text)\" in its text field: \(last)", sourceLocation: sourceLocation)
+    }
+
+    /// Waits until the app with this process is the one in front.
+    func waitForFront(_ process: Int32, timeout: Double = 5, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let end = Date().addingTimeInterval(timeout)
+        var front: Int?
+        while Date() < end {
+            front = try await drive("focus", [:])["front"] as? Int
+            if front == Int(process) {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        Issue.record("The app in front is \(front ?? 0), not \(process)", sourceLocation: sourceLocation)
+    }
+
+    /// Clicks the text field that shows this text.
+    func clickField(_ text: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let end = Date().addingTimeInterval(10)
+        while Date() < end {
+            if let field = try await seen().first(where: { $0.name == text && ["AXTextArea", "AXTextField"].contains($0.role) }) {
+                try await click(at: CGPoint(x: field.frame.midX, y: field.frame.midY))
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        Issue.record("No text field with \"\(text)\" on screen", sourceLocation: sourceLocation)
+        throw UXFailure(description: "no text field with \(text)")
     }
 
     // MARK: - Menu bar
@@ -488,6 +562,10 @@ final class ChangingWindow {
         }
         // Its first page draws just after the window shows.
         Thread.sleep(forTimeInterval: 0.2)
+    }
+
+    var pid: Int32 {
+        process.processIdentifier
     }
 
     /// The window's frame with its title bar, as the window server has it.
