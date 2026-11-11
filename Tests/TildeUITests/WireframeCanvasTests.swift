@@ -255,6 +255,20 @@ struct WireframeCanvasTests {
         #expect(try await rects() == [[404, 305, 191, 89]])
     }
 
+    /// ⌘ turns all snapping off: a component drawn next to another one does not snap to it
+    /// either, by Tilde's lines or by the canvas's own.
+    @Test func commandDrawsWithoutSnappingToOtherComponents() async throws {
+        try await drawComponent("card")
+        // 4 points from the first one's left edge, right edge and bottom edge.
+        try await page.drag(from: CGPoint(x: 204, y: 274), to: CGPoint(x: 436, y: 394), meta: true)
+        #expect(try await rects() == [[200, 150, 240, 120], [204, 274, 232, 120]])
+
+        // Without ⌘ the same drag snaps to them.
+        try await page.draw("undoWireframe()")
+        try await page.drag(from: CGPoint(x: 204, y: 274), to: CGPoint(x: 436, y: 394))
+        #expect(try await rects() == [[200, 150, 240, 120], [200, 270, 240, 124]])
+    }
+
     /// The halves and thirds of the screen, the window and the containers are lines too, and
     /// the guide says which one.
     @Test func aNewComponentSnapsToHalvesAndThirds() async throws {

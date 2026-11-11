@@ -986,8 +986,24 @@ function showGuides(x, y, point) {
 }
 
 // The pointer itself snaps: Excalidraw gets the event again at the snapped point, so the
-// shape follows the guides while it is drawn. ⌘ turns snapping off.
+// shape follows the guides while it is drawn. ⌘ turns all snapping off: Excalidraw gets the
+// event again without ⌘, which would turn its own snapping to other shapes on.
 const retargeted = new WeakSet();
+
+// Sends Excalidraw a copy of a pointer event at `point`, without ⌘, in place of the event.
+function resend(event, point) {
+  event.stopImmediatePropagation();
+  const copy = new PointerEvent(event.type, {
+    bubbles: true, cancelable: true, composed: true, view: window,
+    clientX: point.x, clientY: point.y, screenX: event.screenX + point.x - event.clientX, screenY: event.screenY + point.y - event.clientY,
+    pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, button: event.button, buttons: event.buttons,
+    pressure: event.pressure, width: event.width, height: event.height,
+    shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: false,
+  });
+  retargeted.add(copy);
+  event.target.dispatchEvent(copy);
+}
+
 function snapPointer(event) {
   if (!wireframe || retargeted.has(event)) return;
   if (editWireframe(event)) return;
@@ -1003,27 +1019,22 @@ function snapPointer(event) {
     wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY };
   }
   const tool = api?.getAppState().activeTool.type;
-  if (tool !== "rectangle" || event.metaKey || editing || labelled || isOverMovable) {
+  const pointer = { x: event.clientX, y: event.clientY };
+  if (tool !== "rectangle" || editing || labelled || isOverMovable) {
     hideGuides();
     return;
   }
-  const pointer = { x: event.clientX, y: event.clientY };
+  if (event.metaKey) {
+    hideGuides();
+    resend(event, pointer);
+    return;
+  }
   const lines = snapLines(pointer);
   const x = nearest(lines.x, pointer.x);
   const y = nearest(lines.y, pointer.y);
   const point = { x: x?.value ?? pointer.x, y: y?.value ?? pointer.y };
   showGuides(x, y, point);
-  if (!x && !y) return;
-  event.stopImmediatePropagation();
-  const copy = new PointerEvent(event.type, {
-    bubbles: true, cancelable: true, composed: true, view: window,
-    clientX: point.x, clientY: point.y, screenX: event.screenX + point.x - pointer.x, screenY: event.screenY + point.y - pointer.y,
-    pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, button: event.button, buttons: event.buttons,
-    pressure: event.pressure, width: event.width, height: event.height,
-    shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
-  });
-  retargeted.add(copy);
-  event.target.dispatchEvent(copy);
+  if (x || y) resend(event, point);
 }
 // In Draw with no tool, the canvas takes no press, so nothing draws.
 for (const type of ["pointerdown", "pointermove", "pointerup"]) {
