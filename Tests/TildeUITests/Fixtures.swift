@@ -86,6 +86,24 @@ enum Fixtures {
         return Draft(annotation: annotation, marker: .zero, chip: "Recording \(clipLength(12))", capture: Task { Captures(image: closeUp(0), contextImage: nil) })
     }
 
+    /// The components of the wireframe fixture, in Quartz screen points: a card with a label
+    /// and a table, as the canvas reports them.
+    static let wireframeShapes: [[String: Any]] = [
+        ["id": "a", "type": "card", "label": "Plan", "borders": ["top", "right", "bottom", "left"], "rect": [140, 160, 240, 120]],
+        ["id": "b", "type": "table", "borders": ["top", "bottom"], "rows": 3, "columns": 2, "rect": [140, 300, 400, 160]],
+    ]
+
+    /// A note of a wireframe on the Safari window, with the comment "Add a plan card".
+    static func wireframe() -> Draft {
+        let target = Target.drawing(shapes: WireframeMode.report(of: wireframeShapes, origin: window.frame.origin, isOnWindow: true))
+        let frame = DrawingShapes.bounds(of: wireframeShapes)
+        let annotation = Annotation(id: id(80), comment: "Add a plan card", target: target, frame: frame, image: closeUp(0), contextImage: context(0))
+        return Draft(
+            annotation: annotation, marker: CGPoint(x: frame.maxX, y: frame.minY), chip: WireframeMode.chip,
+            capture: Task { Captures(image: nil, contextImage: nil) }, sourceWindow: window.number
+        )
+    }
+
     static func video(of draft: Draft) -> URL? {
         if case .recording(let video, _, _) = draft.annotation.target {
             return video
