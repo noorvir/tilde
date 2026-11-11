@@ -300,6 +300,36 @@ struct WireframeCanvasTests {
         #expect(try await rects().last == [440, 400, 360, 12])
     }
 
+    /// Tilde finds the lines under the pointer after it got there: lines that come while the
+    /// pointer rests during a drag snap the component at once, with the guide.
+    @Test func linesThatComeWhileThePointerRestsSnapAtOnce() async throws {
+        try await start(tool: "card")
+        try await page.run("""
+            fire('pointermove', 200, 150);
+            window.pressed = fire('pointerdown', 200, 150);
+            fire('pointermove', 300, 230, {isPressed: true, target: window.pressed});
+            fire('pointermove', 403, 304, {isPressed: true, target: window.pressed});
+            0
+            """)
+        try await page.settle()
+        try await page.draw("setSnapTargets({rects: [[400, 300, 200, 100]], containers: [], window: null, screen: null})")
+        let guide = "(() => [...document.querySelectorAll('div')].filter((element) => element.style.borderTopStyle === 'dashed' && element.style.display === 'block').length)()"
+        #expect(try await page.run(guide) as? Int == 1)
+
+        try await page.run("fire('pointerup', 403, 304, {target: window.pressed}); 0")
+        try await page.settle()
+        #expect(try await rects() == [[200, 150, 200, 150]])
+    }
+
+    /// The page posts the pointer's place at most 20 times a second, and always the place
+    /// where it stopped, so Tilde looks for lines there.
+    @Test func theLastPlaceOfAQuickMoveIsPosted() async throws {
+        try await start(tool: "card")
+        try await page.hover(CGPoint(x: 100, y: 100))
+        try await page.run("fire('pointermove', 110, 110); fire('pointermove', 120, 120); 0")
+        try await page.wait { self.page.pointers.last == "120,120" }
+    }
+
     /// A moved component snaps by its edges and its centre; ⌘ turns that off.
     @Test func aMovedComponentSnapsToTheLayoutLines() async throws {
         try await page.draw("setSnapTargets({rects: [[600, 400, 300, 200]], containers: [], window: null, screen: null})")

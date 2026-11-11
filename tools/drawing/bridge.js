@@ -7,6 +7,7 @@ import { api, taken, post, live, changeElements, describe, isPart, withGroups, i
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
+import { snapAgain } from "./wireframe/pointer.js";
 import { setSnapTargets } from "./wireframe/snap.js";
 import { setWireframeWindow } from "./wireframe/window.js";
 
@@ -43,10 +44,16 @@ function remove(ids) {
   changeElements(withGroups(ids), () => ({ isDeleted: true }));
 }
 
+// The lines under the pointer, which Tilde found after the pointer got there.
+function setSnapTargetsHere(targets) {
+  setSnapTargets(targets);
+  snapAgain();
+}
+
 window.tildeDraw = {
   setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect, setSnapFrame,
   shapesOf, clear, newShapes, takeNewShapes, remove,
-  setWireframe, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets,
+  setWireframe, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 
 // Tilde takes its own keys before the page; it must know when a text field here has the

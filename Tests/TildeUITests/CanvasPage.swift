@@ -27,6 +27,8 @@ final class CanvasPage {
     private let webView: WKWebView
     /// What the page posted to Tilde, oldest first, without the pointer's moves.
     private(set) var messages: [String] = []
+    /// The pointer's places that the page posted, oldest first, as "x,y".
+    private(set) var pointers: [String] = []
 
     init() {
         let configuration = WKWebViewConfiguration()
@@ -117,7 +119,12 @@ final class CanvasPage {
     """
 
     private func received(_ text: String?) {
-        if let text, !text.hasPrefix("pointer:") {
+        guard let text else {
+            return
+        }
+        if text.hasPrefix("pointer:") {
+            pointers.append(String(text.dropFirst("pointer:".count)))
+        } else {
             messages.append(text)
         }
     }

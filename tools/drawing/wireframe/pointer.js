@@ -204,8 +204,30 @@ function resend(event, point) {
   event.target.dispatchEvent(copy);
 }
 
+// The pointer's last move on the page, sent again by `snapAgain`.
+let lastMove = null;
+
+// New lines to snap to apply to the pointer where it is, also when it rests: its last move is
+// sent again, to the element that had it.
+export function snapAgain() {
+  if (!wireframe || !lastMove?.target.isConnected) return;
+  lastMove.target.dispatchEvent(new PointerEvent("pointermove", lastMove.init));
+}
+
 export function snapPointer(event) {
   if (!wireframe || retargeted.has(event)) return;
+  if (event.type === "pointermove") {
+    lastMove = {
+      target: event.target,
+      init: {
+        bubbles: true, cancelable: true, composed: true, view: window,
+        clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+        pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, button: event.button, buttons: event.buttons,
+        pressure: event.pressure, width: event.width, height: event.height,
+        shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
+      },
+    };
+  }
   if (editWireframe(event)) return;
   if (isSelectMode) {
     // No tool: a press on empty space draws nothing, and deselects.

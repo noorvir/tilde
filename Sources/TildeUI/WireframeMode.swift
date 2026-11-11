@@ -25,6 +25,8 @@ final class WireframeMode: ObservableObject {
     private var shownNote: Draft.ID?
     /// The lookup under way of the lines under the pointer.
     private var snaps: Task<Void, Never>?
+    /// The newest point that came during the lookup, to look up next.
+    private var nextPoint: CGPoint?
     /// The lines that the canvas has, so the same ones are not sent again at pointer rate.
     private var sentSnaps: Snaps?
 
@@ -95,6 +97,7 @@ final class WireframeMode: ObservableObject {
         shownNote = nil
         snaps?.cancel()
         snaps = nil
+        nextPoint = nil
         sentSnaps = nil
     }
 
@@ -171,9 +174,11 @@ final class WireframeMode: ObservableObject {
 
     /// The pointer moved on the canvas: finds the lines under it to snap to, from
     /// Accessibility, or in Tilde's own windows the element that the page reports. One lookup
-    /// runs at a time; points that come meanwhile are dropped.
+    /// runs at a time; of the points that come meanwhile, the newest is looked up next, so the
+    /// lines are those where the pointer stopped.
     func pointerMoved(to point: CGPoint) {
         guard snaps == nil else {
+            nextPoint = point
             return
         }
         let scope = scope()
@@ -198,6 +203,10 @@ final class WireframeMode: ObservableObject {
             if found != sentSnaps {
                 sentSnaps = found
                 canvas.setSnapTargets(rects: lines.rects, containers: lines.containers, window: window?.frame, screen: screen)
+            }
+            if let next = nextPoint {
+                nextPoint = nil
+                pointerMoved(to: next)
             }
         }
     }

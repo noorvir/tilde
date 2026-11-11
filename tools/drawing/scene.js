@@ -12,13 +12,26 @@ export function setAPI(value) {
 export const taken = new Set();
 export const post = (message) => window.webkit?.messageHandlers?.tilde?.postMessage(message);
 
-// The pointer's place for Tilde, at most 20 times a second.
+// The pointer's place for Tilde, at most 20 times a second. A place that comes sooner is
+// posted when the 50 ms are up, unless a newer one came: Tilde always gets where the pointer
+// stopped.
 let pointerAt = 0;
+let pendingPointer = null;
 
 export function postPointer(x, y) {
-  const now = performance.now();
-  if (now - pointerAt <= 50) return;
-  pointerAt = now;
+  const wait = pointerAt + 50 - performance.now();
+  if (wait >= 0) {
+    if (!pendingPointer) {
+      setTimeout(() => {
+        const [lastX, lastY] = pendingPointer;
+        pendingPointer = null;
+        postPointer(lastX, lastY);
+      }, wait + 1);
+    }
+    pendingPointer = [x, y];
+    return;
+  }
+  pointerAt = performance.now();
   post(`pointer:${x},${y}`);
 }
 
