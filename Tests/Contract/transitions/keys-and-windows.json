@@ -12,7 +12,7 @@
 {"name": "The HUD or the preview dropped with its centre within 40 pt of home snaps there", "dropCentre": [120, 130], "homeCentre": [100, 100], "expect": {"snapsHome": true}},
 {"name": "Dropped 40 pt or more from home, it stays where it was dropped", "dropCentre": [100, 140], "homeCentre": [100, 100], "expect": {"snapsHome": false}},
 {"name": "The browser first opens at the full height and half the width of the screen, centred", "visibleFrame": [0, 0, 2560, 1400], "expect": {"browserFrame": [640, 8, 1280, 1384]}},
-{"name": "On a small screen the browser is as wide as its toolbar needs", "visibleFrame": [0, 0, 1440, 900], "expect": {"browserFrame": [273, 8, 895, 884]}},
+{"name": "On a small screen the browser is as wide as its toolbar needs", "visibleFrame": [0, 0, 1440, 900], "expect": {"browserFrame": [247, 8, 947, 884]}},
 {"name": "The preview is never resized below 560 × 420", "previewSize": [300, 200], "room": [1700, 1000], "expect": {"previewSize": [560, 420]}},
 {"name": "The preview never grows past the room on its screen", "previewSize": [3000, 2000], "room": [1700, 1000], "expect": {"previewSize": [1700, 1000]}}
 ]

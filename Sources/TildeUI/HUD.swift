@@ -312,7 +312,7 @@ struct HUDView: View {
     /// The width of the pill in every mode. The widest title and a two-digit note count fit in
     /// it (the HUD reserves their space with hidden labels), so changing the mode or adding
     /// notes never moves a button; `everyModeFitsThePillWidth` checks it.
-    static let width: CGFloat = 485
+    static let width: CGFloat = 537
 
     /// The flow, the session and the notes.
     @ObservedObject var controller: AnnotationController

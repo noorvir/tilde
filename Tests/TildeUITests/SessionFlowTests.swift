@@ -33,6 +33,7 @@ struct SessionFlowTests {
             }
         }
         opens.append(Open(isDrawing: true))
+        opens.append(Open(pauses: [.user], isDrawing: true))
         let modes = opens.map(SessionFlow.Mode.open) + opens.prefix(18).map { .sending(operation: 3, returnTo: $0) }
             + [.sent(operation: 3), .idle]
         // With and without notes, and with and without text in the comment: the first
@@ -68,8 +69,8 @@ struct SessionFlowTests {
     }
 
     static let events: [SessionFlow.Event] = [
-        .begin(inBrowser: false), .begin(inBrowser: true), .ended, .escape, .togglePause, .resume, .startShortcut, .requestClearAll,
-        .requestCancel, .confirm, .dismissConfirmation, .restore, .openBrowser, .deleteNote, .editNote, .holdBegan, .holdEnded, .otherAppInFront,
+        .begin(inBrowser: false), .begin(inBrowser: true), .ended, .escape, .togglePause, .toggleAnnotating, .resume, .startShortcut,
+        .requestClearAll, .requestCancel, .confirm, .dismissConfirmation, .restore, .openBrowser, .deleteNote, .editNote, .holdBegan, .holdEnded, .otherAppInFront,
         .scopeAppInFront, .openComment, .clickAway, .submitComment, .closeComment, .openPreview, .closePreview, .toggleList,
         .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .toggleRecordingMode, .record, .stop,
         .clipStarted(3), .clipStarted(2), .clipStartFailed(3), .clipStartFailed(2), .clipFinished(3), .clipFinished(2),
