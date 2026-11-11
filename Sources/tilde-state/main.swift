@@ -1,5 +1,5 @@
 // The one way into Tilde's UI for the contract tests in Tests/Contract: it reads state files
-// and draws the real views offscreen. See the README there.
+// and draws the real views offscreen.
 //   tilde-state render <out folder> <state.json>...
 //   tilde-state transition <table.json>     prints each row's resulting state as JSON
 import AppKit

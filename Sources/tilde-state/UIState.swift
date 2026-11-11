@@ -2,7 +2,7 @@ import Foundation
 import TildeInstaller
 @testable import TildeUI
 
-/// A state of Tilde's UI as the files in Tests/Contract/states describe it. See the README there.
+/// A state of Tilde's UI as the files in Tests/Contract/states describe it.
 /// A key or a value that it does not know is an error, so a typo cannot record another picture.
 struct UIState: Decodable {
     enum Surface: String, Decodable {

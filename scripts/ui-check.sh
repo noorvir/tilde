@@ -1,6 +1,6 @@
 #!/bin/sh
 # The check for every commit: state to picture, and state plus event to state. It takes seconds
-# and uses no screen, mouse or keyboard. See Tests/Contract/README.md.
+# and uses no screen, mouse or keyboard.
 #   scripts/ui-check.sh [--record] [name filter]
 set -eu
 cd "$(dirname "$0")/.."

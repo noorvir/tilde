@@ -4,7 +4,7 @@ import CryptoKit
 import Foundation
 import Testing
 
-/// What a user sees and does, one story per spec. See README.md.
+/// What a user sees and does, one story per spec.
 @Suite(.serialized, .enabled(if: uxEnabled))
 struct UXSpecs {
     private func withApp(_ body: (TildeApp) async throws -> Void) async throws {
