@@ -6,7 +6,7 @@ import WebKit
 /// sends it the pointer and key events that the mouse and the keyboard give it, and reads the
 /// shapes that it would report. Nothing shows on the screen.
 @MainActor
-final class CanvasPage: NSObject, WKScriptMessageHandler {
+final class CanvasPage {
     struct NotReady: Error {}
     struct BadAnswer: Error {}
 
@@ -28,15 +28,63 @@ final class CanvasPage: NSObject, WKScriptMessageHandler {
     /// What the page posted to Tilde, oldest first, without the pointer's moves.
     private(set) var messages: [String] = []
 
-    override init() {
+    init() {
         let configuration = WKWebViewConfiguration()
         webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: configuration)
-        super.init()
-        configuration.userContentController.add(self, name: "tilde")
+        configuration.userContentController.add(Messages(page: self), name: "tilde")
+    }
+
+    /// Takes the page's messages for a `CanvasPage` without keeping it: the web view keeps its
+    /// message handler, and the page object must go at the end of its test.
+    private final class Messages: NSObject, WKScriptMessageHandler {
+        weak var page: CanvasPage?
+
+        init(page: CanvasPage) {
+            self.page = page
+        }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            let body = message.body as? String
+            MainActor.assumeIsolated {
+                page?.received(body)
+            }
+        }
+    }
+
+    /// Each page has a web process of its own. Only a few load and run at one time, so the
+    /// tests of other suites that measure time keep their speed.
+    private static var freeSlots = 4
+    private static var waiting: [CheckedContinuation<Void, Never>] = []
+    private var hasSlot = false
+
+    private static func takeSlot() async {
+        if freeSlots > 0 {
+            freeSlots -= 1
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    private static func giveSlot() {
+        if waiting.isEmpty {
+            freeSlots += 1
+        } else {
+            waiting.removeFirst().resume()
+        }
+    }
+
+    deinit {
+        if hasSlot {
+            Task { @MainActor in
+                CanvasPage.giveSlot()
+            }
+        }
     }
 
     /// Loads the page and waits until Excalidraw is ready.
     func load() async throws {
+        await Self.takeSlot()
+        hasSlot = true
         let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")
         guard let page = DrawingCanvas.page(in: folder) else {
             throw NotReady()
@@ -68,8 +116,8 @@ final class CanvasPage: NSObject, WKScriptMessageHandler {
     0
     """
 
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        if let text = message.body as? String, !text.hasPrefix("pointer:") {
+    private func received(_ text: String?) {
+        if let text, !text.hasPrefix("pointer:") {
             messages.append(text)
         }
     }
