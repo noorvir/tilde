@@ -575,14 +575,16 @@ struct HUDView: View {
                     }
                 }
                 .disabled(controller.wireframe != nil)
-                HUDButton(image: Image(systemName: "squareshape.split.2x2.dotted"), isOn: controller.wireframe != nil, keys: controller.wireframe == nil ? ["W"] : ["Esc"], help: "Wireframe") {
-                    if controller.wireframe != nil {
-                        controller.finishWireframe()
-                    } else {
-                        controller.startWireframe()
-                    }
+            }
+            // In recording mode too, disabled, so that no button moves.
+            HUDButton(image: Image(systemName: "squareshape.split.2x2.dotted"), isOn: controller.wireframe != nil, keys: controller.wireframe == nil ? ["W"] : ["Esc"], help: "Wireframe") {
+                if controller.wireframe != nil {
+                    controller.finishWireframe()
+                } else {
+                    controller.startWireframe()
                 }
             }
+            .disabled(controller.isRecordMode)
         }
 
 
