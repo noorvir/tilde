@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 /// A toast after an install or uninstall: a regular pill alone at the top centre of the
@@ -86,7 +87,7 @@ final class InstallToast {
             return
         }
         let escape: (NSEvent) -> Void = { [weak self] event in
-            if event.keyCode == 53 {
+            if Int(event.keyCode) == kVK_Escape {
                 self?.hide()
             }
         }

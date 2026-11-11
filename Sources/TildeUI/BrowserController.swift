@@ -1,5 +1,6 @@
 import TildeCore
 import AppKit
+import Carbon.HIToolbox
 import Combine
 import SwiftUI
 import WebKit
@@ -229,43 +230,25 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
                 webView.goForward()
                 return true
             }
-        // Esc and ↩ for the session, unless a text field (address, note) has the keyboard.
-        case .keyDown where window.isKeyWindow && [53, 36].contains(event.keyCode) && event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty:
-            guard let controller, controller.session != nil, !(window.firstResponder is NSText) else {
+        case .keyDown where window.isKeyWindow:
+            let responder = window.firstResponder
+            let isTyping = responder is NSText
+            let isInPage = (responder as? NSView)?.isDescendant(of: webView) == true
+            if controller?.handleKey(event, in: .browser(isTyping: isTyping, isInPage: isInPage)) == true {
+                return true
+            }
+            // ⌘← and ⌘→, while no text field has the keyboard.
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, !isTyping else {
                 return false
             }
-            if event.keyCode == 53 {
-                controller.escapePressed()
-                return true
-            }
-            if controller.confirmation != nil {
-                controller.confirm()
-                return true
-            }
-        case .keyDown where window.isKeyWindow && event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command:
-            // ⌘↩ follows the Send button, also from the address field or a note.
-            if event.keyCode == 36, let controller, controller.session != nil {
-                controller.send()
-                return true
-            }
-            guard !(window.firstResponder is NSText) else {
-                return false
-            }
-            if event.keyCode == 123 {
+            if Int(event.keyCode) == kVK_LeftArrow {
                 webView.goBack()
                 return true
             }
-            if event.keyCode == 124 {
+            if Int(event.keyCode) == kVK_RightArrow {
                 webView.goForward()
                 return true
             }
-        // The HUD's keys, as for Esc, but never while the page or a text field has the keyboard.
-        case .keyDown where window.isKeyWindow:
-            let responder = window.firstResponder as? NSView
-            guard let controller, controller.session != nil, !(responder is NSText), responder?.isDescendant(of: webView) != true else {
-                return false
-            }
-            return controller.performShortcut(event)
         default:
             break
         }

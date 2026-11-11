@@ -75,20 +75,18 @@ final class AnnotationController: ObservableObject {
             saver.isHeld = composer != nil
         }
     }
-    private var holdMonitor: HoldMonitor?
 
     /// The bar under the HUD that offers Tilde's browser for a page in another browser.
     let browserOffer = BrowserOffer()
     /// The HUD is in the toolbar of Tilde's browser, as the session is limited to it, and the
     /// floating HUD is hidden. It stays there through the Sent confirmation.
     @Published private(set) var isHUDInBrowser = false
-    private var doubleTap: DoubleTapMonitor?
+    /// The double tap, the hold key and the answers to a question.
+    private let keyMonitors: KeyMonitors
     /// The draft shown in the preview card while `flow` has it open; annotate clicks wait.
     @Published private(set) var previewID: Draft.ID?
     /// The saved session that the restore question offers.
     private(set) var restoreRecord: SessionRecord?
-    /// Takes ↩ and Esc for the question from any of Tilde's windows, also from a text field.
-    private var confirmationKeyMonitor: Any?
     /// What the session annotates and records, and the window it is limited to.
     let scope: SessionScope
     /// Draw mode: the canvas, and the notes that shapes become.
@@ -171,7 +169,9 @@ final class AnnotationController: ObservableObject {
         self.archive = archive
         saver = SessionSaver(archive: archive)
         self.defaults = defaults
-        self.shortcuts = shortcuts ?? ShortcutStore()
+        let shortcuts = shortcuts ?? ShortcutStore()
+        self.shortcuts = shortcuts
+        keyMonitors = KeyMonitors(shortcuts: shortcuts)
         picker = ElementPicker(browser: browser)
         hoverPicker = HoverPicker(picker: picker)
         scope = SessionScope(picker: picker, browser: browser)
@@ -218,7 +218,7 @@ final class AnnotationController: ObservableObject {
             }
             drawing.pointerMoved(to: point, isOverLabel: isOverLabel)
         }
-        canvas.onKey = { [weak self] in self?.performShortcut($0) ?? false }
+        canvas.onKey = { [weak self] in self?.handleKey($0, in: .canvas) ?? false }
         canvas.onPress = { [weak self] point in
             guard let self, let id = self.noteLabel(at: point) else {
                 return false
@@ -235,57 +235,10 @@ final class AnnotationController: ObservableObject {
             return composer == nil && !isPointerOverPanel && !isPickingWindow
         }
         hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
-        doubleTap = DoubleTapMonitor { [weak self] in
-            guard let self else {
-                return []
-            }
-            return self.shortcuts.doubleTapKeys
-        } onDoubleTap: { [weak self] key in
-            self?.doubleTapped(key)
-        }
-    }
-
-    enum DoubleTapAction: Equatable {
-        case start
-        case resume
-        case togglePause
-    }
-
-    /// What a double tap of `key` does. The start key brings annotating up: it starts a
-    /// session, or resumes a paused one, and does nothing while annotating. The pause key is
-    /// the pause command of the mode, as in the HUD and the menu. One key may do both.
-    nonisolated static func doubleTapAction(
-        for key: DoubleTapKey, startKey: DoubleTapKey?, pauseKey: DoubleTapKey?, isPaused: Bool, hasSession: Bool
-    ) -> DoubleTapAction? {
-        if key == startKey {
-            if !hasSession {
-                return .start
-            }
-            if isPaused {
-                return .resume
-            }
-        }
-        if key == pauseKey, hasSession {
-            return .togglePause
-        }
-        return nil
-    }
-
-    private func doubleTapped(_ key: DoubleTapKey) {
-        guard !shortcuts.isRecording else {
-            return
-        }
-        let action = Self.doubleTapAction(
-            for: key, startKey: shortcuts.shortcut(for: .startAnnotation)?.doubleTapKey, pauseKey: shortcuts.shortcut(for: .togglePause)?.doubleTapKey,
-            isPaused: pauses.contains(.user), hasSession: session != nil
-        )
-        switch action {
-        case .togglePause, .resume:
-            togglePause()
-        case .start:
-            startLocal()
-        case nil:
-            break
+        keyMonitors.onDoubleTap = { [weak self] key in self?.doubleTapped(key) }
+        keyMonitors.onHold = { [weak self] output in self?.holdChanged(output) }
+        keyMonitors.onQuestionKey = { [weak self] keyCode, modifiers, window in
+            self?.handleConfirmationKey(keyCode, modifiers: modifiers, in: window) == true
         }
     }
 
@@ -326,7 +279,7 @@ final class AnnotationController: ObservableObject {
             drafts = SessionSaver.drafts(from: record, archive: archive, into: session.id)
         }
         saver.start(created: created)
-        startHoldMonitor()
+        keyMonitors.startHold()
         tracker.pageWindow = { [weak self] in
             guard let self, !pageNotes.isEmpty else {
                 return nil
@@ -403,7 +356,9 @@ final class AnnotationController: ObservableObject {
     /// the input monitors. The HUD stays, for the confirmation after Send.
     private func stopAnnotating() {
         clips.discard()
-        stopHoldMonitor()
+        keyMonitors.stopHold()
+        PlainClickTap.stop()
+        dispatch(.holdEnded)
         picker.windows.stop()
         tracker.stop()
         notices.clearPause()
@@ -563,28 +518,6 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that
-    /// enables that button. True when the key is one of them, whether it did anything or not.
-    func performShortcut(_ event: NSEvent) -> Bool {
-        guard session != nil, confirmation == nil,
-              let action = shortcuts.inAppAction(keyCode: event.keyCode, modifiers: event.modifierFlags, isDrawing: isDrawing)
-        else {
-            return false
-        }
-        if event.isARepeat {
-            return true
-        }
-        if let tool = action.drawingTool {
-            setDrawingTool(tool)
-        } else if let color = action.drawingColor {
-            setDrawingColor(color.hex)
-        }
-        for next in flow.events(forKey: action) {
-            dispatch(next)
-        }
-        return true
-    }
-
     /// Annotates again after any pause: one the user chose, or one while another app was in
     /// front.
     func resume() {
@@ -714,7 +647,7 @@ final class AnnotationController: ObservableObject {
     /// current, then its effects run. `with` gives the data of the effects that need it, as
     /// what to do for them, such as showing the comment box that the caller built; one the
     /// flow does not return is dropped.
-    func dispatch(_ event: SessionFlow.Event, holdFlag: NSEvent.ModifierFlags = [], with data: [SessionFlow.Effect: () -> Void] = [:]) {
+    func dispatch(_ event: SessionFlow.Event, with data: [SessionFlow.Effect: () -> Void] = [:]) {
         // A comment typed in the preview is saved first: the event may open a question or a
         // mode in which notes cannot be edited.
         if event != .editNote {
@@ -735,18 +668,18 @@ final class AnnotationController: ObservableObject {
         }
         flow = next
         if questionChanged {
-            watchConfirmationKeys()
+            keyMonitors.watchQuestion(confirmation != nil)
         }
         for effect in effects {
             if let withData = data[effect] {
                 withData()
             } else {
-                run(effect, holdFlag: holdFlag)
+                run(effect)
             }
         }
     }
 
-    private func run(_ effect: SessionFlow.Effect, holdFlag: NSEvent.ModifierFlags) {
+    private func run(_ effect: SessionFlow.Effect) {
         switch effect {
         // Their data comes with the event that returns them, if at all.
         case .showComment, .showPreview, .applySource, .finishSend, .adoptClip, .keepClip, .dropClip, .showPushFailure,
@@ -805,7 +738,7 @@ final class AnnotationController: ObservableObject {
             }
         case .hideHUD: hideHUD()
         case .plainClicksOn:
-            PlainClickTap.start(removing: holdFlag)
+            PlainClickTap.start(removing: keyMonitors.holdFlag)
         case .plainClicksOff:
             PlainClickTap.stop()
         case .enterRecording:
@@ -848,39 +781,6 @@ final class AnnotationController: ObservableObject {
         dispatch(.startShortcut)
     }
 
-    // MARK: - Holding a key to use the mouse
-
-    private func startHoldMonitor() {
-        holdMonitor?.invalidate()
-        holdMonitor = nil
-        guard let key = shortcuts.holdKey else {
-            return
-        }
-        holdMonitor = HoldMonitor(key: key) { [weak self] output in
-            self?.holdChanged(output, key: key)
-        }
-    }
-
-    private func stopHoldMonitor() {
-        holdMonitor?.invalidate()
-        holdMonitor = nil
-        PlainClickTap.stop()
-        dispatch(.holdEnded)
-    }
-
-    private func holdChanged(_ output: HoldGesture.Output, key: DoubleTapKey) {
-        switch output {
-        case .began:
-            dispatch(.holdBegan, holdFlag: key.flag)
-            // With the browser in front, its page takes the first click only when it is key.
-            if pauses.contains(.hold), NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), browser.window?.isVisible == true {
-                browser.window?.makeKey()
-            }
-        case .ended:
-            dispatch(.holdEnded)
-        }
-    }
-
     // MARK: - Labels of notes
 
     /// The note whose numbered label is at this point.
@@ -893,19 +793,6 @@ final class AnnotationController: ObservableObject {
     /// A label's circle has a radius of 10 points; 8 more around it make it easy to hit.
     nonisolated static func isOnLabel(distance: CGFloat) -> Bool {
         distance <= 18
-    }
-
-    /// ⌘[ or ⌘] while the overlay has the keyboard: in Tilde's browser, or else in the app in
-    /// front, as if the overlay were not there.
-    func navigateHistory(_ event: NSEvent) {
-        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        if let front, front != getpid() {
-            event.cgEvent?.postToPid(front)
-        } else if event.keyCode == 33 {
-            browser.goBack(nil)
-        } else {
-            browser.goForward(nil)
-        }
     }
 
     // MARK: - Saving and restoring
@@ -1509,52 +1396,6 @@ final class AnnotationController: ObservableObject {
         makeOverlayKey()
     }
 
-    /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
-    /// has it or annotating is paused.
-    /// ↩ confirms and Esc dismisses the question in the HUD, whichever of Tilde's windows has
-    /// the keyboard: the overlay, the floating HUD, or the browser with a text field focused.
-    /// Keys typed in other apps never reach it.
-    private func watchConfirmationKeys() {
-        if confirmation == nil {
-            if let confirmationKeyMonitor {
-                NSEvent.removeMonitor(confirmationKeyMonitor)
-            }
-            confirmationKeyMonitor = nil
-            return
-        }
-        guard confirmationKeyMonitor == nil else {
-            return
-        }
-        confirmationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let keyCode = event.keyCode
-            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            let isAnswer = MainActor.assumeIsolated {
-                self?.handleConfirmationKey(keyCode, modifiers: modifiers, in: event.window) == true
-            }
-            return isAnswer ? nil : event
-        }
-    }
-
-    /// Returns whether the key answered the question on screen: Esc, or ↩ alone, typed in one of
-    /// the session's windows (its panels or Tilde's browser), never in Settings. ⌘↩ is Send and
-    /// never answers.
-    func handleConfirmationKey(_ keyCode: UInt16, modifiers: NSEvent.ModifierFlags = [], in window: NSWindow?) -> Bool {
-        let isSessionWindow = window is NSPanel || (window != nil && window === browser.window)
-        guard confirmation != nil, modifiers.isEmpty, isSessionWindow else {
-            return false
-        }
-        switch keyCode {
-        case 53:
-            dismissConfirmation()
-            return true
-        case 36, 76:
-            confirm()
-            return true
-        default:
-            return false
-        }
-    }
-
     /// A click on the floating HUD gives Tilde the keyboard, so Esc and ↩ reach it next. The
     /// HUD is a non-activating panel: without this, keys stay with the app in front.
     func takeKeyboard() {
@@ -1565,6 +1406,8 @@ final class AnnotationController: ObservableObject {
         overlays.makeKey()
     }
 
+    /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
+    /// or the preview has it or annotating is paused.
     func makeOverlayKey() {
         guard overlayTakesInput, composer == nil, previewID == nil else {
             return

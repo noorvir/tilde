@@ -233,36 +233,9 @@ final class OverlayView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
-            controller.escapePressed()
-            return
+        if !controller.handleKey(event, in: .overlay(hoveredNote: hoveredMarker)) {
+            super.keyDown(with: event)
         }
-        if controller.confirmation != nil {
-            if event.keyCode == 36, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
-                controller.confirm()
-            }
-            return
-        }
-        // Back and forward belong to the page under the overlay.
-        if event.modifierFlags.contains(.command), event.keyCode == 33 || event.keyCode == 30 {
-            controller.navigateHistory(event)
-            return
-        }
-        // The same action and rule as the Send button, paused too; the flow ignores it while
-        // choosing a window or with nothing to send.
-        if event.keyCode == 36 && event.modifierFlags.contains(.command) {
-            controller.send()
-            return
-        }
-        // Space on a note's marker previews it, before Space pauses.
-        if !controller.pauses.contains(.user), event.keyCode == 49, let id = hoveredMarker {
-            controller.preview(id)
-            return
-        }
-        if controller.performShortcut(event) {
-            return
-        }
-        super.keyDown(with: event)
     }
 
     // MARK: - Drawing

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import TildeCore
 import SwiftUI
 
@@ -299,7 +300,7 @@ class FloatingPanel: NSPanel {
 /// SwiftUI field would take Shift-Return as Return and submit. Returns whether it did.
 func insertNewlineOnShiftReturn(_ event: NSEvent, in window: NSWindow) -> Bool {
     let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-    guard [36, 76].contains(event.keyCode), modifiers == .shift || modifiers == .option, let editor = window.firstResponder as? NSTextView else {
+    guard [kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)), modifiers == .shift || modifiers == .option, let editor = window.firstResponder as? NSTextView else {
         return false
     }
     editor.insertNewlineIgnoringFieldEditor(nil)

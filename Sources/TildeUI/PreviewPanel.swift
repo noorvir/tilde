@@ -1,5 +1,6 @@
 import TildeCore
 import AppKit
+import Carbon.HIToolbox
 import AVKit
 import SwiftUI
 
@@ -30,24 +31,15 @@ final class PreviewPanel {
         let panel = KeyPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: true)
         panel.onKey = { [unowned panel] event in
             let isEditing = panel.firstResponder is NSTextView
-            switch event.keyCode {
-            // ⌘↩ follows the Send button, also while the comment is edited.
-            case 36 where event.modifierFlags.contains(.command):
-                controller.send()
-            case 36 where isEditing && !event.modifierFlags.contains(.shift):
-                panel.makeFirstResponder(nil)
-            case 53 where controller.expandedPreviewImage != nil:
-                controller.expandedPreviewImage = nil
-            case 53:
-                controller.closePreview()
-            case 123 where !isEditing:
-                controller.showAdjacentPreview(-1)
-            case 124 where !isEditing:
-                controller.showAdjacentPreview(1)
-            default:
-                return false
+            if controller.handleKey(event, in: .preview(isTyping: isEditing)) {
+                return true
             }
-            return true
+            // ↩ ends the editing of the comment; ⇧↩ adds a line.
+            if Int(event.keyCode) == kVK_Return, isEditing, !event.modifierFlags.contains(.shift) {
+                panel.makeFirstResponder(nil)
+                return true
+            }
+            return false
         }
 
         let hosting = FirstMouseHostingView(rootView: PreviewView(controller: controller))
