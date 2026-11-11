@@ -14,38 +14,38 @@ enum Surfaces {
 
     static func image(of state: UIState) async throws -> CGImage {
         let size = state.size.map { CGSize(width: $0[0], height: $0[1]) } ?? .zero
-        let appearance: NSAppearance.Name = state.appearance == "light" ? .aqua : .darkAqua
+        let appearance: NSAppearance.Name = state.appearance == .light ? .aqua : .darkAqua
         func hosted<V: View>(_ view: V, size: CGSize) async throws -> CGImage {
             let hosting = NSHostingView(rootView: view.transaction { $0.disablesAnimations = true })
             return try await Renderer.render(hosting, size: size, appearance: appearance)
         }
 
         switch state.surface {
-        case "toast":
+        case .toast:
             let toast = InstallToastState()
             toast.result = result(of: state.toast!)
             toast.isShown = true
             return try await hosted(InstallToastView(state: toast), size: size)
 
-        case "settings":
+        case .settings:
             return try await hosted(SettingsView(model: try settings(state.settings!)), size: size)
 
-        case "restorePrompt":
+        case .restorePrompt:
             let restore = RestoreToastState()
             restore.record = Fixtures.record(notes: 3, updated: Date().addingTimeInterval(-720))
             restore.isShown = true
             return try await hosted(RestoreToastView(state: restore), size: size)
 
-        case "tooltip":
+        case .tooltip:
             return try await hosted(TooltipBubble(text: state.text ?? "", keys: state.keys ?? []).frame(width: size.width, height: size.height), size: size)
 
-        case "outline":
+        case .outline:
             let model = HomeOutline.Model()
             model.isSnapped = state.snapped ?? false
             let size = CGSize(width: HUDView.width, height: PillMetrics.height)
             return try await hosted(OutlineView(model: model, cornerRadius: PillMetrics.height / 2).frame(width: size.width, height: size.height), size: size)
 
-        case "notesPanel":
+        case .notesPanel:
             let controller = try await controller(state)
             var drafts = controller.drafts
             drafts[0].anchor = PageAnchor(url: "https://example.test/docs", selector: "td > .chip", text: "Alex", documentRect: .zero)
@@ -57,7 +57,7 @@ enum Surfaces {
             let panel = NotesPanel(controller: controller, browser: browser).frame(width: BrowserMetrics.panelWidth, height: 520)
             return try await hosted(panel.background(Color(white: 0.1)), size: CGSize(width: BrowserMetrics.panelWidth, height: 520))
 
-        case "toolbar":
+        case .toolbar:
             let browser = BrowserController()
             let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive(), defaults: nil)
             try await Task.sleep(for: .milliseconds(20))
@@ -65,10 +65,10 @@ enum Surfaces {
             let toolbar = BrowserToolbar(browser: browser, controller: controller).background(Color(white: 0.1))
             return try await hosted(toolbar, size: CGSize(width: BrowserMetrics.minWindowWidth, height: BrowserMetrics.toolbarHeight))
 
-        case "hud":
+        case .hud:
             return try await hosted(HUDView(controller: try await controller(state)), size: size)
 
-        case "comment":
+        case .comment:
             let controller = try await controller(state)
             let isEditing = state.editing ?? false
             controller.commentText = state.commentText ?? ""
@@ -78,11 +78,11 @@ enum Surfaces {
             }
             return try await hosted(CommentView(controller: controller, chip: "span", isEditing: isEditing), size: size)
 
-        case "preview":
+        case .preview:
             let controller = try await controller(state)
             return try await hosted(PreviewView(controller: controller), size: size)
 
-        case "overlay":
+        case .overlay:
             let controller = try await controller(state)
             let primaryHeight = NSScreen.screens.first?.frame.height ?? size.height
             if state.pageNotes == true {
@@ -98,9 +98,6 @@ enum Surfaces {
                 )
             }
             return try await Renderer.render(OverlayView(controller: controller), size: size, windowOrigin: NSPoint(x: 0, y: primaryHeight - size.height))
-
-        default:
-            throw NSError(domain: "tilde-state", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unknown surface \(state.surface)"])
         }
     }
 
@@ -109,16 +106,20 @@ enum Surfaces {
         if let client = state.clientWithIcon {
             controller.clientIcon = { $0 == client ? Fixtures.appIcon : nil }
         }
-        if let dot = state.machineDot.flatMap(NodeSetup.Dot.init(rawValue:)) {
+        if let dot = state.machineDot {
             controller.machineDot = { _ in dot }
         }
         apply(state, drafts: try drafts(state), to: controller)
         controller.showsList = state.list ?? false
-        controller.sentStatus = state.sentStatus == "failed" ? .failed : .done
+        controller.sentStatus = state.sentStatus == .failed ? .failed : .done
         if let color = state.drawingColor {
             controller.setDrawingColor(color)
         }
-        controller.expandedPreviewImage = state.enlarged == "closeUp" ? .closeUp : state.enlarged == "context" ? .context : nil
+        switch state.enlarged {
+        case .closeUp: controller.expandedPreviewImage = .closeUp
+        case .context: controller.expandedPreviewImage = .context
+        case nil: controller.expandedPreviewImage = nil
+        }
         return controller
     }
 
@@ -133,7 +134,11 @@ enum Surfaces {
     }
 
     private static func apply(_ state: UIState, drafts: [Draft], composer: Composer? = nil, to controller: AnnotationController) {
-        let notice: AnnotationController.PauseNotice? = state.pauseNotice == "escape" ? .escape : state.pauseNotice == "otherApp" ? .otherApp : nil
+        let notice: AnnotationController.PauseNotice? = switch state.pauseNotice {
+        case .escape: .escape
+        case .otherApp: .otherApp
+        case nil: nil
+        }
         var open = SessionFlow.Open()
         if state.paused == true {
             open.pauses.insert(.user)
@@ -142,19 +147,19 @@ enum Surfaces {
             open.pauses.insert(.otherApp)
         }
         open.isDrawing = state.drawing ?? false
-        open.question = state.confirmation.flatMap(SessionFlow.Question.init(rawValue:))
+        open.question = state.confirmation
         if state.preview != nil {
             open.panel = .preview
         } else if composer != nil {
             open.panel = .comment
         }
         let clip: SessionFlow.Clip? = switch state.recording {
-        case "ready": .ready
-        case "starting": .starting(operation: 0)
-        case "recording": .recording
-        case "paused": .paused
-        case "finishing": .finishing(operation: 0, thenSend: false)
-        default: nil
+        case .ready: .ready
+        case .starting: .starting(operation: 0)
+        case .recording: .recording
+        case .paused: .paused
+        case .finishing: .finishing(operation: 0, thenSend: false)
+        case nil: nil
         }
         if let clip {
             open.activity = .recording(clip)
@@ -169,9 +174,9 @@ enum Surfaces {
             mode = .sending(operation: 0, returnTo: open)
         }
         let source: RecordingSource? = switch state.source {
-        case "phone": .phone(Fixtures.phone)
-        case "display": .screen(Fixtures.display)
-        default: state.scoped == true ? .window(Fixtures.window) : nil
+        case .phone: .phone(Fixtures.phone)
+        case .display: .screen(Fixtures.display)
+        case nil: state.scoped == true ? .window(Fixtures.window) : nil
         }
         // A stand-in for the screen Record records, never the name of the Mac that draws it.
         controller.screenName = { _ in "Studio Display" }
@@ -186,9 +191,9 @@ enum Surfaces {
             isHUDInBrowser: state.hudInBrowser ?? false,
             pauseNotice: notice,
             browserAccessoryURL: state.browserAccessory == true ? URL(string: "https://example.com/pricing") : nil,
-            restoreRecord: state.confirmation == "restore" ? Fixtures.record(notes: 3) : nil,
+            restoreRecord: state.confirmation == .restore ? Fixtures.record(notes: 3) : nil,
             sentText: state.sent ?? "",
-            notice: state.notice.flatMap(Notice.init(rawValue:)),
+            notice: state.notice,
             // A clip in progress has run for 12 seconds.
             clipClock: (Date(), 12)
         )
@@ -196,28 +201,28 @@ enum Surfaces {
             var (screens, apps) = Fixtures.sources()
             let phase: SourcePickerModel.Phase
             switch state.pickerPhase {
-            case "listing":
+            case .listing:
                 (screens, apps) = ([], [])
                 phase = .listing
-            case "failed":
+            case .failed:
                 (screens, apps) = ([], [])
                 phase = .failed
-            case "empty":
+            case .empty:
                 (screens, apps) = ([], [])
                 phase = .done
-            case "picturing", "noPictures":
+            case .picturing, .noPictures:
                 // The tiles are listed, and their pictures are coming, or could not be taken.
                 screens = screens.map { tile in var tile = tile; tile.picture = nil; return tile }
                 apps = apps.map { app in var app = app; app.windows = app.windows.map { tile in var tile = tile; tile.picture = nil; return tile }; return app }
-                phase = state.pickerPhase == "picturing" ? .picturing : .done
-            default:
+                phase = state.pickerPhase == .picturing ? .picturing : .done
+            case nil:
                 phase = .done
             }
             // Opened as the app opens it, so it offers what the app would.
             controller.sourcePicker.injected = (screens, apps, phase)
             controller.openSourcePicker()
-            controller.sourcePicker.tab = picker == "screens" ? .screens : .windows
-            controller.sourcePicker.openApp = picker == "app" ? Fixtures.window.pid : nil
+            controller.sourcePicker.tab = picker == .screens ? .screens : .windows
+            controller.sourcePicker.openApp = picker == .app ? Fixtures.window.pid : nil
         }
     }
 
@@ -233,27 +238,27 @@ enum Surfaces {
             history?.expanded = ["s1"]
         }
         let page: SettingsWindow.Page = switch state.page {
-        case "agents", "home": .home
-        case "shortcuts": .shortcuts
-        case "history": .history
-        default: .configuration
+        case .agents: .home
+        case .shortcuts: .shortcuts
+        case .history: .history
+        case .general: .configuration
         }
         let model = try Fixtures.settingsModel(page: page, history: history)
         model.expandedAgents = Set(state.expandedAgents ?? [])
         if let host = state.machine, let node = state.nodes?.first(where: { $0.host == host }) {
             let machine = AgentSetup(installer: model.setup.installer, placeholderIcon: Fixtures.appIcon, nodes: model.setup.nodes, isRemote: true)
             var statuses: [Harness: InstallStatus] = [:]
-            for name in node.agents ?? [] {
-                Harness(rawValue: name).map { statuses[$0] = .installed }
+            for harness in node.agents ?? [] {
+                statuses[harness] = .installed
             }
-            for name in node.agentsOff ?? [] {
-                Harness(rawValue: name).map { statuses[$0] = .notInstalled }
+            for harness in node.agentsOff ?? [] {
+                statuses[harness] = .notInstalled
             }
             machine.setRemoteStatusesForTesting(statuses)
             model.setup.nodes.setSetupForTesting(machine, for: host)
             model.machinePath = [host]
         }
-        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status), isReachable: $0.isReachable, hasFailed: $0.hasFailed ?? false, isProtected: $0.isProtected ?? true, needsMove: $0.needsMove ?? false, isWorking: $0.isWorking ?? false) })
+        model.setup.nodes.setRowsForTesting((state.nodes ?? []).map { NodeSetup.Row(host: $0.host, status: NodeSetup.Status(name: $0.status.rawValue), isReachable: $0.isReachable, hasFailed: $0.hasFailed ?? false, isProtected: $0.isProtected ?? true, needsMove: $0.needsMove ?? false, isWorking: $0.isWorking ?? false) })
         if state.recording == true {
             model.recordingShortcut = .togglePause
         }

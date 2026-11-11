@@ -31,7 +31,7 @@ Task { @MainActor in
     for path in arguments[3...] {
         let file = URL(fileURLWithPath: path)
         do {
-            let state = try JSONDecoder().decode(UIState.self, from: Data(contentsOf: file))
+            let state = try UIState(file: file)
             let image = try await Surfaces.image(of: state)
             let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])!
             try png.write(to: out.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".png"))
