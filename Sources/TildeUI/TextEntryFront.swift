@@ -29,7 +29,8 @@ enum TextEntryFront {
         holder = panel
         // A panel with the keyboard already counts as active for AppKit, so a plain request to
         // activate would do nothing.
-        activateAfterClick()
+        debugLog.notice("activate, buttons \(NSEvent.pressedMouseButtons)")
+        NSApp.activate(ignoringOtherApps: true)
         // Another app in front while the user writes is the user's choice: it keeps the front.
         observe(NSWorkspace.didActivateApplicationNotification, from: NSWorkspace.shared.notificationCenter) { note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -90,8 +91,13 @@ enum TextEntryFront {
                 takeKeyboardBack()
             }
         }
-        NSApp.yieldActivation(to: app)
-        app.activate()
+        // Not by yielding: an app that yielded cannot come to the front by itself again.
+        if AXIsProcessTrusted() {
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetAttributeValue(element, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        } else {
+            app.activate()
+        }
         debugLog.notice("yielded to \(app.processIdentifier), active \(NSApp.isActive)")
     }
 
@@ -108,7 +114,8 @@ enum TextEntryFront {
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-            activateAfterClick()
+            debugLog.notice("activate, buttons \(NSEvent.pressedMouseButtons)")
+        NSApp.activate(ignoringOtherApps: true)
         }
     }
 
