@@ -36,6 +36,7 @@ function describe(element) {
   const shape = { id: element.id, color: element.strokeColor, type: element.type === "freedraw" ? "freehand" : element.type };
   if (element.customData?.tildeWireframe) {
     shape.type = element.customData.tildeWireframe;
+    delete shape.color;
     if (element.customData.label) shape.label = element.customData.label;
   }
   if (element.type === "text") shape.text = element.text;
