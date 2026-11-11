@@ -738,6 +738,7 @@ final class AnnotationController: ObservableObject {
         }
         let pointer = NSEvent.mouseLocation
         if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
+            hasNoDrawingTool = false
             drawingPanel.startDrawing(on: screen, tool: drawingTool)
         }
     }
@@ -748,6 +749,7 @@ final class AnnotationController: ObservableObject {
 
     func setDrawingTool(_ tool: String) {
         drawingTool = tool
+        hasNoDrawingTool = false
         drawingPanel.setTool(tool)
         if composer != nil {
             commentPanel.focus()
@@ -935,6 +937,11 @@ final class AnnotationController: ObservableObject {
         // In the picker, Esc first goes from an app's windows back to the apps, as "‹ Back".
         if isSourcePickerOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
+            return
+        }
+        // In Draw and Wireframe Esc puts the tool down; only Pause pauses.
+        if isDrawing, !isDrawingPaused, flow.session?.panel == nil, flow.session?.question == nil {
+            putDrawingToolDown()
             return
         }
         dispatch(.escape)
@@ -1260,6 +1267,8 @@ final class AnnotationController: ObservableObject {
     private var isCheckingContent = false
     let drawingPanel = DrawingPanel()
     @Published private(set) var drawingTool = "arrow"
+    /// Esc put Draw's tool down: nothing draws until one is chosen.
+    @Published var hasNoDrawingTool = false
     @Published var wireframe: Wireframe? {
         didSet { saveLastMode() }
     }

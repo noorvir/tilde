@@ -63,6 +63,7 @@ function cancelClickArrow() {
 window.tildeDraw = {
   setTool(type) {
     cancelClickArrow();
+    setSelectMode(false);
     drawingTool = type;
     if (!editing) api.setActiveTool({ type, locked: true });
   },
@@ -88,6 +89,11 @@ window.tildeDraw = {
   setColor(color) {
     if (wireframe) return;
     api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });
+  },
+  // No tool: nothing draws until one is chosen.
+  setNoTool() {
+    cancelClickArrow();
+    setSelectMode(true);
   },
   deselect() {
     cancelClickArrow();
@@ -131,6 +137,7 @@ window.tildeDraw = {
     const wasOn = wireframe !== null;
     wireframe = state;
     if (state?.icons) kindIcons = state.icons;
+    setSelectMode(Boolean(state) && !state.tool);
     hideGuides();
     if (!state) {
       if (!wasOn) return;
@@ -196,6 +203,19 @@ window.tildeDraw = {
 // component is a group of flat elements, made again whole when its label changes.
 let wireframe = null;
 let wireframePress = null;
+// No tool, after Esc: nothing draws; in wireframe mode components still change.
+let isSelectMode = false;
+
+function setSelectMode(isOn) {
+  isSelectMode = isOn;
+  if (!isOn) {
+    moveCursor.textContent = "";
+    return;
+  }
+  hideGuides();
+  cursorRing.style.display = "none";
+  moveCursor.textContent = "canvas { cursor: default !important; }";
+}
 
 // Undo and redo in wireframe mode: the whole scene as it was before each change.
 const wireframeHistory = { undo: [], redo: [] };
@@ -708,11 +728,11 @@ function startAdjusting(event, frame, mode, from) {
   showHandles();
 }
 
-// The component a press on it moves, or with ⌥ copies: not a section without ⌥, which a drag
-// draws in.
+// The component a press on it moves, or with ⌥ copies: not a section without ⌥ while a tool
+// is chosen, as a drag draws in it then.
 function movableAt(event) {
   const component = componentAt(event.clientX, event.clientY);
-  return component && (component.customData.tildeWireframe !== "section" || event.altKey) ? component : null;
+  return component && (component.customData.tildeWireframe !== "section" || event.altKey || isSelectMode) ? component : null;
 }
 
 // The nearest snap of any of `values` (a component's edges and centre on one axis), with the
@@ -811,7 +831,8 @@ function editWireframe(event) {
       if (group !== hoveredGroup) isTypeMenuOpen = false;
       hoveredGroup = group;
       isOverMovable = Boolean(movableAt(event)) && !labelled;
-      moveCursor.textContent = isOverMovable ? `canvas { cursor: ${event.altKey ? "copy" : "move"} !important; }` : "";
+      const cursor = isOverMovable ? (event.altKey ? "copy" : "move") : isSelectMode ? "default" : "";
+      moveCursor.textContent = cursor ? `canvas { cursor: ${cursor} !important; }` : "";
       showHandles();
     }
     return false;
@@ -966,6 +987,14 @@ const retargeted = new WeakSet();
 function snapPointer(event) {
   if (!wireframe || retargeted.has(event)) return;
   if (editWireframe(event)) return;
+  if (isSelectMode) {
+    // No tool: a press on empty space draws nothing, and deselects.
+    if (event.type === "pointerdown") selectGroup(null);
+    hideGuides();
+    event.stopImmediatePropagation();
+    event.preventDefault();
+    return;
+  }
   if (event.type === "pointerdown") {
     wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY };
   }
@@ -991,6 +1020,14 @@ function snapPointer(event) {
   });
   retargeted.add(copy);
   event.target.dispatchEvent(copy);
+}
+// In Draw with no tool, the canvas takes no press, so nothing draws.
+for (const type of ["pointerdown", "pointermove", "pointerup"]) {
+  window.addEventListener(type, (event) => {
+    if (!isSelectMode || wireframe) return;
+    event.stopImmediatePropagation();
+    event.preventDefault();
+  }, true);
 }
 for (const type of ["pointerdown", "pointermove", "pointerup"]) window.addEventListener(type, snapPointer, true);
 
@@ -1087,7 +1124,7 @@ const cursorTools = new Set([...drawingTools, "freedraw"]);
 
 function showCursorRing(event, isSnapping) {
   const tool = api?.getAppState().activeTool.type;
-  const isShown = cursorTools.has(tool) && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target)
+  const isShown = cursorTools.has(tool) && !isSelectMode && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target)
     && !(wireframe && isOverMovable);
   cursorRing.style.display = isShown ? "block" : "none";
   if (!isShown) return;

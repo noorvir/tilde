@@ -229,6 +229,18 @@ extension AnnotationController {
         isDrawing && flow.session?.pauses.isEmpty == false
     }
 
+    /// No tool in Draw or Wireframe: nothing draws, and wireframe components can still be
+    /// selected, moved, resized, copied and changed. A tool from the bar or its key draws again.
+    func putDrawingToolDown() {
+        if wireframe != nil {
+            wireframe?.tool = ""
+            drawingPanel.setWireframe(wireframe?.json ?? "null")
+        } else {
+            hasNoDrawingTool = true
+            drawingPanel.runWireframe("setNoTool()")
+        }
+    }
+
     /// Done in Draw or Wireframe, as ⌘↩ does there.
     func finishDrawingMode() {
         if wireframe != nil {

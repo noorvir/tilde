@@ -395,7 +395,7 @@ struct HUDView: View {
         // While paused the tools wait; Done still finishes.
         Group {
             ForEach(Self.drawingTools, id: \.tool) { entry in
-                HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
+                HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool && !controller.hasNoDrawingTool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
                     controller.setDrawingTool(entry.tool)
                 }
             }
@@ -587,7 +587,7 @@ struct HUDView: View {
                 .disabled(controller.wireframe != nil)
             }
             // In recording mode too, disabled, so that no button moves.
-            HUDButton(image: Image(systemName: "squareshape.split.2x2.dotted"), isOn: controller.wireframe != nil, keys: controller.wireframe == nil ? ["W"] : ["Esc"], help: "Wireframe") {
+            HUDButton(image: Image(systemName: "squareshape.split.2x2.dotted"), isOn: controller.wireframe != nil, keys: controller.wireframe == nil ? ["W"] : ["⌘↩"], help: "Wireframe") {
                 if controller.wireframe != nil, controller.isDrawingPaused {
                     controller.resume()
                 } else if controller.wireframe != nil {
