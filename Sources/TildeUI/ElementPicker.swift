@@ -30,10 +30,12 @@ struct Picked {
 @MainActor
 final class ElementPicker {
     private let browser: BrowserController
+    let windows: WindowStack
     private let accessibilityQueue = DispatchQueue(label: "tilde.accessibility")
 
     init(browser: BrowserController) {
         self.browser = browser
+        windows = WindowStack { [weak browser] in browser?.windowNumber }
     }
 
     /// With `scope`, picks only in that window, also where another window covers it.
@@ -42,6 +44,10 @@ final class ElementPicker {
 
     /// `isMoving`: for the highlight under a moving pointer, not for a click.
     func pick(at point: CGPoint, isMoving: Bool = false, in scope: WindowInfo? = nil) async -> Picked? {
+        // A click picks from the windows as they are now; a moving pointer from the last read.
+        if !isMoving, scope == nil, windows.isRunning {
+            _ = await windows.refreshed()
+        }
         guard let window = window(at: point, in: scope) else {
             return nil
         }
@@ -142,52 +148,21 @@ final class ElementPicker {
     /// (as it is now) when it is set and holds the point.
     func window(at point: CGPoint, in scope: WindowInfo? = nil) -> WindowInfo? {
         if let scope {
-            return currentWindow(number: scope.number).flatMap { $0.frame.contains(point) ? $0 : nil }
+            return scopedWindow(scope).flatMap { $0.frame.contains(point) ? $0 : nil }
         }
-        return windowStack().first { $0.frame.contains(point) }
+        return windows.window(at: point)
     }
 
-    /// The windows on screen that the user sees and can annotate, front to back: other apps'
-    /// windows and Tilde's browser, not Tilde's overlays, HUD or the menu bar.
+    /// The scoped window as it is now: Tilde's own from AppKit; another app's as the session
+    /// follows it, which ends the scope when the window goes.
+    private func scopedWindow(_ scope: WindowInfo) -> WindowInfo? {
+        if NSApp.window(withWindowNumber: scope.number) != nil || !windows.isRunning {
+            return currentWindow(number: scope.number)
+        }
+        return scope
+    }
+
     nonisolated private static let log = Logger(subsystem: "dev.tilde.app", category: "picker")
-
-    func windowStack() -> [WindowInfo] {
-        Self.windowStack(
-            browserWindow: browser.windowNumber, screenFrames: NSScreen.screens.map(\.frame.flipped), overlayLevel: OverlayWindow.overlayLevel.rawValue
-        )
-    }
-
-    /// The same, for a background queue: the window list can take a while to read.
-    nonisolated static func windowStack(browserWindow: Int?, screenFrames: [CGRect], overlayLevel: Int) -> [WindowInfo] {
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-
-        return list.compactMap { info in
-            let number = info[kCGWindowNumber as String] as? Int ?? 0
-            let pid = info[kCGWindowOwnerPID as String] as? pid_t ?? 0
-            let alpha = info[kCGWindowAlpha as String] as? Double ?? 1
-            let layer = info[kCGWindowLayer as String] as? Int ?? 0
-            let app = info[kCGWindowOwnerName as String] as? String ?? "App"
-            guard let bounds = info[kCGWindowBounds as String] as? NSDictionary,
-                  let frame = CGRect(dictionaryRepresentation: bounds)
-            else {
-                return nil
-            }
-            // Windows above the overlay never receive its clicks; Window Server owns the menu bar.
-            guard alpha > 0.01, layer < overlayLevel, app != "Window Server",
-                  pid != ownPID || number == browserWindow
-            else {
-                return nil
-            }
-            // Screen-sized windows above the normal layer are invisible backdrops (the Dock's,
-            // lock screen shields), not content.
-            if layer != 0 && screenFrames.contains(frame) {
-                return nil
-            }
-            let title = (info[kCGWindowName as String] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            return WindowInfo(number: number, pid: pid, app: app, title: title, frame: frame)
-        }
-    }
 
     private func windowPick(_ window: WindowInfo) -> Picked {
         let element = NativeElement(

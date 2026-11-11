@@ -394,6 +394,8 @@ final class AnnotationController: ObservableObject {
         }
         startCheckpoints()
         startHoldMonitor()
+        picker.windows.onChange = { [weak self] in self?.refreshOcclusion() }
+        picker.windows.start()
         saveSession()
 
         if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
@@ -462,6 +464,7 @@ final class AnnotationController: ObservableObject {
     private func stopAnnotating() {
         clips.discard()
         stopHoldMonitor()
+        picker.windows.stop()
         stopOcclusion()
         stopContentChecks()
         pauseNotice = nil
@@ -1111,7 +1114,6 @@ final class AnnotationController: ObservableObject {
     @Published private(set) var hiddenWindows: Set<Int> = []
     /// How far back each window with notes is: 0 for the front window.
     private(set) var windowDepth: [Int: Int] = [:]
-    private var occlusionTimer: Timer?
 
     struct StackWindow: Equatable {
         let number: Int
@@ -1134,28 +1136,14 @@ final class AnnotationController: ObservableObject {
         return (covers, missing)
     }
 
-    /// Checks four times a second, and when another app comes to the front, which windows
-    /// cover the windows that have notes.
-    private func startOcclusion() {
-        refreshOcclusion()
-        guard occlusionTimer == nil else {
-            return
-        }
-        occlusionTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshOcclusion()
-            }
-        }
-    }
-
     private func stopOcclusion() {
-        occlusionTimer?.invalidate()
-        occlusionTimer = nil
         windowCovers = [:]
         hiddenWindows = []
         windowDepth = [:]
     }
 
+    /// Which windows cover the windows that have notes, from the last read of the window
+    /// stack, which reads again when windows can have changed.
     func refreshOcclusion() {
         // Nothing moves on purpose while the user types, and typing must stay instant.
         guard composer == nil else {
@@ -1168,26 +1156,7 @@ final class AnnotationController: ObservableObject {
         guard !windows.isEmpty else {
             return
         }
-        guard !isReadingWindows else {
-            return
-        }
-        isReadingWindows = true
-        let browserWindow = browser.windowNumber
-        let screenFrames = NSScreen.screens.map(\.frame.flipped)
-        let overlayLevel = OverlayWindow.overlayLevel.rawValue
-        trackingQueue.async { [weak self] in
-            let stack = ElementPicker.windowStack(browserWindow: browserWindow, screenFrames: screenFrames, overlayLevel: overlayLevel)
-                .map { StackWindow(number: $0.number, frame: $0.frame) }
-            DispatchQueue.main.async { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.applyOcclusion(stack, windows: windows)
-                }
-            }
-        }
-    }
-
-    private func applyOcclusion(_ stack: [StackWindow], windows: Set<Int>) {
-        isReadingWindows = false
+        let stack = picker.windows.windows.map { StackWindow(number: $0.number, frame: $0.frame) }
         windowFrames = Dictionary(stack.map { ($0.number, $0.frame) }, uniquingKeysWith: { first, _ in first })
         let result = Self.covers(of: windows, in: stack)
         windowDepth = Dictionary(uniqueKeysWithValues: stack.enumerated().filter { windows.contains($0.element.number) }.map { ($0.element.number, $0.offset) })
@@ -1247,7 +1216,6 @@ final class AnnotationController: ObservableObject {
     private var isFindingSnapFrame = false
     private var typedComments: [Draft.ID: String] = [:]
     private var typedCommentsTask: Task<Void, Never>?
-    private var isReadingWindows = false
     /// Where the windows are, from the last time the window list was read.
     private var windowFrames: [Int: CGRect] = [:]
 
@@ -2594,7 +2562,7 @@ final class AnnotationController: ObservableObject {
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: capture, anchor: pending.anchor,
                 sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
             ))
-            startOcclusion()
+            refreshOcclusion()
             startContentChecks()
             if let tracked = pending.tracked {
                 trackedElements[annotation.id] = tracked
@@ -2655,6 +2623,7 @@ final class AnnotationController: ObservableObject {
 
     private func hideComposer() {
         composer = nil
+        refreshOcclusion()
         commentPanel.close()
         drawingPanel.endEditing()
         if isDrawing {
