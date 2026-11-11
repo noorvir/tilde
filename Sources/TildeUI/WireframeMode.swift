@@ -25,6 +25,14 @@ final class WireframeMode: ObservableObject {
     private var shownNote: Draft.ID?
     /// The lookup under way of the lines under the pointer.
     private var snaps: Task<Void, Never>?
+    /// The lines that the canvas has, so the same ones are not sent again at pointer rate.
+    private var sentSnaps: Snaps?
+
+    private struct Snaps: Equatable {
+        let lines: WireframeLayout.Lines
+        let window: CGRect?
+        let screen: CGRect?
+    }
 
     /// Card, Rectangle and Circle stand in for any component not in the list.
     nonisolated static let tools = [
@@ -87,6 +95,7 @@ final class WireframeMode: ObservableObject {
         shownNote = nil
         snaps?.cancel()
         snaps = nil
+        sentSnaps = nil
     }
 
     private func sendTool() {
@@ -153,6 +162,8 @@ final class WireframeMode: ObservableObject {
             return
         }
         self.window = current
+        // The canvas drops the lines it has: they were where the window was.
+        sentSnaps = nil
         canvas.setWireframeWindow(current.frame)
     }
 
@@ -183,7 +194,11 @@ final class WireframeMode: ObservableObject {
                 return
             }
             snaps = nil
-            canvas.setSnapTargets(rects: lines.rects, containers: lines.containers, window: window?.frame, screen: screen)
+            let found = Snaps(lines: lines, window: window?.frame, screen: screen)
+            if found != sentSnaps {
+                sentSnaps = found
+                canvas.setSnapTargets(rects: lines.rects, containers: lines.containers, window: window?.frame, screen: screen)
+            }
         }
     }
 

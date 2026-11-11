@@ -4,7 +4,7 @@ import ApplicationServices
 /// The layout of an app's window around a point, from Accessibility: the lines that a
 /// wireframe's components snap to.
 enum WireframeLayout {
-    struct Lines: Equatable {
+    struct Lines: Equatable, Sendable {
         /// The element at the point, its containers up to the window, and their children.
         var rects: [CGRect] = []
         /// The larger containers, innermost first, whose thirds and halves count as well.

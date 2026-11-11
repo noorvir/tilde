@@ -360,7 +360,8 @@ final class AnnotationController: ObservableObject {
             makeOverlayKey()
         case .keepKeyboard:
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
-            if !hud.isInBrowser {
+            // A comment that is open, as after Done in Wireframe, keeps the keyboard.
+            if !hud.isInBrowser, commentBox.composer == nil {
                 overlays.makeKey()
             }
         case .giveKeyboardBack:
