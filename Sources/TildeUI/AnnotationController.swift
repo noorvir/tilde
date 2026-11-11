@@ -1264,18 +1264,17 @@ final class AnnotationController: ObservableObject {
     }
 
     /// How much a note's content is on screen: the page's identity decides when it can, and
-    /// the picture of the note's area otherwise. Nil when neither can be read. `source` says
-    /// which reading decided, for the log; it holds no address or title.
-    nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> (value: Double, source: String)? {
+    /// the picture of the note's area otherwise. Nil when neither can be read.
+    nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> Double? {
         let original = await check.page?.value
         if let original, let isSame = now?.isSamePage(as: original),
            let similarity = NoteVisibility.similarity(isSamePage: isSame, isElementConfirmed: check.isElementConfirmed)
         {
-            return (similarity, "page \(isSame ? "same" : "other"), element \(check.isElementConfirmed ? "confirmed" : "not confirmed")")
+            return similarity
         }
 
         if check.isElementGone, await check.fingerprint.value?.isPlain == true {
-            return (0, "element gone on a plain area")
+            return 0
         }
 
         guard let fingerprint = await check.fingerprint.value,
@@ -1283,8 +1282,7 @@ final class AnnotationController: ObservableObject {
         else {
             return nil
         }
-        let page = original == nil ? "no page at the note" : now == nil ? "page not read" : "page undecided"
-        return (current.similarity(to: fingerprint), "picture, \(page)")
+        return current.similarity(to: fingerprint)
     }
 
     /// Checks twice a second whether each note's content is on screen.
@@ -1326,7 +1324,7 @@ final class AnnotationController: ObservableObject {
         }
         isCheckingContent = true
         Task { [weak self] in
-            var similarities: [Draft.ID: (value: Double, source: String)] = [:]
+            var similarities: [Draft.ID: Double] = [:]
             // One read per window, however many notes it has.
             var pages: [Int: PageIdentity] = [:]
             for check in checks {
@@ -1339,12 +1337,12 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    private func applyContentChecks(_ similarities: [Draft.ID: (value: Double, source: String)]) {
+    private func applyContentChecks(_ similarities: [Draft.ID: Double]) {
         isCheckingContent = false
         var gone = contentGoneNotes
         for (id, similarity) in similarities {
             var visibility = visibilities[id] ?? NoteVisibility()
-            if visibility.update(similarity: similarity.value) {
+            if visibility.update(similarity: similarity) {
                 // Back on its page: its element may be a new one, or in a tab that left.
                 if gone.remove(id) != nil {
                     elementsToFindAgain.insert(id)
@@ -1353,8 +1351,6 @@ final class AnnotationController: ObservableObject {
                 gone.insert(id)
             }
             visibilities[id] = visibility
-            // To tune the thresholds from a real session.
-            log.notice("note content similarity \(similarity.value, format: .fixed(precision: 3)) by \(similarity.source, privacy: .public), shows \(visibility.isVisible)")
         }
         if gone != contentGoneNotes {
             contentGoneNotes = gone
