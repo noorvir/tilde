@@ -1235,6 +1235,10 @@ final class AnnotationController: ObservableObject {
     private func holdChanged(_ output: HoldGesture.Output, key: DoubleTapKey) {
         switch output {
         case .began:
+            // In wireframe mode ⌥ and a drag copies a component.
+            guard wireframe == nil else {
+                return
+            }
             dispatch(.holdBegan, holdFlag: key.flag)
             // With the browser in front, its page takes the first click only when it is key.
             if pauses.contains(.hold), NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), browser.window?.isVisible == true {
