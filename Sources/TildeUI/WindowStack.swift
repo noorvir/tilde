@@ -8,8 +8,9 @@ import AppKit
 @MainActor
 final class WindowStack {
     private(set) var windows: [ElementPicker.WindowInfo] = []
-    /// The stack is another one: a window moved, came, went or changed its order.
-    var onChange: () -> Void = {}
+    /// After each read, with whether the stack is another one: a window moved, came, went or
+    /// changed its order.
+    var onRead: (_ isChanged: Bool) -> Void = { _ in }
     /// A mouse button came up or a key went down, here or in another app.
     var onInput: () -> Void = {}
 
@@ -131,8 +132,8 @@ final class WindowStack {
             self.waiting = []
             waiting.forEach { $0.resume(returning: read) }
         }
-        if isChanged, isRunning {
-            onChange()
+        if isRunning {
+            onRead(isChanged)
         }
     }
 

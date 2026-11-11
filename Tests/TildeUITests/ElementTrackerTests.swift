@@ -49,14 +49,14 @@ struct ElementTrackerTests {
 @MainActor
 struct OcclusionTests {
     @Test func windowsInFrontOfANotesWindowCoverItAndMissingWindowsHideTheirNotes() {
-        let finder = AnnotationController.StackWindow(number: 1, frame: CGRect(x: 100, y: 50, width: 800, height: 600))
-        let claude = AnnotationController.StackWindow(number: 2, frame: CGRect(x: 0, y: 0, width: 1200, height: 900))
-        let faraway = AnnotationController.StackWindow(number: 3, frame: CGRect(x: 2000, y: 0, width: 400, height: 400))
-        let back = AnnotationController.StackWindow(number: 4, frame: CGRect(x: 0, y: 0, width: 1500, height: 1000))
+        let finder = NoteTracker.StackWindow(number: 1, frame: CGRect(x: 100, y: 50, width: 800, height: 600))
+        let claude = NoteTracker.StackWindow(number: 2, frame: CGRect(x: 0, y: 0, width: 1200, height: 900))
+        let faraway = NoteTracker.StackWindow(number: 3, frame: CGRect(x: 2000, y: 0, width: 400, height: 400))
+        let back = NoteTracker.StackWindow(number: 4, frame: CGRect(x: 0, y: 0, width: 1500, height: 1000))
         // Front to back.
         let stack = [faraway, finder, claude, back]
 
-        let result = AnnotationController.covers(of: [1, 2, 9], in: stack)
+        let result = NoteTracker.covers(of: [1, 2, 9], in: stack)
 
         // Finder is in front: nothing covers it. Claude is behind Finder; the faraway window
         // in front does not overlap it.

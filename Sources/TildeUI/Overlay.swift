@@ -88,8 +88,8 @@ final class OverlayView: NSView {
     init(controller: AnnotationController) {
         self.controller = controller
         super.init(frame: .zero)
-        // The browser's notes move with its page; the hover highlight changes on its own.
-        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange, controller.hoverHighlight.objectWillChange)
+        // The browser's notes move with its page; the hover highlight and the notes' places change on their own.
+        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange, controller.hoverHighlight.objectWillChange, controller.tracker.objectWillChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.needsDisplay = true }
     }
@@ -313,7 +313,7 @@ final class OverlayView: NSView {
         if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.composer == nil,
            !controller.pageNotes.contains(where: { $0.draft.id == id })
         {
-            if let marker = controller.noteMarker(draft) {
+            if let marker = controller.tracker.marker(of: draft) {
                 drawTooltip(Self.commentText(draft), at: marker)
             }
         }
@@ -338,7 +338,7 @@ final class OverlayView: NSView {
         var notes: [Note] = []
         for (index, draft) in controller.drafts.enumerated() where draft.anchor == nil {
             // Notes on elements in other apps follow them, and hide while out of view.
-            guard let frame = controller.noteFrame(draft), let marker = controller.noteMarker(draft) else {
+            guard let frame = controller.tracker.frame(of: draft), let marker = controller.tracker.marker(of: draft) else {
                 continue
             }
             notes.append(Note(number: index + 1, draft: draft, frame: frame, marker: marker, window: draft.sourceWindow, isOnPage: false))
@@ -347,8 +347,8 @@ final class OverlayView: NSView {
         for note in controller.pageNotes {
             notes.append(Note(number: note.number, draft: note.draft, frame: note.frame, marker: note.marker, window: browserWindow, isOnPage: true))
         }
-        notes = notes.filter { note in note.window.map { !controller.hiddenWindows.contains($0) } ?? true }
-        notes.sort { (controller.windowDepth[$0.window ?? -1] ?? 0) > (controller.windowDepth[$1.window ?? -1] ?? 0) }
+        notes = notes.filter { note in note.window.map { !controller.tracker.hiddenWindows.contains($0) } ?? true }
+        notes.sort { (controller.tracker.windowDepth[$0.window ?? -1] ?? 0) > (controller.tracker.windowDepth[$1.window ?? -1] ?? 0) }
 
         noteCards = []
         for note in notes {
@@ -363,7 +363,7 @@ final class OverlayView: NSView {
                 let card = drawCommentCard(Self.commentText(note.draft), beside: anchor, element: element, avoiding: noteCards.map(\.rect), maxLines: 3)
                 noteCards.append((note.draft.id, card))
             }
-            for cover in note.window.flatMap({ controller.windowCovers[$0] }) ?? [] {
+            for cover in note.window.flatMap({ controller.tracker.windowCovers[$0] }) ?? [] {
                 NSColor.clear.setFill()
                 cover.offsetBy(dx: -origin.x, dy: -origin.y).fill(using: .copy)
             }

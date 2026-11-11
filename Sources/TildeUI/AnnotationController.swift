@@ -134,6 +134,7 @@ final class AnnotationController: ObservableObject {
                 store.updateNoteCount(drafts.count, for: session.id)
             }
             browser.anchors = Dictionary(uniqueKeysWithValues: drafts.compactMap { draft in draft.anchor.map { (draft.id, $0) } })
+            tracker.notes = drafts
             scheduleSave()
         }
     }
@@ -151,7 +152,9 @@ final class AnnotationController: ObservableObject {
     }
     @Published var sentStatus = SentStatus.done
     /// The comment box's data while `flow` has it open.
-    @Published private(set) var composer: Composer?
+    @Published private(set) var composer: Composer? {
+        didSet { tracker.isHeld = composer != nil }
+    }
     private var holdMonitor: HoldMonitor?
 
     /// Why annotating just paused, for the note below the HUD.
@@ -279,14 +282,8 @@ final class AnnotationController: ObservableObject {
     /// A saved session whose notes the next session starts with.
     private var pendingRestore: SessionRecord?
 
-    /// Notes on elements in other apps, and where those elements are now; a note missing from
-    /// `trackedFrames` but in `hiddenNotes` scrolled out of view or lost its element.
-    private var trackedElements: [Draft.ID: TrackedElement] = [:]
-    @Published private(set) var trackedFrames: [Draft.ID: CGRect] = [:]
-    @Published private(set) var hiddenNotes: Set<Draft.ID> = []
-    private var trackingTimer: Timer?
-    private var isTracking = false
-    private let trackingQueue = DispatchQueue(label: "tilde.tracking")
+    /// Where each note is on screen now, and whether it shows.
+    let tracker: NoteTracker
 
     init(store: SessionStore, browser: BrowserController, shortcuts: ShortcutStore? = nil, archive: SessionArchive = SessionArchive(), defaults: UserDefaults? = .standard) {
         self.store = store
@@ -295,6 +292,7 @@ final class AnnotationController: ObservableObject {
         self.defaults = defaults
         self.shortcuts = shortcuts ?? ShortcutStore()
         picker = ElementPicker(browser: browser)
+        tracker = NoteTracker(windows: picker.windows)
         flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
         subscription = store.$sessions
@@ -394,7 +392,14 @@ final class AnnotationController: ObservableObject {
         }
         startCheckpoints()
         startHoldMonitor()
-        picker.windows.onChange = { [weak self] in self?.refreshOcclusion() }
+        tracker.pageWindow = { [weak self] in
+            guard let self, !pageNotes.isEmpty else {
+                return nil
+            }
+            return browser.windowNumber
+        }
+        // Also when the stack is the same: the browser's page notes can have come or gone.
+        picker.windows.onRead = { [weak self] _ in self?.tracker.refreshCovers() }
         picker.windows.start()
         saveSession()
 
@@ -465,11 +470,9 @@ final class AnnotationController: ObservableObject {
         clips.discard()
         stopHoldMonitor()
         picker.windows.stop()
-        stopOcclusion()
-        stopContentChecks()
+        tracker.stop()
         pauseNotice = nil
         pauseNoticeTimer?.invalidate()
-        stopTracking()
         drawingPanel.endSession()
         commentPanel.close()
         previewPanel.close()
@@ -1106,68 +1109,6 @@ final class AnnotationController: ObservableObject {
         dispatch(.startShortcut)
     }
 
-    // MARK: - Windows in front of notes
-
-    /// For each window with notes, the frames of the windows in front of it; a window not on
-    /// screen (closed, minimised, on another Space) is in `hiddenWindows`, and its notes hide.
-    @Published private(set) var windowCovers: [Int: [CGRect]] = [:]
-    @Published private(set) var hiddenWindows: Set<Int> = []
-    /// How far back each window with notes is: 0 for the front window.
-    private(set) var windowDepth: [Int: Int] = [:]
-
-    struct StackWindow: Equatable {
-        let number: Int
-        let frame: CGRect
-    }
-
-    /// The windows in front of each of `windows` in a front-to-back `stack`, and the ones
-    /// missing from it.
-    nonisolated static func covers(of windows: Set<Int>, in stack: [StackWindow]) -> (covers: [Int: [CGRect]], missing: Set<Int>) {
-        var covers: [Int: [CGRect]] = [:]
-        var missing: Set<Int> = []
-        for window in windows {
-            guard let index = stack.firstIndex(where: { $0.number == window }) else {
-                missing.insert(window)
-                continue
-            }
-            let frame = stack[index].frame
-            covers[window] = stack[..<index].map(\.frame).filter { $0.intersects(frame) }
-        }
-        return (covers, missing)
-    }
-
-    private func stopOcclusion() {
-        windowCovers = [:]
-        hiddenWindows = []
-        windowDepth = [:]
-    }
-
-    /// Which windows cover the windows that have notes, from the last read of the window
-    /// stack, which reads again when windows can have changed.
-    func refreshOcclusion() {
-        // Nothing moves on purpose while the user types, and typing must stay instant.
-        guard composer == nil else {
-            return
-        }
-        var windows = Set(drafts.compactMap(\.sourceWindow))
-        if !pageNotes.isEmpty, let number = browser.windowNumber {
-            windows.insert(number)
-        }
-        guard !windows.isEmpty else {
-            return
-        }
-        let stack = picker.windows.windows.map { StackWindow(number: $0.number, frame: $0.frame) }
-        windowFrames = Dictionary(stack.map { ($0.number, $0.frame) }, uniquingKeysWith: { first, _ in first })
-        let result = Self.covers(of: windows, in: stack)
-        windowDepth = Dictionary(uniqueKeysWithValues: stack.enumerated().filter { windows.contains($0.element.number) }.map { ($0.element.number, $0.offset) })
-        if result.covers != windowCovers {
-            windowCovers = result.covers
-        }
-        if result.missing != hiddenWindows {
-            hiddenWindows = result.missing
-        }
-    }
-
     // MARK: - Holding a key to use the mouse
 
     private func startHoldMonitor() {
@@ -1203,12 +1144,6 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - Whether a note's content is on screen
 
-    /// Notes whose content is gone from their window, such as after a page change. They stay
-    /// in the session, the list and the report; only their marks hide.
-    @Published private(set) var contentGoneNotes: Set<Draft.ID> = []
-    private var visibilities: [Draft.ID: NoteVisibility] = [:]
-    private var contentTimer: Timer?
-    private var isCheckingContent = false
     let drawingPanel = DrawingPanel()
     @Published private(set) var drawingTool = "arrow"
     @Published private(set) var drawingColor = "#2F76FF"
@@ -1216,121 +1151,12 @@ final class AnnotationController: ObservableObject {
     private var isFindingSnapFrame = false
     private var typedComments: [Draft.ID: String] = [:]
     private var typedCommentsTask: Task<Void, Never>?
-    /// Where the windows are, from the last time the window list was read.
-    private var windowFrames: [Int: CGRect] = [:]
 
-    private struct ContentCheck: Sendable {
-        let id: Draft.ID
-        let window: Int
-        let windowFrame: CGRect?
-        let pid: pid_t?
-        let frame: CGRect
-        let fingerprint: Task<NoteFingerprint?, Never>
-        let page: Task<PageIdentity?, Never>?
-        let isElementConfirmed: Bool
-        let isElementGone: Bool
-    }
+    // MARK: - Labels of notes
 
-    /// How much a note's content is on screen: the page's identity decides when it can, and
-    /// the picture of the note's area otherwise. Nil when neither can be read.
-    nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> Double? {
-        let original = await check.page?.value
-        if let original, let isSame = now?.isSamePage(as: original),
-           let similarity = NoteVisibility.similarity(isSamePage: isSame, isElementConfirmed: check.isElementConfirmed)
-        {
-            return similarity
-        }
-
-        if check.isElementGone, await check.fingerprint.value?.isPlain == true {
-            return 0
-        }
-
-        guard let fingerprint = await check.fingerprint.value,
-              let current = await NoteFingerprint.capture(window: CGWindowID(check.window), area: check.frame, windowFrame: check.windowFrame)
-        else {
-            return nil
-        }
-        return current.similarity(to: fingerprint)
-    }
-
-    /// Checks twice a second whether each note's content is on screen.
-    private func startContentChecks() {
-        guard contentTimer == nil else {
-            return
-        }
-        contentTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.checkContent()
-            }
-        }
-    }
-
-    private func stopContentChecks() {
-        contentTimer?.invalidate()
-        contentTimer = nil
-        visibilities = [:]
-        contentGoneNotes = []
-    }
-
-    private func checkContent() {
-        guard !isCheckingContent, isOpen, composer == nil else {
-            return
-        }
-        let checks = drafts.compactMap { draft -> ContentCheck? in
-            guard let window = draft.sourceWindow, let fingerprint = draft.fingerprint, !hiddenWindows.contains(window) else {
-                return nil
-            }
-            return ContentCheck(
-                id: draft.id, window: window, windowFrame: windowFrames[window], pid: draft.sourcePID,
-                frame: draft.pictureArea ?? trackedFrames[draft.id] ?? draft.annotation.frame, fingerprint: fingerprint, page: draft.page,
-                isElementConfirmed: trackedElements[draft.id] != nil && !goneElements.contains(draft.id),
-                isElementGone: goneElements.contains(draft.id)
-            )
-        }
-        guard !checks.isEmpty else {
-            return
-        }
-        isCheckingContent = true
-        Task { [weak self] in
-            var similarities: [Draft.ID: Double] = [:]
-            // One read per window, however many notes it has.
-            var pages: [Int: PageIdentity] = [:]
-            for check in checks {
-                if pages[check.window] == nil, let pid = check.pid, let frame = check.windowFrame {
-                    pages[check.window] = await Task.detached { PageIdentity.read(pid: pid, windowFrame: frame) }.value
-                }
-                similarities[check.id] = await Self.similarity(of: check, page: pages[check.window])
-            }
-            self?.applyContentChecks(similarities)
-        }
-    }
-
-    private func applyContentChecks(_ similarities: [Draft.ID: Double]) {
-        isCheckingContent = false
-        var gone = contentGoneNotes
-        for (id, similarity) in similarities {
-            var visibility = visibilities[id] ?? NoteVisibility()
-            if visibility.update(similarity: similarity) {
-                // Back on its page: its element may be a new one, or in a tab that left.
-                if gone.remove(id) != nil {
-                    elementsToFindAgain.insert(id)
-                }
-            } else {
-                gone.insert(id)
-            }
-            visibilities[id] = visibility
-        }
-        if gone != contentGoneNotes {
-            contentGoneNotes = gone
-        }
-    }
-
-    // MARK: - Following elements in other apps
-
-    /// Where a note's element is on screen now, or nil while it is out of view or gone.
     /// The note whose numbered label is at this point.
     func noteLabel(at point: CGPoint) -> Draft.ID? {
-        let labels = drafts.filter { $0.anchor == nil }.compactMap { draft in noteMarker(draft).map { (draft.id, $0) } }
+        let labels = drafts.filter { $0.anchor == nil }.compactMap { draft in tracker.marker(of: draft).map { (draft.id, $0) } }
             + anchoredNotes.map { ($0.draft.id, $0.marker) }
         return labels.last { Self.isOnLabel(distance: hypot($0.1.x - point.x, $0.1.y - point.y)) }?.0
     }
@@ -1338,21 +1164,6 @@ final class AnnotationController: ObservableObject {
     /// A label's circle has a radius of 10 points; 8 more around it make it easy to hit.
     nonisolated static func isOnLabel(distance: CGFloat) -> Bool {
         distance <= 18
-    }
-
-    func noteFrame(_ draft: Draft) -> CGRect? {
-        if hiddenNotes.contains(draft.id) || contentGoneNotes.contains(draft.id) {
-            return nil
-        }
-        // A recording is only in the list.
-        if case .recording = draft.annotation.target {
-            return nil
-        }
-        // Nothing can confirm that its element is on screen; it stays in the list of notes.
-        if draft.isRestored, draft.anchor == nil {
-            return nil
-        }
-        return trackedFrames[draft.id] ?? draft.annotation.frame
     }
 
     /// ⌘[ or ⌘] while the overlay has the keyboard: in Tilde's browser, or else in the app in
@@ -1365,96 +1176,6 @@ final class AnnotationController: ObservableObject {
             browser.goBack(nil)
         } else {
             browser.goForward(nil)
-        }
-    }
-
-    /// Where a note's numbered marker is now, at its element's top-right corner.
-    func noteMarker(_ draft: Draft) -> CGPoint? {
-        guard let frame = noteFrame(draft) else {
-            return nil
-        }
-        return trackedElements[draft.id] != nil ? CGPoint(x: frame.maxX, y: frame.minY) : draft.marker
-    }
-
-    /// Reads tracked elements five times a second, besides after scrolls and window moves.
-    private func startTracking() {
-        guard trackingTimer == nil else {
-            return
-        }
-        trackingTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.refreshTracking()
-            }
-        }
-        refreshTracking()
-    }
-
-    private var elementsToFindAgain: Set<Draft.ID> = []
-    /// Notes whose element the app no longer reports: only the picture can confirm their content.
-    private var goneElements: Set<Draft.ID> = []
-
-    private func stopTracking() {
-        trackingTimer?.invalidate()
-        trackingTimer = nil
-        trackedElements = [:]
-        trackedFrames = [:]
-        hiddenNotes = []
-        goneElements = []
-    }
-
-    /// Reads where each tracked element is, off the main thread, and moves its note there.
-    func refreshTracking() {
-        let ids = Set(drafts.map(\.id))
-        trackedElements = trackedElements.filter { ids.contains($0.key) }
-        guard !isTracking, !trackedElements.isEmpty, composer == nil else {
-            return
-        }
-        isTracking = true
-        // A note off its page stays with its page: another page's look-alike is not its element.
-        let work = trackedElements.filter { !contentGoneNotes.contains($0.key) }.map { id, tracked in
-            let original = drafts.first { $0.id == id }?.annotation.frame ?? .zero
-            let findsAgain = elementsToFindAgain.contains(id)
-            return (id, tracked, findsAgain ? original : trackedFrames[id] ?? original, findsAgain)
-        }
-        elementsToFindAgain = []
-        trackingQueue.async { [weak self] in
-            let results = work.map { id, tracked, last, findsAgain in (id, ElementTracker.locate(tracked, lastFrame: last, findsAgain: findsAgain)) }
-            DispatchQueue.main.async { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.applyTracking(results)
-                }
-            }
-        }
-    }
-
-    private func applyTracking(_ results: [(Draft.ID, (frame: CGRect?, tracked: TrackedElement, isGone: Bool))]) {
-        isTracking = false
-        var frames = trackedFrames
-        var hidden = hiddenNotes
-        for (id, result) in results where trackedElements[id] != nil {
-            trackedElements[id] = result.tracked
-            if result.isGone {
-                goneElements.insert(id)
-            } else {
-                goneElements.remove(id)
-            }
-            let windowFrame = drafts.first { $0.id == id }?.sourceWindow.flatMap { windowFrames[$0] }
-            if let frame = result.frame, let visible = ElementTracker.visibleFrame(frame, clips: windowFrame.map { [$0] } ?? []) {
-                frames[id] = visible
-                hidden.remove(id)
-            } else if result.isGone, drafts.first(where: { $0.id == id })?.fingerprint != nil {
-                // Apps such as the Simulator rebuild elements on every page. The picture of
-                // the note's area decides, so the note comes back with its page.
-                hidden.remove(id)
-            } else {
-                hidden.insert(id)
-            }
-        }
-        if frames != trackedFrames {
-            trackedFrames = frames
-        }
-        if hidden != hiddenNotes {
-            hiddenNotes = hidden
         }
     }
 
@@ -2117,7 +1838,7 @@ final class AnnotationController: ObservableObject {
         // The window may have come forward over its overlay, such as on a click in it.
         orderAboveScope()
         if current.frame != scope.frame {
-            refreshTracking()
+            tracker.refreshTracking()
         }
     }
 
@@ -2292,9 +2013,9 @@ final class AnnotationController: ObservableObject {
         }
         ScrollForwarder.forward(event, at: point, to: window)
         if window.number != browser.windowNumber {
-            if !trackedElements.isEmpty {
+            if tracker.isFollowing {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
-                    self?.refreshTracking()
+                    self?.tracker.refreshTracking()
                 }
             }
             hoverAfterScroll?.cancel()
@@ -2546,7 +2267,7 @@ final class AnnotationController: ObservableObject {
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
             var capture = pending.capture
             if pending.isDrawingEdited {
-                let windowFrame = pending.sourceWindow.flatMap { windowFrames[$0] }
+                let windowFrame = pending.sourceWindow.flatMap { tracker.windowFrames[$0] }
                 let bounds = pending.drawingBounds ?? pending.frame
                 capture = Task {
                     // The canvas has to paint without the handles first.
@@ -2562,11 +2283,9 @@ final class AnnotationController: ObservableObject {
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: capture, anchor: pending.anchor,
                 sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
             ))
-            refreshOcclusion()
-            startContentChecks()
+            tracker.notesAdded()
             if let tracked = pending.tracked {
-                trackedElements[annotation.id] = tracked
-                startTracking()
+                tracker.follow(annotation.id, element: tracked)
             }
             Task {
                 let captures = await capture.value
@@ -2623,7 +2342,6 @@ final class AnnotationController: ObservableObject {
 
     private func hideComposer() {
         composer = nil
-        refreshOcclusion()
         commentPanel.close()
         drawingPanel.endEditing()
         if isDrawing {
