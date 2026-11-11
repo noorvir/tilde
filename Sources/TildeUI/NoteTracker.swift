@@ -39,18 +39,25 @@ final class NoteTracker: ObservableObject {
     }
     /// The window of Tilde's browser while the overlay draws the notes of its page.
     var pageWindow: () -> Int? = { nil }
+    /// Annotating is paused: the user works in their apps.
+    var isPaused = false
 
     private let windows: WindowStack
     private var elements: [Draft.ID: TrackedElement] = [:]
     /// Notes whose element the app no longer reports: only the picture can confirm their content.
     private var goneElements: Set<Draft.ID> = []
     private var elementsToFindAgain: Set<Draft.ID> = []
+    /// When each lost element is searched for next, and how long the last wait was.
+    private var searches: [Draft.ID: (next: Date, delay: TimeInterval)] = [:]
     private var trackingTimer: Timer?
     private var isTracking = false
     private let trackingQueue = DispatchQueue(label: "tilde.tracking")
     private var visibilities: [Draft.ID: NoteVisibility] = [:]
     private var contentTimer: Timer?
     private var isCheckingContent = false
+    /// Something that can change a note's content happened since the last round of checks.
+    private var isChanged = true
+    private var lastRound = Date.distantPast
 
     init(windows: WindowStack) {
         self.windows = windows
@@ -58,8 +65,35 @@ final class NoteTracker: ObservableObject {
 
     /// Notes were added: their windows and content are checked from now on.
     func notesAdded() {
+        isChanged = true
         refreshCovers()
         startContentChecks()
+    }
+
+    /// Something happened that can change what the notes' windows show: input, a window that
+    /// moved, came or went, another app in front.
+    func somethingChanged() {
+        isChanged = true
+    }
+
+    /// A page scrolled under the pointer: the notes on it moved, and a lost element may be in
+    /// view again.
+    func scrolled() {
+        isChanged = true
+        searches = [:]
+        guard isFollowing else {
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            self?.refreshTracking()
+        }
+    }
+
+    /// The window that the session is limited to moved.
+    func windowMoved() {
+        isChanged = true
+        searches = [:]
+        refreshTracking()
     }
 
     /// The note follows this element of another app.
@@ -75,6 +109,7 @@ final class NoteTracker: ObservableObject {
         frames = [:]
         hidden = []
         goneElements = []
+        searches = [:]
         contentTimer?.invalidate()
         contentTimer = nil
         visibilities = [:]
@@ -173,7 +208,7 @@ final class NoteTracker: ObservableObject {
         refreshTracking()
     }
 
-    var isFollowing: Bool {
+    private var isFollowing: Bool {
         !elements.isEmpty
     }
 
@@ -184,14 +219,18 @@ final class NoteTracker: ObservableObject {
         }
         isTracking = true
         // A note off its page stays with its page: another page's look-alike is not its element.
+        let now = Date()
         let work = elements.filter { !contentGone.contains($0.key) }.map { id, tracked in
             let original = notes.first { $0.id == id }?.annotation.frame ?? .zero
             let findsAgain = elementsToFindAgain.contains(id)
-            return (id, tracked, findsAgain ? original : frames[id] ?? original, findsAgain)
+            let searches = findsAgain || (self.searches[id]?.next ?? .distantPast) <= now
+            return (id, tracked, findsAgain ? original : frames[id] ?? original, findsAgain, searches)
         }
         elementsToFindAgain = []
         trackingQueue.async { [weak self] in
-            let results = work.map { id, tracked, last, findsAgain in (id, ElementTracker.locate(tracked, lastFrame: last, findsAgain: findsAgain)) }
+            let results = work.map { id, tracked, last, findsAgain, searches in
+                (id, ElementTracker.locate(tracked, lastFrame: last, findsAgain: findsAgain, searches: searches), searches)
+            }
             DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
                     self?.applyTracking(results)
@@ -200,16 +239,28 @@ final class NoteTracker: ObservableObject {
         }
     }
 
-    private func applyTracking(_ results: [(Draft.ID, (frame: CGRect?, tracked: TrackedElement, isGone: Bool))]) {
+    /// How long to wait before the next search for an element that a search did not find:
+    /// twice the last wait, from 0.2 s up to 5 s. A search walks the app's elements.
+    nonisolated static func searchDelay(after last: TimeInterval?) -> TimeInterval {
+        min(5, (last ?? 0.1) * 2)
+    }
+
+    private func applyTracking(_ results: [(Draft.ID, (frame: CGRect?, tracked: TrackedElement, isGone: Bool), Bool)]) {
         isTracking = false
         var frames = self.frames
         var hidden = self.hidden
-        for (id, result) in results where elements[id] != nil {
+        let gone = goneElements
+        for (id, result, searched) in results where elements[id] != nil {
             elements[id] = result.tracked
             if result.isGone {
                 goneElements.insert(id)
+                if searched {
+                    let delay = Self.searchDelay(after: searches[id]?.delay)
+                    searches[id] = (Date().addingTimeInterval(delay), delay)
+                }
             } else {
                 goneElements.remove(id)
+                searches[id] = nil
             }
             let windowFrame = notes.first { $0.id == id }?.sourceWindow.flatMap { windowFrames[$0] }
             if let frame = result.frame, let visible = ElementTracker.visibleFrame(frame, clips: windowFrame.map { [$0] } ?? []) {
@@ -222,6 +273,9 @@ final class NoteTracker: ObservableObject {
             } else {
                 hidden.insert(id)
             }
+        }
+        if frames != self.frames || hidden != self.hidden || gone != goneElements {
+            isChanged = true
         }
         if frames != self.frames {
             self.frames = frames
@@ -245,34 +299,43 @@ final class NoteTracker: ObservableObject {
         let isElementGone: Bool
     }
 
-    /// How much a note's content is on screen: the page's identity decides when it can, and
-    /// the picture of the note's area otherwise. Nil when neither can be read.
-    nonisolated private static func similarity(of check: ContentCheck, page now: PageIdentity?) async -> Double? {
+    /// What the page's identity says about a note's content, or that its element is gone from
+    /// a plain area: nil when only the picture can tell.
+    nonisolated private static func pageSimilarity(of check: ContentCheck, page now: PageIdentity?) async -> Double? {
         let original = await check.page?.value
         if let original, let isSame = now?.isSamePage(as: original),
            let similarity = NoteVisibility.similarity(isSamePage: isSame, isElementConfirmed: check.isElementConfirmed)
         {
             return similarity
         }
-
         if check.isElementGone, await check.fingerprint.value?.isPlain == true {
             return 0
         }
-
-        guard let fingerprint = await check.fingerprint.value,
-              let current = await NoteFingerprint.capture(window: CGWindowID(check.window), area: check.frame, windowFrame: check.windowFrame)
-        else {
-            return nil
-        }
-        return current.similarity(to: fingerprint)
+        return nil
     }
 
-    /// Checks twice a second whether each note's content is on screen.
+    /// How often content is checked at most, and at least while nothing changes.
+    nonisolated static let checkInterval: TimeInterval = 0.5
+    nonisolated static let quietInterval: TimeInterval = 1
+
+    /// Whether a round of checks runs now. It runs after a change and while a note's showing is
+    /// about to change; with no change, once a second, and not at all while annotating is paused
+    /// with no note on screen, as only something the user does can change what shows then.
+    nonisolated static func runsRound(isChanged: Bool, isSettling: Bool, sinceLastRound: TimeInterval, isPaused: Bool, isAnyNoteShown: Bool) -> Bool {
+        if isChanged || isSettling {
+            return true
+        }
+        if isPaused, !isAnyNoteShown {
+            return false
+        }
+        return sinceLastRound >= quietInterval - 0.05
+    }
+
     private func startContentChecks() {
         guard contentTimer == nil else {
             return
         }
-        contentTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        contentTimer = Timer.scheduledTimer(withTimeInterval: Self.checkInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.checkContent()
             }
@@ -294,22 +357,51 @@ final class NoteTracker: ObservableObject {
                 isElementGone: goneElements.contains(draft.id)
             )
         }
-        guard !checks.isEmpty else {
+        let isSettling = checks.contains { visibilities[$0.id]?.isSettled == false }
+        let isAnyNoteShown = notes.contains { note in
+            frame(of: note) != nil && !(note.sourceWindow.map(hiddenWindows.contains) ?? false)
+        }
+        let runs = Self.runsRound(
+            isChanged: isChanged, isSettling: isSettling, sinceLastRound: Date().timeIntervalSince(lastRound), isPaused: isPaused, isAnyNoteShown: isAnyNoteShown
+        )
+        guard !checks.isEmpty, runs else {
             return
         }
+        isChanged = false
+        lastRound = Date()
         isCheckingContent = true
         Task { [weak self] in
-            var similarities: [Draft.ID: Double] = [:]
-            // One read per window, however many notes it has.
-            var pages: [Int: PageIdentity] = [:]
-            for check in checks {
-                if pages[check.window] == nil, let pid = check.pid, let frame = check.windowFrame {
-                    pages[check.window] = await Task.detached { PageIdentity.read(pid: pid, windowFrame: frame) }.value
-                }
-                similarities[check.id] = await Self.similarity(of: check, page: pages[check.window])
-            }
+            let similarities = await Self.similarities(of: checks)
             self?.applyContentChecks(similarities)
         }
+    }
+
+    /// One round: for each window, one read of its page and one screenshot of the notes that
+    /// the page cannot decide.
+    nonisolated private static func similarities(of checks: [ContentCheck]) async -> [Draft.ID: Double] {
+        var similarities: [Draft.ID: Double] = [:]
+        for (window, checks) in Dictionary(grouping: checks, by: \.window) {
+            var page: PageIdentity?
+            if let pid = checks[0].pid, let frame = checks[0].windowFrame {
+                page = await Task.detached { PageIdentity.read(pid: pid, windowFrame: frame) }.value
+            }
+            var byPicture: [(check: ContentCheck, fingerprint: NoteFingerprint)] = []
+            for check in checks {
+                if let similarity = await pageSimilarity(of: check, page: page) {
+                    similarities[check.id] = similarity
+                } else if let fingerprint = await check.fingerprint.value {
+                    byPicture.append((check, fingerprint))
+                }
+            }
+            guard !byPicture.isEmpty else {
+                continue
+            }
+            let current = await NoteFingerprint.capture(window: CGWindowID(window), areas: byPicture.map(\.check.frame), windowFrame: checks[0].windowFrame)
+            for ((check, fingerprint), now) in zip(byPicture, current) {
+                similarities[check.id] = now.map { $0.similarity(to: fingerprint) }
+            }
+        }
+        return similarities
     }
 
     private func applyContentChecks(_ similarities: [Draft.ID: Double]) {

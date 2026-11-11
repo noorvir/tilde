@@ -89,7 +89,10 @@ final class AnnotationController: ObservableObject {
 
     /// What the session on screen does; every change goes through `dispatch(_:)`.
     @Published private(set) var flow = SessionFlow(mode: .idle) {
-        didSet { updateOverlayInput() }
+        didSet {
+            updateOverlayInput()
+            tracker.isPaused = !pauses.isEmpty
+        }
     }
     var mode: SessionFlow.Mode { flow.mode }
     /// A session is on screen, also while its report is being made.
@@ -399,7 +402,13 @@ final class AnnotationController: ObservableObject {
             return browser.windowNumber
         }
         // Also when the stack is the same: the browser's page notes can have come or gone.
-        picker.windows.onRead = { [weak self] _ in self?.tracker.refreshCovers() }
+        picker.windows.onRead = { [weak self] isChanged in
+            self?.tracker.refreshCovers()
+            if isChanged {
+                self?.tracker.somethingChanged()
+            }
+        }
+        picker.windows.onInput = { [weak self] in self?.tracker.somethingChanged() }
         picker.windows.start()
         saveSession()
 
@@ -1838,7 +1847,7 @@ final class AnnotationController: ObservableObject {
         // The window may have come forward over its overlay, such as on a click in it.
         orderAboveScope()
         if current.frame != scope.frame {
-            tracker.refreshTracking()
+            tracker.windowMoved()
         }
     }
 
@@ -2013,11 +2022,7 @@ final class AnnotationController: ObservableObject {
         }
         ScrollForwarder.forward(event, at: point, to: window)
         if window.number != browser.windowNumber {
-            if tracker.isFollowing {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
-                    self?.tracker.refreshTracking()
-                }
-            }
+            tracker.scrolled()
             hoverAfterScroll?.cancel()
             hoverAfterScroll = Task { [weak self] in
                 try? await Task.sleep(for: .milliseconds(60))
