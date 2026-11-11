@@ -73,9 +73,11 @@ final class OverlayWindow: NSPanel {
 /// rectangle. Uses a flipped coordinate space so Quartz rects map by a plain offset.
 final class OverlayView: NSView {
     private let controller: AnnotationController
-    private var subscription: AnyCancellable?
+    private var subscriptions: [AnyCancellable] = []
     private var dragStart: CGPoint?
     private var dragRect: CGRect?
+    /// The part of the view that the highlight covered when the view was last drawn.
+    private var drawnHighlight: CGRect?
     private var hoveredMarker: Draft.ID?
     private var handCursorTimer: Timer?
     /// Where the comment cards of the browser's page notes are, in view coordinates, for clicks.
@@ -86,14 +88,20 @@ final class OverlayView: NSView {
         super.init(frame: .zero)
         // What the overlay draws: the notes and the flow, the target of the open comment, the
         // window the session is limited to, the browser's notes, which move with its page, and
-        // the hover highlight and the notes' places, which change on their own.
+        // the notes' places, which change on their own.
         let changes = [
             controller.objectWillChange, controller.commentBox.objectWillChange, controller.scope.objectWillChange,
-            controller.browser.objectWillChange, controller.hoverPicker.highlight.objectWillChange, controller.tracker.objectWillChange,
+            controller.browser.objectWillChange, controller.tracker.objectWillChange,
         ]
-        subscription = Publishers.MergeMany(changes)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.needsDisplay = true }
+        subscriptions = [
+            Publishers.MergeMany(changes)
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.needsDisplay = true },
+            // The hover highlight changes at the pointer's rate, on a view the size of a screen.
+            controller.hoverPicker.highlight.objectWillChange
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in self?.highlightChanged() },
+        ]
     }
 
     required init?(coder: NSCoder) {
@@ -214,7 +222,7 @@ final class OverlayView: NSView {
         let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y), width: abs(point.x - start.x), height: abs(point.y - start.y))
         if dragRect != nil || rect.width > 6 || rect.height > 6 {
             dragRect = rect
-            needsDisplay = true
+            highlightChanged()
         }
     }
 
@@ -275,14 +283,11 @@ final class OverlayView: NSView {
             drawMarker(controller.drafts.count + 1, at: pending.marker)
         }
 
-        if let rect = dragRect?.offsetBy(dx: -origin.x, dy: -origin.y) {
-            drawRect(rect, fill: blue.withAlphaComponent(0.1), stroke: blue, dashed: true)
-            drawLabel(["\(Int(rect.width))×\(Int(rect.height))"], near: rect)
-        } else if let hover = controller.hover {
-            let rect = hover.frame.offsetBy(dx: -origin.x, dy: -origin.y)
-            drawRect(rect, fill: blue.withAlphaComponent(0.08), stroke: blue, dashed: false)
-            drawLabel(hover.details, near: rect)
+        if let highlight {
+            drawRect(highlight.rect, fill: blue.withAlphaComponent(highlight.isDrag ? 0.1 : 0.08), stroke: blue, dashed: highlight.isDrag)
+            drawLabel(highlight.lines, near: highlight.rect)
         }
+        drawnHighlight = highlightRegion
 
         // Page notes show their comment already.
         if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.commentBox.composer == nil,
@@ -290,6 +295,39 @@ final class OverlayView: NSView {
         {
             if let marker = controller.tracker.marker(of: draft) {
                 drawTooltip(Self.commentText(draft), at: marker)
+            }
+        }
+    }
+
+    /// The drag rectangle with its size, or else the hover highlight with its details, in view
+    /// coordinates. It is the one thing on the overlay that changes at the pointer's rate.
+    private var highlight: (rect: CGRect, lines: [String], isDrag: Bool)? {
+        if let rect = dragRect {
+            return (rect.offsetBy(dx: -origin.x, dy: -origin.y), ["\(Int(rect.width))×\(Int(rect.height))"], true)
+        }
+        if let hover = controller.hover {
+            return (hover.frame.offsetBy(dx: -origin.x, dy: -origin.y), hover.details, false)
+        }
+        return nil
+    }
+
+    /// The part of the view that the highlight covers: its outline and its label, in whole
+    /// points with 1 pt around them for the smoothing of the edges.
+    var highlightRegion: CGRect? {
+        guard let highlight else {
+            return nil
+        }
+        // The outline is 1 pt outside the rectangle, and half of its 1.5 pt line is outside that.
+        let outline = highlight.rect.insetBy(dx: -2, dy: -2)
+        let label = labelBox(of: Self.labelText(highlight.lines), near: highlight.rect)
+        return outline.union(label).insetBy(dx: -1, dy: -1).integral
+    }
+
+    /// The highlight is another one: only where it was and where it is now is drawn again.
+    private func highlightChanged() {
+        for region in [drawnHighlight, highlightRegion] {
+            if let region {
+                setNeedsDisplay(region)
             }
         }
     }
@@ -396,10 +434,23 @@ final class OverlayView: NSView {
 
     /// Dark monospaced label above the highlight, or below it near the top of the screen.
     private func drawLabel(_ lines: [String], near rect: CGRect) {
-        let text = NSAttributedString(string: lines.joined(separator: "\n"), attributes: [
+        let text = Self.labelText(lines)
+        let box = labelBox(of: text, near: rect)
+
+        NSColor.tildeInk.setFill()
+        NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
+        text.draw(at: NSPoint(x: box.minX + 7, y: box.minY + 4))
+    }
+
+    private static func labelText(_ lines: [String]) -> NSAttributedString {
+        NSAttributedString(string: lines.joined(separator: "\n"), attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .medium),
             .foregroundColor: NSColor.white,
         ])
+    }
+
+    /// Where a highlight's label goes, kept inside the view.
+    private func labelBox(of text: NSAttributedString, near rect: CGRect) -> NSRect {
         let size = text.size()
         var box = NSRect(x: rect.minX, y: rect.minY - size.height - 14, width: size.width + 14, height: size.height + 8)
         if box.minY < 4 {
@@ -407,10 +458,7 @@ final class OverlayView: NSView {
         }
         box.origin.x = min(max(box.minX, 4), bounds.width - box.width - 4)
         box.origin.y = min(max(box.minY, 4), bounds.height - box.height - 4)
-
-        NSColor.tildeInk.setFill()
-        NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
-        text.draw(at: NSPoint(x: box.minX + 7, y: box.minY + 4))
+        return box
     }
 
     /// A note's comment in the tooltip's card, at most `maxLines` lines and 240 pt wide, right

@@ -438,6 +438,61 @@ struct BehaviourTests {
         #expect(!NoteCaptures.isMostlyInside(CGRect(x: 2000, y: 100, width: 200, height: 100), window))
     }
 
+    // MARK: - Overlay
+
+    /// The overlay draws a new hover highlight only where the highlight was and where it is,
+    /// so its region must hold every pixel that the highlight changes: the outline and the
+    /// label, also at an edge of the view, where the label goes below it or moves inward.
+    @Test(arguments: [
+        CGRect(x: 120, y: 90, width: 140, height: 32), CGRect(x: 2, y: 3, width: 40, height: 12), CGRect(x: 330, y: 170, width: 68, height: 28),
+    ])
+    func theHighlightRegionHoldsTheWholeHighlight(place: CGRect) throws {
+        let overlay = OverlayWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 200), level: .normal, isWindowSized: false, controller: controller)
+        defer { overlay.close() }
+        let view = try #require(overlay.contentView as? OverlayView)
+        open()
+        #expect(view.highlightRegion == nil)
+        let before = try picture(of: view)
+
+        let origin = overlay.frame.flipped.origin
+        let hover = Fixtures.hover()
+        controller.hover = Picked(frame: place.offsetBy(dx: origin.x, dy: origin.y), element: hover.element, chip: hover.chip, details: hover.details)
+        let region = try #require(view.highlightRegion)
+        let changed = try #require(difference(before, try picture(of: view), in: view))
+
+        #expect(region.contains(changed), "\(changed) is outside \(region)")
+        #expect(changed.contains(place))
+    }
+
+    private func picture(of view: NSView) throws -> NSBitmapImageRep {
+        let picture = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: picture)
+        return picture
+    }
+
+    /// The smallest rectangle of a flipped view, in points, with every pixel in which two
+    /// pictures of the view differ.
+    private func difference(_ first: NSBitmapImageRep, _ second: NSBitmapImageRep, in view: NSView) -> CGRect? {
+        guard let old = first.bitmapData, let new = second.bitmapData else {
+            return nil
+        }
+        let bytesPerPixel = first.bitsPerPixel / 8
+        var changed = CGRect.null
+        for row in 0..<first.pixelsHigh {
+            for column in 0..<first.pixelsWide {
+                let offset = row * first.bytesPerRow + column * bytesPerPixel
+                if memcmp(old + offset, new + offset, bytesPerPixel) != 0 {
+                    changed = changed.union(CGRect(x: column, y: row, width: 1, height: 1))
+                }
+            }
+        }
+        if changed.isNull {
+            return nil
+        }
+        let scale = CGFloat(first.pixelsWide) / view.bounds.width
+        return CGRect(x: changed.minX / scale, y: changed.minY / scale, width: changed.width / scale, height: changed.height / scale)
+    }
+
     // MARK: - HUD placement
 
     /// The pill keeps one width in every mode: the widest title and a two-digit note count fit
