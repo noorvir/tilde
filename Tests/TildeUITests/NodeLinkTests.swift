@@ -161,4 +161,41 @@ struct NodeLinkTests {
         #expect(apps.allSatisfy { new.status(of: $0) == .installed })
         #expect(try texts().allSatisfy { $0.contains("tproxy") && !$0.contains("Bearer") })
     }
+
+    /// The machine's page and its Install read the machine's apps at the same time: they share
+    /// one read, so the page never replaces the setup that Install works on, whose end would
+    /// then be ignored and leave the machine "Working on it".
+    @MainActor @Test func aPageAndInstallShareOneRead() async throws {
+        let local = try Fixtures.agentSetup()
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("nodes-\(UUID().uuidString).json")
+        let installer = local.installer
+        let reads = Reads()
+        let nodes = NodeSetup(store: NodeStore(file: file), nodePort: 7312) { _, _, _, _ in
+            reads.add()
+            // ssh takes a while: the second read starts before the first ends.
+            Thread.sleep(forTimeInterval: 0.2)
+            return (installer, true)
+        }
+
+        async let page: Void = nodes.loadSetup("box")
+        async let install: Void = nodes.loadSetup("box")
+        _ = await (page, install)
+        let setup = try #require(nodes.setups["box"])
+        await nodes.loadSetup("box")
+        #expect(reads.count == 1)
+        #expect(nodes.setups["box"] === setup)
+    }
+}
+
+private final class Reads: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int {
+        lock.withLock { value }
+    }
+
+    func add() {
+        lock.withLock { value += 1 }
+    }
 }

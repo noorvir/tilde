@@ -152,12 +152,24 @@ final class NodeSetup: ObservableObject {
     private var sockets: [String: NodeSocket] = [:]
     private var isLinking = false
     private var isFixed = false
+    /// A machine's page and its Install can both read its apps at once: they share one read,
+    /// so a later read never replaces the setup that Install works on.
+    private var loading: [String: Task<Void, Never>] = [:]
+    /// Makes a machine's installer over ssh: its host, Tilde's URL there, its token and
+    /// whether it stays on the port; it returns whether the machine's type has `tproxy`.
+    private let makeInstaller: @Sendable (String, String, String, Bool) throws -> (Installer, Bool)
 
     /// `remotePort` is not Tilde's own port: the node may run a Tilde of its own.
-    init(store: NodeStore = NodeStore(), nodePort: UInt16, remotePort: UInt16 = 7319) {
+    init(
+        store: NodeStore = NodeStore(),
+        nodePort: UInt16,
+        remotePort: UInt16 = 7319,
+        makeInstaller: @escaping @Sendable (String, String, String, Bool) throws -> (Installer, Bool) = { try NodeSetup.installer($0, url: $1, token: $2, onPort: $3) }
+    ) {
         self.store = store
         self.nodePort = nodePort
         self.remotePort = remotePort
+        self.makeInstaller = makeInstaller
     }
 
     /// For the contract: rows with no machines behind them.
@@ -221,18 +233,30 @@ final class NodeSetup: ObservableObject {
 
     /// Reads what a machine has, for its page, once.
     func loadSetup(_ host: String) async {
+        if let load = loading[host] {
+            await load.value
+            return
+        }
         guard setups[host] == nil, !isFixed else {
             return
         }
 
+        let load = Task { await readSetup(host) }
+        loading[host] = load
+        await load.value
+        loading[host] = nil
+    }
+
+    private func readSetup(_ host: String) async {
         let token = token(for: host)
         let url = remoteURL
         // A node on the port keeps its URL entries on its page until it moves.
         let isOnPort = store.load().first { $0.host == host }.map { $0.socket == nil } ?? false
+        let makeInstaller = makeInstaller
         let installer: Installer
         let hasProxy: Bool
         do {
-            (installer, hasProxy) = try await Task.detached { try Self.installer(host, url: url, token: token, onPort: isOnPort) }.value
+            (installer, hasProxy) = try await Task.detached { try makeInstaller(host, url, token, isOnPort) }.value
         } catch {
             update(host, note: "Could not connect by ssh", detail: String(describing: error))
             setFailed(host, true)
@@ -270,9 +294,10 @@ final class NodeSetup: ObservableObject {
         let installed = old.foundRows.filter { old.status(of: $0) == .installed }.map(\.harness)
         let token = token(for: host)
         let url = remoteURL
+        let makeInstaller = makeInstaller
         Task {
             let result = await Task.detached { () throws -> Installer? in
-                let (new, _) = try Self.installer(host, url: url, token: token, onPort: false)
+                let (new, _) = try makeInstaller(host, url, token, false)
                 return Self.move(installed, from: old.installer, to: new) ? new : nil
             }.result
             guard case .success(let moved?) = result else {
@@ -418,7 +443,7 @@ final class NodeSetup: ObservableObject {
 
     /// The machine's installer, and whether its type has `tproxy`: its entries start `tproxy`
     /// when it has, unless the node is still `onPort`.
-    nonisolated private static func installer(_ host: String, url: String, token: String, onPort: Bool) throws -> (Installer, Bool) {
+    nonisolated static func installer(_ host: String, url: String, token: String, onPort: Bool) throws -> (Installer, Bool) {
         let run: ShellFiles.Run = { command, input in
             try RemotePush.runOnNode(host, command: command, input: input)
         }
