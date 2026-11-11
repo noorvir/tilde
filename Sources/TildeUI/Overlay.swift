@@ -121,7 +121,7 @@ final class OverlayView: NSView {
         let cursor: NSCursor?
         if controller.isOverTextPanel(point) {
             cursor = nil
-        } else if controller.isOverPanel(point) || controller.previewID != nil || !controller.allows(point) {
+        } else if controller.isOverPanel(point) || controller.previewCard.id != nil || !controller.allows(point) {
             cursor = .arrow
         } else if controller.tracker.label(at: point) != nil {
             cursor = .pointingHand
@@ -255,7 +255,7 @@ final class OverlayView: NSView {
         // elements, so they scroll with the page; the overlay's marks would stay behind.
         drawNotes()
 
-        if let pending = controller.pendingTarget {
+        if let pending = controller.commentBox.pending {
             let rect = pending.frame.offsetBy(dx: -origin.x, dy: -origin.y)
             let isRegion: Bool
             if case .region = pending.target {
@@ -279,7 +279,7 @@ final class OverlayView: NSView {
         }
 
         // Page notes show their comment already.
-        if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.composer == nil,
+        if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.commentBox.composer == nil,
            !controller.tracker.pageNotes.contains(where: { $0.draft.id == id })
         {
             if let marker = controller.tracker.marker(of: draft) {

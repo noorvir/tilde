@@ -8,8 +8,18 @@ extension AnnotationController {
         SessionScope.allows(point, scope: isPickingWindow ? nil : scope.window?.frame)
     }
 
+    /// Whether a Quartz point is over the comment box or the preview, which have text fields.
+    func isOverTextPanel(_ point: CGPoint) -> Bool {
+        commentBox.contains(point.flipped) || previewCard.contains(point.flipped)
+    }
+
+    /// Whether a Quartz point is over Tilde's own HUD, comment box or preview.
+    func isOverPanel(_ point: CGPoint) -> Bool {
+        hud.contains(point.flipped) || isOverTextPanel(point)
+    }
+
     func mouseMoved(to point: CGPoint) {
-        guard composer == nil, previewID == nil else {
+        guard commentBox.composer == nil, previewCard.id == nil else {
             return
         }
         hoverPicker.pointerMoved(isOverPanel: isOverPanel(point))
@@ -52,7 +62,7 @@ extension AnnotationController {
     }
 
     func click(at point: CGPoint) {
-        if previewID != nil {
+        if previewCard.id != nil {
             dispatch(.closePreview)
             return
         }
@@ -71,7 +81,7 @@ extension AnnotationController {
         guard allows(point) else {
             return
         }
-        if composer != nil {
+        if commentBox.composer != nil {
             dispatch(.clickAway)
             return
         }
@@ -88,7 +98,7 @@ extension AnnotationController {
     }
 
     func dragEnded(with rect: CGRect) {
-        if previewID != nil {
+        if previewCard.id != nil {
             dispatch(.closePreview)
             return
         }
@@ -99,7 +109,7 @@ extension AnnotationController {
         guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
             return
         }
-        if composer != nil {
+        if commentBox.composer != nil {
             dispatch(.clickAway)
             return
         }

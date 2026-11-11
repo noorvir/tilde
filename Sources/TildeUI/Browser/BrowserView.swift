@@ -49,7 +49,7 @@ private struct EmbeddedPauseCard: View {
     @ObservedObject var controller: AnnotationController
 
     var body: some View {
-        if controller.isHUDInBrowser, let notice = controller.notices.pause {
+        if controller.hud.isInBrowser, let notice = controller.notices.pause {
             AboveAppKit {
                 PauseCard(notice: notice, controller: controller)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -104,7 +104,7 @@ struct BrowserToolbar: View {
                 .frame(minWidth: BrowserMetrics.addressMinWidth, maxWidth: .infinity)
                 .padding(.leading, 4)
 
-            if controller.isHUDInBrowser {
+            if controller.hud.isInBrowser {
                 HUDView(controller: controller, isEmbedded: true)
                     .padding(.leading, 4)
             } else {
@@ -119,7 +119,7 @@ struct BrowserToolbar: View {
             }
         }
         .padding(.leading, 84)
-        .padding(.trailing, controller.isHUDInBrowser ? BrowserMetrics.frame : BrowserMetrics.frame + 4)
+        .padding(.trailing, controller.hud.isInBrowser ? BrowserMetrics.frame : BrowserMetrics.frame + 4)
         .frame(height: BrowserMetrics.toolbarHeight)
         .onAppear { draft = browser.address }
         .onChange(of: browser.addressFocusRequest) { _, _ in

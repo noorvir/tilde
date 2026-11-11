@@ -71,10 +71,10 @@ enum Surfaces {
         case .comment:
             let controller = try await controller(state)
             let isEditing = state.editing ?? false
-            controller.commentText = state.commentText ?? ""
+            controller.commentBox.text = state.commentText ?? ""
             if isEditing, let draft = controller.drafts.first {
                 apply(state, drafts: controller.drafts, composer: .edit(draft.id), to: controller)
-                controller.commentText = draft.annotation.comment
+                controller.commentBox.text = draft.annotation.comment
             }
             return try await hosted(CommentView(controller: controller, chip: "span", isEditing: isEditing), size: size)
 
@@ -110,15 +110,15 @@ enum Surfaces {
             controller.machineDot = { _ in dot }
         }
         apply(state, drafts: try drafts(state), to: controller)
-        controller.showsList = state.list ?? false
+        controller.hud.showsList = state.list ?? false
         controller.notices.showSent(state.sent ?? "", status: state.sentStatus == .failed ? .failed : .done)
         if let color = state.drawingColor {
             controller.setDrawingColor(color)
         }
         switch state.enlarged {
-        case .closeUp: controller.expandedPreviewImage = .closeUp
-        case .context: controller.expandedPreviewImage = .context
-        case nil: controller.expandedPreviewImage = nil
+        case .closeUp: controller.previewCard.expandedImage = .closeUp
+        case .context: controller.previewCard.expandedImage = .context
+        case nil: controller.previewCard.expandedImage = nil
         }
         return controller
     }

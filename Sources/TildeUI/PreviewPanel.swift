@@ -182,7 +182,7 @@ struct PreviewView: View {
 
     var body: some View {
         Group {
-            if let id = controller.previewID, let index = controller.drafts.firstIndex(where: { $0.id == id }) {
+            if let id = controller.previewCard.id, let index = controller.drafts.firstIndex(where: { $0.id == id }) {
                 card(index: index, draft: controller.drafts[index])
             }
         }
@@ -228,7 +228,7 @@ struct PreviewView: View {
                 images(of: annotation)
 
                 // An enlarged screenshot gets the whole card below the header.
-                if controller.expandedPreviewImage == nil {
+                if controller.previewCard.expandedImage == nil {
                     CommentEditor(controller: controller, id: draft.id, initial: annotation.comment)
                         .id(draft.id)
                     footer(id: draft.id)
@@ -249,10 +249,10 @@ struct PreviewView: View {
     private func footer(id: Draft.ID) -> some View {
         HStack(spacing: 6) {
             CardButton(symbol: "chevron.left", keys: ["←"], help: "Previous") {
-                controller.showAdjacentPreview(-1)
+                controller.previewCard.step(-1, in: controller.drafts)
             }
             CardButton(symbol: "chevron.right", keys: ["→"], help: "Next") {
-                controller.showAdjacentPreview(1)
+                controller.previewCard.step(1, in: controller.drafts)
             }
             Spacer()
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
@@ -267,7 +267,7 @@ struct PreviewView: View {
     /// screenshot replaces both, under a Back button.
     @ViewBuilder
     private func images(of annotation: Annotation) -> some View {
-        switch controller.expandedPreviewImage {
+        switch controller.previewCard.expandedImage {
         case .closeUp:
             enlarged(title: "Close-up", data: annotation.image)
         case .context:
@@ -285,12 +285,12 @@ struct PreviewView: View {
                     }
                 } else {
                     Screenshot(title: "Close-up", data: annotation.image) {
-                        controller.expandedPreviewImage = .closeUp
+                        controller.previewCard.expandedImage = .closeUp
                     }
                 }
                 if annotation.contextImage != nil {
                     Screenshot(title: "Context", data: annotation.contextImage) {
-                        controller.expandedPreviewImage = .context
+                        controller.previewCard.expandedImage = .context
                     }
                     .frame(width: 240, height: 180)
                 }
@@ -302,7 +302,7 @@ struct PreviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 CardButton(symbol: "chevron.left", title: "Back", keys: ["Esc"], help: "Back") {
-                    controller.expandedPreviewImage = nil
+                    controller.previewCard.expandedImage = nil
                 }
                 Text(title)
                     .font(.system(size: 12.5, weight: .semibold))

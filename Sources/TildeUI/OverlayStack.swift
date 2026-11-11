@@ -5,13 +5,24 @@ import AppKit
 /// Overlay panels are non-activating: the user's app stays frontmost while annotating.
 @MainActor
 final class OverlayStack {
+    /// Whether the overlays take the pointer and the keyboard; without it, they only draw.
+    var takesInput = false {
+        didSet {
+            for overlay in overlays {
+                overlay.takesInput = takesInput
+            }
+        }
+    }
+
     private var overlays: [OverlayWindow] = []
     /// The window the overlays are on; nil for one per screen.
     private var window: Int?
+    private let browser: BrowserController
     /// Makes an overlay at a frame in AppKit screen coordinates.
     private let makeOverlay: (_ frame: CGRect, _ level: NSWindow.Level, _ isWindowSized: Bool) -> OverlayWindow
 
-    init(makeOverlay: @escaping (_ frame: CGRect, _ level: NSWindow.Level, _ isWindowSized: Bool) -> OverlayWindow) {
+    init(browser: BrowserController, makeOverlay: @escaping (_ frame: CGRect, _ level: NSWindow.Level, _ isWindowSized: Bool) -> OverlayWindow) {
+        self.browser = browser
         self.makeOverlay = makeOverlay
     }
 
@@ -23,28 +34,39 @@ final class OverlayStack {
         overlays.count
     }
 
-    /// Puts one overlay on each screen, or one at `frame` (AppKit screen coordinates) on the
-    /// window `scoped` names, unless the overlays are that already. Returns whether it made
-    /// new ones.
-    func layout(on scoped: (window: Int, frame: CGRect)?) -> Bool {
-        if !overlays.isEmpty, window == scoped?.window {
+    /// Puts one overlay on each screen, or one on `scoped`, the window the session is limited
+    /// to, unless the overlays are that already. Returns whether it made new ones.
+    func layout(on scoped: ElementPicker.WindowInfo?) -> Bool {
+        if !overlays.isEmpty, window == scoped?.number {
             return false
         }
         close()
-        window = scoped?.window
+        window = scoped?.number
         if let scoped {
             // The same level as the window, such as a floating one of Tilde's, so ordering above
             // it works; other apps' windows are normal ones.
-            let level = NSApp.window(withWindowNumber: scoped.window)?.level ?? .normal
-            overlays = [makeOverlay(scoped.frame, level, true)]
-            orderAbove(scoped.window)
+            let level = NSApp.window(withWindowNumber: scoped.number)?.level ?? .normal
+            overlays = [makeOverlay(frame(on: scoped), level, true)]
+            orderAbove(scoped.number)
         } else {
             overlays = NSScreen.screens.map { makeOverlay($0.frame, OverlayWindow.overlayLevel, false) }
             for overlay in overlays {
                 overlay.orderFrontRegardless()
             }
         }
+        for overlay in overlays {
+            overlay.takesInput = takesInput
+        }
         return true
+    }
+
+    /// Where the overlay of a window goes, in AppKit screen coordinates: on Tilde's browser,
+    /// its page only, so the toolbar (with the HUD) and the notes work as usual.
+    private func frame(on window: ElementPicker.WindowInfo) -> CGRect {
+        if window.number == browser.windowNumber, let page = browser.pageFrame {
+            return page
+        }
+        return window.frame.flipped
     }
 
     func close() {
@@ -53,13 +75,6 @@ final class OverlayStack {
             overlay.close()
         }
         overlays = []
-    }
-
-    /// Whether the overlays take the pointer; without it, they only draw.
-    func setTakesInput(_ takesInput: Bool) {
-        for overlay in overlays {
-            overlay.takesInput = takesInput
-        }
     }
 
     /// Keeps a window's overlay directly above it, so other windows in front of it also cover
@@ -78,11 +93,14 @@ final class OverlayStack {
         overlay.order(.above, relativeTo: window)
     }
 
-    /// Moves a window's overlay with its window.
-    func setFrame(_ frame: CGRect) {
+    /// The window of the overlay moved, or may have come forward over it, such as on a click
+    /// in it: the overlay goes where the window is, above it.
+    func follow(_ window: ElementPicker.WindowInfo) {
+        let frame = frame(on: window)
         if let overlay = overlays.first, overlay.isWindowSized, overlay.frame != frame {
             overlay.setFrame(frame, display: true)
         }
+        orderAbove(window.number)
     }
 
     /// Gives the keyboard to the overlay under the pointer.

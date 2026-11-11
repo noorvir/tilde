@@ -97,19 +97,19 @@ extension AnnotationController {
             }
             // Esc goes back from an enlarged image, then closes.
             if key == kVK_Escape {
-                if expandedPreviewImage != nil {
-                    expandedPreviewImage = nil
+                if previewCard.expandedImage != nil {
+                    previewCard.expandedImage = nil
                 } else {
                     dispatch(.closePreview)
                 }
                 return true
             }
             if !isTyping, key == kVK_LeftArrow {
-                showAdjacentPreview(-1)
+                previewCard.step(-1, in: drafts)
                 return true
             }
             if !isTyping, key == kVK_RightArrow {
-                showAdjacentPreview(1)
+                previewCard.step(1, in: drafts)
                 return true
             }
             return false

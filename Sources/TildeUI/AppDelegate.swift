@@ -112,7 +112,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak history] takes in history?.takesRestore = takes }
         let model = SettingsModel(
             setup: setup, shortcuts: shortcuts, browser: browser, history: history, server: serverState, version: version,
-            onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.resetHUDPosition() }
+            onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.hud.resetPosition() }
         )
         let settings = SettingsWindow(model: model)
         controller.clientIcon = { setup.icon(forClient: $0) }

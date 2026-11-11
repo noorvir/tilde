@@ -347,9 +347,9 @@ struct CommentTypingTests {
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController())
         var changes = 0
         let subscription = controller.objectWillChange.sink { changes += 1 }
-        controller.commentText = "typed"
+        controller.commentBox.text = "typed"
         #expect(changes == 0)
-        #expect(controller.commentText == "typed")
+        #expect(controller.commentBox.text == "typed")
         subscription.cancel()
     }
 }

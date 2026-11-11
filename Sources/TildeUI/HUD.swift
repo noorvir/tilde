@@ -21,7 +21,7 @@ final class HUDPanel {
     private var placeBeforePicking: NSPoint?
     private var screenObserver: Any?
     private lazy var zoom = ZoomPresenter(panel: window) { [controller] isShown in
-        controller.isHUDShown = isShown
+        controller.hud.isShown = isShown
     }
     /// Drags the pill, snapping it home, and remembers where it was dropped on each screen.
     private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: PillMetrics.height / 2, positionsKey: "HUDPositions")
@@ -90,7 +90,7 @@ final class HUDPanel {
         guard let screen = screen ?? NSScreen.main else {
             return
         }
-        if pickerRoom(on: screen).height < HUDAccessoryPicker.sizes.min.height, !controller.isHUDInBrowser, placeBeforePicking == nil {
+        if pickerRoom(on: screen).height < HUDAccessoryPicker.sizes.min.height, !controller.hud.isInBrowser, placeBeforePicking == nil {
             placeBeforePicking = window.frame.origin
             let home = Self.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
             window.setFrameOrigin(NSPoint(x: home.x - window.frame.width / 2, y: home.y - window.frame.height))
@@ -108,7 +108,7 @@ final class HUDPanel {
 
     /// The picker's room under the pill where the panel is now.
     private func pickerRoom(on screen: NSScreen) -> CGSize {
-        let pill = controller.isHUDInBrowser ? 0 : PillMetrics.height + HUDAccessory.gap
+        let pill = controller.hud.isInBrowser ? 0 : PillMetrics.height + HUDAccessory.gap
         return room(under: window.frame, pill: pill, in: screen.visibleFrame)
     }
 
@@ -127,8 +127,8 @@ final class HUDPanel {
     }
 
     private func screenChanged() {
-        if let display = screen?.displayID, display != controller.hudDisplay {
-            controller.hudDisplay = display
+        if let display = screen?.displayID, display != controller.hud.display {
+            controller.hud.display = display
         }
     }
 
@@ -206,7 +206,7 @@ final class HUDPanel {
 
     /// Whether an AppKit screen point is over the visible HUD content.
     func contains(_ point: NSPoint) -> Bool {
-        guard window.isVisible, controller.isHUDShown else {
+        guard window.isVisible, controller.hud.isShown else {
             return false
         }
         return Self.screenRect(ofContent: contentFrame, inWindow: window.frame).contains(point)
@@ -337,7 +337,7 @@ struct HUDView: View {
     private var floating: some View {
         VStack(spacing: HUDAccessory.gap) {
             // In Tilde's browser the main bar is on the toolbar, below the canvas.
-            if !controller.isHUDInBrowser {
+            if !controller.hud.isInBrowser {
                 // Its own width, also above a wider accessory picker.
                 pill
                     .fixedSize()
@@ -348,22 +348,22 @@ struct HUDView: View {
                     .fixedSize()
                     .transition(.opacity)
             }
-            if controller.isHUDShown, controller.showsBrowserAccessory {
+            if controller.hud.isShown, controller.showsBrowserAccessory {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: controller.browserOffer.dismiss)
                     .transition(Self.zoom)
             }
-            if controller.isHUDShown, let notice = controller.notices.pause {
+            if controller.hud.isShown, let notice = controller.notices.pause {
                 PauseCard(notice: notice, controller: controller)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if controller.isHUDShown, controller.isOpen, controller.showsList, !controller.drafts.isEmpty {
+            if controller.hud.isShown, controller.isOpen, controller.hud.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
                     .transition(Self.zoom)
             }
-            if controller.isHUDShown, controller.isPickingWindow {
+            if controller.hud.isShown, controller.isPickingWindow {
                 HUDAccessoryPicker(
                     model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
-                    selectedID: controller.isRecordMode ? controller.clipSource.id : controller.scope.source?.id,
+                    selectedID: controller.clipSource.id,
                     onOpen: { controller.dispatch(.openPicker) }, onBack: controller.escapePressed, onChoose: controller.choose
                 )
                     .transition(Self.zoom)
@@ -374,7 +374,7 @@ struct HUDView: View {
         .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: onContentFrame)
         .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
-        .animation(.spring(duration: 0.28), value: controller.showsList)
+        .animation(.spring(duration: 0.28), value: controller.hud.showsList)
         .animation(.spring(duration: 0.28), value: controller.isPickingWindow)
         .animation(.spring(duration: 0.3, bounce: 0), value: controller.isSourcePickerOpen)
         .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
@@ -389,7 +389,7 @@ struct HUDView: View {
     private static let zoom = AnyTransition.scale(scale: 0.5, anchor: .top).combined(with: .opacity)
 
     private var pillScale: CGFloat {
-        if !controller.isHUDShown {
+        if !controller.hud.isShown {
             return 0.5
         }
         return isPillHovered ? 1.015 : 1
@@ -524,7 +524,7 @@ struct HUDView: View {
         // pointer it grows a little to show that it can be dragged; a drag that starts on a
         // button moves the HUD and does not press it.
         .scaleEffect(pillScale)
-        .opacity(controller.isHUDShown ? 1 : 0)
+        .opacity(controller.hud.isShown ? 1 : 0)
         .animation(.spring(duration: 0.25), value: isPillHovered)
         .onHover { isPillHovered = $0 }
         .gesture(
@@ -536,7 +536,7 @@ struct HUDView: View {
     private var drawingAccessoryBar: some View {
         let size = HUDAccessory.size
         return capsule(HStack(spacing: size.scaled(4)) { drawingContent }, width: size.scaled(HUDView.width), size: size)
-            .opacity(controller.isHUDShown ? 1 : 0)
+            .opacity(controller.hud.isShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
                     .onChanged { _ in onDrag() }
@@ -611,7 +611,7 @@ struct HUDView: View {
 
 
         Group {
-            HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.showsList, help: controller.showsList ? "Hide notes" : "Show notes") {
+            HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.hud.showsList, help: controller.hud.showsList ? "Hide notes" : "Show notes") {
                 controller.dispatch(.toggleList)
             }
             .disabled(count == 0)

@@ -483,12 +483,12 @@ struct BehaviourTests {
         let panel = HUDPanel(controller: controller)
         panel.window.setFrame(NSRect(x: screen.frame.midX - 50, y: screen.frame.midY, width: 100, height: 100), display: false)
         open(activity: .recording(.ready))
-        controller.hudDisplay = 999
+        controller.hud.display = 999
 
         NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: panel.window)
 
         let display = try #require(screen.displayID)
-        #expect(controller.hudDisplay == display)
+        #expect(controller.hud.display == display)
         #expect(controller.clipSource == .screen(display))
     }
 
@@ -598,18 +598,18 @@ struct BehaviourTests {
         )
 
         #expect(controller.handleKey(try key(124), in: .preview(isTyping: false)))
-        #expect(controller.previewID == drafts[1].id)
+        #expect(controller.previewCard.id == drafts[1].id)
         #expect(controller.handleKey(try key(123), in: .preview(isTyping: false)))
-        #expect(controller.previewID == drafts[0].id)
+        #expect(controller.previewCard.id == drafts[0].id)
         #expect(!controller.handleKey(try key(124), in: .preview(isTyping: true)))
-        #expect(controller.previewID == drafts[0].id)
+        #expect(controller.previewCard.id == drafts[0].id)
 
-        controller.expandedPreviewImage = .context
+        controller.previewCard.expandedImage = .context
         #expect(controller.handleKey(try key(53), in: .preview(isTyping: true)))
-        #expect(controller.expandedPreviewImage == nil)
-        #expect(controller.previewID == drafts[0].id)
+        #expect(controller.previewCard.expandedImage == nil)
+        #expect(controller.previewCard.id == drafts[0].id)
         #expect(controller.handleKey(try key(53), in: .preview(isTyping: false)))
-        #expect(controller.previewID == nil)
+        #expect(controller.previewCard.id == nil)
     }
 
     // MARK: - Shortcuts

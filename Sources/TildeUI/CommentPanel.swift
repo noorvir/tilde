@@ -254,8 +254,8 @@ struct CommentView: View {
         self.isEditing = isEditing
         self.onHeightChange = onHeightChange
         // The right size from the start, so that nothing has to correct it after the first layout.
-        _editorHeight = State(initialValue: CommentEditor.height(of: controller.commentDraft.text))
-        _isEmpty = State(initialValue: controller.commentDraft.text.isEmpty)
+        _editorHeight = State(initialValue: CommentEditor.height(of: controller.commentBox.draft.text))
+        _isEmpty = State(initialValue: controller.commentBox.draft.text.isEmpty)
     }
 
     var body: some View {
@@ -268,7 +268,7 @@ struct CommentView: View {
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.white.opacity(0.08)))
                 Spacer()
-                if isEditing, case .edit(let id) = controller.composer {
+                if isEditing, case .edit(let id) = controller.commentBox.composer {
                     Button {
                         controller.deleteDraft(id)
                     } label: {
@@ -283,7 +283,7 @@ struct CommentView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                CommentEditor(draft: controller.commentDraft, height: $editorHeight, isEmpty: $isEmpty, onHeightChange: onHeightChange) {
+                CommentEditor(draft: controller.commentBox.draft, height: $editorHeight, isEmpty: $isEmpty, onHeightChange: onHeightChange) {
                     controller.dispatch(.submitComment)
                 } onCancel: {
                     controller.escapePressed()

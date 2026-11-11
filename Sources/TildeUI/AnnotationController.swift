@@ -68,24 +68,6 @@ final class AnnotationController: ObservableObject {
             saver.saveSoon()
         }
     }
-    /// The comment box's data while `flow` has it open.
-    @Published private(set) var composer: Composer? {
-        didSet {
-            tracker.isHeld = composer != nil
-            saver.isHeld = composer != nil
-        }
-    }
-    /// The comment's text. Apart from the rest of the state: typing must not redraw the HUD
-    /// and the overlay.
-    let commentDraft = CommentDraft()
-    var commentText: String {
-        get { commentDraft.text }
-        set { commentDraft.text = newValue }
-    }
-    /// The draft shown in the preview card while `flow` has it open; annotate clicks wait.
-    @Published private(set) var previewID: Draft.ID?
-    /// The screenshot that fills the preview card's image area, if any.
-    @Published var expandedPreviewImage: PreviewImage?
     /// The saved session that the restore question offers.
     private(set) var restoreRecord: SessionRecord?
     /// A saved session whose notes the next session starts with.
@@ -93,16 +75,6 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - The HUD
 
-    /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
-    /// when it appears and collapses into it before the panel hides.
-    @Published var isHUDShown = false
-    /// The HUD is in the toolbar of Tilde's browser, as the session is limited to it, and the
-    /// floating HUD is hidden. It stays there through the Sent confirmation.
-    @Published private(set) var isHUDInBrowser = false
-    /// The display the floating HUD is on, which its panel keeps up to date as it is placed
-    /// and dragged.
-    @Published var hudDisplay: CGDirectDisplayID?
-    @Published var showsList = false
     /// The icon of the agent app with this display name, for the HUD; nil when unknown.
     var clientIcon: (String) -> NSImage? = { _ in nil }
     /// The status of the remote machine with this name, for the HUD's machine icon.
@@ -151,12 +123,16 @@ final class AnnotationController: ObservableObject {
     /// The double tap, the hold key and the answers to a question.
     private let keyMonitors: KeyMonitors
     let picker: ElementPicker
-    private lazy var overlays = OverlayStack { [unowned self] frame, level, isWindowSized in
+    // The session's windows show the session, so each is made with the controller.
+    /// The comment box next to a new note or one that is edited, while `flow` has it open.
+    private(set) lazy var commentBox = CommentBox { [unowned self] in CommentPanel(controller: self) }
+    /// The preview card on a note, while `flow` has it open.
+    private(set) lazy var previewCard = PreviewCard { [unowned self] in PreviewPanel(controller: self) }
+    /// Where the HUD is: floating, or in the toolbar of Tilde's browser.
+    private(set) lazy var hud = HUDPlacement(browser: browser) { [unowned self] in HUDPanel(controller: self) }
+    private lazy var overlays = OverlayStack(browser: browser) { [unowned self] frame, level, isWindowSized in
         OverlayWindow(frame: frame, level: level, isWindowSized: isWindowSized, controller: self)
     }
-    private lazy var hud = HUDPanel(controller: self)
-    private lazy var commentPanel = CommentPanel(controller: self)
-    private lazy var previewPanel = PreviewPanel(controller: self)
 
     private let store: SessionStore
     let browser: BrowserController
@@ -193,7 +169,11 @@ final class AnnotationController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
-        partChanges = [notices.objectWillChange, scope.objectWillChange, drawing.objectWillChange, browserOffer.objectWillChange].map { changes in
+        let parts = [
+            notices.objectWillChange, scope.objectWillChange, drawing.objectWillChange, browserOffer.objectWillChange,
+            commentBox.objectWillChange, previewCard.objectWillChange, hud.objectWillChange,
+        ]
+        partChanges = parts.map { changes in
             changes.sink { [weak self] in self?.objectWillChange.send() }
         }
         joinParts()
@@ -204,6 +184,11 @@ final class AnnotationController: ObservableObject {
         saver.snapshot = { [weak self] in self?.snapshot }
         notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
         typedComments.onPause = { [weak self] in self?.saveTypedComments() }
+        // Nothing moves or is saved under a comment that is being written.
+        commentBox.onChange = { [weak self] isOpen in
+            self?.tracker.isHeld = isOpen
+            self?.saver.isHeld = isOpen
+        }
 
         scope.onChange = { [weak self] in self?.sourceChanged() }
         scope.onCheck = { [weak self] delta in self?.scopeChecked(movedBy: delta) }
@@ -228,7 +213,7 @@ final class AnnotationController: ObservableObject {
             guard let self else {
                 return false
             }
-            return composer == nil && !isPickingWindow
+            return commentBox.composer == nil && !isPickingWindow
         }
         hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
 
@@ -247,8 +232,8 @@ final class AnnotationController: ObservableObject {
         canvas.onClickAway = { [weak self] in
             self?.dispatch(.clickAway)
             // The click gave the canvas the keyboard; a question in the comment box needs it.
-            if self?.composer != nil {
-                self?.commentPanel.focus()
+            if self?.commentBox.composer != nil {
+                self?.commentBox.focus()
             }
         }
         canvas.onPointer = { [weak self] point in
@@ -276,10 +261,8 @@ final class AnnotationController: ObservableObject {
     /// What the flow's rules read of the notes and the comment being written, as they are now.
     var facts: SessionFlow.Facts {
         var facts = SessionFlow.Facts(notes: drafts.count)
-        facts.commentHasText = !commentText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if case .new(let pending) = composer {
-            facts.commentIsOnDrawing = !pending.drawingIDs.isEmpty
-        }
+        facts.commentHasText = commentBox.hasText
+        facts.commentIsOnDrawing = commentBox.pending?.drawingIDs.isEmpty == false
         return facts
     }
 
@@ -349,17 +332,18 @@ final class AnnotationController: ObservableObject {
             drawing.panel.stopDrawing()
             drawing.panel.setSnapFrame(nil)
             hover = nil
-            if composer == nil {
+            if commentBox.composer == nil {
                 drawing.panel.hide()
             }
-            if isHUDInBrowser {
-                hud.hide()
+            // The drawing tools showed in the floating panel.
+            if hud.isInBrowser {
+                hud.hidePanel()
             }
             // The canvas has had the keyboard: Esc and ⌘↩ belong to the overlay again.
             makeOverlayKey()
         case .keepKeyboard:
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
-            if !isHUDInBrowser {
+            if !hud.isInBrowser {
                 overlays.makeKey()
             }
         case .giveKeyboardBack:
@@ -379,13 +363,8 @@ final class AnnotationController: ObservableObject {
                 replaceDrafts(with: record)
             }
         case .startLocalSession: startLocal()
-        case .showHUD:
-            if isHUDInBrowser {
-                browser.show()
-            } else {
-                hud.show()
-            }
-        case .hideHUD: hideHUD()
+        case .showHUD: hud.show()
+        case .hideHUD: hud.hide()
         case .plainClicksOn:
             PlainClickTap.start(removing: keyMonitors.holdFlag)
         case .plainClicksOff:
@@ -408,7 +387,7 @@ final class AnnotationController: ObservableObject {
         case .showSaveFailure: notices.show(.recordingNotSaved)
         case .showSourceGone: notices.show(.recordingStopped)
         case .startPicking:
-            showsList = false
+            hud.showsList = false
             hover = nil
             pickingChanged()
         case .stopPicking:
@@ -467,9 +446,9 @@ final class AnnotationController: ObservableObject {
         browserOffer.reset()
         drafts = []
         hover = nil
-        composer = nil
-        previewID = nil
-        showsList = false
+        commentBox.close()
+        previewCard.close()
+        hud.showsList = false
         scope.reset()
         PageIdentity.askAppsToDescribeWebContent()
         drawing.panel.prepare()
@@ -520,12 +499,7 @@ final class AnnotationController: ObservableObject {
             self.returnApp = nil
             browser.close()
             // The browser's HUD goes with it, so the confirmation shows in the floating one.
-            if isHUDInBrowser {
-                isHUDInBrowser = false
-                if case .sent = mode {
-                    hud.show()
-                }
-            }
+            hud.leaveBrowser(showing: sentConfirmation != nil)
             NSApp.yieldActivation(to: returnApp)
             ElementPicker.bringToFront(returnApp)
         }
@@ -533,7 +507,7 @@ final class AnnotationController: ObservableObject {
         if case .sent(let operation) = mode {
             notices.endSent(operation, after: 1.6)
         } else {
-            hideHUD()
+            hud.hide()
         }
     }
 
@@ -548,23 +522,17 @@ final class AnnotationController: ObservableObject {
         tracker.stop()
         notices.clearPause()
         drawing.panel.endSession()
-        commentPanel.close()
-        previewPanel.close()
-        previewID = nil
+        commentBox.close()
+        previewCard.close()
         overlays.close()
         hover = nil
-        composer = nil
     }
 
     /// Starts a session from Tilde itself. Its feedback goes to the clipboard and the inbox.
     /// While a session is on screen, brings the HUD forward instead.
     func startLocal() {
         if session != nil {
-            if isHUDInBrowser {
-                browser.show()
-            } else {
-                hud.show()
-            }
+            hud.show()
             return
         }
         _ = store.start(client: "You", url: nil, isLocal: true)
@@ -642,7 +610,7 @@ final class AnnotationController: ObservableObject {
             dispatch(.pushFailed, with: [.showPushFailure: { [self] in
                 notices.showSent(RemotePush.failure(failed), status: .failed)
                 if case .sent(let operation) = mode {
-                    hud.show()
+                    hud.showPanel()
                     notices.endSent(operation, after: 4)
                 }
             }])
@@ -716,37 +684,14 @@ final class AnnotationController: ObservableObject {
         guard session != nil, isOpen else {
             return
         }
-        // In Tilde's browser the HUD stays in its toolbar, and the floating panel shows only
-        // the picker, under the toolbar, while choosing.
-        isHUDInBrowser = scope.isBrowser
-        if isHUDInBrowser, isPickingWindow, let frame = browser.window?.frame {
-            hud.show(top: NSPoint(x: frame.midX, y: frame.maxY - BrowserMetrics.toolbarHeight + 10))
-        } else if isHUDInBrowser {
-            hud.hide()
-        } else if !isHUDShown {
-            hud.show()
-        }
-        if isPickingWindow {
-            hud.fitPicker()
-        } else {
-            hud.endPicking()
-        }
-    }
-
-    private func hideHUD() {
-        isHUDInBrowser = false
-        hud.hide()
-    }
-
-    func resetHUDPosition() {
-        hud.resetPosition()
+        hud.place(inBrowser: scope.isBrowser, isPicking: isPickingWindow)
     }
 
     private func toggleList() {
         if scope.isBrowser {
             browser.showsNotes.toggle()
         } else {
-            showsList.toggle()
+            hud.showsList.toggle()
         }
     }
 
@@ -756,22 +701,10 @@ final class AnnotationController: ObservableObject {
         browser.selectedNote = id
     }
 
-    /// Where the overlay of a session limited to one window goes, in AppKit screen
-    /// coordinates: on Tilde's browser, its page only, so the toolbar (with the HUD) and the
-    /// notes work as usual.
-    private func overlayFrame(for window: ElementPicker.WindowInfo) -> CGRect {
-        if window.number == browser.windowNumber, let page = browser.pageFrame {
-            return page
-        }
-        return window.frame.flipped
-    }
-
     /// One overlay per screen above everything, or one on the scoped window just above it.
     /// While choosing a source, every screen has one.
     private func layoutOverlays() {
-        let window = isPickingWindow ? nil : scope.window
-        let isNew = overlays.layout(on: window.map { ($0.number, overlayFrame(for: $0)) })
-        updateOverlayInput()
+        let isNew = overlays.layout(on: isPickingWindow ? nil : scope.window)
         if isNew {
             applyPause()
         }
@@ -780,9 +713,8 @@ final class AnnotationController: ObservableObject {
     /// Puts the overlays in step with `overlayTakesInput`; without input, nothing is hovered
     /// and a pick in progress is dropped.
     private func updateOverlayInput() {
-        let takesInput = overlayTakesInput
-        overlays.setTakesInput(takesInput)
-        if !takesInput {
+        overlays.takesInput = overlayTakesInput
+        if !overlayTakesInput {
             hoverPicker.stop()
         }
     }
@@ -824,23 +756,10 @@ final class AnnotationController: ObservableObject {
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
     /// or the preview has it or annotating is paused.
     func makeOverlayKey() {
-        guard overlayTakesInput, composer == nil, previewID == nil else {
+        guard overlayTakesInput, commentBox.composer == nil, previewCard.id == nil else {
             return
         }
         overlays.makeKey()
-    }
-
-    /// Whether a Quartz point is over Tilde's own HUD, comment box or preview.
-    /// Whether a Quartz point is over the comment box or the preview, which have text fields.
-    func isOverTextPanel(_ point: CGPoint) -> Bool {
-        let point = point.flipped
-        return [commentPanel.window, previewPanel.window].contains { $0.isVisible && $0.frame.contains(point) }
-    }
-
-    func isOverPanel(_ point: CGPoint) -> Bool {
-        let point = point.flipped
-        let panels = [commentPanel.window, previewPanel.window]
-        return hud.contains(point) || panels.contains { $0.isVisible && $0.frame.contains(point) }
     }
 
     // MARK: - Source and scope
@@ -889,9 +808,7 @@ final class AnnotationController: ObservableObject {
         if let delta {
             hover = hover?.moved(by: delta)
         }
-        overlays.setFrame(overlayFrame(for: window))
-        // The window may have come forward over its overlay, such as on a click in it.
-        overlays.orderAbove(window.number)
+        overlays.follow(window)
         if delta != nil {
             tracker.windowMoved()
         }
@@ -919,7 +836,7 @@ final class AnnotationController: ObservableObject {
     /// The browser accessory bar shows only while annotating outside Tilde's browser, and comes
     /// back there.
     var showsBrowserAccessory: Bool {
-        browserOffer.url != nil && !isRecordMode && !isPickingWindow && !isHUDInBrowser
+        browserOffer.url != nil && !isRecordMode && !isPickingWindow && !hud.isInBrowser
     }
 
     /// The browser accessory bar's open button: Tilde's browser opens the page and limits the
@@ -937,7 +854,7 @@ final class AnnotationController: ObservableObject {
 
     /// What Record records: the chosen source, or the screen with the HUD when there is none.
     var clipSource: RecordingSource {
-        scope.source ?? .screen(hudDisplay ?? CGMainDisplayID())
+        scope.source ?? .screen(hud.display ?? CGMainDisplayID())
     }
 
     /// The name of what Record records, such as "Studio Display", for the HUD.
@@ -964,23 +881,23 @@ final class AnnotationController: ObservableObject {
     private func showCanvas() {
         hover = nil
         // Over Tilde's browser, the canvas would cover tools on its toolbar.
-        if isHUDInBrowser {
-            hud.show()
+        if hud.isInBrowser {
+            hud.showPanel()
         }
         drawing.start()
     }
 
     func setDrawingTool(_ tool: String) {
         drawing.setTool(tool)
-        if composer != nil {
-            commentPanel.focus()
+        if commentBox.composer != nil {
+            commentBox.focus()
         }
     }
 
     func setDrawingColor(_ color: String) {
         drawing.setColor(color)
-        if composer != nil {
-            commentPanel.focus()
+        if commentBox.composer != nil {
+            commentBox.focus()
         }
     }
 
@@ -999,17 +916,15 @@ final class AnnotationController: ObservableObject {
 
     /// The shape of the open comment changed: its link and the comment box go with it.
     private func updateEditedDrawing() {
-        guard case .new(let open) = composer, !open.drawingIDs.isEmpty else {
+        guard let ids = commentBox.pending?.drawingIDs, !ids.isEmpty else {
             return
         }
-        let ids = open.drawingIDs
         hover = nil
         Task {
-            guard let edit = await drawing.edit(of: ids), case .new(var pending) = composer, pending.drawingIDs == ids, pending.take(edit) else {
+            guard let edit = await drawing.edit(of: ids), var pending = commentBox.pending, pending.drawingIDs == ids, pending.take(edit) else {
                 return
             }
-            composer = .new(pending)
-            commentPanel.follow(near: pending.marker, below: pending.frame)
+            commentBox.follow(pending)
         }
     }
 
@@ -1053,10 +968,8 @@ final class AnnotationController: ObservableObject {
         if let window = note.window, let page = pending.page {
             browserOffer.consider(window, page: page)
         }
-        composer = .new(pending)
         log.notice("comment opened for \(note.chip, privacy: .public)")
-        commentText = ""
-        commentPanel.show(chip: note.chip, isEditing: false, near: note.marker, below: note.frame)
+        commentBox.open(pending)
     }
 
     func edit(_ id: Draft.ID) {
@@ -1064,26 +977,24 @@ final class AnnotationController: ObservableObject {
             return
         }
         // The comment being written stays, also when another note is opened.
-        if composer != nil {
+        if commentBox.composer != nil {
             dispatch(.clickAway)
-            if composer != nil {
+            if commentBox.composer != nil {
                 return
             }
         }
         dispatch(.openComment, with: [.showComment: { [self] in
             hover = nil
-            composer = .edit(id)
-            commentText = draft.annotation.comment
-            commentPanel.show(chip: draft.chip, isEditing: true, near: draft.marker, below: draft.annotation.frame)
+            commentBox.open(editing: draft)
         }])
     }
 
     /// Puts the open comment in the list: a new note, or the edited one.
     private func saveComment() {
-        guard let composer else {
+        guard let composer = commentBox.composer else {
             return
         }
-        let comment = commentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let comment = commentBox.text.trimmingCharacters(in: .whitespacesAndNewlines)
         log.notice("comment submitted (\(comment.count) characters)")
 
         switch composer {
@@ -1118,15 +1029,15 @@ final class AnnotationController: ObservableObject {
 
     func deleteDraft(_ id: Draft.ID) {
         dispatch(.deleteNote, with: [.deleteNote: { [self] in
-            if previewID == id {
-                showAdjacentPreview(1)
-                if previewID == id {
+            if previewCard.id == id {
+                previewCard.step(1, in: drafts)
+                if previewCard.id == id {
                     dispatch(.closePreview)
                 }
             }
             drafts.filter { $0.id == id }.forEach(ClipRecorder.deleteVideo)
             drafts.removeAll { $0.id == id }
-            if case .edit(id) = composer {
+            if case .edit(id) = commentBox.composer {
                 dispatch(.closeComment)
             }
         }])
@@ -1134,7 +1045,7 @@ final class AnnotationController: ObservableObject {
 
     /// Discards the open comment's data, including a new target's capture.
     private func discardComposer() {
-        if case .new(let pending) = composer {
+        if let pending = commentBox.pending {
             pending.capture.cancel()
             drawing.panel.remove(pending.drawingIDs)
         }
@@ -1143,8 +1054,7 @@ final class AnnotationController: ObservableObject {
     }
 
     private func hideComposer() {
-        composer = nil
-        commentPanel.close()
+        commentBox.close()
         drawing.panel.endEditing()
         if isDrawing {
             drawing.panel.resumeDrawing()
@@ -1152,14 +1062,6 @@ final class AnnotationController: ObservableObject {
         }
         drawing.panel.hide()
         makeOverlayKey()
-    }
-
-    /// Frame and marker of the comment target that is not yet a draft.
-    var pendingTarget: Pending? {
-        if case .new(let pending) = composer {
-            return pending
-        }
-        return nil
     }
 
     /// A key in a note's comment field: the note takes the text when typing pauses.
@@ -1191,34 +1093,20 @@ final class AnnotationController: ObservableObject {
         guard drafts.contains(where: { $0.id == id }) else {
             return
         }
-        if composer != nil {
+        if commentBox.composer != nil {
             dispatch(.clickAway)
-            if composer != nil {
+            if commentBox.composer != nil {
                 return
             }
         }
         dispatch(.openPreview, with: [.showPreview: { [self] in
             hover = nil
-            previewID = id
-            expandedPreviewImage = nil
-            previewPanel.show()
+            previewCard.open(id)
         }])
     }
 
-    /// Moves the preview by `step` drafts, wrapping around at either end. An enlarged
-    /// screenshot stays enlarged, so ← and → compare the same kind of image.
-    func showAdjacentPreview(_ step: Int) {
-        guard let id = previewID, let index = drafts.firstIndex(where: { $0.id == id }) else {
-            return
-        }
-        let next = (index + step + drafts.count) % drafts.count
-        previewID = drafts[next].id
-    }
-
     private func hidePreview() {
-        previewID = nil
-        expandedPreviewImage = nil
-        previewPanel.close()
+        previewCard.close()
         makeOverlayKey()
     }
 }
@@ -1250,15 +1138,14 @@ extension AnnotationController {
         flow = SessionFlow(mode: mode)
         flow.choosesInPicker = choosesInPicker
         self.hover = hover
-        self.composer = composer
-        self.previewID = previewID
+        commentBox.setStateForTesting(composer: composer)
+        previewCard.setStateForTesting(id: previewID)
         scope.setStateForTesting(source: source)
-        self.isHUDInBrowser = isHUDInBrowser
+        hud.setStateForTesting(isInBrowser: isHUDInBrowser)
         browserOffer.setStateForTesting(url: browserAccessoryURL)
         self.restoreRecord = restoreRecord
         notices.setStateForTesting(notice: notice, pause: pauseNotice, sentText: sentText)
         clips.clock = clipClock
-        isHUDShown = true
     }
 }
 #endif

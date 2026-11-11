@@ -122,7 +122,7 @@ final class Harness {
             controller.frontmostAppChanged(to: ProcessInfo.processInfo.processIdentifier)
 
             // The HUD is in the browser's toolbar, and the floating one is hidden.
-            try check(controller.isHUDInBrowser && hudWindow?.isVisible != true, "the browser's toolbar hosts the HUD and the floating HUD is hidden")
+            try check(controller.hud.isInBrowser && hudWindow?.isVisible != true, "the browser's toolbar hosts the HUD and the floating HUD is hidden")
 
             // The overlay sits on the page only and follows the window with no lag.
             let overlay = try require(overlays.first, "an overlay")
@@ -200,7 +200,7 @@ final class Harness {
 
         mouse(.leftMouseDown, at: chipCenter)
         mouse(.leftMouseUp, at: chipCenter)
-        try await until("the comment box opens") { self.controller.composer != nil && self.commentFieldIsFocused }
+        try await until("the comment box opens") { self.controller.commentBox.composer != nil && self.commentFieldIsFocused }
         await render("03-comment-open")
         type("Avatar and name are not vertically centered")
         await render("04-comment-typed")
@@ -249,7 +249,7 @@ final class Harness {
         try await until("the preview opens") { self.previewWindow?.isVisible == true }
         if let previewWindow {
             await renderAlone(previewWindow, "04b-preview")
-            controller.expandedPreviewImage = .context
+            controller.previewCard.expandedImage = .context
             await renderAlone(previewWindow, "04c-preview-context")
         }
         controller.dispatch(.closePreview)
@@ -260,11 +260,11 @@ final class Harness {
         controller.dispatch(.togglePause)
         let pausedWidth = hudWidth
         controller.dispatch(.togglePause)
-        controller.showsList = true
+        controller.hud.showsList = true
         if let hudWindow, hudWindow.isVisible {
             await renderAlone(hudWindow, "04d-hud-list")
         }
-        controller.showsList = false
+        controller.hud.showsList = false
         try check(annotatingWidth == pausedWidth && annotatingWidth > 0, "HUD keeps its width when paused, got \(annotatingWidth) and \(pausedWidth)")
 
         // Clear all and cancel ask first, in the pill, at the same width; Cancel keeps everything.
@@ -302,9 +302,9 @@ final class Harness {
         }
         await render("05-dragging")
         mouse(.leftMouseUp, at: end)
-        try await until("the region comment box opens") { self.controller.pendingTarget != nil && self.commentFieldIsFocused }
+        try await until("the region comment box opens") { self.controller.commentBox.pending != nil && self.commentFieldIsFocused }
         type("Too much empty space under the table")
-        controller.showsList = true
+        controller.hud.showsList = true
         await render("06-region-and-list")
 
         key("\r", code: 36, modifiers: .command)
