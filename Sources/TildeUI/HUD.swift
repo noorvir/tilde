@@ -427,6 +427,44 @@ struct HUDView: View {
         .fixedSize()
     }
 
+    @ViewBuilder
+    private var wireframeContent: some View {
+        let size = HUDAccessory.size
+        ForEach(Wireframe.tools, id: \.tool) { entry in
+            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.wireframe?.tool == entry.tool, keys: [entry.key.uppercased()], help: entry.help) {
+                controller.setWireframeTool(entry.tool)
+            }
+        }
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
+        ForEach(Wireframe.fills, id: \.fill) { entry in
+            let isOn = controller.wireframe?.fill == entry.fill
+            Button {
+                controller.setWireframeFill(entry.fill)
+            } label: {
+                WireframeFillSwatch(fill: entry.fill)
+                    .frame(width: size.swatchSize, height: size.swatchSize)
+                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.white.opacity(isOn ? 1 : 0.25), lineWidth: isOn ? 2 : 1))
+                    .padding(1)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .tildeTooltip(entry.help, keys: [entry.key])
+            .accessibilityLabel(entry.help)
+        }
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
+        HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
+            controller.undoWireframe()
+        }
+        HUDButton(image: Image(systemName: "arrow.uturn.forward"), help: "Redo") {
+            controller.redoWireframe()
+        }
+        Spacer(minLength: 0)
+        PillTextButton(title: "Done", key: "esc", isDestructive: false) {
+            controller.finishWireframe()
+        }
+        .fixedSize()
+    }
+
     /// The key of an in-app shortcut, for its button's tooltip; none when it has none, and
     /// none for a mode's key while drawing, where it does nothing.
     private func keys(_ action: ShortcutStore.Action?) -> [String] {
@@ -469,7 +507,13 @@ struct HUDView: View {
 
     private var drawingAccessoryBar: some View {
         let size = HUDAccessory.size
-        return capsule(HStack(spacing: size.scaled(4)) { drawingContent }, width: size.scaled(HUDView.width), size: size)
+        return capsule(HStack(spacing: size.scaled(4)) {
+            if controller.wireframe != nil {
+                wireframeContent
+            } else {
+                drawingContent
+            }
+        }, width: size.scaled(HUDView.width), size: size)
             .opacity(controller.isHUDShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -534,11 +578,19 @@ struct HUDView: View {
                 }
                 .disabled(controller.recording != .recording && controller.recording != .paused)
             } else {
-                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, keys: keys(.drawingMode), help: "Draw") {
+                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing && controller.wireframe == nil, keys: keys(.drawingMode), help: "Draw") {
                     if controller.isDrawing {
                         controller.finishDrawing()
                     } else {
                         controller.startDrawing()
+                    }
+                }
+                .disabled(controller.wireframe != nil)
+                HUDButton(image: Image(systemName: "squareshape.split.2x2.dotted"), isOn: controller.wireframe != nil, keys: controller.wireframe == nil ? ["W"] : ["Esc"], help: "Wireframe") {
+                    if controller.wireframe != nil {
+                        controller.finishWireframe()
+                    } else {
+                        controller.startWireframe()
                     }
                 }
             }
@@ -1297,5 +1349,38 @@ private extension Color {
     init(hex: String) {
         let value = Int(hex.dropFirst(), radix: 16) ?? 0
         self.init(red: Double(value >> 16 & 255) / 255, green: Double(value >> 8 & 255) / 255, blue: Double(value & 255) / 255)
+    }
+}
+
+/// A wireframe fill in small, for its button in the accessory bar.
+private struct WireframeFillSwatch: View {
+    let fill: String
+
+    var body: some View {
+        Canvas { context, size in
+            let shape = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 3)
+            switch fill {
+            case "dots":
+                context.fill(shape, with: .color(Color(white: 0.93)))
+                for x in stride(from: 3.0, to: size.width, by: 4) {
+                    for y in stride(from: 3.0, to: size.height, by: 4) {
+                        context.fill(Path(ellipseIn: CGRect(x: x - 0.75, y: y - 0.75, width: 1.5, height: 1.5)), with: .color(Color(white: 0.45)))
+                    }
+                }
+            case "hatched":
+                context.fill(shape, with: .color(Color(white: 0.95)))
+                var lines = Path()
+                for offset in stride(from: -size.height, to: size.width, by: 4) {
+                    lines.move(to: CGPoint(x: offset, y: size.height))
+                    lines.addLine(to: CGPoint(x: offset + size.height, y: 0))
+                }
+                context.clip(to: shape)
+                context.stroke(lines, with: .color(Color(white: 0.5)), lineWidth: 1)
+            case "white":
+                context.fill(shape, with: .color(.white))
+            default:
+                break
+            }
+        }
     }
 }

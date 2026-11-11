@@ -223,7 +223,7 @@ final class AnnotationController: ObservableObject {
     private let store: SessionStore
     let browser: BrowserController
     let shortcuts: ShortcutStore
-    private let picker: ElementPicker
+    let picker: ElementPicker
     private var overlays: [OverlayWindow] = []
     /// The window the overlays are on; nil for one per screen.
     private var overlaysWindow: Int?
@@ -655,6 +655,9 @@ final class AnnotationController: ObservableObject {
     /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that
     /// enables that button. True when the key is one of them, whether it did anything or not.
     func performShortcut(_ event: NSEvent) -> Bool {
+        if performWireframeShortcut(event) {
+            return true
+        }
         guard session != nil, confirmation == nil,
               let action = shortcuts.inAppAction(keyCode: event.keyCode, modifiers: event.modifierFlags, isDrawing: isDrawing)
         else {
@@ -901,6 +904,10 @@ final class AnnotationController: ObservableObject {
             drawingPanel.setSnapFrame(nil)
             return
         }
+        if wireframe != nil {
+            findWireframeSnaps(at: point)
+            return
+        }
 
         guard !isFindingSnapFrame, UserDefaults.standard.object(forKey: "drawingSnaps") as? Bool ?? true else {
             return
@@ -919,6 +926,10 @@ final class AnnotationController: ObservableObject {
     }
 
     func escapePressed() {
+        if wireframe != nil, flow.session?.question == nil, flow.session?.panel == nil {
+            finishWireframe()
+            return
+        }
         // In the picker, Esc first goes from an app's windows back to the apps, as "‹ Back".
         if isSourcePickerOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
@@ -985,6 +996,7 @@ final class AnnotationController: ObservableObject {
         case .openShapeComment:
             Task { await addDrawingNote() }
         case .keepDrawing:
+            endWireframe()
             drawingPanel.endEditing()
             drawingPanel.stopDrawing()
             drawingPanel.setSnapFrame(nil)
@@ -1242,9 +1254,10 @@ final class AnnotationController: ObservableObject {
     private var isCheckingContent = false
     let drawingPanel = DrawingPanel()
     @Published private(set) var drawingTool = "arrow"
+    @Published var wireframe: Wireframe?
     @Published private(set) var drawingColor = "#2F76FF"
     private var undoneDrawings: [Draft] = []
-    private var isFindingSnapFrame = false
+    var isFindingSnapFrame = false
     private var typedComments: [Draft.ID: String] = [:]
     private var typedCommentsTask: Task<Void, Never>?
     private var isReadingWindows = false
@@ -2419,7 +2432,7 @@ final class AnnotationController: ObservableObject {
     /// Opens the comment box for a new target and starts its screenshots. `window` is the
     /// window the target belongs to. For an element (`outline` set), both screenshots come
     /// from that window alone, so no other window, Tilde's included, can cover them.
-    private func openComposer(
+    func openComposer(
         target: Target, frame: CGRect, marker: CGPoint, chip: String, outline: CGRect?, window: ElementPicker.WindowInfo?, anchor: PageAnchor? = nil,
         tracked: TrackedElement? = nil, pictureArea: CGRect? = nil, captures: Captures? = nil, drawingIDs: [String] = []
     ) {

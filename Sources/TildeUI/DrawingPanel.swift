@@ -100,6 +100,31 @@ final class DrawingPanel {
         active?.setSnapFrame(frame)
     }
 
+    /// Wireframe mode's tool and fill as JSON, or `null` to leave it.
+    func setWireframe(_ json: String) {
+        active?.wireframe = json
+    }
+
+    func runWireframe(_ call: String) {
+        active?.run(call)
+    }
+
+    /// Lines for wireframe shapes to snap to, in Quartz screen coordinates.
+    func setSnapTargets(rects: [CGRect], containers: [CGRect], window: CGRect?, screen: CGRect?) {
+        guard let active else {
+            return
+        }
+        let origin = active.frame.flipped.origin
+        func values(_ rect: CGRect) -> [Double] {
+            [rect.minX - origin.x, rect.minY - origin.y, rect.width, rect.height]
+        }
+        let targets: [String: Any] = [
+            "rects": rects.map(values), "containers": containers.map(values),
+            "window": window.map(values) ?? NSNull(), "screen": screen.map(values) ?? NSNull(),
+        ]
+        active.run("setSnapTargets(\(Self.json(targets)))")
+    }
+
     /// The shapes with these ids, wherever they are.
     func shapes(_ ids: [String]) async -> [[String: Any]] {
         for canvas in canvases {
@@ -169,6 +194,11 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private var isPreparing = false
     private var pendingTool = "arrow"
     private var pendingColor: String?
+    var wireframe = "null" {
+        didSet {
+            run("setWireframe(\(wireframe))")
+        }
+    }
     var onEscape: () -> Void = {}
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
@@ -313,6 +343,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             if let pendingColor {
                 setColor(pendingColor)
             }
+            run("setWireframe(\(wireframe))")
         case "escape":
             onEscape()
         case "shape":
