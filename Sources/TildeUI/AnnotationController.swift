@@ -720,6 +720,7 @@ final class AnnotationController: ObservableObject {
         drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
         drawingPanel.onKey = { [weak self] in self?.performShortcut($0) ?? false }
         drawingPanel.onPress = { [weak self] point in
+            self?.chooseWireframeWindow(at: point)
             guard let self, let id = self.noteLabel(at: point) else {
                 return false
             }

@@ -6,10 +6,12 @@ import TildeCore
 /// with an optional label, sent together as one note with the screen under them.
 struct Wireframe: Equatable {
     var tool = "card"
+    /// The window of the first press: the components keep their place on it when it moves.
+    var window: ElementPicker.WindowInfo?
 
     /// Card stands in for any component not in the list.
     static let tools = [
-        (tool: "screen", symbol: "macwindow", key: "s", help: "Screen"),
+        (tool: "section", symbol: "rectangle.split.3x1", key: "s", help: "Section"),
         (tool: "card", symbol: "square.text.square", key: "c", help: "Card"),
         (tool: "table", symbol: "tablecells", key: "t", help: "Table"),
         (tool: "button", symbol: "capsule", key: "b", help: "Button"),
@@ -158,10 +160,11 @@ extension AnnotationController {
         try? await Task.sleep(for: .milliseconds(100))
         let bounds = drawing.bounds
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let window = scope ?? picker.window(at: center)
+        let chosen = self.wireframe?.window.flatMap { picker.currentWindow(number: $0.number) }
+        let window = chosen ?? scope ?? picker.window(at: center)
         let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
-        // The window when the wireframe is in it, else the whole screen.
-        let area = window.map(\.frame).flatMap { Self.isMostlyInside(bounds, $0) ? $0 : nil } ?? screen
+        // The wireframe's window; else the window when the wireframe is in it, else the whole screen.
+        let area = chosen?.frame ?? window.map(\.frame).flatMap { Self.isMostlyInside(bounds, $0) ? $0 : nil } ?? screen
 
         let canvas = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
         let page = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
@@ -177,6 +180,28 @@ extension AnnotationController {
         )
     }
 
+    /// The first press in wireframe mode chooses its window, which the components then follow
+    /// while it moves, until wireframe mode ends.
+    func chooseWireframeWindow(at point: CGPoint) {
+        guard wireframe != nil, wireframe?.window == nil, let window = picker.window(at: point, in: scope) else {
+            return
+        }
+        wireframe?.window = window
+        drawingPanel.setWireframeWindow(window.frame)
+        Task {
+            while let current = wireframe?.window, current.number == window.number {
+                try? await Task.sleep(for: .milliseconds(33))
+                guard let now = picker.currentWindow(number: window.number), wireframe?.window?.number == window.number,
+                      now.frame != wireframe?.window?.frame
+                else {
+                    continue
+                }
+                wireframe?.window = now
+                drawingPanel.setWireframeWindow(now.frame)
+            }
+        }
+    }
+
     /// The lines under the pointer to snap to, from Accessibility; in Tilde's browser, the
     /// element the page reports.
     func findWireframeSnaps(at point: CGPoint) {
@@ -184,7 +209,7 @@ extension AnnotationController {
             return
         }
         isFindingSnapFrame = true
-        let window = scope ?? picker.window(at: point)
+        let window = wireframe?.window ?? scope ?? picker.window(at: point)
         let screen = NSScreen.screens.first { $0.frame.flipped.contains(point) }?.frame.flipped
         let isOwn = window?.number == browser.windowNumber || window?.pid == ProcessInfo.processInfo.processIdentifier
         Task {

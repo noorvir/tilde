@@ -38,6 +38,7 @@ function describe(element) {
     shape.type = element.customData.tildeWireframe;
     delete shape.color;
     if (element.customData.label) shape.label = element.customData.label;
+    if (element.customData.borders) shape.borders = element.customData.borders;
   }
   if (element.type === "text") shape.text = element.text;
   if (element.type === "arrow") {
@@ -109,6 +110,9 @@ window.tildeDraw = {
   // The shapes drawn since the last call, in points from the top left of the canvas.
   takeNewShapes() {
     if (labelled) endLabel(true);
+    hideHandles();
+    hideGuides();
+    windowOutline.style.display = "none";
     const elements = live().filter((element) => !taken.has(element.id));
     if (!elements.length) return "";
     elements.forEach((element) => taken.add(element.id));
@@ -127,6 +131,9 @@ window.tildeDraw = {
     hideGuides();
     if (!state) {
       if (!wasOn) return;
+      adjusting = null;
+      hideHandles();
+      setWireframeWindow(null);
       changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), () => ({ isDeleted: true }));
       wireframeUndone.length = 0;
       if (labelled) endLabel(false);
@@ -155,6 +162,7 @@ window.tildeDraw = {
     const ids = wireframeUndone.pop();
     if (ids) changeElements(ids, () => ({ isDeleted: false }));
   },
+  setWireframeWindow,
   // Lines to snap to, in points from the top left of the canvas: `rects` add to those seen
   // near the pointer before; `containers`, `window` and `screen` replace theirs.
   setSnapTargets({ rects, containers, window: windowRect, screen }) {
@@ -172,7 +180,7 @@ window.tildeDraw = {
   },
 };
 
-// Wireframe mode: skeletons of components (screen, card, table, button, dropdown, list) over
+// Wireframe mode: skeletons of components (section, card, table, button, dropdown, list) over
 // the screen, sent together as one note. Its shapes stay until Done takes them all. Each
 // component is a group of flat elements, made again whole when its label changes.
 let wireframe = null;
@@ -198,18 +206,19 @@ const rule = (x, y, width) => ({ type: "line", x, y, width, height: 0, points: [
 const dot = (x, y, size, backgroundColor = skeleton.bar) => ({ type: "ellipse", x, y, width: size, height: size, ...flat, strokeColor: "transparent", backgroundColor });
 
 // The parts of a component in its rect, behind its label; `hasLabel` leaves out the bars that
-// a label stands in for.
-function componentParts(kind, { x, y, width, height }, hasLabel) {
+// a label stands in for. A section is a region of a page with the `borders` named.
+function componentParts(kind, { x, y, width, height }, hasLabel, borders) {
   const pad = clamp(Math.min(width, height) * 0.12, 6, 16);
   const barHeight = clamp(height * 0.08, 5, 10);
   const parts = [];
   switch (kind) {
-    case "screen": {
-      const titleBar = clamp(height * 0.07, 16, 28);
-      const dotSize = titleBar * 0.36;
-      parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.darkBar, roundness: { type: 3 } }));
-      parts.push(rule(x, y + titleBar, width));
-      for (let index = 0; index < 3; index++) parts.push(dot(x + titleBar * 0.5 + index * dotSize * 1.7, y + (titleBar - dotSize) / 2, dotSize, skeleton.darkBar));
+    case "section": {
+      parts.push(block(x, y, width, height, skeleton.surface));
+      const edges = { top: [[0, 0], [width, 0]], right: [[width, 0], [width, height]], bottom: [[0, height], [width, height]], left: [[0, 0], [0, height]] };
+      for (const border of borders) {
+        const [[startX, startY], [endX, endY]] = edges[border];
+        parts.push({ type: "line", x: x + startX, y: y + startY, width: endX - startX, height: endY - startY, points: [[0, 0], [endX - startX, endY - startY]], ...flat, strokeWidth: 2, strokeColor: skeleton.darkBar });
+      }
       break;
     }
     case "card": {
@@ -281,9 +290,11 @@ function componentParts(kind, { x, y, width, height }, hasLabel) {
 // Buttons, dropdowns and cards show a label on themselves; the rest on a chip, over their rows.
 const plainLabels = new Set(["button", "dropdown", "card"]);
 
-function wireframeElements(kind, rect, label, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`]) {
-  const skeletons = componentParts(kind, rect, Boolean(label));
-  skeletons[0].customData = { tildeWireframe: kind, label };
+const allBorders = ["top", "right", "bottom", "left"];
+
+function wireframeElements(kind, rect, label, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`], borders = allBorders) {
+  const skeletons = componentParts(kind, rect, Boolean(label), borders);
+  skeletons[0].customData = { tildeWireframe: kind, label, ...(kind === "section" ? { borders } : {}) };
   const elements = convertToExcalidrawElements(skeletons);
   if (label) {
     const fontSize = plainLabels.has(kind) ? clamp(rect.height * 0.32, 12, 20) : 15;
@@ -349,14 +360,22 @@ function endLabel(isKept) {
   labelField.style.display = "none";
   labelField.blur();
   if (!isKept || !component) return;
-  const label = labelField.value.trim() || undefined;
+  const frame = frameOf(component.groupIds[0]) ?? component;
+  rebuild(frame.groupIds[0], frame, { ...frame.customData, label: labelField.value.trim() || undefined });
+}
+
+// A component made again whole in `rect`, with `data` (kind, label, borders), at the same place
+// in the stack.
+function rebuild(group, rect, data) {
   const all = api.getSceneElementsIncludingDeleted();
-  const group = component.groupIds[0];
   const index = all.findIndex((element) => element.groupIds.includes(group));
   const rest = all.filter((element) => !element.groupIds.includes(group));
-  const elements = wireframeElements(component.customData.tildeWireframe, component, label, component.groupIds);
-  rest.splice(index, 0, ...elements);
+  rest.splice(index, 0, ...wireframeElements(data.tildeWireframe, rect, data.label, [group], data.borders));
   api.updateScene({ elements: rest, captureUpdate: "NEVER" });
+}
+
+function frameOf(group) {
+  return live().find((element) => element.customData?.tildeWireframe && element.groupIds[0] === group);
 }
 
 labelField.addEventListener("keydown", (event) => {
@@ -368,6 +387,175 @@ labelField.addEventListener("blur", () => {
   if (labelled) endLabel(true);
 });
 
+// Editing a component after it is drawn: over one, a chip at its top left moves it (a click on
+// it edits the label; a section's chip also sets its borders), and a handle at its bottom right
+// resizes it, both with snapping. Only components not sent yet can change.
+const handleOutline = document.createElement("div");
+handleOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:1px solid #2F76FF";
+const chip = document.createElement("div");
+chip.dataset.wireframeHandle = "";
+chip.style.cssText = "position:fixed;z-index:9999;display:none;align-items:center;gap:2px;height:22px;padding:0 4px 0 8px;border-radius:11px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif;cursor:move;user-select:none;white-space:nowrap";
+const resizer = document.createElement("div");
+resizer.dataset.wireframeHandle = "";
+resizer.style.cssText = "position:fixed;z-index:9999;display:none;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff;cursor:nwse-resize";
+document.addEventListener("DOMContentLoaded", () => document.body.append(handleOutline, chip, resizer));
+let hoveredGroup = null;
+let adjusting = null;
+
+const isHandle = (target) => Boolean(target?.closest?.("[data-wireframe-handle]"));
+const kindNames = { section: "Section", card: "Card", table: "Table", button: "Button", dropdown: "Dropdown", list: "List" };
+
+function componentAt(x, y) {
+  return live().filter((element) => {
+    const isInside = x >= element.x && x <= element.x + element.width && y >= element.y && y <= element.y + element.height;
+    return element.customData?.tildeWireframe && !taken.has(element.id) && isInside;
+  }).pop();
+}
+
+// A border toggle: the square with the side it sets drawn bold while it is on.
+function borderToggle(side, isOn) {
+  const lines = { top: "M3 3H13", right: "M13 3V13", bottom: "M3 13H13", left: "M3 3V13" };
+  const title = `${side[0].toUpperCase()}${side.slice(1)} border`;
+  return `<span data-border="${side}" title="${title}" style="display:flex;padding:2px;border-radius:5px;cursor:pointer"><svg width="16" height="16"><rect x="3" y="3" width="10" height="10" fill="none" stroke="rgba(255,255,255,.3)"/><path d="${lines[side]}" stroke="${isOn ? "#fff" : "rgba(255,255,255,.3)"}" stroke-width="${isOn ? 2.5 : 1}" stroke-linecap="round"/></svg></span>`;
+}
+
+function showHandles() {
+  const frame = hoveredGroup ? frameOf(hoveredGroup) : null;
+  const isShown = Boolean(frame && wireframe && !labelled && !editing);
+  handleOutline.style.display = isShown ? "block" : "none";
+  chip.style.display = isShown ? "flex" : "none";
+  resizer.style.display = isShown ? "block" : "none";
+  if (!isShown) return;
+  const { tildeWireframe: kind, borders } = frame.customData;
+  Object.assign(handleOutline.style, { left: `${frame.x}px`, top: `${frame.y}px`, width: `${frame.width}px`, height: `${frame.height}px` });
+  // Over the component's top edge, so the pointer reaches it without leaving the component.
+  Object.assign(chip.style, { left: `${frame.x}px`, top: `${frame.y >= 24 ? frame.y - 20 : frame.y + 4}px` });
+  Object.assign(resizer.style, { left: `${frame.x + frame.width}px`, top: `${frame.y + frame.height}px` });
+  const content = `<span style="margin-right:4px">⠿ ${kindNames[kind]}</span>${borders ? allBorders.map((side) => borderToggle(side, borders.includes(side))).join("") : ""}`;
+  if (chip.innerHTML !== content) chip.innerHTML = content;
+}
+
+function hideHandles() {
+  hoveredGroup = null;
+  showHandles();
+}
+
+// The nearest snap of any of `values` (a component's edges and centre on one axis), with the
+// shift that puts that value on its line.
+function nearestOf(lines, values) {
+  let best = null;
+  for (const value of values) {
+    const line = nearest(lines, value);
+    if (line && (!best || line.distance < best.distance)) best = { ...line, shift: line.value - value };
+  }
+  return best;
+}
+
+function adjust(event) {
+  const { mode, group, start, rect, data } = adjusting;
+  const pointer = { x: event.clientX, y: event.clientY };
+  const dx = pointer.x - start.x;
+  const dy = pointer.y - start.y;
+  if (Math.hypot(dx, dy) >= 3) adjusting.moved = true;
+  if (!adjusting.moved) return;
+  const now = performance.now();
+  if (now - pointerAt > 50) {
+    pointerAt = now;
+    post(`pointer:${pointer.x},${pointer.y}`);
+  }
+  const lines = event.metaKey ? { x: [], y: [] } : snapLines(pointer, group);
+  let next;
+  let snapX;
+  let snapY;
+  let point;
+  if (mode === "move") {
+    next = { ...rect, x: rect.x + dx, y: rect.y + dy };
+    snapX = nearestOf(lines.x, [next.x, next.x + next.width / 2, next.x + next.width]);
+    snapY = nearestOf(lines.y, [next.y, next.y + next.height / 2, next.y + next.height]);
+    next.x += snapX?.shift ?? 0;
+    next.y += snapY?.shift ?? 0;
+    point = { x: snapX?.value ?? pointer.x, y: snapY?.value ?? pointer.y };
+  } else {
+    const corner = { x: rect.x + rect.width + dx, y: rect.y + rect.height + dy };
+    snapX = nearest(lines.x, corner.x);
+    snapY = nearest(lines.y, corner.y);
+    point = { x: snapX?.value ?? corner.x, y: snapY?.value ?? corner.y };
+    next = { ...rect, width: Math.max(16, point.x - rect.x), height: Math.max(12, point.y - rect.y) };
+  }
+  showGuides(snapX, snapY, point);
+  rebuild(group, next, data);
+  showHandles();
+}
+
+// Takes the pointer events of the handles and of a move or resize under way; over the canvas,
+// shows the handles of the component under the pointer.
+function editWireframe(event) {
+  if (adjusting) {
+    event.stopImmediatePropagation();
+    event.preventDefault();
+    if (event.type === "pointermove") adjust(event);
+    if (event.type === "pointerup") {
+      const frame = frameOf(adjusting.group);
+      const isClick = !adjusting.moved && adjusting.mode === "move";
+      adjusting = null;
+      hideGuides();
+      if (isClick && frame) editLabel(frame);
+      showHandles();
+    }
+    return true;
+  }
+  if (!isHandle(event.target)) {
+    if (event.type === "pointerdown") hideHandles();
+    if (event.type === "pointermove" && !isPressed) {
+      hoveredGroup = componentAt(event.clientX, event.clientY)?.groupIds[0] ?? null;
+      showHandles();
+    }
+    return false;
+  }
+  event.stopImmediatePropagation();
+  event.preventDefault();
+  cursorRing.style.display = "none";
+  const frame = hoveredGroup ? frameOf(hoveredGroup) : null;
+  if (event.type !== "pointerdown" || !frame) return true;
+  const side = event.target.closest("[data-border]")?.dataset.border;
+  if (side) {
+    const borders = frame.customData.borders.includes(side) ? frame.customData.borders.filter((border) => border !== side) : [...frame.customData.borders, side];
+    rebuild(hoveredGroup, frame, { ...frame.customData, borders: allBorders.filter((border) => borders.includes(border)) });
+    showHandles();
+    return true;
+  }
+  const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+  adjusting = { mode: resizer.contains(event.target) ? "resize" : "move", group: hoveredGroup, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false };
+  event.target.setPointerCapture?.(event.pointerId);
+  return true;
+}
+
+// The window the wireframe is on: its components keep their place on it when it moves.
+let wireframeWindow = null;
+const windowOutline = document.createElement("div");
+windowOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9996;display:none;border:1.5px solid rgba(47,118,255,.6);border-radius:10px";
+document.addEventListener("DOMContentLoaded", () => document.body.append(windowOutline));
+
+function setWireframeWindow(rect) {
+  const before = wireframeWindow;
+  wireframeWindow = rect;
+  windowOutline.style.display = rect ? "block" : "none";
+  if (!rect) return;
+  const [left, top, width, height] = rect;
+  Object.assign(windowOutline.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+  const dx = before ? left - before[0] : 0;
+  const dy = before ? top - before[1] : 0;
+  if (!dx && !dy) return;
+  changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), (element) => ({ x: element.x + dx, y: element.y + dy }));
+  // The lines seen near the pointer were where the window was.
+  snapRects.clear();
+  if (labelled) {
+    labelField.style.left = `${parseFloat(labelField.style.left) + dx}px`;
+    labelField.style.top = `${parseFloat(labelField.style.top) + dy}px`;
+  }
+  showHandles();
+}
+
 // Wireframe snapping: x and y each go to the nearest line within reach: edges of the elements
 // seen near the pointer, thirds and halves of the screen, the window and the containers under
 // the pointer, and edges and centres of the shapes drawn.
@@ -376,7 +564,8 @@ const snapRects = new Map();
 let snapAreas = [];
 const fractions = [[0, ""], [1 / 3, "⅓"], [1 / 2, "½"], [2 / 3, "⅔"], [1, ""]];
 
-function snapLines(pointer) {
+// `except`: the group of a component being moved or resized, which has no lines of its own.
+function snapLines(pointer, except) {
   const lines = { x: [], y: [] };
   for (const [left, top, width, height] of snapRects.values()) {
     const away = Math.hypot(Math.max(left - pointer.x, 0, pointer.x - left - width), Math.max(top - pointer.y, 0, pointer.y - top - height));
@@ -393,7 +582,7 @@ function snapLines(pointer) {
   }
   const drawing = api.getAppState().newElement?.id;
   for (const element of live()) {
-    if (element.id === drawing || !element.customData?.tildeWireframe) continue;
+    if (element.id === drawing || !element.customData?.tildeWireframe || element.groupIds.includes(except)) continue;
     lines.x.push({ value: element.x }, { value: element.x + element.width / 2 }, { value: element.x + element.width });
     lines.y.push({ value: element.y }, { value: element.y + element.height / 2 }, { value: element.y + element.height });
   }
@@ -446,6 +635,7 @@ function showGuides(x, y, point) {
 const retargeted = new WeakSet();
 function snapPointer(event) {
   if (!wireframe || retargeted.has(event)) return;
+  if (editWireframe(event)) return;
   if (event.type === "pointerdown") {
     wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY };
   }
@@ -541,7 +731,7 @@ const cursorTools = new Set([...drawingTools, "freedraw"]);
 
 function showCursorRing(event, isSnapping) {
   const tool = api?.getAppState().activeTool.type;
-  const isShown = cursorTools.has(tool) && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped;
+  const isShown = cursorTools.has(tool) && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target);
   cursorRing.style.display = isShown ? "block" : "none";
   if (!isShown) return;
   const color = api.getAppState().currentItemStrokeColor;

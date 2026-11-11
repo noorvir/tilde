@@ -125,6 +125,16 @@ final class DrawingPanel {
         active.run("setSnapTargets(\(Self.json(targets)))")
     }
 
+    /// The window a wireframe is on, in Quartz screen coordinates; its components move with it.
+    func setWireframeWindow(_ frame: CGRect) {
+        guard let active else {
+            return
+        }
+        let origin = active.frame.flipped.origin
+        let values = [frame.minX - origin.x, frame.minY - origin.y, frame.width, frame.height]
+        active.run("setWireframeWindow(\(Self.json(values)))")
+    }
+
     /// The shapes with these ids, wherever they are.
     func shapes(_ ids: [String]) async -> [[String: Any]] {
         for canvas in canvases {
