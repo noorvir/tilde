@@ -186,7 +186,7 @@ window.tildeDraw = {
 let wireframe = null;
 let wireframePress = null;
 const wireframeUndone = [];
-const skeleton = { block: "#EEEFF2", bar: "#DADCE1", darkBar: "#C9CCD2", line: "#D3D5DA", surface: "#FAFAFB", text: "#4A4D55" };
+const skeleton = { block: "#EEEFF2", bar: "#DADCE1", darkBar: "#C9CCD2", line: "#D3D5DA", surface: "#FAFAFB", border: "#A9ADB5", text: "#4A4D55" };
 
 const isPart = (element) => element.customData?.tildePart === true;
 
@@ -217,7 +217,7 @@ function componentParts(kind, { x, y, width, height }, hasLabel, borders) {
       const edges = { top: [[0, 0], [width, 0]], right: [[width, 0], [width, height]], bottom: [[0, height], [width, height]], left: [[0, 0], [0, height]] };
       for (const border of borders) {
         const [[startX, startY], [endX, endY]] = edges[border];
-        parts.push({ type: "line", x: x + startX, y: y + startY, width: endX - startX, height: endY - startY, points: [[0, 0], [endX - startX, endY - startY]], ...flat, strokeWidth: 2, strokeColor: skeleton.darkBar });
+        parts.push({ type: "line", x: x + startX, y: y + startY, width: endX - startX, height: endY - startY, points: [[0, 0], [endX - startX, endY - startY]], ...flat, strokeWidth: 2, strokeColor: skeleton.border });
       }
       break;
     }
@@ -515,6 +515,7 @@ function editWireframe(event) {
   event.stopImmediatePropagation();
   event.preventDefault();
   cursorRing.style.display = "none";
+  hideGuides();
   const frame = hoveredGroup ? frameOf(hoveredGroup) : null;
   if (event.type !== "pointerdown" || !frame) return true;
   const side = event.target.closest("[data-border]")?.dataset.border;
