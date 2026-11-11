@@ -3,11 +3,15 @@ import AppKit
 import Combine
 import os
 
-/// Runs annotate mode for the active session: hover, pick, comment, send.
-/// Owns the overlay, HUD and comment windows; views read its published state.
+/// The session on screen. It sends every event to `SessionFlow` and runs the effects, keeps
+/// the session's notes, and starts, stops and joins the parts that do the work: each part
+/// tells the controller what happened, and the controller tells the other parts. Views
+/// observe it.
 @MainActor
 final class AnnotationController: ObservableObject {
     typealias PauseReason = SessionFlow.PauseReason
+
+    // MARK: - The session and its notes
 
     /// What the session on screen does; every change goes through `dispatch(_:)`.
     @Published private(set) var flow = SessionFlow(mode: .idle) {
@@ -42,6 +46,9 @@ final class AnnotationController: ObservableObject {
     /// A question in the pill, waiting for the user.
     var confirmation: SessionFlow.Question? { flow.session?.question }
     var isDrawing: Bool { flow.session?.isDrawing ?? false }
+    /// Whether the overlay takes the pointer (hover, picks, clicks, the crosshair) and the
+    /// keyboard: while annotating, and while choosing a window in any mode.
+    var overlayTakesInput: Bool { flow.overlayTakesInput }
     /// The confirmation after Send, such as "Sent to Codex", while it shows.
     var sentConfirmation: String? {
         if case .sent = mode {
@@ -49,6 +56,7 @@ final class AnnotationController: ObservableObject {
         }
         return nil
     }
+
     @Published private(set) var session: SessionStore.Session?
     @Published private(set) var drafts: [Draft] = [] {
         didSet {
@@ -60,12 +68,6 @@ final class AnnotationController: ObservableObject {
             saver.saveSoon()
         }
     }
-    /// The element under the pointer.
-    let hoverPicker: HoverPicker
-    var hover: Picked? {
-        get { hoverPicker.picked }
-        set { hoverPicker.picked = newValue }
-    }
     /// The comment box's data while `flow` has it open.
     @Published private(set) var composer: Composer? {
         didSet {
@@ -73,24 +75,56 @@ final class AnnotationController: ObservableObject {
             saver.isHeld = composer != nil
         }
     }
+    /// The comment's text. Apart from the rest of the state: typing must not redraw the HUD
+    /// and the overlay.
+    let commentDraft = CommentDraft()
+    var commentText: String {
+        get { commentDraft.text }
+        set { commentDraft.text = newValue }
+    }
+    /// The draft shown in the preview card while `flow` has it open; annotate clicks wait.
+    @Published private(set) var previewID: Draft.ID?
+    /// The screenshot that fills the preview card's image area, if any.
+    @Published var expandedPreviewImage: PreviewImage?
+    /// The saved session that the restore question offers.
+    private(set) var restoreRecord: SessionRecord?
+    /// A saved session whose notes the next session starts with.
+    private var pendingRestore: SessionRecord?
 
-    /// The bar under the HUD that offers Tilde's browser for a page in another browser.
-    let browserOffer = BrowserOffer()
+    // MARK: - The HUD
+
+    /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
+    /// when it appears and collapses into it before the panel hides.
+    @Published var isHUDShown = false
     /// The HUD is in the toolbar of Tilde's browser, as the session is limited to it, and the
     /// floating HUD is hidden. It stays there through the Sent confirmation.
     @Published private(set) var isHUDInBrowser = false
-    /// The double tap, the hold key and the answers to a question.
-    private let keyMonitors: KeyMonitors
-    /// The draft shown in the preview card while `flow` has it open; annotate clicks wait.
-    @Published private(set) var previewID: Draft.ID?
-    /// The saved session that the restore question offers.
-    private(set) var restoreRecord: SessionRecord?
+    /// The display the floating HUD is on, which its panel keeps up to date as it is placed
+    /// and dragged.
+    @Published var hudDisplay: CGDirectDisplayID?
+    @Published var showsList = false
+    /// The icon of the agent app with this display name, for the HUD; nil when unknown.
+    var clientIcon: (String) -> NSImage? = { _ in nil }
+    /// The status of the remote machine with this name, for the HUD's machine icon.
+    var machineDot: (String) -> NodeSetup.Dot = { _ in .grey }
+    /// A screen's name as the system gives it; pictures of the HUD give a stand-in, so that
+    /// they never show the name of the Mac that drew them.
+    var screenName: (CGDirectDisplayID) -> String = SourcePickerModel.name(of:)
+
+    // MARK: - Parts
+
     /// What the session annotates and records, and the window it is limited to.
     let scope: SessionScope
+    /// Where each note is on screen now, and whether it shows.
+    let tracker: NoteTracker
+    /// The element under the pointer.
+    let hoverPicker: HoverPicker
+    var hover: Picked? {
+        get { hoverPicker.picked }
+        set { hoverPicker.picked = newValue }
+    }
     /// Draw mode: the canvas, and the notes that shapes become.
     let drawing: DrawingNotes
-    /// Comments typed into the preview or the browser's notes panel, until typing pauses.
-    private let typedComments = TypedComments()
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -106,22 +140,16 @@ final class AnnotationController: ObservableObject {
     let sourcePicker = SourcePickerModel()
     /// What the HUD says for a moment: a notice, the note after a pause, the confirmation after Send.
     let notices = Notices()
-    /// Whether the HUD pill is open. HUDPanel animates it, so the pill grows out of its centre
-    /// when it appears and collapses into it before the panel hides.
-    @Published var isHUDShown = false
-    /// The screenshot that fills the preview card's image area, if any.
-    @Published var expandedPreviewImage: PreviewImage?
-    @Published var showsList = false
-    /// Apart from the rest of the state: typing must not redraw the HUD and the overlay.
-    let commentDraft = CommentDraft()
-    var commentText: String {
-        get { commentDraft.text }
-        set { commentDraft.text = newValue }
-    }
-
-    private let store: SessionStore
-    let browser: BrowserController
-    let shortcuts: ShortcutStore
+    /// The bar under the HUD that offers Tilde's browser for a page in another browser.
+    let browserOffer = BrowserOffer()
+    /// Where sessions are saved while in progress and kept afterwards.
+    let archive: SessionArchive
+    let saver: SessionSaver
+    var sender = ReportSender()
+    /// Comments typed into the preview or the browser's notes panel, until typing pauses.
+    private let typedComments = TypedComments()
+    /// The double tap, the hold key and the answers to a question.
+    private let keyMonitors: KeyMonitors
     let picker: ElementPicker
     private lazy var overlays = OverlayStack { [unowned self] frame, level, isWindowSized in
         OverlayWindow(frame: frame, level: level, isWindowSized: isWindowSized, controller: self)
@@ -129,32 +157,21 @@ final class AnnotationController: ObservableObject {
     private lazy var hud = HUDPanel(controller: self)
     private lazy var commentPanel = CommentPanel(controller: self)
     private lazy var previewPanel = PreviewPanel(controller: self)
+
+    private let store: SessionStore
+    let browser: BrowserController
+    let shortcuts: ShortcutStore
+    /// Keeps how the user last chose a window across launches; nil keeps it only in memory.
+    private let defaults: UserDefaults?
+    private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
     private var subscription: AnyCancellable?
     /// Views observe the controller; it sends on the changes of the parts that the HUD shows.
     private var partChanges: [AnyCancellable] = []
-
     /// The app that was in front when an agent's session opened Tilde's browser. The session
     /// ends with the browser closed and this app in front again, so the user is back in the chat.
     private var returnApp: NSRunningApplication?
     /// The next session that starts from Tilde is limited to the browser window.
     private var scopesNextLocalSessionToBrowser = false
-    /// The icon of the agent app with this display name, for the HUD; nil when unknown.
-    var clientIcon: (String) -> NSImage? = { _ in nil }
-    /// The status of the remote machine with this name, for the HUD's machine icon.
-    var machineDot: (String) -> NodeSetup.Dot = { _ in .grey }
-    private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
-
-    /// Where sessions are saved while in progress and kept afterwards.
-    let archive: SessionArchive
-    let saver: SessionSaver
-    var sender = ReportSender()
-    /// Keeps how the user last chose a window across launches; nil keeps it only in memory.
-    private let defaults: UserDefaults?
-    /// A saved session whose notes the next session starts with.
-    private var pendingRestore: SessionRecord?
-
-    /// Where each note is on screen now, and whether it shows.
-    let tracker: NoteTracker
 
     init(store: SessionStore, browser: BrowserController, shortcuts: ShortcutStore? = nil, archive: SessionArchive = SessionArchive(), defaults: UserDefaults? = .standard) {
         self.store = store
@@ -176,10 +193,18 @@ final class AnnotationController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
-        notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
         partChanges = [notices.objectWillChange, scope.objectWillChange, drawing.objectWillChange, browserOffer.objectWillChange].map { changes in
             changes.sink { [weak self] in self?.objectWillChange.send() }
         }
+        joinParts()
+    }
+
+    /// Gives each part what it asks of the session, and takes what it reports.
+    private func joinParts() {
+        saver.snapshot = { [weak self] in self?.snapshot }
+        notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
+        typedComments.onPause = { [weak self] in self?.saveTypedComments() }
+
         scope.onChange = { [weak self] in self?.sourceChanged() }
         scope.onCheck = { [weak self] delta in self?.scopeChecked(movedBy: delta) }
         scope.onGone = { [weak self] in self?.scopeEnded() }
@@ -187,7 +212,32 @@ final class AnnotationController: ObservableObject {
         scope.canChange = { [weak self] in self?.flow.canPick == true && self?.isPickingWindow == false }
         // The window never came on screen: the session covers everything.
         scope.onBrowserMissing = { [weak self] in self?.placeHUD() }
-        typedComments.onPause = { [weak self] in self?.saveTypedComments() }
+
+        // Also when the stack is the same: the browser's page notes can have come or gone.
+        picker.windows.onRead = { [weak self] isChanged in
+            self?.tracker.refreshCovers()
+            self?.scope.windowsRead()
+            if isChanged {
+                self?.tracker.somethingChanged()
+            }
+        }
+        picker.windows.onInput = { [weak self] in self?.tracker.somethingChanged() }
+
+        hoverPicker.scope = { [weak self] in self?.scope.window }
+        hoverPicker.shows = { [weak self] in
+            guard let self else {
+                return false
+            }
+            return composer == nil && !isPickingWindow
+        }
+        hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
+
+        keyMonitors.onDoubleTap = { [weak self] key in self?.doubleTapped(key) }
+        keyMonitors.onHold = { [weak self] output in self?.holdChanged(output) }
+        keyMonitors.onQuestionKey = { [weak self] keyCode, modifiers, window in
+            self?.handleConfirmationKey(keyCode, modifiers: modifiers, in: window) == true
+        }
+
         drawing.scope = { [weak self] in self?.scope.window }
         drawing.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         let canvas = drawing.panel
@@ -216,361 +266,12 @@ final class AnnotationController: ObservableObject {
             guard let self, let id = tracker.label(at: point) else {
                 return false
             }
-            self.preview(id)
+            preview(id)
             return true
         }
-        saver.snapshot = { [weak self] in self?.snapshot }
-        hoverPicker.scope = { [weak self] in self?.scope.window }
-        hoverPicker.shows = { [weak self] in
-            guard let self else {
-                return false
-            }
-            return composer == nil && !isPickingWindow
-        }
-        hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
-        keyMonitors.onDoubleTap = { [weak self] key in self?.doubleTapped(key) }
-        keyMonitors.onHold = { [weak self] output in self?.holdChanged(output) }
-        keyMonitors.onQuestionKey = { [weak self] keyCode, modifiers, window in
-            self?.handleConfirmationKey(keyCode, modifiers: modifiers, in: window) == true
-        }
     }
 
-    // MARK: - Session lifecycle
-
-    private func syncWithStore() {
-        let active = store.active
-        guard active?.id != session?.id else {
-            return
-        }
-
-        if let active {
-            begin(active)
-        } else if isOpen {
-            dispatch(.ended)
-        }
-    }
-
-    private func begin(_ session: SessionStore.Session) {
-        self.session = session
-        browserOffer.reset()
-        drafts = []
-        hover = nil
-        composer = nil
-        previewID = nil
-        showsList = false
-        scope.reset()
-        PageIdentity.askAppsToDescribeWebContent()
-        drawing.panel.prepare()
-        log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
-
-        var created = Date()
-        if let record = pendingRestore {
-            pendingRestore = nil
-            if record.id == session.id {
-                created = record.created
-            }
-            drafts = SessionSaver.drafts(from: record, archive: archive, into: session.id)
-        }
-        saver.start(created: created)
-        keyMonitors.startHold()
-        // Also when the stack is the same: the browser's page notes can have come or gone.
-        picker.windows.onRead = { [weak self] isChanged in
-            self?.tracker.refreshCovers()
-            self?.scope.windowsRead()
-            if isChanged {
-                self?.tracker.somethingChanged()
-            }
-        }
-        picker.windows.onInput = { [weak self] in self?.tracker.somethingChanged() }
-        picker.windows.start()
-        saver.save()
-
-        if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
-            returnApp = frontmost
-        }
-        // A session in the browser starts paused, so the user can type an address and browse
-        // first; Annotate in the HUD (or the pause shortcut) starts annotating.
-        let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
-        scopesNextLocalSessionToBrowser = false
-        dispatch(.begin(inBrowser: isInBrowser))
-
-        layoutOverlays()
-        if isInBrowser {
-            // The HUD shows once the browser's window is on screen, in its toolbar.
-            openBrowser(at: session.url)
-        } else {
-            placeHUD()
-        }
-    }
-
-    /// Closes the session on screen. After Send the HUD shows the confirmation for a moment;
-    /// otherwise it goes at once.
-    private func end() {
-        stopAnnotating()
-        saver.stop()
-        session = nil
-        drafts = []
-        scope.reset()
-        browserOffer.reset()
-
-        if let returnApp {
-            self.returnApp = nil
-            browser.close()
-            // The browser's HUD goes with it, so the confirmation shows in the floating one.
-            if isHUDInBrowser {
-                isHUDInBrowser = false
-                if case .sent = mode {
-                    hud.show()
-                }
-            }
-            NSApp.yieldActivation(to: returnApp)
-            ElementPicker.bringToFront(returnApp)
-        }
-
-        if case .sent(let operation) = mode {
-            notices.endSent(operation, after: 1.6)
-        } else {
-            hideHUD()
-        }
-    }
-
-    private func hideHUD() {
-        isHUDInBrowser = false
-        hud.hide()
-    }
-
-    /// Closes everything that annotates: the overlays, the comment, the preview, the hover and
-    /// the input monitors. The HUD stays, for the confirmation after Send.
-    private func stopAnnotating() {
-        clips.discard()
-        keyMonitors.stopHold()
-        PlainClickTap.stop()
-        dispatch(.holdEnded)
-        picker.windows.stop()
-        tracker.stop()
-        notices.clearPause()
-        drawing.panel.endSession()
-        commentPanel.close()
-        previewPanel.close()
-        previewID = nil
-        overlays.close()
-        hover = nil
-        composer = nil
-    }
-
-    /// Makes the report: waits for the captures, then saves it to the inbox. "Sent" or
-    /// "Copied" shows only once that is done; a failure leaves the session as it was.
-    private func startSend() {
-        guard let session, case .sending(let operation, _) = mode else {
-            return
-        }
-        let drafts = self.drafts
-        Task {
-            let report: ReportSender.Report
-            do {
-                report = try await sender.save(drafts, of: session)
-            } catch {
-                log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
-                dispatch(.sendFailed(operation))
-                return
-            }
-            dispatch(.sendFinished(operation), with: [.finishSend: { [self] in
-                finishSend(session, report)
-            }])
-        }
-    }
-
-    private func finishSend(_ session: SessionStore.Session, _ report: ReportSender.Report) {
-        log.notice("session \(session.id, privacy: .public) sent with \(report.feedback.annotations.count) annotations")
-        if session.isLocal {
-            sender.copy(report)
-            notices.showSent("Copied", status: .done)
-        } else {
-            notices.showSent("Sent to \(session.client)", status: .done)
-        }
-        saver.save(state: .sent, reportFolder: report.folder)
-        store.finish(session.id, with: .sent(report.feedback, folder: report.folder))
-        end()
-
-        // A copy's images go to the remote machines in the background; a machine they do not
-        // reach gets its own short warning.
-        guard session.isLocal else {
-            return
-        }
-        Task {
-            let failed = await sender.push(report)
-            guard !failed.isEmpty else {
-                return
-            }
-            dispatch(.pushFailed, with: [.showPushFailure: { [self] in
-                notices.showSent(RemotePush.failure(failed), status: .failed)
-                if case .sent(let operation) = mode {
-                    hud.show()
-                    notices.endSent(operation, after: 4)
-                }
-            }])
-        }
-    }
-
-    /// Opens the browser's notes panel with a note selected, such as from its card on the page.
-    func showNoteInPanel(_ id: Draft.ID) {
-        browser.showsNotes = true
-        browser.selectedNote = id
-    }
-
-    private func toggleList() {
-        if scope.isBrowser {
-            browser.showsNotes.toggle()
-        } else {
-            showsList.toggle()
-        }
-    }
-
-    /// Starts a session from Tilde itself. Its feedback goes to the clipboard and the inbox.
-    /// While a session is on screen, brings the HUD forward instead.
-    func startLocal() {
-        if session != nil {
-            if isHUDInBrowser {
-                browser.show()
-            } else {
-                hud.show()
-            }
-            return
-        }
-        _ = store.start(client: "You", url: nil, isLocal: true)
-    }
-
-    /// Opens Tilde's browser and annotates only in it: a new session from Tilde, which starts
-    /// paused, or the session on screen.
-    func annotateInBrowser() {
-        if session != nil {
-            dispatch(.openBrowser)
-            return
-        }
-        scopesNextLocalSessionToBrowser = true
-        _ = store.start(client: "You", url: nil, isLocal: true)
-    }
-
-    private func cancelSession() {
-        guard let session else {
-            return
-        }
-        log.notice("session \(session.id, privacy: .public) cancelled")
-        // A cancelled session keeps its notes in History, stopped recordings included; only a
-        // clip still in progress goes, with the session's end.
-        saver.save(state: .cancelled)
-        store.finish(session.id, with: .cancelled)
-        dispatch(.ended)
-    }
-
-    /// Whether the overlay takes the pointer (hover, picks, clicks, the crosshair) and the
-    /// keyboard: while annotating, and while choosing a window in any mode.
-    var overlayTakesInput: Bool {
-        flow.overlayTakesInput
-    }
-
-    /// Puts the overlays in step with `overlayTakesInput`; without input, nothing is hovered
-    /// and a pick in progress is dropped.
-    private func updateOverlayInput() {
-        let takesInput = overlayTakesInput
-        overlays.setTakesInput(takesInput)
-        if !takesInput {
-            hoverPicker.stop()
-        }
-    }
-
-    /// The HUD's leading button: records, pauses or resumes a clip in recording mode; else
-    /// resumes after any pause, or pauses.
-    func pressStatusButton() {
-        if isRecordMode {
-            dispatch(.record)
-        } else if !pauses.isEmpty {
-            dispatch(.resume)
-        } else {
-            dispatch(.togglePause)
-        }
-    }
-
-    private func showCanvas() {
-        hover = nil
-        // Over Tilde's browser, the canvas would cover tools on its toolbar.
-        if isHUDInBrowser {
-            hud.show()
-        }
-        drawing.start()
-    }
-
-    func setDrawingTool(_ tool: String) {
-        drawing.setTool(tool)
-        if composer != nil {
-            commentPanel.focus()
-        }
-    }
-
-    /// Makes a note of what was just drawn. Nothing drawn: nothing happens.
-    private func addDrawingNote() async {
-        guard let note = await drawing.takeNote() else {
-            drawing.panel.endEditing()
-            if isDrawing {
-                drawing.panel.resumeDrawing()
-            }
-            return
-        }
-        openComposer(note)
-        drawing.panel.editShapes(note.drawingIDs)
-    }
-
-    /// The shape of the open comment changed: its link and the comment box go with it.
-    private func updateEditedDrawing() {
-        guard case .new(let open) = composer, !open.drawingIDs.isEmpty else {
-            return
-        }
-        let ids = open.drawingIDs
-        hover = nil
-        Task {
-            guard let edit = await drawing.edit(of: ids), case .new(var pending) = composer, pending.drawingIDs == ids, pending.take(edit) else {
-                return
-            }
-            composer = .new(pending)
-            commentPanel.follow(near: pending.marker, below: pending.frame)
-        }
-    }
-
-    func setDrawingColor(_ color: String) {
-        drawing.setColor(color)
-        if composer != nil {
-            commentPanel.focus()
-        }
-    }
-
-    /// A note of a drawing can be undone in draw mode, and come back.
-    private func undoLastDrawing() {
-        let isDrawingNote: (Draft) -> Bool = { draft in
-            if case .drawing = draft.annotation.target {
-                return true
-            }
-            return false
-        }
-        if let index = drafts.lastIndex(where: isDrawingNote) {
-            drawing.keepUndone(drafts.remove(at: index))
-        }
-    }
-
-    private func redoLastDrawing() {
-        if let draft = drawing.takeUndone() {
-            drafts.append(draft)
-        }
-    }
-
-    /// Esc, and the picker's "‹ Back".
-    func escapePressed() {
-        // In the picker, Esc first goes from an app's windows back to the apps.
-        if isSourcePickerOpen, sourcePicker.openApp != nil {
-            sourcePicker.openApp = nil
-            return
-        }
-        dispatch(.escape)
-    }
+    // MARK: - The flow
 
     /// What the flow's rules read of the notes and the comment being written, as they are now.
     var facts: SessionFlow.Facts {
@@ -590,6 +291,12 @@ final class AnnotationController: ObservableObject {
     /// Send and ⌘↩ have something to send, and nothing is starting or finishing.
     var canSend: Bool {
         flow.canSend(facts)
+    }
+
+    /// Notes change only when the flow takes it: not under a question, while choosing or while
+    /// the report is made.
+    var canEditNotes: Bool {
+        accepts(.editNote)
     }
 
     /// The one way the session's mode changes: the flow decides from the facts as they are
@@ -718,6 +425,230 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    /// Esc, and the picker's "‹ Back".
+    func escapePressed() {
+        // In the picker, Esc first goes from an app's windows back to the apps.
+        if isSourcePickerOpen, sourcePicker.openApp != nil {
+            sourcePicker.openApp = nil
+            return
+        }
+        dispatch(.escape)
+    }
+
+    /// The HUD's leading button: records, pauses or resumes a clip in recording mode; else
+    /// resumes after any pause, or pauses.
+    func pressStatusButton() {
+        if isRecordMode {
+            dispatch(.record)
+        } else if !pauses.isEmpty {
+            dispatch(.resume)
+        } else {
+            dispatch(.togglePause)
+        }
+    }
+
+    // MARK: - Session lifecycle
+
+    private func syncWithStore() {
+        let active = store.active
+        guard active?.id != session?.id else {
+            return
+        }
+
+        if let active {
+            begin(active)
+        } else if isOpen {
+            dispatch(.ended)
+        }
+    }
+
+    private func begin(_ session: SessionStore.Session) {
+        self.session = session
+        browserOffer.reset()
+        drafts = []
+        hover = nil
+        composer = nil
+        previewID = nil
+        showsList = false
+        scope.reset()
+        PageIdentity.askAppsToDescribeWebContent()
+        drawing.panel.prepare()
+        log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
+
+        var created = Date()
+        if let record = pendingRestore {
+            pendingRestore = nil
+            if record.id == session.id {
+                created = record.created
+            }
+            drafts = SessionSaver.drafts(from: record, archive: archive, into: session.id)
+        }
+        saver.start(created: created)
+        keyMonitors.startHold()
+        picker.windows.start()
+        saver.save()
+
+        if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
+            returnApp = frontmost
+        }
+        // A session in the browser starts paused, so the user can type an address and browse
+        // first; Annotate in the HUD (or the pause shortcut) starts annotating.
+        let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
+        scopesNextLocalSessionToBrowser = false
+        dispatch(.begin(inBrowser: isInBrowser))
+
+        layoutOverlays()
+        if isInBrowser {
+            // The HUD shows once the browser's window is on screen, in its toolbar.
+            openBrowser(at: session.url)
+        } else {
+            placeHUD()
+        }
+    }
+
+    /// Closes the session on screen. After Send the HUD shows the confirmation for a moment;
+    /// otherwise it goes at once.
+    private func end() {
+        stopAnnotating()
+        saver.stop()
+        session = nil
+        drafts = []
+        scope.reset()
+        browserOffer.reset()
+
+        if let returnApp {
+            self.returnApp = nil
+            browser.close()
+            // The browser's HUD goes with it, so the confirmation shows in the floating one.
+            if isHUDInBrowser {
+                isHUDInBrowser = false
+                if case .sent = mode {
+                    hud.show()
+                }
+            }
+            NSApp.yieldActivation(to: returnApp)
+            ElementPicker.bringToFront(returnApp)
+        }
+
+        if case .sent(let operation) = mode {
+            notices.endSent(operation, after: 1.6)
+        } else {
+            hideHUD()
+        }
+    }
+
+    /// Closes everything that annotates: the overlays, the comment, the preview, the hover and
+    /// the input monitors. The HUD stays, for the confirmation after Send.
+    private func stopAnnotating() {
+        clips.discard()
+        keyMonitors.stopHold()
+        PlainClickTap.stop()
+        dispatch(.holdEnded)
+        picker.windows.stop()
+        tracker.stop()
+        notices.clearPause()
+        drawing.panel.endSession()
+        commentPanel.close()
+        previewPanel.close()
+        previewID = nil
+        overlays.close()
+        hover = nil
+        composer = nil
+    }
+
+    /// Starts a session from Tilde itself. Its feedback goes to the clipboard and the inbox.
+    /// While a session is on screen, brings the HUD forward instead.
+    func startLocal() {
+        if session != nil {
+            if isHUDInBrowser {
+                browser.show()
+            } else {
+                hud.show()
+            }
+            return
+        }
+        _ = store.start(client: "You", url: nil, isLocal: true)
+    }
+
+    /// Opens Tilde's browser and annotates only in it: a new session from Tilde, which starts
+    /// paused, or the session on screen.
+    func annotateInBrowser() {
+        if session != nil {
+            dispatch(.openBrowser)
+            return
+        }
+        scopesNextLocalSessionToBrowser = true
+        _ = store.start(client: "You", url: nil, isLocal: true)
+    }
+
+    private func cancelSession() {
+        guard let session else {
+            return
+        }
+        log.notice("session \(session.id, privacy: .public) cancelled")
+        // A cancelled session keeps its notes in History, stopped recordings included; only a
+        // clip still in progress goes, with the session's end.
+        saver.save(state: .cancelled)
+        store.finish(session.id, with: .cancelled)
+        dispatch(.ended)
+    }
+
+    // MARK: - Sending
+
+    /// Makes the report: waits for the captures, then saves it to the inbox. "Sent" or
+    /// "Copied" shows only once that is done; a failure leaves the session as it was.
+    private func startSend() {
+        guard let session, case .sending(let operation, _) = mode else {
+            return
+        }
+        let drafts = self.drafts
+        Task {
+            let report: ReportSender.Report
+            do {
+                report = try await sender.save(drafts, of: session)
+            } catch {
+                log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
+                dispatch(.sendFailed(operation))
+                return
+            }
+            dispatch(.sendFinished(operation), with: [.finishSend: { [self] in
+                finishSend(session, report)
+            }])
+        }
+    }
+
+    private func finishSend(_ session: SessionStore.Session, _ report: ReportSender.Report) {
+        log.notice("session \(session.id, privacy: .public) sent with \(report.feedback.annotations.count) annotations")
+        if session.isLocal {
+            sender.copy(report)
+            notices.showSent("Copied", status: .done)
+        } else {
+            notices.showSent("Sent to \(session.client)", status: .done)
+        }
+        saver.save(state: .sent, reportFolder: report.folder)
+        store.finish(session.id, with: .sent(report.feedback, folder: report.folder))
+        end()
+
+        // A copy's images go to the remote machines in the background; a machine they do not
+        // reach gets its own short warning.
+        guard session.isLocal else {
+            return
+        }
+        Task {
+            let failed = await sender.push(report)
+            guard !failed.isEmpty else {
+                return
+            }
+            dispatch(.pushFailed, with: [.showPushFailure: { [self] in
+                notices.showSent(RemotePush.failure(failed), status: .failed)
+                if case .sent(let operation) = mode {
+                    hud.show()
+                    notices.endSent(operation, after: 4)
+                }
+            }])
+        }
+    }
+
     // MARK: - Saving and restoring
 
     /// The session on screen as it is now, for its saved record.
@@ -777,7 +708,7 @@ final class AnnotationController: ObservableObject {
         return true
     }
 
-    // MARK: - Overlays and pause
+    // MARK: - Windows and the keyboard
 
     /// The HUD goes in the browser's toolbar while the session is limited to the browser, and
     /// floats over the screen otherwise.
@@ -802,6 +733,29 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    private func hideHUD() {
+        isHUDInBrowser = false
+        hud.hide()
+    }
+
+    func resetHUDPosition() {
+        hud.resetPosition()
+    }
+
+    private func toggleList() {
+        if scope.isBrowser {
+            browser.showsNotes.toggle()
+        } else {
+            showsList.toggle()
+        }
+    }
+
+    /// Opens the browser's notes panel with a note selected, such as from its card on the page.
+    func showNoteInPanel(_ id: Draft.ID) {
+        browser.showsNotes = true
+        browser.selectedNote = id
+    }
+
     /// Where the overlay of a session limited to one window goes, in AppKit screen
     /// coordinates: on Tilde's browser, its page only, so the toolbar (with the HUD) and the
     /// notes work as usual.
@@ -823,6 +777,16 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    /// Puts the overlays in step with `overlayTakesInput`; without input, nothing is hovered
+    /// and a pick in progress is dropped.
+    private func updateOverlayInput() {
+        let takesInput = overlayTakesInput
+        overlays.setTakesInput(takesInput)
+        if !takesInput {
+            hoverPicker.stop()
+        }
+    }
+
     /// Puts the overlays in step with the pause state; every start, resume and scope change
     /// goes through here. Resuming puts the overlay back above its window, which a click in
     /// that window (such as on the browser's Annotate button) raised over it.
@@ -837,52 +801,6 @@ final class AnnotationController: ObservableObject {
         makeOverlayKey()
     }
 
-    /// The frontmost app changed: pause or resume, and put the overlay back above its window.
-    func frontmostAppChanged(to pid: pid_t?) {
-        let waits = SessionScope.autoPauses(frontmost: pid, scopePID: scope.window?.pid, ownPID: ProcessInfo.processInfo.processIdentifier)
-        if waits != pauses.contains(.otherApp) {
-            log.notice("\(waits ? "auto-paused" : "auto-resumed", privacy: .public) for frontmost pid \(pid ?? 0, privacy: .public)")
-            dispatch(waits ? .otherAppInFront : .scopeAppInFront)
-        }
-        overlays.orderAbove(scope.window?.number)
-    }
-
-    // MARK: - Recording
-
-    /// What Record records: the chosen source, or the screen with the HUD when there is none.
-    var clipSource: RecordingSource {
-        scope.source ?? .screen(hudDisplay ?? CGMainDisplayID())
-    }
-
-    /// The name of what Record records, such as "Studio Display", for the HUD.
-    var clipSourceName: String {
-        switch clipSource {
-        case .screen(let display): screenName(display)
-        case .window(let window): scope.name ?? window.app
-        case .phone(let phone): phone.name
-        }
-    }
-
-    /// A screen's name as the system gives it; pictures of the HUD give a stand-in, so that
-    /// they never show the name of the Mac that drew them.
-    var screenName: (CGDirectDisplayID) -> String = SourcePickerModel.name(of:)
-
-    /// The display the floating HUD is on, which its panel keeps up to date as it is placed
-    /// and dragged.
-    @Published var hudDisplay: CGDirectDisplayID?
-
-    private func startClip() {
-        guard case .starting(let operation) = recording, let session else {
-            return
-        }
-        // The clip belongs to the session: it is in its folder, and goes with it.
-        clips.start(
-            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
-        )
-    }
-
-    // MARK: - Window scope
-
     /// The overlays cover every screen while choosing, and the floating HUD shows the picker.
     private func pickingChanged() {
         guard isOpen, !overlays.isEmpty else {
@@ -893,11 +811,48 @@ final class AnnotationController: ObservableObject {
         makeOverlayKey()
     }
 
-    private func openPicker() {
-        sourcePicker.tab = .screens
-        sourcePicker.openApp = nil
-        hover = nil
-        sourcePicker.load(browserWindow: browser.windowNumber)
+    /// A click on the floating HUD gives Tilde the keyboard, so Esc and ↩ reach it next. The
+    /// HUD is a non-activating panel: without this, keys stay with the app in front.
+    func takeKeyboard() {
+        guard session != nil else {
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        overlays.makeKey()
+    }
+
+    /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
+    /// or the preview has it or annotating is paused.
+    func makeOverlayKey() {
+        guard overlayTakesInput, composer == nil, previewID == nil else {
+            return
+        }
+        overlays.makeKey()
+    }
+
+    /// Whether a Quartz point is over Tilde's own HUD, comment box or preview.
+    /// Whether a Quartz point is over the comment box or the preview, which have text fields.
+    func isOverTextPanel(_ point: CGPoint) -> Bool {
+        let point = point.flipped
+        return [commentPanel.window, previewPanel.window].contains { $0.isVisible && $0.frame.contains(point) }
+    }
+
+    func isOverPanel(_ point: CGPoint) -> Bool {
+        let point = point.flipped
+        let panels = [commentPanel.window, previewPanel.window]
+        return hud.contains(point) || panels.contains { $0.isVisible && $0.frame.contains(point) }
+    }
+
+    // MARK: - Source and scope
+
+    /// The frontmost app changed: pause or resume, and put the overlay back above its window.
+    func frontmostAppChanged(to pid: pid_t?) {
+        let waits = SessionScope.autoPauses(frontmost: pid, scopePID: scope.window?.pid, ownPID: ProcessInfo.processInfo.processIdentifier)
+        if waits != pauses.contains(.otherApp) {
+            log.notice("\(waits ? "auto-paused" : "auto-resumed", privacy: .public) for frontmost pid \(pid ?? 0, privacy: .public)")
+            dispatch(waits ? .otherAppInFront : .scopeAppInFront)
+        }
+        overlays.orderAbove(scope.window?.number)
     }
 
     /// The choice: a window limits the session to it, as clicking it on screen does; a screen
@@ -906,6 +861,13 @@ final class AnnotationController: ObservableObject {
         dispatch(.choose(drawable: source.isDrawable), with: [.applySource: { [self] in
             scope.choose(source)
         }])
+    }
+
+    private func openPicker() {
+        sourcePicker.tab = .screens
+        sourcePicker.openApp = nil
+        hover = nil
+        sourcePicker.load(browserWindow: browser.windowNumber)
     }
 
     /// The session has another source: the front app now counts for the new window, and the
@@ -970,6 +932,105 @@ final class AnnotationController: ObservableObject {
         dispatch(.openBrowser, with: [.openBrowser: { [self] in
             openBrowser(at: url)
         }])
+    }
+
+    // MARK: - Recording
+
+    /// What Record records: the chosen source, or the screen with the HUD when there is none.
+    var clipSource: RecordingSource {
+        scope.source ?? .screen(hudDisplay ?? CGMainDisplayID())
+    }
+
+    /// The name of what Record records, such as "Studio Display", for the HUD.
+    var clipSourceName: String {
+        switch clipSource {
+        case .screen(let display): screenName(display)
+        case .window(let window): scope.name ?? window.app
+        case .phone(let phone): phone.name
+        }
+    }
+
+    private func startClip() {
+        guard case .starting(let operation) = recording, let session else {
+            return
+        }
+        // The clip belongs to the session: it is in its folder, and goes with it.
+        clips.start(
+            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
+        )
+    }
+
+    // MARK: - Drawing
+
+    private func showCanvas() {
+        hover = nil
+        // Over Tilde's browser, the canvas would cover tools on its toolbar.
+        if isHUDInBrowser {
+            hud.show()
+        }
+        drawing.start()
+    }
+
+    func setDrawingTool(_ tool: String) {
+        drawing.setTool(tool)
+        if composer != nil {
+            commentPanel.focus()
+        }
+    }
+
+    func setDrawingColor(_ color: String) {
+        drawing.setColor(color)
+        if composer != nil {
+            commentPanel.focus()
+        }
+    }
+
+    /// Makes a note of what was just drawn. Nothing drawn: nothing happens.
+    private func addDrawingNote() async {
+        guard let note = await drawing.takeNote() else {
+            drawing.panel.endEditing()
+            if isDrawing {
+                drawing.panel.resumeDrawing()
+            }
+            return
+        }
+        openComposer(note)
+        drawing.panel.editShapes(note.drawingIDs)
+    }
+
+    /// The shape of the open comment changed: its link and the comment box go with it.
+    private func updateEditedDrawing() {
+        guard case .new(let open) = composer, !open.drawingIDs.isEmpty else {
+            return
+        }
+        let ids = open.drawingIDs
+        hover = nil
+        Task {
+            guard let edit = await drawing.edit(of: ids), case .new(var pending) = composer, pending.drawingIDs == ids, pending.take(edit) else {
+                return
+            }
+            composer = .new(pending)
+            commentPanel.follow(near: pending.marker, below: pending.frame)
+        }
+    }
+
+    /// A note of a drawing can be undone in draw mode, and come back.
+    private func undoLastDrawing() {
+        let isDrawingNote: (Draft) -> Bool = { draft in
+            if case .drawing = draft.annotation.target {
+                return true
+            }
+            return false
+        }
+        if let index = drafts.lastIndex(where: isDrawingNote) {
+            drawing.keepUndone(drafts.remove(at: index))
+        }
+    }
+
+    private func redoLastDrawing() {
+        if let draft = drawing.takeUndone() {
+            drafts.append(draft)
+        }
     }
 
     // MARK: - Comments
@@ -1056,12 +1117,6 @@ final class AnnotationController: ObservableObject {
         hideComposer()
     }
 
-    /// Notes change only when the flow takes it: not under a question, while choosing or while
-    /// the report is made.
-    var canEditNotes: Bool {
-        accepts(.editNote)
-    }
-
     func deleteDraft(_ id: Draft.ID) {
         dispatch(.deleteNote, with: [.deleteNote: { [self] in
             if previewID == id {
@@ -1100,36 +1155,34 @@ final class AnnotationController: ObservableObject {
         makeOverlayKey()
     }
 
-    /// A click on the floating HUD gives Tilde the keyboard, so Esc and ↩ reach it next. The
-    /// HUD is a non-activating panel: without this, keys stay with the app in front.
-    func takeKeyboard() {
-        guard session != nil else {
+    /// Frame and marker of the comment target that is not yet a draft.
+    var pendingTarget: Pending? {
+        if case .new(let pending) = composer {
+            return pending
+        }
+        return nil
+    }
+
+    /// A key in a note's comment field: the note takes the text when typing pauses.
+    func updateCommentSoon(_ id: Draft.ID, _ comment: String) {
+        guard canEditNotes else {
             return
         }
-        NSApp.activate(ignoringOtherApps: true)
-        overlays.makeKey()
+        typedComments.typed(id, comment)
     }
 
-    /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
-    /// or the preview has it or annotating is paused.
-    func makeOverlayKey() {
-        guard overlayTakesInput, composer == nil, previewID == nil else {
-            return
+    private func saveTypedComments() {
+        for (id, comment) in typedComments.take() {
+            updateComment(id, comment)
         }
-        overlays.makeKey()
     }
 
-    /// Whether a Quartz point is over Tilde's own HUD, comment box or preview.
-    /// Whether a Quartz point is over the comment box or the preview, which have text fields.
-    func isOverTextPanel(_ point: CGPoint) -> Bool {
-        let point = point.flipped
-        return [commentPanel.window, previewPanel.window].contains { $0.isVisible && $0.frame.contains(point) }
-    }
-
-    func isOverPanel(_ point: CGPoint) -> Bool {
-        let point = point.flipped
-        let panels = [commentPanel.window, previewPanel.window]
-        return hud.contains(point) || panels.contains { $0.isVisible && $0.frame.contains(point) }
+    func updateComment(_ id: Draft.ID, _ comment: String) {
+        dispatch(.editNote, with: [.editNote: { [self] in
+            if let index = drafts.firstIndex(where: { $0.id == id }) {
+                drafts[index].annotation.comment = comment
+            }
+        }])
     }
 
     // MARK: - Preview
@@ -1163,45 +1216,11 @@ final class AnnotationController: ObservableObject {
         previewID = drafts[next].id
     }
 
-    func resetHUDPosition() {
-        hud.resetPosition()
-    }
-
     private func hidePreview() {
         previewID = nil
         expandedPreviewImage = nil
         previewPanel.close()
         makeOverlayKey()
-    }
-
-    /// A key in a note's comment field: the note takes the text when typing pauses.
-    func updateCommentSoon(_ id: Draft.ID, _ comment: String) {
-        guard canEditNotes else {
-            return
-        }
-        typedComments.typed(id, comment)
-    }
-
-    private func saveTypedComments() {
-        for (id, comment) in typedComments.take() {
-            updateComment(id, comment)
-        }
-    }
-
-    func updateComment(_ id: Draft.ID, _ comment: String) {
-        dispatch(.editNote, with: [.editNote: { [self] in
-            if let index = drafts.firstIndex(where: { $0.id == id }) {
-                drafts[index].annotation.comment = comment
-            }
-        }])
-    }
-
-    /// Frame and marker of the comment target that is not yet a draft.
-    var pendingTarget: Pending? {
-        if case .new(let pending) = composer {
-            return pending
-        }
-        return nil
     }
 }
 
