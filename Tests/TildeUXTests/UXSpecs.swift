@@ -312,53 +312,56 @@ struct UXSpecs {
 
     // MARK: - Pasted text
 
-    /// A dictation app pastes what it heard into the text field of the app in front, then
-    /// looks there for it. Tilde is in front only while one of its comment boxes has the
-    /// keyboard; before and after, the user's app is, and Tilde's keys still work.
-    @Test func textPastedIntoACommentBoxIsInTheAppInFrontAndTheUsersAppIsInFrontAgainAfter() async throws {
+    /// A dictation app pastes, then asks Accessibility for the focused element: when that is not
+    /// an editable text with the pasted text, it shows the text in its own window instead.
+    @Test func aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
-            let row = try await app.waitToSee("Starlink outages disrupt drone operations", inApp: "tilde-ux-fixture")
-            // A click on its window brings the user's app to the front.
-            try await app.click(at: CGPoint(x: row.frame.midX, y: row.frame.midY))
-            try await app.waitForFront(window.pid)
             try await app.doubleTap("control")
             try await app.waitToSee("Annotating")
-            try await app.waitForFront(window.pid)
+            let before = try await app.focus()
 
-            // The comment box of a new note.
-            try await app.click(at: CGPoint(x: row.frame.midX, y: row.frame.midY))
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.midX, y: frame.midY))
             try await app.waitToSee("add")
-            try await app.paste("Said to the box")
-            try await app.waitForTextInFront("Said to the box")
-            try await app.key(.enter)
-            try await app.waitNotToSee("add")
-            try await app.waitForFront(window.pid)
-            // Esc still reaches Tilde, and so does the shortcut that resumes.
-            try await app.key(.escape)
-            try await app.waitToSee("Paused")
-            try await app.doubleTap("control")
-            try await app.waitToSee("Annotating")
-            step("comment box")
+            try await Task.sleep(for: .milliseconds(40))
+            try await app.paste("dictated words")
+            try await app.waitToSee("dictated words", timeout: 3)
+            let inBox = try await app.focus()
+            #expect(inBox.frontmost == app.pid)
+            #expect(inBox.app == app.pid)
+            #expect(inBox.role == "AXTextArea")
+            #expect(inBox.value == "dictated words")
+            #expect(inBox.isEditable)
 
-            // The preview's comment, opened from the note's label at the corner of its element.
-            try await app.click(at: CGPoint(x: row.frame.maxX, y: row.frame.minY))
-            try await app.waitToSee("1 of 1")
-            try await app.waitForFront(window.pid)
-            try await app.clickField("Said to the box")
-            try await app.key(.a, command: true)
-            try await app.paste("Said to the preview")
-            try await app.waitForTextInFront("Said to the preview")
-            // ↩ ends editing: the user's app is in front, and Esc closes the preview.
             try await app.key(.enter)
-            try await app.waitForFront(window.pid)
-            try await app.key(.escape)
-            try await app.waitNotToSee("1 of 1")
-            try await app.key(.escape)
-            try await app.waitToSee("Paused")
-            try await app.waitForFront(window.pid)
-            step("preview")
+            try await app.waitToSeeText(containing: "1 note")
+            try await Task.sleep(for: .milliseconds(300))
+            let after = try await app.focus()
+            #expect(after.frontmost == before.frontmost)
+            #expect(after.app == before.app)
+
+            try await app.press("Show notes")
+            try await app.press("dictated words")
+            try await app.waitToSee("1 of 1")
+            let previewOpen = try await app.focus()
+            try await app.press("dictated words")
+            try await app.key(.a, command: true)
+            try await app.paste("dictated again")
+            try await app.waitToSee("dictated again", timeout: 3)
+            let inPreview = try await app.focus()
+            #expect(inPreview.frontmost == app.pid)
+            #expect(inPreview.app == app.pid)
+            #expect(["AXTextArea", "AXTextField"].contains(inPreview.role))
+            #expect(inPreview.value == "dictated again")
+            #expect(inPreview.isEditable)
+
+            try await app.key(.enter)
+            try await Task.sleep(for: .milliseconds(300))
+            let afterPreview = try await app.focus()
+            #expect(afterPreview.frontmost == previewOpen.frontmost)
+            #expect(afterPreview.app == previewOpen.app)
         }
     }
 

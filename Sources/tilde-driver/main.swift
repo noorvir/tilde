@@ -14,8 +14,9 @@ import CoreVideo
 //   POST /tap   {"key": "control|option|shift|command|function"}  a modifier pressed and released
 //   POST /ax    {"pid": 123}               the app's windows and menu bar extras as a JSON tree
 //   POST /press {"pid": 123, "name": "..."} AXPress on the first element with that name
-//   POST /focus                        the app in front, its focused element and the system's
 //   POST /window {"pid": 123, "title": "..."} a picture of that window, as base64 PNG
+//   POST /focus                        what a dictation app checks after a paste: the app in
+//                                      front, the system-wide focused app and element
 // Coordinates are Quartz screen points (top-left origin of the main display).
 
 import TildeCore
@@ -86,14 +87,6 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
         maxDepth = body["depth"] as? Int ?? 40
         return json(["tree": roots(of: pid).map { node($0, depth: 0) }])
 
-    case ("POST", "/focus"):
-        var result: [String: Any] = ["system": focusedElement(of: AXUIElementCreateSystemWide()) as Any]
-        if let front = NSWorkspace.shared.frontmostApplication {
-            result["front"] = Int(front.processIdentifier)
-            result["inFront"] = focusedElement(of: AXUIElementCreateApplication(front.processIdentifier))
-        }
-        return json(result)
-
     case ("POST", "/window"):
         return json(["png": windowPicture(pid: body["pid"] as? Int ?? 0, title: body["title"] as? String ?? "") as Any])
 
@@ -103,6 +96,24 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
     case ("POST", "/edges"):
         let edges = await WindowEdges.record(pid: body["pid"] as? Int ?? 0, width: body["width"] as? Double ?? 0, seconds: body["seconds"] as? Double ?? 1)
         return json(["edges": edges])
+
+    case ("POST", "/focus"):
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 1)
+        var result: [String: Any] = ["frontmost": frontmostPID()]
+        if let app: AXUIElement = axValue(system, kAXFocusedApplicationAttribute) {
+            var pid: pid_t = 0
+            AXUIElementGetPid(app, &pid)
+            result["app"] = Int(pid)
+        }
+        if let element: AXUIElement = axValue(system, kAXFocusedUIElementAttribute) {
+            var isEditable: DarwinBoolean = false
+            AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &isEditable)
+            result["role"] = axValue(element, kAXRoleAttribute) as String?
+            result["value"] = axValue(element, kAXValueAttribute) as String?
+            result["editable"] = isEditable.boolValue
+        }
+        return json(result)
 
     case ("POST", "/press"):
         let pid = pid_t(body["pid"] as? Int ?? 0)
@@ -122,6 +133,23 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
     default:
         return HTTPResponse(status: 404)
     }
+}
+
+/// The app in front as LaunchServices has it. NSWorkspace in this process can name the app
+/// before it for a long time.
+func frontmostPID() -> Int {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sh")
+    process.arguments = ["-c", #"lsappinfo info -only pid "$(lsappinfo front)""#]
+    let output = Pipe()
+    process.standardOutput = output
+    guard (try? process.run()) != nil else {
+        return 0
+    }
+    process.waitUntilExit()
+    // As `"pid"=123`.
+    let text = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return Int(text.split(separator: "=").last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
 }
 
 func windowPicture(pid: Int, title: String) -> String? {
@@ -196,22 +224,6 @@ func axName(_ element: AXUIElement) -> String? {
         }
     }
     return nil
-}
-
-/// The element with the keyboard in an app, or on the whole Mac for the system-wide element,
-/// as a tool that pastes text reads it.
-func focusedElement(of owner: AXUIElement) -> [String: Any]? {
-    guard let element: AXUIElement = axValue(owner, kAXFocusedUIElementAttribute) else {
-        return nil
-    }
-    var pid: pid_t = 0
-    AXUIElementGetPid(element, &pid)
-    var isSettable: DarwinBoolean = false
-    AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &isSettable)
-    return [
-        "pid": Int(pid), "role": axValue(element, kAXRoleAttribute) as String? ?? "",
-        "value": axValue(element, kAXValueAttribute) as String? ?? "", "editable": isSettable.boolValue,
-    ]
 }
 
 nonisolated(unsafe) var maxDepth = 40

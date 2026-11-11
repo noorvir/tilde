@@ -218,9 +218,14 @@ final class HUDPanel {
     }
 }
 
-/// Borderless panel that can take keyboard focus without activating other windows. While one
-/// of its text views has the keyboard, Tilde is the app in front; see `TextEntryFront`.
+/// Borderless panel that can take keyboard focus without activating other windows.
+///
+/// While one of its text views has the keyboard, Tilde is the app in front, as with any text
+/// field on the Mac: dictation and paste tools look for the focused element in the app in
+/// front. The app that was in front before gets it back when the text view lets go.
 class FloatingPanel: NSPanel {
+    private var returnApp: NSRunningApplication?
+
     override var canBecomeKey: Bool { true }
 
     override func sendEvent(_ event: NSEvent) {
@@ -230,38 +235,61 @@ class FloatingPanel: NSPanel {
         super.sendEvent(event)
     }
 
-    override func becomeKey() {
-        super.becomeKey()
-        textEntryChanged()
-    }
-
     @discardableResult
     override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
-        let isMade = super.makeFirstResponder(responder)
-        textEntryChanged()
-        return isMade
+        let made = super.makeFirstResponder(responder)
+        updateActivation()
+        return made
+    }
+
+    override func becomeKey() {
+        super.becomeKey()
+        updateActivation()
     }
 
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)
-        TextEntryFront.giveBack(from: self)
+        updateActivation()
     }
 
-    /// Another window with the keyboard changes nothing: the text view gets it back, or the
-    /// panel closes.
-    private func textEntryChanged() {
-        guard isKeyWindow else {
+    /// `NSApp.isActive` is already true while a non-activating panel has the keyboard, so the
+    /// app in front is what tells whether Tilde is in front.
+    private func updateActivation() {
+        let isEditing = isVisible && firstResponder is NSTextView
+        let own = NSRunningApplication.current.processIdentifier
+        if isEditing {
+            guard isKeyWindow, let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != own else {
+                return
+            }
+            returnApp = front
+            NSApp.activate()
             return
         }
-        guard firstResponder is NSTextView else {
-            TextEntryFront.giveBack(from: self)
+
+        guard let returnApp else {
             return
         }
-        // A panel that opens can give a text view the keyboard for a moment, before its own
-        // code takes it away: only a text view that keeps it counts.
-        DispatchQueue.main.async { [weak self] in
-            if let self, isKeyWindow, firstResponder is NSTextView {
-                TextEntryFront.take(for: self)
+        self.returnApp = nil
+        // As before the text view had it, a panel of Tilde keeps the keyboard while that app is
+        // in front: the one the caller makes key in this turn, such as the overlay after the
+        // comment box. The app's activation takes the keyboard when it lands, a moment later, so
+        // that panel takes it back then.
+        Task { @MainActor in
+            // The user or Tilde went to another app meanwhile: that app keeps the keyboard.
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == own else {
+                return
+            }
+            let keyWindow = NSApp.keyWindow
+            NSApp.yieldActivation(to: returnApp)
+            returnApp.activate()
+            guard let keyWindow else {
+                return
+            }
+            for _ in 0..<40 where keyWindow.isKeyWindow {
+                try? await Task.sleep(for: .milliseconds(25))
+            }
+            if !keyWindow.isKeyWindow, keyWindow.isVisible {
+                keyWindow.makeKey()
             }
         }
     }
