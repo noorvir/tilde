@@ -27,7 +27,9 @@ enum TextEntryFront {
         debugLog.notice("take from \(front.processIdentifier) for \(panel.className, privacy: .public)")
         lender = front
         holder = panel
-        NSApp.activate()
+        // A panel with the keyboard already counts as active for AppKit, so a plain request to
+        // activate would do nothing.
+        NSApp.activate(ignoringOtherApps: true)
         // Another app in front while the user writes is the user's choice: it keeps the front.
         observe(NSWorkspace.didActivateApplicationNotification, from: NSWorkspace.shared.notificationCenter) { note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
