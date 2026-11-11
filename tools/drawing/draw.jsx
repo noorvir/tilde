@@ -553,7 +553,7 @@ const deleteButton = `<span data-action="delete" title="Delete" style="${chipBut
 // A new kind keeps the rect and the label, and the fill or rows where the new kind has them.
 function changedKind(frame, kind) {
   const old = frame.customData;
-  const data = { ...newData(kind), label: old.label };
+  const data = { ...newData(kind), tildeWireframe: kind, label: old.label };
   if (old.borders) data.borders = old.borders;
   if ("filled" in data && old.filled !== undefined) data.filled = old.filled;
   if ((kind === "table" || kind === "list") && old.rows !== undefined) data.rows = old.rows;
