@@ -230,8 +230,13 @@ struct SessionFlow: Equatable {
     /// none for a mode's key, so that it never leaves drawing. A drawing tool or colour changes
     /// no mode.
     func events(forKey action: ShortcutStore.Action) -> [Event] {
-        guard case .open(let open) = mode, open.question == nil, !(open.isDrawing && action.group == .modes) else {
+        guard case .open(let open) = mode, open.question == nil else {
             return []
+        }
+        // Draw paused resumes by its own key or Space; no other mode's key leaves it.
+        if open.isDrawing, action.group == .modes {
+            let resumes = !open.pauses.isEmpty && (action == .drawingMode || action == .pauseOrResume)
+            return resumes ? [.resume] : []
         }
         let isBusy = switch open.activity {
         case .recording(.starting), .recording(.finishing): true
@@ -697,8 +702,13 @@ struct SessionFlow: Equatable {
         if open.panel == .preview {
             return closePreview(&open)
         }
+        // Esc never ends Draw: it pauses it, and the drawing waits.
         if open.isDrawing {
-            return leaveDrawing(&open)
+            guard open.pauses.isEmpty else {
+                return []
+            }
+            open.pauses.insert(.user)
+            return [.applyPause, .keepKeyboard]
         }
         if case .recording = open.activity {
             return leaveRecording(&open)
@@ -746,16 +756,15 @@ struct SessionFlow: Equatable {
         case .annotating:
             break
         }
-        // The canvas would keep the mouse from the screen that a pause gives back.
-        let finished = finishDrawing(&open)
+        // A pause keeps Draw, with the drawing on screen; the canvas lets the mouse through.
         if open.pauses.contains(.user) {
             // Annotate pressed on purpose resumes, whatever app was last in front.
             open.pauses.remove(.user)
             open.pauses.remove(.otherApp)
-            return finished + [.applyPause, .takeKeyboard]
+            return [.applyPause, .takeKeyboard]
         }
         open.pauses.insert(.user)
-        return finished + [.applyPause, .giveKeyboardBack, .takeKeyboard]
+        return [.applyPause, .giveKeyboardBack, .takeKeyboard]
     }
 
     /// Annotation mode on: from Draw, recording mode (unless a clip asks first) or no mode.

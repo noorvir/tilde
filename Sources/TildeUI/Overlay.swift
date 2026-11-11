@@ -255,7 +255,12 @@ final class OverlayView: NSView {
         // The same action and rule as the Send button, paused too; the flow ignores it while
         // choosing a window or with nothing to send.
         if event.keyCode == 36 && event.modifierFlags.contains(.command) {
-            controller.send()
+            // In Draw and Wireframe it is their Done.
+            if controller.isDrawing {
+                controller.finishDrawingMode()
+            } else {
+                controller.send()
+            }
             return
         }
         // Space on a note's marker previews it, before Space pauses.

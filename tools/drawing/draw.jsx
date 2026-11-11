@@ -1031,6 +1031,18 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;
   // Excalidraw ends the text being typed.
   if (wireframe && isTextField(event.target)) return;
+  // In wireframe mode Esc steps back one level: the kind menu, then the selection; with
+  // nothing selected it reaches Tilde, which pauses.
+  if (wireframe && (isTypeMenuOpen || selectedGroup)) {
+    event.stopPropagation();
+    if (isTypeMenuOpen) {
+      isTypeMenuOpen = false;
+      showHandles();
+    } else {
+      selectGroup(null);
+    }
+    return;
+  }
   if (clickArrow) {
     event.stopPropagation();
     cancelClickArrow();

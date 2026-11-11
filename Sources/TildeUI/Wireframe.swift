@@ -181,10 +181,11 @@ extension AnnotationController {
         _ = focusWireframeCanvas()
     }
 
-    /// In wireframe mode the canvas, not the overlay, takes the keyboard and so the pointer's
-    /// moves: the cursor ring shows at once, and the screen behind shows no hover highlight.
+    /// In Draw and Wireframe the canvas, not the overlay, takes the keyboard and so the
+    /// pointer's moves: the cursor ring shows at once, and the screen behind shows no hover
+    /// highlight.
     func focusWireframeCanvas() -> Bool {
-        guard wireframe != nil else {
+        guard isDrawing, !isDrawingPaused else {
             return false
         }
         drawingPanel.focus()
@@ -223,9 +224,28 @@ extension AnnotationController {
         }
     }
 
-    /// The keys of wireframe mode: W starts it, also from Draw; in it, its tools, and
-    /// no other letter or digit, as Draw's tools would change the canvas behind the HUD.
+    /// Draw or Wireframe paused: the drawing stays on screen, the tools wait.
+    var isDrawingPaused: Bool {
+        isDrawing && flow.session?.pauses.isEmpty == false
+    }
+
+    /// Done in Draw or Wireframe, as ⌘↩ does there.
+    func finishDrawingMode() {
+        if wireframe != nil {
+            finishWireframe()
+        } else {
+            finishDrawing()
+        }
+    }
+
+    /// The keys of wireframe mode: W starts it, also from Draw, and resumes it when paused; in
+    /// it, its tools, and no other letter or digit, as Draw's tools would change the canvas
+    /// behind the HUD. ⌘↩ is Done in Draw and Wireframe.
     func performWireframeShortcut(_ event: NSEvent) -> Bool {
+        if isDrawing, event.keyCode == 36, event.modifierFlags.contains(.command) {
+            finishDrawingMode()
+            return true
+        }
         guard session != nil, confirmation == nil, event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
               let key = event.charactersIgnoringModifiers?.lowercased(), key.count == 1, key != " "
         else {
@@ -239,6 +259,12 @@ extension AnnotationController {
                 return true
             }
             return false
+        }
+        if isDrawingPaused {
+            if key == "w", !event.isARepeat {
+                resume()
+            }
+            return key == "w"
         }
         if let tool = Wireframe.tools.first(where: { $0.key == key }) {
             setWireframeTool(tool.tool)

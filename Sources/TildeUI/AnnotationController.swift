@@ -932,10 +932,6 @@ final class AnnotationController: ObservableObject {
     }
 
     func escapePressed() {
-        if wireframe != nil, flow.session?.question == nil, flow.session?.panel == nil {
-            finishWireframe()
-            return
-        }
         // In the picker, Esc first goes from an app's windows back to the apps, as "‹ Back".
         if isSourcePickerOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
@@ -1854,6 +1850,14 @@ final class AnnotationController: ObservableObject {
         hasLoggedMove = false
         log.notice("annotating \(self.pauses.isEmpty ? "on" : "paused", privacy: .public) (\(String(describing: self.pauses), privacy: .public), overlays \(self.overlays.count))")
         hover = nil
+        // Draw and Wireframe stay through a pause, on screen; the mouse goes through them.
+        if isDrawing {
+            if pauses.isEmpty {
+                drawingPanel.resumeDrawing()
+            } else {
+                drawingPanel.stopDrawing()
+            }
+        }
         orderAboveScope()
         makeOverlayKey()
     }
