@@ -2,28 +2,23 @@ import AppKit
 import ApplicationServices
 import TildeCore
 
-/// Wireframe mode: rough boxes, text, buttons and image placeholders drawn over the screen in
-/// the drawing canvas, sent together as one note with the screen under them.
+/// Wireframe mode: skeletons of components drawn over the screen in the drawing canvas, each
+/// with an optional label, sent together as one note with the screen under them.
 struct Wireframe: Equatable {
-    var tool = "box"
-    var fill = "dots"
+    var tool = "card"
 
+    /// Card stands in for any component not in the list.
     static let tools = [
-        (tool: "box", symbol: "rectangle", key: "r", help: "Box"),
-        (tool: "text", symbol: "textformat", key: "t", help: "Text"),
+        (tool: "screen", symbol: "macwindow", key: "s", help: "Screen"),
+        (tool: "card", symbol: "square.text.square", key: "c", help: "Card"),
+        (tool: "table", symbol: "tablecells", key: "t", help: "Table"),
         (tool: "button", symbol: "capsule", key: "b", help: "Button"),
-        (tool: "image", symbol: "photo", key: "i", help: "Image"),
-    ]
-
-    static let fills = [
-        (fill: "dots", key: "1", help: "Dotted"),
-        (fill: "hatched", key: "2", help: "Hatched"),
-        (fill: "white", key: "3", help: "White"),
-        (fill: "outline", key: "4", help: "Outline"),
+        (tool: "dropdown", symbol: "chevron.down.square", key: "d", help: "Dropdown"),
+        (tool: "list", symbol: "list.bullet.rectangle", key: "l", help: "List"),
     ]
 
     var json: String {
-        DrawingPanel.json(["tool": tool, "fill": fill])
+        DrawingPanel.json(["tool": tool])
     }
 
     /// The edges of the element at a point, of its containers up to the window, and of their
@@ -105,11 +100,6 @@ extension AnnotationController {
         drawingPanel.setWireframe(wireframe?.json ?? "null")
     }
 
-    func setWireframeFill(_ fill: String) {
-        wireframe?.fill = fill
-        drawingPanel.setWireframe(wireframe?.json ?? "null")
-    }
-
     func undoWireframe() {
         drawingPanel.runWireframe("undoWireframe()")
     }
@@ -136,7 +126,7 @@ extension AnnotationController {
         }
     }
 
-    /// The keys of wireframe mode: W starts it, also from Draw; in it, its tools and fills, and
+    /// The keys of wireframe mode: W starts it, also from Draw; in it, its tools, and
     /// no other letter or digit, as Draw's tools would change the canvas behind the HUD.
     func performWireframeShortcut(_ event: NSEvent) -> Bool {
         guard session != nil, confirmation == nil, event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
@@ -155,8 +145,6 @@ extension AnnotationController {
         }
         if let tool = Wireframe.tools.first(where: { $0.key == key }) {
             setWireframeTool(tool.tool)
-        } else if let fill = Wireframe.fills.first(where: { $0.key == key }) {
-            setWireframeFill(fill.fill)
         }
         return key.allSatisfy { $0.isLetter || $0.isNumber }
     }

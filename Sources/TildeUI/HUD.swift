@@ -436,22 +436,6 @@ struct HUDView: View {
             }
         }
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
-        ForEach(Wireframe.fills, id: \.fill) { entry in
-            let isOn = controller.wireframe?.fill == entry.fill
-            Button {
-                controller.setWireframeFill(entry.fill)
-            } label: {
-                WireframeFillSwatch(fill: entry.fill)
-                    .frame(width: size.swatchSize, height: size.swatchSize)
-                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.white.opacity(isOn ? 1 : 0.25), lineWidth: isOn ? 2 : 1))
-                    .padding(1)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .tildeTooltip(entry.help, keys: [entry.key])
-            .accessibilityLabel(entry.help)
-        }
-        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
         HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
             controller.undoWireframe()
         }
@@ -1349,38 +1333,5 @@ private extension Color {
     init(hex: String) {
         let value = Int(hex.dropFirst(), radix: 16) ?? 0
         self.init(red: Double(value >> 16 & 255) / 255, green: Double(value >> 8 & 255) / 255, blue: Double(value & 255) / 255)
-    }
-}
-
-/// A wireframe fill in small, for its button in the accessory bar.
-private struct WireframeFillSwatch: View {
-    let fill: String
-
-    var body: some View {
-        Canvas { context, size in
-            let shape = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 3)
-            switch fill {
-            case "dots":
-                context.fill(shape, with: .color(Color(white: 0.93)))
-                for x in stride(from: 3.0, to: size.width, by: 4) {
-                    for y in stride(from: 3.0, to: size.height, by: 4) {
-                        context.fill(Path(ellipseIn: CGRect(x: x - 0.75, y: y - 0.75, width: 1.5, height: 1.5)), with: .color(Color(white: 0.45)))
-                    }
-                }
-            case "hatched":
-                context.fill(shape, with: .color(Color(white: 0.95)))
-                var lines = Path()
-                for offset in stride(from: -size.height, to: size.width, by: 4) {
-                    lines.move(to: CGPoint(x: offset, y: size.height))
-                    lines.addLine(to: CGPoint(x: offset + size.height, y: 0))
-                }
-                context.clip(to: shape)
-                context.stroke(lines, with: .color(Color(white: 0.5)), lineWidth: 1)
-            case "white":
-                context.fill(shape, with: .color(.white))
-            default:
-                break
-            }
-        }
     }
 }

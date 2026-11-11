@@ -36,7 +36,7 @@ function describe(element) {
   const shape = { id: element.id, color: element.strokeColor, type: element.type === "freedraw" ? "freehand" : element.type };
   if (element.customData?.tildeWireframe) {
     shape.type = element.customData.tildeWireframe;
-    shape.fill = element.customData.fill;
+    if (element.customData.label) shape.label = element.customData.label;
   }
   if (element.type === "text") shape.text = element.text;
   if (element.type === "arrow") {
@@ -107,6 +107,7 @@ window.tildeDraw = {
   },
   // The shapes drawn since the last call, in points from the top left of the canvas.
   takeNewShapes() {
+    if (labelled) endLabel(true);
     const elements = live().filter((element) => !taken.has(element.id));
     if (!elements.length) return "";
     elements.forEach((element) => taken.add(element.id));
@@ -118,7 +119,7 @@ window.tildeDraw = {
   remove(ids) {
     changeElements(withGroups(ids), () => ({ isDeleted: true }));
   },
-  // `state`: { tool, fill } while in wireframe mode, null to leave it; its shapes not taken go.
+  // `state`: { tool } while in wireframe mode, null to leave it; its shapes not taken go.
   setWireframe(state) {
     const wasOn = wireframe !== null;
     wireframe = state;
@@ -127,17 +128,18 @@ window.tildeDraw = {
       if (!wasOn) return;
       changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), () => ({ isDeleted: true }));
       wireframeUndone.length = 0;
-      api.updateScene({ appState: { currentItemRoughness: 0, currentItemRoundness: "round", selectedElementIds: {} }, captureUpdate: "NEVER" });
+      if (labelled) endLabel(false);
+      api.updateScene({ appState: { currentItemStrokeStyle: "solid", currentItemStrokeWidth: 2, currentItemRoundness: "round", selectedElementIds: {} }, captureUpdate: "NEVER" });
       return;
     }
     api.updateScene({
       appState: {
-        currentItemStrokeColor: wireframeStroke, currentItemRoughness: 1, currentItemBackgroundColor: "transparent",
-        currentItemFontFamily: 2, currentItemFontSize: 28, currentItemRoundness: "sharp", selectedElementIds: {},
+        currentItemStrokeColor: "#8A8D95", currentItemStrokeStyle: "dashed", currentItemStrokeWidth: 1, currentItemBackgroundColor: "transparent",
+        currentItemRoundness: "sharp", selectedElementIds: {},
       },
       captureUpdate: "NEVER",
     });
-    drawingTool = state.tool === "text" ? "text" : "rectangle";
+    drawingTool = "rectangle";
     if (!editing) api.setActiveTool({ type: drawingTool, locked: true });
   },
   // The last wireframe shape not taken yet goes, and comes back with redo.
@@ -169,19 +171,13 @@ window.tildeDraw = {
   },
 };
 
-// Wireframe mode: rough grey boxes, buttons, image placeholders and text over the screen,
-// sent together as one note. Its shapes stay until Done takes them all.
+// Wireframe mode: skeletons of components (screen, card, table, button, dropdown, list) over
+// the screen, sent together as one note. Its shapes stay until Done takes them all. Each
+// component is a group of flat elements, made again whole when its label changes.
 let wireframe = null;
 let wireframePress = null;
 const wireframeUndone = [];
-const wireframeStroke = "#5C5C5C";
-// An opaque base under a pattern hides the screen below; outline only shows it.
-const wireframeFills = {
-  dots: { base: "#EEEEEE", fillStyle: "dots", backgroundColor: "#B4B4B4" },
-  hatched: { base: "#F4F4F4", fillStyle: "hachure", backgroundColor: "#A8A8A8" },
-  white: { base: null, fillStyle: "solid", backgroundColor: "#FFFFFF" },
-  outline: { base: null, fillStyle: "solid", backgroundColor: "transparent" },
-};
+const skeleton = { block: "#EEEFF2", bar: "#DADCE1", darkBar: "#C9CCD2", line: "#D3D5DA", surface: "#FAFAFB", text: "#4A4D55" };
 
 const isPart = (element) => element.customData?.tildePart === true;
 
@@ -191,50 +187,185 @@ function withGroups(ids) {
   return live().filter((element) => wanted.has(element.id) || element.groupIds.some((group) => groups.has(group))).map((element) => element.id);
 }
 
-function wireframeElements(kind, { x, y, width, height }, fillName) {
-  const fill = wireframeFills[fillName] ?? wireframeFills.dots;
-  const groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`];
-  const style = { strokeColor: wireframeStroke, strokeWidth: 2, roughness: 1 };
-  const skeletons = [];
-  if (fill.base) {
-    skeletons.push({ type: "rectangle", x, y, width, height, ...style, strokeColor: "transparent", backgroundColor: fill.base, fillStyle: "solid", roundness: kind === "button" ? { type: 3 } : null });
+const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+const flat = { roughness: 0, strokeWidth: 1, fillStyle: "solid", strokeStyle: "solid" };
+const block = (x, y, width, height, backgroundColor, more = {}) => ({
+  type: "rectangle", x, y, width, height, ...flat, strokeColor: "transparent", backgroundColor, roundness: null, ...more,
+});
+const bar = (x, y, width, height, backgroundColor = skeleton.bar) => block(x, y, width, height, backgroundColor, { roundness: { type: 2 } });
+const rule = (x, y, width) => ({ type: "line", x, y, width, height: 0, points: [[0, 0], [width, 0]], ...flat, strokeColor: skeleton.line });
+const dot = (x, y, size, backgroundColor = skeleton.bar) => ({ type: "ellipse", x, y, width: size, height: size, ...flat, strokeColor: "transparent", backgroundColor });
+
+// The parts of a component in its rect, behind its label; `hasLabel` leaves out the bars that
+// a label stands in for.
+function componentParts(kind, { x, y, width, height }, hasLabel) {
+  const pad = clamp(Math.min(width, height) * 0.12, 6, 16);
+  const barHeight = clamp(height * 0.08, 5, 10);
+  const parts = [];
+  switch (kind) {
+    case "screen": {
+      const titleBar = clamp(height * 0.07, 16, 28);
+      const dotSize = titleBar * 0.36;
+      parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.darkBar, roundness: { type: 3 } }));
+      parts.push(rule(x, y + titleBar, width));
+      for (let index = 0; index < 3; index++) parts.push(dot(x + titleBar * 0.5 + index * dotSize * 1.7, y + (titleBar - dotSize) / 2, dotSize, skeleton.darkBar));
+      break;
+    }
+    case "card": {
+      parts.push(block(x, y, width, height, skeleton.block, { roundness: { type: 3 } }));
+      if (hasLabel) break;
+      const lineWidth = width - 2 * pad;
+      parts.push(bar(x + pad, y + pad, lineWidth * 0.5, barHeight * 1.3, skeleton.darkBar));
+      const fits = Math.floor((height - 2 * pad - barHeight * 3.3) / (barHeight * 2)) + 1;
+      [0.9, 0.8, 0.85, 0.6].slice(0, clamp(fits, 0, 4)).forEach((fraction, index) => {
+        parts.push(bar(x + pad, y + pad + barHeight * 3.3 + index * barHeight * 2, lineWidth * fraction, barHeight));
+      });
+      break;
+    }
+    case "table": {
+      const header = clamp(height * 0.14, 18, 34);
+      const row = clamp(header * 1.1, 18, 40);
+      const columns = clamp(Math.floor(width / 110), 2, 5);
+      const column = width / columns;
+      const cell = clamp(row * 0.28, 4, 8);
+      parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.line }));
+      parts.push(block(x, y, width, header, skeleton.block));
+      const rows = clamp(Math.floor((height - header) / row), 0, 12);
+      for (let column_ = 0; column_ < columns; column_++) {
+        parts.push(bar(x + column_ * column + pad, y + (header - cell) / 2, column * 0.5, cell, skeleton.darkBar));
+      }
+      for (let index = 0; index < rows; index++) {
+        const top = y + header + index * row;
+        if (index > 0) parts.push(rule(x, top, width));
+        for (let column_ = 0; column_ < columns; column_++) {
+          parts.push(bar(x + column_ * column + pad, top + (row - cell) / 2, column * [0.6, 0.45, 0.55][(index + column_) % 3], cell));
+        }
+      }
+      break;
+    }
+    case "button":
+      parts.push(block(x, y, width, height, skeleton.bar, { roundness: { type: 3 } }));
+      if (!hasLabel) parts.push(bar(x + width * 0.3, y + (height - barHeight) / 2, width * 0.4, barHeight, skeleton.darkBar));
+      break;
+    case "dropdown": {
+      const chevron = clamp(height * 0.18, 3, 7);
+      parts.push(block(x, y, width, height, "#FFFFFF", { strokeColor: skeleton.darkBar, roundness: { type: 3 } }));
+      parts.push({
+        type: "line", x: x + width - pad - chevron * 2, y: y + height / 2 - chevron * 0.4, width: chevron * 2, height: chevron,
+        points: [[0, 0], [chevron, chevron], [chevron * 2, 0]], ...flat, strokeWidth: 2, strokeColor: "#8A8D95",
+      });
+      if (!hasLabel) parts.push(bar(x + pad, y + (height - barHeight) / 2, width * 0.45, barHeight));
+      break;
+    }
+    case "list": {
+      const row = clamp(Math.min(height / 3, 56), 28, 56);
+      const avatar = row * 0.56;
+      parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.line }));
+      const rows = clamp(Math.floor(height / row), 1, 10);
+      for (let index = 0; index < rows; index++) {
+        const top = y + index * row;
+        if (index > 0) parts.push(rule(x + pad, top, width - 2 * pad));
+        parts.push(dot(x + pad, top + (row - avatar) / 2, avatar));
+        const textLeft = x + pad * 2 + avatar;
+        const textWidth = width - textLeft + x - pad;
+        parts.push(bar(textLeft, top + row / 2 - barHeight - 2, textWidth * 0.55, barHeight, skeleton.darkBar));
+        parts.push(bar(textLeft, top + row / 2 + 3, textWidth * 0.35, barHeight * 0.8));
+      }
+      break;
+    }
   }
-  const frame = {
-    type: "rectangle", x, y, width, height, ...style, backgroundColor: fill.backgroundColor, fillStyle: fill.fillStyle,
-    roundness: kind === "button" ? { type: 3 } : null, customData: { tildeWireframe: kind, fill: fillName },
-  };
-  if (kind === "button") {
-    frame.label = { text: "Button", fontSize: Math.max(12, Math.min(24, height * 0.4)), fontFamily: 2, strokeColor: wireframeStroke };
+  return parts;
+}
+
+// Buttons, dropdowns and cards show a label on themselves; the rest on a chip, over their rows.
+const plainLabels = new Set(["button", "dropdown", "card"]);
+
+function wireframeElements(kind, rect, label, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`]) {
+  const skeletons = componentParts(kind, rect, Boolean(label));
+  skeletons[0].customData = { tildeWireframe: kind, label };
+  const elements = convertToExcalidrawElements(skeletons);
+  if (label) {
+    const fontSize = plainLabels.has(kind) ? clamp(rect.height * 0.32, 12, 20) : 15;
+    const [text] = convertToExcalidrawElements([{ type: "text", x: 0, y: 0, text: label, fontSize, fontFamily: 2, strokeColor: skeleton.text, textAlign: "center", roughness: 0 }]);
+    const centre = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    if (!plainLabels.has(kind)) {
+      elements.push(...convertToExcalidrawElements([block(centre.x - text.width / 2 - 10, centre.y - text.height / 2 - 5, text.width + 20, text.height + 10, "#FFFFFF", { strokeColor: skeleton.line, roundness: { type: 3 } })]));
+    }
+    elements.push({ ...text, x: centre.x - text.width / 2, y: centre.y - text.height / 2 });
   }
-  skeletons.push(frame);
-  if (kind === "image") {
-    skeletons.push({ type: "line", x, y, width, height, points: [[0, 0], [width, height]], ...style });
-    skeletons.push({ type: "line", x: x + width, y, width, height, points: [[0, 0], [-width, height]], ...style });
-  }
-  return convertToExcalidrawElements(skeletons).map((element) => ({
+  return elements.map((element) => ({
     ...element,
     groupIds,
     customData: element.customData?.tildeWireframe ? element.customData : { tildePart: true },
   }));
 }
 
-// After Excalidraw has finished the rectangle of a drag: it becomes the shape of the tool.
+// After Excalidraw has finished the rectangle of a drag: it becomes the component of the tool.
+// A click instead labels the component under it.
 function finishWireframeShape() {
-  const before = wireframePress;
+  const press = wireframePress;
   wireframePress = null;
-  if (!before || !wireframe) return;
-  const created = live().filter((element) => !before.has(element.id));
+  if (!press || !wireframe) return;
+  const created = live().filter((element) => !press.ids.has(element.id));
   if (created.length) wireframeUndone.length = 0;
   const box = created.find((element) => element.type === "rectangle" && !element.customData);
-  if (!box || wireframe.tool === "text") return;
+  if (!box) return;
   const rest = api.getSceneElementsIncludingDeleted().filter((element) => element.id !== box.id);
   if (box.width < 4 || box.height < 4) {
     api.updateScene({ elements: rest, appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+    const component = live().filter((element) => {
+      const { x, y } = press;
+      return element.customData?.tildeWireframe && x >= element.x && x <= element.x + element.width && y >= element.y && y <= element.y + element.height;
+    }).pop();
+    if (component) editLabel(component);
     return;
   }
-  const elements = wireframeElements(wireframe.tool, box, wireframe.fill);
+  const elements = wireframeElements(wireframe.tool, box);
   api.updateScene({ elements: [...rest, ...elements], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
 }
+
+// The label field over the centre of a component: Return or a click elsewhere keeps what was
+// typed, Esc does not.
+const labelField = document.createElement("input");
+labelField.style.cssText = "position:fixed;z-index:10000;transform:translate(-50%,-50%);min-width:120px;padding:5px 10px;border:1.5px solid #2F76FF;border-radius:8px;background:#fff;color:#4A4D55;font:15px Helvetica,sans-serif;text-align:center;outline:none;display:none";
+labelField.placeholder = "Label";
+document.addEventListener("DOMContentLoaded", () => document.body.append(labelField));
+let labelled = null;
+
+function editLabel(component) {
+  labelled = component;
+  labelField.value = component.customData.label ?? "";
+  labelField.style.left = `${component.x + component.width / 2}px`;
+  labelField.style.top = `${component.y + component.height / 2}px`;
+  labelField.style.display = "block";
+  labelField.focus();
+  labelField.select();
+}
+
+function endLabel(isKept) {
+  const component = labelled;
+  labelled = null;
+  labelField.style.display = "none";
+  labelField.blur();
+  if (!isKept || !component) return;
+  const label = labelField.value.trim() || undefined;
+  const all = api.getSceneElementsIncludingDeleted();
+  const group = component.groupIds[0];
+  const index = all.findIndex((element) => element.groupIds.includes(group));
+  const rest = all.filter((element) => !element.groupIds.includes(group));
+  const elements = wireframeElements(component.customData.tildeWireframe, component, label, component.groupIds);
+  rest.splice(index, 0, ...elements);
+  api.updateScene({ elements: rest, captureUpdate: "NEVER" });
+}
+
+labelField.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") endLabel(true);
+  if (event.key === "Escape") endLabel(false);
+  event.stopPropagation();
+});
+labelField.addEventListener("blur", () => {
+  if (labelled) endLabel(true);
+});
 
 // Wireframe snapping: x and y each go to the nearest line within reach: edges of the elements
 // seen near the pointer, thirds and halves of the screen, the window and the containers under
@@ -261,7 +392,7 @@ function snapLines(pointer) {
   }
   const drawing = api.getAppState().newElement?.id;
   for (const element of live()) {
-    if (element.id === drawing || isPart(element) || !(element.customData?.tildeWireframe || element.type === "text")) continue;
+    if (element.id === drawing || !element.customData?.tildeWireframe) continue;
     lines.x.push({ value: element.x }, { value: element.x + element.width / 2 }, { value: element.x + element.width });
     lines.y.push({ value: element.y }, { value: element.y + element.height / 2 }, { value: element.y + element.height });
   }
@@ -314,9 +445,11 @@ function showGuides(x, y, point) {
 const retargeted = new WeakSet();
 function snapPointer(event) {
   if (!wireframe || retargeted.has(event)) return;
-  if (event.type === "pointerdown") wireframePress = new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id));
+  if (event.type === "pointerdown") {
+    wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY };
+  }
   const tool = api?.getAppState().activeTool.type;
-  if ((tool !== "rectangle" && tool !== "text") || event.metaKey || editing) {
+  if (tool !== "rectangle" || event.metaKey || editing || labelled) {
     hideGuides();
     return;
   }
