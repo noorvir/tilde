@@ -65,14 +65,12 @@ enum TextEntryFront {
                 return
             }
             stopObserving()
-            DispatchQueue.main.asyncAfter(deadline: .now() + rekeyDelay) {
-                debugLog.notice("re-key \(keyWindow?.className ?? "none", privacy: .public), front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive)")
-                if let keyWindow, keyWindow.isVisible, keyWindow.canBecomeKey, lender == nil {
-                    keyWindow.makeKey()
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    debugLog.notice("later, front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive) key \(NSApp.keyWindow?.className ?? "none", privacy: .public)")
-                }
+            debugLog.notice("re-key \(keyWindow?.className ?? "none", privacy: .public), front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive)")
+            if let keyWindow, keyWindow.isVisible, keyWindow.canBecomeKey {
+                keyWindow.makeKey()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                debugLog.notice("later, front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive) key \(NSApp.keyWindow?.className ?? "none", privacy: .public)")
             }
         }
         observe(NSApplication.willResignActiveNotification, from: .default) { _ in
@@ -93,10 +91,6 @@ enum TextEntryFront {
         NSApp.yieldActivation(to: app)
         ElementPicker.bringToFront(app)
         debugLog.notice("yielded to \(app.processIdentifier), active \(NSApp.isActive)")
-    }
-
-    private static var rekeyDelay: TimeInterval {
-        UserDefaults.standard.object(forKey: "rekeyDelay") as? Double ?? 0.1
     }
 
     private static func observe(_ name: Notification.Name, from center: NotificationCenter, _ handle: @escaping @MainActor (Notification) -> Void) {
