@@ -173,7 +173,13 @@ extension AnnotationController {
             item.submenu = submenu
             menu.addItem(item)
         }
+        // The canvas is above the menu's level: its clicks go through to the menu while it is
+        // open. The menu closes before popUp returns.
+        drawingPanel.stopDrawing()
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+        if wireframe != nil {
+            drawingPanel.resumeDrawing()
+        }
     }
 
     private func setWireframeStyle(_ key: String, to value: String) {
