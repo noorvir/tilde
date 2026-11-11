@@ -348,7 +348,7 @@ struct HUDView: View {
                     .transition(.opacity)
             }
             if controller.isHUDShown, controller.showsBrowserAccessory {
-                HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: controller.dismissBrowserAccessory)
+                HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: controller.browserOffer.dismiss)
                     .transition(Self.zoom)
             }
             if controller.isHUDShown, let notice = controller.notices.pause {
@@ -381,7 +381,7 @@ struct HUDView: View {
         .animation(HUDPanel.motion, value: controller.sentConfirmation)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
         .animation(.easeOut(duration: 0.15), value: controller.notices.pause)
-        .animation(.spring(duration: 0.28), value: controller.browserAccessoryURL)
+        .animation(.spring(duration: 0.28), value: controller.browserOffer.url)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -458,7 +458,7 @@ struct HUDView: View {
     private var drawingContent: some View {
         let size = HUDAccessory.size
         ForEach(Self.drawingTools, id: \.tool) { entry in
-            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawingTool == entry.tool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
+            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawing.tool == entry.tool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
                 controller.setDrawingTool(entry.tool)
             }
         }
@@ -470,7 +470,7 @@ struct HUDView: View {
                 Circle()
                     .fill(Color(hex: entry.hex))
                     .frame(width: size.swatchSize, height: size.swatchSize)
-                    .overlay(Circle().strokeBorder(Color.white.opacity(controller.drawingColor == entry.hex ? 1 : 0.25), lineWidth: controller.drawingColor == entry.hex ? 2 : 1))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(controller.drawing.color == entry.hex ? 1 : 0.25), lineWidth: controller.drawing.color == entry.hex ? 2 : 1))
                     .padding(1)
                     .contentShape(Circle())
             }

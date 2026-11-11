@@ -19,6 +19,18 @@ struct Picked {
     /// The Accessibility element, for elements in other apps, so a note can follow it.
     var tracked: TrackedElement?
 
+    /// The answer of a window that shows no elements, such as the iOS Simulator: a note stays
+    /// where it was made, and only what is around that point tells whether it is still on
+    /// screen. Such an app may also answer with one large group, as the phone in Device Hub.
+    var isWholeWindow: Bool {
+        let isLargeGroup = chip == "Group" && frame.width >= 150 && frame.height >= 150
+        // A browser that has not described its page yet answers with the page itself.
+        let isAboutTheWindow = window.map { window in
+            frame.width * frame.height >= 0.7 * window.frame.width * window.frame.height
+        } ?? false
+        return chip == "window" || isLargeGroup || isAboutTheWindow
+    }
+
     /// The same element after its window moved by `delta`.
     func moved(by delta: CGVector) -> Picked {
         Picked(frame: frame.offsetBy(dx: delta.dx, dy: delta.dy), element: element, chip: chip, details: details, window: window, anchor: anchor, tracked: tracked)

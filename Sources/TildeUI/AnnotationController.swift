@@ -77,16 +77,8 @@ final class AnnotationController: ObservableObject {
     }
     private var holdMonitor: HoldMonitor?
 
-    /// The page in another browser that the browser accessory bar under the HUD offers to
-    /// open in Tilde's browser, until it is dismissed or opened; nil for no bar.
-    @Published private(set) var browserAccessoryURL: URL?
-    /// The browser accessory bar shows at most once a session.
-    private var hasOfferedBrowser = false
-    /// The page the next `.openBrowser` effect opens, from the browser accessory bar.
-    private var browserURLToOpen: URL?
-    static let browserBundleIDs: Set<String> = [
-        "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.microsoft.edgemac", "com.brave.Browser",
-    ]
+    /// The bar under the HUD that offers Tilde's browser for a page in another browser.
+    let browserOffer = BrowserOffer()
     /// The HUD is in the toolbar of Tilde's browser, as the session is limited to it, and the
     /// floating HUD is hidden. It stays there through the Sent confirmation.
     @Published private(set) var isHUDInBrowser = false
@@ -99,6 +91,10 @@ final class AnnotationController: ObservableObject {
     private var confirmationKeyMonitor: Any?
     /// What the session annotates and records, and the window it is limited to.
     let scope: SessionScope
+    /// Draw mode: the canvas, and the notes that shapes become.
+    let drawing: DrawingNotes
+    /// Comments typed into the preview or the browser's notes panel, until typing pauses.
+    private let typedComments = TypedComments()
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -179,6 +175,7 @@ final class AnnotationController: ObservableObject {
         picker = ElementPicker(browser: browser)
         hoverPicker = HoverPicker(picker: picker)
         scope = SessionScope(picker: picker, browser: browser)
+        drawing = DrawingNotes(picker: picker)
         tracker = NoteTracker(windows: picker.windows)
         flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
@@ -187,7 +184,7 @@ final class AnnotationController: ObservableObject {
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
         notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
-        partChanges = [notices.objectWillChange, scope.objectWillChange].map { changes in
+        partChanges = [notices.objectWillChange, scope.objectWillChange, drawing.objectWillChange, browserOffer.objectWillChange].map { changes in
             changes.sink { [weak self] in self?.objectWillChange.send() }
         }
         scope.onChange = { [weak self] in self?.sourceChanged() }
@@ -197,6 +194,38 @@ final class AnnotationController: ObservableObject {
         scope.canChange = { [weak self] in self?.flow.canPick == true && self?.isPickingWindow == false }
         // The window never came on screen: the session covers everything.
         scope.onBrowserMissing = { [weak self] in self?.placeHUD() }
+        typedComments.onPause = { [weak self] in self?.saveTypedComments() }
+        drawing.scope = { [weak self] in self?.scope.window }
+        drawing.isOnLabel = { [weak self] point in self?.noteLabel(at: point) != nil }
+        let canvas = drawing.panel
+        canvas.onEscape = { [weak self] in self?.escapePressed() }
+        canvas.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
+        canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
+        canvas.onClickAway = { [weak self] in
+            self?.dispatch(.clickAway)
+            // The click gave the canvas the keyboard; a question in the comment box needs it.
+            if self?.composer != nil {
+                self?.commentPanel.focus()
+            }
+        }
+        canvas.onPointer = { [weak self] point in
+            guard let self else {
+                return
+            }
+            let isOverLabel = noteLabel(at: point) != nil
+            if isOverLabel {
+                hover = nil
+            }
+            drawing.pointerMoved(to: point, isOverLabel: isOverLabel)
+        }
+        canvas.onKey = { [weak self] in self?.performShortcut($0) ?? false }
+        canvas.onPress = { [weak self] point in
+            guard let self, let id = self.noteLabel(at: point) else {
+                return false
+            }
+            self.preview(id)
+            return true
+        }
         saver.snapshot = { [weak self] in self?.snapshot }
         hoverPicker.scope = { [weak self] in self?.scope.window }
         hoverPicker.shows = { [weak self] in
@@ -277,8 +306,7 @@ final class AnnotationController: ObservableObject {
 
     private func begin(_ session: SessionStore.Session) {
         self.session = session
-        hasOfferedBrowser = false
-        browserAccessoryURL = nil
+        browserOffer.reset()
         drafts = []
         hover = nil
         composer = nil
@@ -286,7 +314,7 @@ final class AnnotationController: ObservableObject {
         showsList = false
         scope.reset()
         PageIdentity.askAppsToDescribeWebContent()
-        drawingPanel.prepare()
+        drawing.panel.prepare()
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
 
         var created = Date()
@@ -343,7 +371,7 @@ final class AnnotationController: ObservableObject {
         session = nil
         drafts = []
         scope.reset()
-        browserAccessoryURL = nil
+        browserOffer.reset()
 
         if let returnApp {
             self.returnApp = nil
@@ -379,7 +407,7 @@ final class AnnotationController: ObservableObject {
         picker.windows.stop()
         tracker.stop()
         notices.clearPause()
-        drawingPanel.endSession()
+        drawing.panel.endSession()
         commentPanel.close()
         previewPanel.close()
         previewID = nil
@@ -587,33 +615,11 @@ final class AnnotationController: ObservableObject {
 
     private func showCanvas() {
         hover = nil
-        drawingPanel.onEscape = { [weak self] in self?.escapePressed() }
-        drawingPanel.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
-        drawingPanel.onEdited = { [weak self] in self?.updateEditedDrawing() }
-        drawingPanel.onClickAway = { [weak self] in
-            self?.dispatch(.clickAway)
-            // The click gave the canvas the keyboard; a question in the comment box needs it.
-            if self?.composer != nil {
-                self?.commentPanel.focus()
-            }
-        }
-        drawingPanel.onPointer = { [weak self] in self?.findSnapFrame(at: $0) }
-        drawingPanel.onKey = { [weak self] in self?.performShortcut($0) ?? false }
-        drawingPanel.onPress = { [weak self] point in
-            guard let self, let id = self.noteLabel(at: point) else {
-                return false
-            }
-            self.preview(id)
-            return true
-        }
         // Over Tilde's browser, the canvas would cover tools on its toolbar.
         if isHUDInBrowser {
             hud.show()
         }
-        let pointer = NSEvent.mouseLocation
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main {
-            drawingPanel.startDrawing(on: screen, tool: drawingTool)
-        }
+        drawing.start()
     }
 
     func finishDrawing() {
@@ -621,111 +627,39 @@ final class AnnotationController: ObservableObject {
     }
 
     func setDrawingTool(_ tool: String) {
-        drawingTool = tool
-        drawingPanel.setTool(tool)
+        drawing.setTool(tool)
         if composer != nil {
             commentPanel.focus()
         }
     }
 
-    /// Makes a note of what was just drawn, with the window and the whole screen as they are
-    /// with the drawing on them. Nothing drawn: nothing happens.
+    /// Makes a note of what was just drawn. Nothing drawn: nothing happens.
     private func addDrawingNote() async {
-        guard let drawing = await drawingPanel.takeNewShapes(), !drawing.ids.isEmpty else {
-            drawingPanel.endEditing()
+        guard let note = await drawing.takeNote() else {
+            drawing.panel.endEditing()
             if isDrawing {
-                drawingPanel.resumeDrawing()
+                drawing.panel.resumeDrawing()
             }
             return
         }
-        undoneDrawings = []
-        let point = DrawingShapes.linkPoint(of: drawing.shapes)
-        let link = await noteLink(at: point, fallback: drawing.bounds)
-        let center = CGPoint(x: drawing.bounds.midX, y: drawing.bounds.midY)
-        let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped
-        let origin = (link.window?.frame ?? screen ?? drawing.bounds).origin
-        let captures = await drawingCaptures(of: drawing.bounds, in: link.window?.frame)
-        openComposer(NewNote(
-            target: .drawing(shapes: DrawingShapes.encode(drawing.shapes, origin: origin, element: link.element)), frame: link.frame,
-            marker: link.marker, chip: "Drawing", window: link.window, anchor: link.anchor, tracked: link.tracked,
-            pictureArea: link.pictureArea, captures: captures, drawingIDs: drawing.ids
-        ))
-        drawingPanel.editShapes(drawing.ids)
+        openComposer(note)
+        drawing.panel.editShapes(note.drawingIDs)
     }
 
-    /// What a drawing's label is attached to.
-    private struct NoteLink {
-        let frame: CGRect
-        let marker: CGPoint
-        let element: Element?
-        let window: ElementPicker.WindowInfo?
-        let anchor: PageAnchor?
-        let tracked: TrackedElement?
-        let pictureArea: CGRect?
-    }
-
-    /// The smallest element at a point. A window that shows no elements gets a label at the
-    /// point, as a click does; `fallback` is then the frame of the note.
-    private func noteLink(at point: CGPoint, fallback: CGRect) async -> NoteLink {
-        guard let picked = await picker.pick(at: point, in: scope.window) else {
-            let window = scope.window ?? picker.window(at: point)
-            return NoteLink(frame: fallback, marker: point, element: nil, window: window, anchor: nil, tracked: nil, pictureArea: Self.pictureArea(around: point))
-        }
-
-        guard Self.isWholeWindow(picked) else {
-            let marker = CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
-            return NoteLink(frame: picked.frame, marker: marker, element: picked.element, window: picked.window, anchor: picked.anchor, tracked: picked.tracked, pictureArea: nil)
-        }
-
-        return NoteLink(frame: fallback, marker: point, element: nil, window: picked.window, anchor: nil, tracked: nil, pictureArea: Self.pictureArea(around: point))
-    }
-
-    /// A window that shows no elements, such as the iOS Simulator: a note stays where it was
-    /// made, and only what is around that point tells whether it is still on screen. Such an
-    /// app may also answer with one large group, as the phone in Device Hub.
-    private static func isWholeWindow(_ picked: Picked) -> Bool {
-        let isLargeGroup = picked.chip == "Group" && picked.frame.width >= 150 && picked.frame.height >= 150
-        // A browser that has not described its page yet answers with the page itself.
-        let isAboutTheWindow = picked.window.map { window in
-            picked.frame.width * picked.frame.height >= 0.7 * window.frame.width * window.frame.height
-        } ?? false
-        return picked.chip == "window" || isLargeGroup || isAboutTheWindow
-    }
-
-    private static func pictureArea(around point: CGPoint) -> CGRect {
-        CGRect(x: point.x - 80, y: point.y - 50, width: 160, height: 100)
-    }
-
-    /// The window (or else the screen) and the whole screen, with the drawings on them.
-    private func drawingCaptures(of bounds: CGRect, in windowFrame: CGRect?) async -> Captures {
-        let keeping = Set(drawingPanel.windowNumbers.map { CGWindowID($0) })
-        return await NoteCaptures.ofDrawing(bounds: bounds, in: windowFrame, keeping: keeping)
-    }
-
-    /// The shape of the open comment changed: its link and the comment box go with it. Its
-    /// picture waits for the end of the edit, without the handles.
-    private func updatePendingDrawing(_ ids: [String]) async {
-        let shapes = await drawingPanel.shapes(ids)
-        hover = nil
-        let bounds = DrawingShapes.bounds(of: shapes)
-        let link = await noteLink(at: DrawingShapes.linkPoint(of: shapes), fallback: bounds)
-        guard !shapes.isEmpty, case .new(var pending) = composer, pending.drawingIDs == ids, case .drawing(let old) = pending.target else {
+    /// The shape of the open comment changed: its link and the comment box go with it.
+    private func updateEditedDrawing() {
+        guard case .new(let open) = composer, !open.drawingIDs.isEmpty else {
             return
         }
-        pending.target = .drawing(shapes: DrawingShapes.encode(shapes, origin: DrawingShapes.origin(of: old), element: link.element))
-        pending.drawingBounds = bounds
-        pending.frame = link.frame
-        pending.marker = link.marker
-        pending.anchor = link.anchor
-        pending.tracked = link.tracked
-        pending.pictureArea = link.pictureArea
-        pending.isDrawingEdited = true
-        if let window = pending.sourceWindow {
-            let area = link.pictureArea ?? link.frame
-            pending.fingerprint = Task { await NoteFingerprint.capture(window: CGWindowID(window), area: area) }
+        let ids = open.drawingIDs
+        hover = nil
+        Task {
+            guard let edit = await drawing.edit(of: ids), case .new(var pending) = composer, pending.drawingIDs == ids, pending.take(edit) else {
+                return
+            }
+            composer = .new(pending)
+            commentPanel.follow(near: pending.marker, below: pending.frame)
         }
-        composer = .new(pending)
-        commentPanel.follow(near: pending.marker, below: link.frame)
     }
 
     func undoDrawing() {
@@ -737,8 +671,7 @@ final class AnnotationController: ObservableObject {
     }
 
     func setDrawingColor(_ color: String) {
-        drawingColor = color
-        drawingPanel.setColor(color)
+        drawing.setColor(color)
         if composer != nil {
             commentPanel.focus()
         }
@@ -752,48 +685,14 @@ final class AnnotationController: ObservableObject {
             }
             return false
         }
-        guard let index = drafts.lastIndex(where: isDrawingNote) else {
-            return
+        if let index = drafts.lastIndex(where: isDrawingNote) {
+            drawing.keepUndone(drafts.remove(at: index))
         }
-        undoneDrawings.append(drafts.remove(at: index))
     }
 
     private func redoLastDrawing() {
-        if let draft = undoneDrawings.popLast() {
+        if let draft = drawing.takeUndone() {
             drafts.append(draft)
-        }
-    }
-
-    private func updateEditedDrawing() {
-        if case .new(let pending) = composer, !pending.drawingIDs.isEmpty {
-            Task { await updatePendingDrawing(pending.drawingIDs) }
-        }
-    }
-
-    /// The element under the pointer while drawing. It reuses the hover lookup, which leaves
-    /// out apps too slow to ask.
-    private func findSnapFrame(at point: CGPoint) {
-        let isOverLabel = noteLabel(at: point) != nil
-        drawingPanel.setOverLabel(isOverLabel)
-        if isOverLabel {
-            hover = nil
-            drawingPanel.setSnapFrame(nil)
-            return
-        }
-
-        guard !isFindingSnapFrame, UserDefaults.standard.object(forKey: "drawingSnaps") as? Bool ?? true else {
-            return
-        }
-        isFindingSnapFrame = true
-        Task {
-            let picked = await picker.pick(at: point, isMoving: true, in: scope.window)
-            isFindingSnapFrame = false
-            guard noteLabel(at: point) == nil else {
-                return
-            }
-
-            // Only the snap ring shows the element: no outline or label, as on hover.
-            drawingPanel.setSnapFrame(picked?.chip == "window" ? nil : picked?.frame)
         }
     }
 
@@ -864,12 +763,12 @@ final class AnnotationController: ObservableObject {
         case .openShapeComment:
             Task { await addDrawingNote() }
         case .keepDrawing:
-            drawingPanel.endEditing()
-            drawingPanel.stopDrawing()
-            drawingPanel.setSnapFrame(nil)
+            drawing.panel.endEditing()
+            drawing.panel.stopDrawing()
+            drawing.panel.setSnapFrame(nil)
             hover = nil
             if composer == nil {
-                drawingPanel.hide()
+                drawing.panel.hide()
             }
             if isHUDInBrowser {
                 hud.hide()
@@ -935,7 +834,7 @@ final class AnnotationController: ObservableObject {
             sourcePicker.stopLoading()
             pickingChanged()
         case .openPicker: openPicker()
-        case .openBrowser: openBrowser(at: browserURLToOpen)
+        case .openBrowser: openBrowser(at: nil)
         case .closePicker:
             hover = nil
             sourcePicker.stopLoading()
@@ -981,16 +880,6 @@ final class AnnotationController: ObservableObject {
             dispatch(.holdEnded)
         }
     }
-
-    // MARK: - Whether a note's content is on screen
-
-    let drawingPanel = DrawingPanel()
-    @Published private(set) var drawingTool = "arrow"
-    @Published private(set) var drawingColor = "#2F76FF"
-    private var undoneDrawings: [Draft] = []
-    private var isFindingSnapFrame = false
-    private var typedComments: [Draft.ID: String] = [:]
-    private var typedCommentsTask: Task<Void, Never>?
 
     // MARK: - Labels of notes
 
@@ -1341,48 +1230,21 @@ final class AnnotationController: ObservableObject {
         scope.limitToBrowser()
     }
 
-    /// The first click on an element in another browser in a session offers to open its page
-    /// in Tilde's browser, when the address the note reads for its page is a web address.
-    private func offerBrowser(window: ElementPicker.WindowInfo, page: Task<PageIdentity?, Never>) {
-        guard !hasOfferedBrowser,
-              let bundleID = NSRunningApplication(processIdentifier: window.pid)?.bundleIdentifier,
-              Self.browserBundleIDs.contains(bundleID)
-        else {
-            return
-        }
-        let sessionID = session?.id
-        Task {
-            guard let url = await page.value?.url.flatMap(URL.init(string:)), url.scheme == "http" || url.scheme == "https",
-                  session?.id == sessionID, !hasOfferedBrowser
-            else {
-                return
-            }
-            hasOfferedBrowser = true
-            browserAccessoryURL = url
-        }
-    }
-
     /// The browser accessory bar shows only while annotating outside Tilde's browser, and comes
     /// back there.
     var showsBrowserAccessory: Bool {
-        browserAccessoryURL != nil && !isRecordMode && !isPickingWindow && !isHUDInBrowser
+        browserOffer.url != nil && !isRecordMode && !isPickingWindow && !isHUDInBrowser
     }
 
-    /// The browser accessory bar's ×.
-    func dismissBrowserAccessory() {
-        browserAccessoryURL = nil
-    }
-
-    /// The browser accessory bar's open button: Tilde's browser opens the page and limits the session to it, as for
-    /// an agent's start_annotation with a url. The notes stay.
+    /// The browser accessory bar's open button: Tilde's browser opens the page and limits the
+    /// session to it, as for an agent's start_annotation with a url. The notes stay.
     func openBrowserFromAccessory() {
-        guard let url = browserAccessoryURL else {
+        guard let url = browserOffer.take() else {
             return
         }
-        browserAccessoryURL = nil
-        browserURLToOpen = url
-        dispatch(.openBrowser)
-        browserURLToOpen = nil
+        dispatch(.openBrowser, with: [.openBrowser: { [self] in
+            openBrowser(at: url)
+        }])
     }
 
     // MARK: - Picking
@@ -1467,12 +1329,12 @@ final class AnnotationController: ObservableObject {
             guard let picked else {
                 return
             }
-            let isWholeWindow = Self.isWholeWindow(picked)
+            let isWholeWindow = picked.isWholeWindow
             let marker = isWholeWindow ? point : CGPoint(x: picked.frame.maxX, y: picked.frame.minY)
             openComposer(NewNote(
                 target: .element(picked.element), frame: picked.frame, marker: marker, chip: picked.chip, outline: picked.frame,
                 window: picked.window, anchor: picked.anchor, tracked: isWholeWindow ? nil : picked.tracked,
-                pictureArea: isWholeWindow ? Self.pictureArea(around: point) : nil
+                pictureArea: isWholeWindow ? NoteFingerprint.area(around: point) : nil
             ))
         }
     }
@@ -1511,7 +1373,7 @@ final class AnnotationController: ObservableObject {
             showComposer(note)
         }])
         if !isShown {
-            drawingPanel.remove(note.drawingIDs)
+            drawing.panel.remove(note.drawingIDs)
         }
     }
 
@@ -1519,7 +1381,7 @@ final class AnnotationController: ObservableObject {
         let pending = Pending(note, browser: browser, withContext: session?.capturesContext ?? false)
         hover = nil
         if let window = note.window, let page = pending.page {
-            offerBrowser(window: window, page: page)
+            browserOffer.consider(window, page: page)
         }
         composer = .new(pending)
         log.notice("comment opened for \(note.chip, privacy: .public)")
@@ -1573,20 +1435,7 @@ final class AnnotationController: ObservableObject {
 
         case .new(let pending):
             let annotation = Annotation(comment: comment, target: pending.target, frame: pending.frame, image: nil, contextImage: nil)
-            var capture = pending.capture
-            if pending.isDrawingEdited {
-                let windowFrame = pending.sourceWindow.flatMap { tracker.windowFrames[$0] }
-                let bounds = pending.drawingBounds ?? pending.frame
-                capture = Task {
-                    // The canvas has to paint without the handles first.
-                    try? await Task.sleep(for: .milliseconds(100))
-                    let captures = await drawingCaptures(of: bounds, in: windowFrame)
-                    drawingPanel.remove(pending.drawingIDs)
-                    return captures
-                }
-            } else {
-                drawingPanel.remove(pending.drawingIDs)
-            }
+            let capture = drawing.finish(pending, windowFrame: pending.sourceWindow.flatMap { tracker.windowFrames[$0] })
             drafts.append(Draft(
                 annotation: annotation, marker: pending.marker, chip: pending.chip, capture: capture, anchor: pending.anchor,
                 sourceWindow: pending.sourceWindow, fingerprint: pending.fingerprint, page: pending.page, sourcePID: pending.sourcePID, pictureArea: pending.pictureArea
@@ -1642,7 +1491,7 @@ final class AnnotationController: ObservableObject {
     private func discardComposer() {
         if case .new(let pending) = composer {
             pending.capture.cancel()
-            drawingPanel.remove(pending.drawingIDs)
+            drawing.panel.remove(pending.drawingIDs)
         }
         log.notice("comment discarded")
         hideComposer()
@@ -1651,12 +1500,12 @@ final class AnnotationController: ObservableObject {
     private func hideComposer() {
         composer = nil
         commentPanel.close()
-        drawingPanel.endEditing()
+        drawing.panel.endEditing()
         if isDrawing {
-            drawingPanel.resumeDrawing()
+            drawing.panel.resumeDrawing()
             return
         }
-        drawingPanel.hide()
+        drawing.panel.hide()
         makeOverlayKey()
     }
 
@@ -1782,27 +1631,16 @@ final class AnnotationController: ObservableObject {
         makeOverlayKey()
     }
 
-    /// Keeps what was typed and saves it after a short pause: every change to the drafts redraws
-    /// the HUD and the overlay, which must not happen on each key.
+    /// A key in a note's comment field: the note takes the text when typing pauses.
     func updateCommentSoon(_ id: Draft.ID, _ comment: String) {
         guard canEditNotes else {
             return
         }
-        typedComments[id] = comment
-        typedCommentsTask?.cancel()
-        typedCommentsTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
-            if !Task.isCancelled {
-                self?.saveTypedComments()
-            }
-        }
+        typedComments.typed(id, comment)
     }
 
     private func saveTypedComments() {
-        typedCommentsTask?.cancel()
-        let typed = typedComments
-        typedComments = [:]
-        for (id, comment) in typed {
+        for (id, comment) in typedComments.take() {
             updateComment(id, comment)
         }
     }
@@ -1855,7 +1693,7 @@ extension AnnotationController {
         self.previewID = previewID
         scope.setStateForTesting(source: source)
         self.isHUDInBrowser = isHUDInBrowser
-        self.browserAccessoryURL = browserAccessoryURL
+        browserOffer.setStateForTesting(url: browserAccessoryURL)
         self.restoreRecord = restoreRecord
         notices.setStateForTesting(notice: notice, pause: pauseNotice, sentText: sentText)
         clips.clock = clipClock

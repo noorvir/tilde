@@ -80,6 +80,11 @@ struct NoteFingerprint: Equatable, Sendable {
         self.levels = levels
     }
 
+    /// What the picture check looks at for a note at a point of a window that shows no elements.
+    static func area(around point: CGPoint) -> CGRect {
+        CGRect(x: point.x - 80, y: point.y - 50, width: 160, height: 100)
+    }
+
     /// The area of a window, without anything in front of it. Nil without Screen Recording or
     /// when the window is gone.
     /// `windowFrame`: where the window is now, if known; its description can be from earlier.
