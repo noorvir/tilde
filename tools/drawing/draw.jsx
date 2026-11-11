@@ -126,10 +126,11 @@ window.tildeDraw = {
   remove(ids) {
     changeElements(withGroups(ids), () => ({ isDeleted: true }));
   },
-  // `state`: { tool } while in wireframe mode, null to leave it; its shapes not taken go.
+  // `state`: { tool, icons } while in wireframe mode, null to leave it; its shapes not taken go.
   setWireframe(state) {
     const wasOn = wireframe !== null;
     wireframe = state;
+    if (state?.icons) kindIcons = state.icons;
     hideGuides();
     if (!state) {
       if (!wasOn) return;
@@ -563,6 +564,8 @@ const isHandle = (target) => Boolean(target?.closest?.("[data-wireframe-handle]"
 const kindNames = {
   section: "Section", card: "Card", table: "Table", button: "Button", dropdown: "Dropdown", list: "List", rectangle: "Rectangle", ellipse: "Circle",
 };
+// The bar's symbol for each kind, as image URLs from Tilde.
+let kindIcons = {};
 const chipButton = "display:flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 2px;border-radius:5px;cursor:pointer";
 
 function componentAt(x, y) {
@@ -679,7 +682,9 @@ function showHandles() {
   if (chip.innerHTML !== content) chip.innerHTML = content;
   const items = Object.entries(kindNames).map(([value, name]) => {
     const background = value === kind ? "background:rgba(255,255,255,.2);" : "";
-    return `<span data-kind="${value}" style="${background}padding:5px 12px;border-radius:6px;cursor:pointer">${name}</span>`;
+    const icon = kindIcons[value] ? `<img src="${kindIcons[value]}" style="max-width:16px;max-height:14px;pointer-events:none">` : "";
+    const iconSlot = `<span style="display:flex;justify-content:center;width:18px">${icon}</span>`;
+    return `<span data-kind="${value}" style="${background}display:flex;align-items:center;gap:8px;padding:5px 12px 5px 8px;border-radius:6px;cursor:pointer">${iconSlot}${name}</span>`;
   }).join("");
   if (typeMenu.innerHTML !== items) typeMenu.innerHTML = items;
 }

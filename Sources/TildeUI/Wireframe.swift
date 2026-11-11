@@ -23,9 +23,32 @@ struct Wireframe: Equatable {
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
     ]
 
-    var json: String {
-        DrawingPanel.json(["tool": tool])
+    @MainActor var json: String {
+        DrawingPanel.json(["tool": tool, "icons": Self.icons])
     }
+
+    /// Each tool's symbol as a white PNG, for the kind menu in a component's chip, so that it
+    /// shows the same icons as the bar.
+    @MainActor static let icons: [String: String] = Dictionary(uniqueKeysWithValues: tools.compactMap { entry in
+        let configuration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular).applying(.init(paletteColors: [.white]))
+        guard let image = NSImage(systemSymbolName: entry.symbol, accessibilityDescription: nil)?.withSymbolConfiguration(configuration),
+              let bitmap = NSBitmapImageRep(
+                  bitmapDataPlanes: nil, pixelsWide: Int(image.size.width * 2), pixelsHigh: Int(image.size.height * 2), bitsPerSample: 8,
+                  samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+              )
+        else {
+            return nil
+        }
+        bitmap.size = image.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        return (entry.tool, "data:image/png;base64,\(png.base64EncodedString())")
+    })
 
     /// The edges of the element at a point, of its containers up to the window, and of their
     /// children: the layout lines a wireframe snaps to. `containers` are the larger ancestors,
