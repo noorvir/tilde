@@ -29,7 +29,7 @@ enum TextEntryFront {
         holder = panel
         // A panel with the keyboard already counts as active for AppKit, so a plain request to
         // activate would do nothing.
-        NSApp.activate(ignoringOtherApps: true)
+        activateAfterClick()
         // Another app in front while the user writes is the user's choice: it keeps the front.
         observe(NSWorkspace.didActivateApplicationNotification, from: NSWorkspace.shared.notificationCenter) { note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
@@ -91,8 +91,25 @@ enum TextEntryFront {
             }
         }
         NSApp.yieldActivation(to: app)
-        ElementPicker.bringToFront(app)
+        app.activate()
         debugLog.notice("yielded to \(app.processIdentifier), active \(NSApp.isActive)")
+    }
+
+    /// Activates Tilde, after the click that is in progress, if any: macOS does not bring an
+    /// app to the front in the middle of a click on one of its non-activating panels. A text
+    /// view takes the events of its click itself, so no monitor sees the button come up.
+    private static func activateAfterClick() {
+        guard lender != nil else {
+            return
+        }
+        guard NSEvent.pressedMouseButtons != 0 else {
+            debugLog.notice("activate")
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+            activateAfterClick()
+        }
     }
 
     private static func observe(_ name: Notification.Name, from center: NotificationCenter, _ handle: @escaping @MainActor (Notification) -> Void) {
