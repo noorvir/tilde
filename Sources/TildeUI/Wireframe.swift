@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import SwiftUI
 import TildeCore
 
 /// Wireframe mode: skeletons of components drawn over the screen in the drawing canvas, each
@@ -151,40 +152,8 @@ extension AnnotationController {
         _ = focusWireframeCanvas()
     }
 
-    /// The Style menu, at the pointer: a row for each setting, with its sizes in a submenu.
-    func showWireframeStyleMenu() {
-        guard let style = wireframe?.style else {
-            return
-        }
-        let menu = NSMenu()
-        let heading = NSMenuItem(title: style.isSelection ? "Selected Component" : "New Components", action: nil, keyEquivalent: "")
-        heading.isEnabled = false
-        menu.addItem(heading)
-        for row in Wireframe.Style.rows {
-            let submenu = NSMenu()
-            for (value, title) in row.options {
-                let item = ActionMenuItem(title: title) { [weak self] in
-                    self?.setWireframeStyle(row.key, to: value)
-                }
-                item.state = style.value(of: row.key) == value ? .on : .off
-                submenu.addItem(item)
-            }
-            let item = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
-            item.submenu = submenu
-            menu.addItem(item)
-        }
-        // The canvas is above the menu's level: its clicks go through to the menu while it is
-        // open. The menu closes before popUp returns.
-        drawingPanel.stopDrawing()
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-        if wireframe != nil {
-            drawingPanel.resumeDrawing()
-        }
-    }
-
-    private func setWireframeStyle(_ key: String, to value: String) {
+    func setWireframeStyle(_ key: String, to value: String) {
         drawingPanel.runWireframe("setStyle(\(DrawingPanel.json([key: value])))")
-        _ = focusWireframeCanvas()
     }
 
     func undoWireframe() {
@@ -367,21 +336,42 @@ extension AnnotationController {
     }
 }
 
-/// A menu item that runs a closure.
-private final class ActionMenuItem: NSMenuItem {
-    private let run: () -> Void
+/// The Style button of the wireframe bar and its popover: a row for each setting of the selected
+/// component, or else of the components drawn next. The popover is at the HUD's level, above the
+/// overlay and the canvas, where a menu would not take clicks.
+struct WireframeStyleButton: View {
+    @ObservedObject var controller: AnnotationController
+    @State private var isShown = false
 
-    init(title: String, run: @escaping () -> Void) {
-        self.run = run
-        super.init(title: title, action: #selector(runAction), keyEquivalent: "")
-        target = self
-    }
-
-    required init(coder: NSCoder) {
-        fatalError("init(coder:) is not supported")
-    }
-
-    @objc private func runAction() {
-        run()
+    var body: some View {
+        HUDButton(image: Image(systemName: "paintbrush"), isOn: isShown, help: "Style") {
+            isShown.toggle()
+        }
+        .popover(isPresented: $isShown, arrowEdge: .bottom) {
+            let style = controller.wireframe?.style ?? Wireframe.Style()
+            VStack(alignment: .leading, spacing: 10) {
+                Text(style.isSelection ? "Selected Component" : "New Components")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(Wireframe.Style.rows, id: \.key) { row in
+                    HStack(spacing: 12) {
+                        Text(row.title)
+                            .frame(width: 92, alignment: .leading)
+                        Picker(row.title, selection: Binding(
+                            get: { style.value(of: row.key) },
+                            set: { controller.setWireframeStyle(row.key, to: $0) }
+                        )) {
+                            ForEach(row.options, id: \.0) { value, title in
+                                Text(title).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                }
+            }
+            .padding(14)
+        }
     }
 }
