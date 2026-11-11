@@ -246,32 +246,20 @@ function rowsOf(kind, { width, height }, data) {
 }
 
 // The parts of a component in its rect, behind its label; with a label, the bars it stands in
-// for are left out. `data`: the label, a section's `borders`, the `rows` and `columns` of a
-// table or list, whether a rectangle or ellipse is `filled`.
+// for are left out. `data`: the label, the `borders` it has, the `rows` and `columns` of a table
+// or list, whether a rectangle or ellipse is `filled`. All four borders outline its main part,
+// rounded where it is; some of them are straight lines on those sides.
 function componentParts(kind, { x, y, width, height }, data) {
   const hasLabel = Boolean(data.label) || data.isLabelling;
   const pad = clamp(Math.min(width, height) * 0.12, 6, 16);
   const barHeight = clamp(height * 0.08, 5, 10);
   const parts = [];
   switch (kind) {
-    case "section": {
+    case "section":
       parts.push(block(x, y, width, height, skeleton.surface));
-      const edges = { top: [[0, 0], [width, 0]], right: [[width, 0], [width, height]], bottom: [[0, height], [width, height]], left: [[0, 0], [0, height]] };
-      for (const border of data.borders) {
-        const [[startX, startY], [endX, endY]] = edges[border];
-        parts.push({ type: "line", x: x + startX, y: y + startY, width: endX - startX, height: endY - startY, points: [[0, 0], [endX - startX, endY - startY]], ...flat, strokeWidth: 2, strokeColor: skeleton.border });
-      }
       break;
-    }
     case "card": {
       parts.push(block(x, y, width, height, skeleton.block, { roundness: { type: 3 } }));
-      if (hasLabel) break;
-      const lineWidth = width - 2 * pad;
-      parts.push(bar(x + pad, y + pad, lineWidth * 0.5, barHeight * 1.3, skeleton.darkBar));
-      const fits = Math.floor((height - 2 * pad - barHeight * 3.3) / (barHeight * 2)) + 1;
-      [0.9, 0.8, 0.85, 0.6].slice(0, clamp(fits, 0, 4)).forEach((fraction, index) => {
-        parts.push(bar(x + pad, y + pad + barHeight * 3.3 + index * barHeight * 2, lineWidth * fraction, barHeight));
-      });
       break;
     }
     case "table": {
@@ -279,7 +267,7 @@ function componentParts(kind, { x, y, width, height }, data) {
       const row = (height - header) / rows;
       const column = width / columns;
       const cell = clamp(row * 0.28, 3, 8);
-      parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.line }));
+      parts.push(block(x, y, width, height, skeleton.surface));
       parts.push(block(x, y, width, header, skeleton.block));
       for (let column_ = 0; column_ < columns; column_++) {
         parts.push(bar(x + column_ * column + pad, y + (header - cell) / 2, column * 0.5, cell, skeleton.darkBar));
@@ -299,7 +287,7 @@ function componentParts(kind, { x, y, width, height }, data) {
       break;
     case "dropdown": {
       const chevron = clamp(height * 0.18, 3, 7);
-      parts.push(block(x, y, width, height, "#FFFFFF", { strokeColor: skeleton.darkBar, roundness: { type: 3 } }));
+      parts.push(block(x, y, width, height, "#FFFFFF", { roundness: { type: 3 } }));
       parts.push({
         type: "line", x: x + width - pad - chevron * 2, y: y + height / 2 - chevron * 0.4, width: chevron * 2, height: chevron,
         points: [[0, 0], [chevron, chevron], [chevron * 2, 0]], ...flat, strokeWidth: 2, strokeColor: "#8A8D95",
@@ -311,7 +299,7 @@ function componentParts(kind, { x, y, width, height }, data) {
       const { rows } = rowsOf(kind, { width, height }, data);
       const row = height / rows;
       const line = clamp(row * 0.3, 4, 12);
-      parts.push(block(x, y, width, height, skeleton.surface, { strokeColor: skeleton.line }));
+      parts.push(block(x, y, width, height, skeleton.surface));
       for (let index = 0; index < rows; index++) {
         const top = y + index * row;
         if (index > 0) parts.push(rule(x + pad, top, width - 2 * pad));
@@ -320,20 +308,30 @@ function componentParts(kind, { x, y, width, height }, data) {
       break;
     }
     case "rectangle":
-      parts.push(data.filled ? block(x, y, width, height, skeleton.block, { roundness: { type: 3 } })
-        : block(x, y, width, height, "transparent", { strokeColor: skeleton.border, strokeWidth: 2, roundness: { type: 3 } }));
+      parts.push(block(x, y, width, height, data.filled ? skeleton.block : "transparent", { roundness: { type: 3 } }));
       break;
     case "ellipse":
-      parts.push({
-        type: "ellipse", x, y, width, height, ...flat, strokeWidth: 2,
-        strokeColor: data.filled ? "transparent" : skeleton.border, backgroundColor: data.filled ? skeleton.block : "transparent",
-      });
+      parts.push({ type: "ellipse", x, y, width, height, ...flat, strokeColor: "transparent", backgroundColor: data.filled ? skeleton.block : "transparent" });
       break;
+  }
+  const borders = data.borders ?? [];
+  if (borders.length === 4) {
+    Object.assign(parts[0], { strokeColor: skeleton.border, strokeWidth: 1.5 });
+  } else {
+    const edges = { top: [[0, 0], [width, 0]], right: [[width, 0], [width, height]], bottom: [[0, height], [width, height]], left: [[0, 0], [0, height]] };
+    for (const border of borders) {
+      const [[startX, startY], [endX, endY]] = edges[border];
+      parts.push({
+        type: "line", x: x + startX, y: y + startY, width: endX - startX, height: endY - startY, points: [[0, 0], [endX - startX, endY - startY]],
+        ...flat, strokeWidth: 1.5, strokeColor: skeleton.border,
+      });
+    }
   }
   return parts;
 }
 
-// Buttons, dropdowns and cards show a label on themselves; the rest on a chip, over their rows.
+// Buttons, dropdowns, cards and plain shapes show a label on themselves; the rest on a chip,
+// over their rows.
 const plainLabels = new Set(["button", "dropdown", "card", "rectangle", "ellipse"]);
 
 const allBorders = ["top", "right", "bottom", "left"];
@@ -341,9 +339,8 @@ const allBorders = ["top", "right", "bottom", "left"];
 let isFilled = true;
 
 function newData(kind) {
-  if (kind === "section") return { borders: allBorders };
-  if (kind === "rectangle" || kind === "ellipse") return { filled: isFilled };
-  return {};
+  if (kind === "rectangle" || kind === "ellipse") return { borders: allBorders, filled: isFilled };
+  return { borders: allBorders };
 }
 
 function wireframeElements(kind, rect, data, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`]) {
@@ -383,7 +380,7 @@ function finishWireframeShape() {
       const { x, y } = press;
       return element.customData?.tildeWireframe && x >= element.x && x <= element.x + element.width && y >= element.y && y <= element.y + element.height;
     }).pop();
-    if (component) editLabel(component);
+    if (component && isDoubleClick(component.groupIds[0])) editLabel(component);
     return;
   }
   const elements = wireframeElements(wireframe.tool, box, newData(wireframe.tool));
@@ -444,6 +441,16 @@ function endLabel(isKept) {
   if (label !== editingLabel.label) record(labelBefore);
 }
 
+// The second click on a component within 400 ms is a double-click, which edits its label.
+let lastClick = null;
+
+function isDoubleClick(group) {
+  const now = performance.now();
+  const isDouble = lastClick?.group === group && now - lastClick.time < 400;
+  lastClick = isDouble ? null : { group, time: now };
+  return isDouble;
+}
+
 // A component made again whole in `rect`, with `data` (kind, label, borders), at the same place
 // in the stack.
 function rebuild(group, rect, data) {
@@ -467,11 +474,11 @@ labelField.addEventListener("blur", () => {
   if (labelled) endLabel(true);
 });
 
-// Editing a component after it is drawn. Over one, it shows as selected: a drag on it moves it
-// (a section only by its chip: a drag on a section draws in it; ⌥ draws on any component) and a
-// click edits its label. A chip at its top left moves it too; a click on its name changes the
-// kind, and its controls set a section's borders, the rows and columns of a table or list, the
-// fill of a rectangle or ellipse, or delete it. A handle at its bottom right resizes it. Moves
+// Editing a component after it is drawn. Over one, it shows as selected: a drag anywhere on it
+// moves it (a section only by its chip: a drag on a section draws in it), ⌥ and a drag moves a
+// copy, and a double-click edits its label. A chip at its top left moves it too; a click on its
+// name changes the kind, and its controls set the borders, the rows and columns of a table or
+// list, the fill of a rectangle or ellipse, or delete it. A handle at its bottom right resizes it. Moves
 // and resizes snap. Only components not sent yet can change; each change can be undone.
 const handleOutline = document.createElement("div");
 handleOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:1px solid #2F76FF";
@@ -522,16 +529,23 @@ function fillToggle(isOn) {
   return `<span data-action="filled" title="Filled or outline" style="${chipButton};gap:4px;margin-left:6px;padding:0 6px;background:rgba(255,255,255,.12)">${square}${isOn ? "Filled" : "Outline"}</span>`;
 }
 
+// All borders on, or off when they all are on.
+function allBordersToggle(isOn) {
+  const stroke = isOn ? `stroke="#fff" stroke-width="2.5"` : `stroke="rgba(255,255,255,.3)"`;
+  return `<span data-action="border:all" title="All borders" style="${chipButton}"><svg width="16" height="16"><rect x="3" y="3" width="10" height="10" fill="none" ${stroke}/></svg></span>`;
+}
+
 function chipControls(frame) {
   const data = frame.customData;
   const kind = data.tildeWireframe;
-  if (data.borders) return allBorders.map((side) => borderToggle(side, data.borders.includes(side))).join("");
+  const borders = data.borders ?? [];
+  let controls = allBordersToggle(borders.length === 4) + allBorders.map((side) => borderToggle(side, borders.includes(side))).join("");
   if (kind === "table" || kind === "list") {
     const counts = rowsOf(kind, frame, data);
-    return stepper("rows", counts.rows) + (kind === "table" ? stepper("columns", counts.columns) : "");
+    controls += stepper("rows", counts.rows) + (kind === "table" ? stepper("columns", counts.columns) : "");
   }
-  if (kind === "rectangle" || kind === "ellipse") return fillToggle(data.filled);
-  return "";
+  if (kind === "rectangle" || kind === "ellipse") controls += fillToggle(data.filled);
+  return controls;
 }
 
 const deleteButton = `<span data-action="delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="12" height="12"><path d="M3 3L9 9M9 3L3 9" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
@@ -540,6 +554,7 @@ const deleteButton = `<span data-action="delete" title="Delete" style="${chipBut
 function changedKind(frame, kind) {
   const old = frame.customData;
   const data = { ...newData(kind), label: old.label };
+  if (old.borders) data.borders = old.borders;
   if ("filled" in data && old.filled !== undefined) data.filled = old.filled;
   if ((kind === "table" || kind === "list") && old.rows !== undefined) data.rows = old.rows;
   return data;
@@ -555,8 +570,11 @@ function deleteComponent(group) {
 function changedData(frame, action) {
   const data = { ...frame.customData };
   const [name, value] = action.split(":");
-  if (name === "border") {
-    const borders = data.borders.includes(value) ? data.borders.filter((border) => border !== value) : [...data.borders, value];
+  if (name === "border" && value === "all") {
+    data.borders = data.borders?.length === 4 ? [] : allBorders;
+  } else if (name === "border") {
+    const current = data.borders ?? [];
+    const borders = current.includes(value) ? current.filter((border) => border !== value) : [...current, value];
     data.borders = allBorders.filter((border) => borders.includes(border));
   } else if (name === "filled") {
     data.filled = !data.filled;
@@ -604,17 +622,18 @@ function startAdjusting(event, frame, mode, from) {
   const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
   adjusting = {
     mode, from, group: hoveredGroup, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false,
-    before: api.getSceneElementsIncludingDeleted(),
+    before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && event.altKey,
   };
   event.target.setPointerCapture?.(event.pointerId);
   cursorRing.style.display = "none";
   showHandles();
 }
 
-// The component a press on it moves: not a section, which is drawn in, nor with ⌥.
+// The component a press on it moves, or with ⌥ copies: not a section without ⌥, which a drag
+// draws in.
 function movableAt(event) {
   const component = componentAt(event.clientX, event.clientY);
-  return component && component.customData.tildeWireframe !== "section" && !event.altKey ? component : null;
+  return component && (component.customData.tildeWireframe !== "section" || event.altKey) ? component : null;
 }
 
 // The nearest snap of any of `values` (a component's edges and centre on one axis), with the
@@ -629,15 +648,23 @@ function nearestOf(lines, values) {
 }
 
 function adjust(event) {
-  const { mode, group, start, rect, data } = adjusting;
+  const { mode, start, rect, data } = adjusting;
   const pointer = { x: event.clientX, y: event.clientY };
   const dx = pointer.x - start.x;
   const dy = pointer.y - start.y;
   if (!adjusting.moved && Math.hypot(dx, dy) >= 3) {
     adjusting.moved = true;
     record(adjusting.before);
+    // The copy goes on top, and moves; the original stays.
+    if (adjusting.isCopy) {
+      const copy = wireframeElements(data.tildeWireframe, rect, data);
+      api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...copy], captureUpdate: "NEVER" });
+      adjusting.group = copy[0].groupIds[0];
+      hoveredGroup = adjusting.group;
+    }
   }
   if (!adjusting.moved) return;
+  const { group } = adjusting;
   const now = performance.now();
   if (now - pointerAt > 50) {
     pointerAt = now;
@@ -679,7 +706,7 @@ function editWireframe(event) {
       const frame = frameOf(adjusting.group);
       adjusting = null;
       hideGuides();
-      if (!moved && frame && from === "body") editLabel(frame);
+      if (!moved && frame && from === "body" && isDoubleClick(frame.groupIds[0])) editLabel(frame);
       if (!moved && from === "chip") isTypeMenuOpen = !isTypeMenuOpen;
       showHandles();
     }
@@ -702,7 +729,7 @@ function editWireframe(event) {
       if (group !== hoveredGroup) isTypeMenuOpen = false;
       hoveredGroup = group;
       isOverMovable = Boolean(movableAt(event)) && !labelled;
-      moveCursor.textContent = isOverMovable ? "canvas { cursor: move !important; }" : "";
+      moveCursor.textContent = isOverMovable ? `canvas { cursor: ${event.altKey ? "copy" : "move"} !important; }` : "";
       showHandles();
     }
     return false;
