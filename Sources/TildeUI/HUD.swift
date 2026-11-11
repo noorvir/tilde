@@ -435,6 +435,9 @@ struct HUDView: View {
                 controller.setWireframeTool(entry.tool)
             }
         }
+        HUDButton(image: Image(systemName: "paintbrush"), help: "Style") {
+            controller.showWireframeStyleMenu()
+        }
         Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
         HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: ["⌘Z"], help: "Undo") {
             controller.undoWireframe()

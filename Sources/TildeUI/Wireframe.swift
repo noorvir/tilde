@@ -23,8 +23,37 @@ struct Wireframe: Equatable {
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
     ]
 
+    var style = Style()
+
     var json: String {
         DrawingPanel.json(["tool": tool])
+    }
+
+    /// The Style menu's rows: corner radius and shadow, of the selected component, or else of
+    /// the components drawn next.
+    struct Style: Equatable {
+        var radius = "medium"
+        var shadow = "none"
+        var isSelection = false
+
+        static let rows = [
+            (key: "radius", title: "Corner Radius", options: [("none", "None"), ("small", "Small"), ("medium", "Medium"), ("large", "Large")]),
+            (key: "shadow", title: "Shadow", options: [("none", "None"), ("small", "Small"), ("medium", "Medium"), ("large", "Large")]),
+        ]
+
+        init() {}
+
+        /// From the canvas's JSON.
+        init(json: String) {
+            let values = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] ?? [:]
+            radius = values["radius"] as? String ?? radius
+            shadow = values["shadow"] as? String ?? shadow
+            isSelection = values["isSelection"] as? Bool ?? false
+        }
+
+        func value(of key: String) -> String {
+            key == "radius" ? radius : shadow
+        }
     }
 
     /// The edges of the element at a point, of its containers up to the window, and of their
@@ -97,6 +126,9 @@ extension AnnotationController {
         }
         drawingPanel.setSnapFrame(nil)
         hover = nil
+        drawingPanel.onWireframeStyle = { [weak self] json in
+            self?.wireframe?.style = Wireframe.Style(json: json)
+        }
         let next = Wireframe()
         wireframe = next
         drawingPanel.setWireframe(next.json)
@@ -116,6 +148,36 @@ extension AnnotationController {
     func setWireframeTool(_ tool: String) {
         wireframe?.tool = tool
         drawingPanel.setWireframe(wireframe?.json ?? "null")
+        _ = focusWireframeCanvas()
+    }
+
+    /// The Style menu, at the pointer: a row for each setting, with its sizes in a submenu.
+    func showWireframeStyleMenu() {
+        guard let style = wireframe?.style else {
+            return
+        }
+        let menu = NSMenu()
+        let heading = NSMenuItem(title: style.isSelection ? "Selected Component" : "New Components", action: nil, keyEquivalent: "")
+        heading.isEnabled = false
+        menu.addItem(heading)
+        for row in Wireframe.Style.rows {
+            let submenu = NSMenu()
+            for (value, title) in row.options {
+                let item = ActionMenuItem(title: title) { [weak self] in
+                    self?.setWireframeStyle(row.key, to: value)
+                }
+                item.state = style.value(of: row.key) == value ? .on : .off
+                submenu.addItem(item)
+            }
+            let item = NSMenuItem(title: row.title, action: nil, keyEquivalent: "")
+            item.submenu = submenu
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private func setWireframeStyle(_ key: String, to value: String) {
+        drawingPanel.runWireframe("setStyle(\(DrawingPanel.json([key: value])))")
         _ = focusWireframeCanvas()
     }
 
@@ -296,5 +358,24 @@ extension AnnotationController {
                 drawingPanel.setSnapTargets(rects: layout.rects, containers: layout.containers, window: window?.frame, screen: screen)
             }
         }
+    }
+}
+
+/// A menu item that runs a closure.
+private final class ActionMenuItem: NSMenuItem {
+    private let run: () -> Void
+
+    init(title: String, run: @escaping () -> Void) {
+        self.run = run
+        super.init(title: title, action: #selector(runAction), keyEquivalent: "")
+        target = self
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    @objc private func runAction() {
+        run()
     }
 }
