@@ -127,13 +127,13 @@ window.tildeDraw = {
       if (!wasOn) return;
       changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), () => ({ isDeleted: true }));
       wireframeUndone.length = 0;
-      api.updateScene({ appState: { currentItemRoughness: 0, selectedElementIds: {} }, captureUpdate: "NEVER" });
+      api.updateScene({ appState: { currentItemRoughness: 0, currentItemRoundness: "round", selectedElementIds: {} }, captureUpdate: "NEVER" });
       return;
     }
     api.updateScene({
       appState: {
         currentItemStrokeColor: wireframeStroke, currentItemRoughness: 1, currentItemBackgroundColor: "transparent",
-        currentItemFontFamily: 2, currentItemFontSize: 28, selectedElementIds: {},
+        currentItemFontFamily: 2, currentItemFontSize: 28, currentItemRoundness: "sharp", selectedElementIds: {},
       },
       captureUpdate: "NEVER",
     });
@@ -177,7 +177,7 @@ const wireframeUndone = [];
 const wireframeStroke = "#5C5C5C";
 // An opaque base under a pattern hides the screen below; outline only shows it.
 const wireframeFills = {
-  dots: { base: "#EEEEEE", fillStyle: "dots", backgroundColor: "#8E8E8E" },
+  dots: { base: "#EEEEEE", fillStyle: "dots", backgroundColor: "#B4B4B4" },
   hatched: { base: "#F4F4F4", fillStyle: "hachure", backgroundColor: "#A8A8A8" },
   white: { base: null, fillStyle: "solid", backgroundColor: "#FFFFFF" },
   outline: { base: null, fillStyle: "solid", backgroundColor: "transparent" },

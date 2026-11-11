@@ -165,6 +165,9 @@ extension AnnotationController {
         guard let drawing = await drawingPanel.takeNewShapes(), !drawing.ids.isEmpty else {
             return
         }
+        // The pictures show the wireframe without the handles of a selected shape.
+        drawingPanel.runWireframe("deselect()")
+        try? await Task.sleep(for: .milliseconds(100))
         let bounds = drawing.bounds
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let window = scope ?? picker.window(at: center)
