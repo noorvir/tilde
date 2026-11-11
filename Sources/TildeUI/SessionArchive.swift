@@ -66,6 +66,9 @@ struct SessionRecord: Codable, Equatable, Identifiable {
 final class SessionArchive: @unchecked Sendable {
     let root: URL
     private let queue = DispatchQueue(label: "tilde.archive")
+    /// The records read so far, each with the time its file was written, so that a read
+    /// decodes only the files that changed. Only on `queue`.
+    private var readRecords: [String: (written: Date, record: SessionRecord)] = [:]
 
     /// Kept at least this long, and at least `keptCount` sessions whatever their age.
     static let keptDays = 30
@@ -220,10 +223,13 @@ final class SessionArchive: @unchecked Sendable {
 
     /// A note's close-up and context image.
     func images(of note: SessionRecord.Note, in id: String) -> (image: Data?, contextImage: Data?) {
-        let folder = folder(id)
-        let image = try? Data(contentsOf: folder.appendingPathComponent(Self.imageName(note.id)))
-        let contextImage = try? Data(contentsOf: folder.appendingPathComponent(Self.contextImageName(note.id)))
-        return (image, contextImage)
+        let contextImage = try? Data(contentsOf: folder(id).appendingPathComponent(Self.contextImageName(note.id)))
+        return (closeUp(of: note, in: id), contextImage)
+    }
+
+    /// A note's close-up alone, such as for its thumbnail.
+    func closeUp(of note: SessionRecord.Note, in id: String) -> Data? {
+        try? Data(contentsOf: folder(id).appendingPathComponent(Self.imageName(note.id)))
     }
 
     func folder(_ id: String) -> URL {
@@ -253,6 +259,7 @@ final class SessionArchive: @unchecked Sendable {
     @discardableResult
     private func write(_ record: SessionRecord) -> Bool {
         let folder = folder(record.id)
+        readRecords[record.id] = nil
         do {
             try createPrivateFolder(root)
             try createPrivateFolder(folder)
@@ -269,16 +276,33 @@ final class SessionArchive: @unchecked Sendable {
     }
 
     private func read(_ id: String) -> SessionRecord? {
-        guard let data = try? Data(contentsOf: folder(id).appendingPathComponent("session.json")) else {
+        let file = folder(id).appendingPathComponent("session.json")
+        guard let written = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else {
+            readRecords[id] = nil
+            return nil
+        }
+        if let read = readRecords[id], read.written == written {
+            return read.record
+        }
+        readRecords[id] = nil
+        guard let data = try? Data(contentsOf: file) else {
             return nil
         }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(SessionRecord.self, from: data)
+        guard let record = try? decoder.decode(SessionRecord.self, from: data) else {
+            return nil
+        }
+        readRecords[id] = (written, record)
+        return record
     }
 
     private func readAll() -> [SessionRecord] {
         let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-        return folders.compactMap { read($0.lastPathComponent) }.sorted { $0.updated > $1.updated }
+        let ids = folders.map(\.lastPathComponent)
+        // A session that is deleted, also in the Finder, is not kept.
+        let kept = Set(ids)
+        readRecords = readRecords.filter { kept.contains($0.key) }
+        return ids.compactMap(read).sorted { $0.updated > $1.updated }
     }
 }

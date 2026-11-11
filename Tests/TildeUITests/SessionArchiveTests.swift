@@ -21,6 +21,47 @@ struct SessionArchiveTests {
         #expect(archive.images(of: note, in: record.id).contextImage == nil)
     }
 
+    /// The archive keeps the sessions it has read, and reads a session again when its file is
+    /// another one: saved again, written by something else, or deleted.
+    @Test func aSavedSessionIsReadAgainWhenItsFileChanges() throws {
+        let archive = Fixtures.archive()
+        var record = Fixtures.record(notes: 1)
+        archive.save(record)
+        #expect(archive.all() == [record])
+
+        record.state = .sent
+        archive.save(record)
+        #expect(archive.all().map(\.state) == [.sent])
+
+        let file = archive.folder(record.id).appendingPathComponent("session.json")
+        let text = try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: "\"sent\"", with: "\"cancelled\"")
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        #expect(archive.all().map(\.state) == [.cancelled])
+        #expect(archive.record(record.id)?.state == .cancelled)
+
+        try FileManager.default.removeItem(at: archive.folder(record.id))
+        #expect(archive.all().isEmpty)
+        #expect(archive.record(record.id) == nil)
+    }
+
+    /// History reads the saved sessions away from the main thread, after a delete in progress.
+    @Test func historyShowsTheSessionsThatAreLeft() async throws {
+        let archive = Fixtures.archive()
+        let kept = Fixtures.record(id: "a1b2c3d4", notes: 1)
+        let deleted = Fixtures.record(id: "b1b2c3d4", notes: 1, updated: Date(timeIntervalSince1970: 1_792_000_000))
+        archive.save(kept)
+        archive.save(deleted)
+        let history = HistoryModel(archive: archive)
+
+        history.reload()
+        #expect(!history.hasRead)
+        try await waitUntil { history.records == [kept, deleted] }
+        #expect(history.hasRead)
+
+        history.delete(deleted)
+        try await waitUntil { history.records == [kept] }
+    }
+
     @Test func restoredNotesHaveTheirSavedImages() async throws {
         let archive = Fixtures.archive()
         let record = Fixtures.record(isLocal: true, notes: 1, pageURL: nil)
@@ -350,6 +391,19 @@ struct CommentTypingTests {
         controller.commentBox.text = "typed"
         #expect(changes == 0)
         #expect(controller.commentBox.text == "typed")
+        subscription.cancel()
+    }
+
+    /// A view observes the controller for the flow, the session and the notes, and each part it
+    /// shows: a change of a part redraws only the views that observe that part.
+    @Test func aPartDoesNotRedrawTheViewsOfTheOtherParts() {
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: nil)
+        var changes = 0
+        let subscription = controller.objectWillChange.sink { changes += 1 }
+        controller.previewCard.expandedImage = .context
+        controller.hud.showsList = true
+        controller.notices.show(.windowClosed)
+        #expect(changes == 0)
         subscription.cancel()
     }
 }

@@ -408,6 +408,20 @@ struct BehaviourTests {
 
     // MARK: - Captures
 
+    /// A view that shows a screenshot decodes it once: the same picture gives the same image.
+    @Test func aScreenshotIsDecodedOnceForEachPicture() throws {
+        let drafts = Fixtures.drafts(2)
+        let first = try #require(drafts[0].annotation.image)
+        let second = try #require(drafts[1].annotation.image)
+        #expect(first != second)
+
+        let decoded = DecodedImage()
+        let image = try #require(decoded.image(of: first))
+        #expect(decoded.image(of: first) === image)
+        #expect(decoded.image(of: second) !== image)
+        #expect(decoded.image(of: nil) == nil)
+    }
+
     @Test func closeUpIsTheElementPlusFourPoints() {
         let element = CGRect(x: 100, y: 50, width: 84, height: 22)
         #expect(NoteCaptures.closeUpRect(frame: element, outline: element) == CGRect(x: 96, y: 46, width: 92, height: 30))

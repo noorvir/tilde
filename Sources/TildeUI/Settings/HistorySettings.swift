@@ -6,12 +6,16 @@ import TildeCore
 @MainActor
 final class HistoryModel: ObservableObject {
     @Published private(set) var records: [SessionRecord] = []
+    /// The sessions were read at least once; until then, an empty list says nothing.
+    @Published private(set) var hasRead = false
     @Published var expanded: Set<String> = []
     /// Whether Restore does anything now: always without a session on screen, else as the
     /// window button's rule allows.
     @Published var takesRestore = true
     /// The copy in progress; only the latest one writes the clipboard.
     private var copying: Task<Void, Never>?
+    /// The read in progress; only the latest one gives the sessions.
+    private var reading: Task<Void, Never>?
     let archive: SessionArchive
     /// The session on screen, which cannot be restored.
     let currentID: () -> String?
@@ -28,8 +32,18 @@ final class HistoryModel: ObservableObject {
         self.icon = icon
     }
 
+    /// Reads the saved sessions away from the main thread, after the archive's writes in
+    /// progress: the first read decodes every session.
     func reload() {
-        records = archive.all()
+        let archive = self.archive
+        reading?.cancel()
+        reading = Task {
+            let records = await Task.detached { archive.all() }.value
+            if !Task.isCancelled {
+                self.records = records
+                hasRead = true
+            }
+        }
     }
 
     func restore(_ record: SessionRecord) {
@@ -39,14 +53,12 @@ final class HistoryModel: ObservableObject {
 
     func delete(_ record: SessionRecord) {
         archive.delete(record.id)
-        archive.flush()
         reload()
     }
 
     /// Every session but the one on screen, whose notes and recordings are still in use.
     func clear() {
         archive.deleteAll(except: currentID())
-        archive.flush()
         reload()
     }
 
@@ -96,7 +108,7 @@ struct HistorySettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             SettingsSection("Sessions") {
-                if history.records.isEmpty {
+                if history.hasRead, history.records.isEmpty {
                     SettingsRow(title: "No sessions yet", subtitle: "Sessions are saved while you annotate") {
                         EmptyView()
                     }
@@ -221,7 +233,7 @@ private struct HistoryRow: View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(record.notes.enumerated()), id: \.element.id) { index, note in
                 HStack(alignment: .top, spacing: 10) {
-                    NoteThumbnail(data: history.archive.images(of: note, in: record.id).image)
+                    NoteThumbnail(archive: history.archive, note: note, session: record.id)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(index + 1). \(note.chip)")
                             .font(.system(size: 11, weight: .medium))
@@ -299,12 +311,17 @@ private struct StateBadge: View {
     }
 }
 
+/// A saved note's close-up, small. It reads the picture once, away from the main thread, when
+/// the note shows.
 private struct NoteThumbnail: View {
-    let data: Data?
+    let archive: SessionArchive
+    let note: SessionRecord.Note
+    let session: String
+    @State private var image: NSImage?
 
     var body: some View {
         Group {
-            if let data, let image = NSImage(data: data) {
+            if let image {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -315,5 +332,12 @@ private struct NoteThumbnail: View {
         .frame(width: 44, height: 30)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.1)))
+        .task(id: note.id) {
+            let archive = self.archive
+            let note = self.note
+            let session = self.session
+            let data = await Task.detached { archive.closeUp(of: note, in: session) }.value
+            image = data.flatMap { NSImage(data: $0) }
+        }
     }
 }

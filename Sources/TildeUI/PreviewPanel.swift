@@ -402,11 +402,12 @@ private struct ClipPlayer: NSViewRepresentable {
 /// in points, which is twice their size on a Retina screen.
 private struct ImageSlot: View {
     let data: Data?
+    @StateObject private var decoded = DecodedImage()
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.05))
-            if let data, let image = NSImage(data: data) {
+            if let image = decoded.image(of: data) {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.high)

@@ -1361,10 +1361,11 @@ private struct AnnotationRow: View {
 
 private struct Thumbnail: View {
     let data: Data?
+    @StateObject private var decoded = DecodedImage()
 
     var body: some View {
         Group {
-            if let data, let image = NSImage(data: data) {
+            if let image = decoded.image(of: data) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
