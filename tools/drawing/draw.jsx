@@ -114,6 +114,10 @@ window.tildeDraw = {
     api.updateScene({ elements: [], captureUpdate: "NEVER" });
     api.history.clear();
   },
+  // The shapes drawn and not taken yet, as `takeNewShapes` gives them; they stay as they are.
+  newShapes() {
+    return JSON.stringify(live().filter((element) => !taken.has(element.id) && !isPart(element)).map(describe));
+  },
   // The shapes drawn since the last call, in points from the top left of the canvas.
   takeNewShapes() {
     if (labelled) endLabel(true);
