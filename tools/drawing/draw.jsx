@@ -309,9 +309,9 @@ function finishWireframeShape() {
   const created = live().filter((element) => !press.ids.has(element.id));
   if (created.length) wireframeUndone.length = 0;
   const box = created.find((element) => element.type === "rectangle" && !element.customData);
-  if (!box) return;
-  const rest = api.getSceneElementsIncludingDeleted().filter((element) => element.id !== box.id);
-  if (box.width < 4 || box.height < 4) {
+  const rest = api.getSceneElementsIncludingDeleted().filter((element) => element.id !== box?.id);
+  // Excalidraw keeps no rectangle for a click.
+  if (!box || box.width < 4 || box.height < 4) {
     api.updateScene({ elements: rest, appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
     const component = live().filter((element) => {
       const { x, y } = press;
