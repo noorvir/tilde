@@ -78,7 +78,7 @@ struct NotesPanel: View {
 
 private struct PageGroup: View {
     let group: NotesPanel.Group
-    @ObservedObject var controller: AnnotationController
+    let controller: AnnotationController
     @ObservedObject var browser: BrowserController
 
     var body: some View {

@@ -84,8 +84,14 @@ final class OverlayView: NSView {
     init(controller: AnnotationController) {
         self.controller = controller
         super.init(frame: .zero)
-        // The browser's notes move with its page; the hover highlight and the notes' places change on their own.
-        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange, controller.hoverPicker.highlight.objectWillChange, controller.tracker.objectWillChange)
+        // What the overlay draws: the notes and the flow, the target of the open comment, the
+        // window the session is limited to, the browser's notes, which move with its page, and
+        // the hover highlight and the notes' places, which change on their own.
+        let changes = [
+            controller.objectWillChange, controller.commentBox.objectWillChange, controller.scope.objectWillChange,
+            controller.browser.objectWillChange, controller.hoverPicker.highlight.objectWillChange, controller.tracker.objectWillChange,
+        ]
+        subscription = Publishers.MergeMany(changes)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.needsDisplay = true }
     }

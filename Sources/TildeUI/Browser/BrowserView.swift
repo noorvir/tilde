@@ -36,7 +36,7 @@ struct BrowserView: View {
         .tildeTooltipHostAboveAppKit()
         .overlay(alignment: .topTrailing) {
             if let controller = browser.controller {
-                EmbeddedPauseCard(controller: controller)
+                EmbeddedPauseCard(hud: controller.hud, notices: controller.notices)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: browser.showsNotes)
@@ -46,12 +46,13 @@ struct BrowserView: View {
 
 /// The pause card under the toolbar's HUD, right-aligned with it, drawn above the page.
 private struct EmbeddedPauseCard: View {
-    @ObservedObject var controller: AnnotationController
+    @ObservedObject var hud: HUDPlacement
+    @ObservedObject var notices: Notices
 
     var body: some View {
-        if controller.hud.isInBrowser, let notice = controller.notices.pause {
+        if hud.isInBrowser, let notice = notices.pause {
             AboveAppKit {
-                PauseCard(notice: notice, controller: controller)
+                PauseCard(notice: notice, notices: notices)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             }
             .frame(width: HUDView.width, height: 72)
@@ -80,9 +81,17 @@ enum BrowserMetrics {
 /// toggle.
 struct BrowserToolbar: View {
     @ObservedObject var browser: BrowserController
-    @ObservedObject var controller: AnnotationController
+    let controller: AnnotationController
+    /// Whether the toolbar has the session's HUD.
+    @ObservedObject private var hud: HUDPlacement
     @State private var draft = ""
     @FocusState private var editing: Bool
+
+    init(browser: BrowserController, controller: AnnotationController) {
+        self.browser = browser
+        self.controller = controller
+        hud = controller.hud
+    }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -104,7 +113,7 @@ struct BrowserToolbar: View {
                 .frame(minWidth: BrowserMetrics.addressMinWidth, maxWidth: .infinity)
                 .padding(.leading, 4)
 
-            if controller.hud.isInBrowser {
+            if hud.isInBrowser {
                 HUDView(controller: controller, isEmbedded: true)
                     .padding(.leading, 4)
             } else {
@@ -119,7 +128,7 @@ struct BrowserToolbar: View {
             }
         }
         .padding(.leading, 84)
-        .padding(.trailing, controller.hud.isInBrowser ? BrowserMetrics.frame : BrowserMetrics.frame + 4)
+        .padding(.trailing, hud.isInBrowser ? BrowserMetrics.frame : BrowserMetrics.frame + 4)
         .frame(height: BrowserMetrics.toolbarHeight)
         .onAppear { draft = browser.address }
         .onChange(of: browser.addressFocusRequest) { _, _ in

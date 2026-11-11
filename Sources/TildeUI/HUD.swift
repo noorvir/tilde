@@ -314,17 +314,40 @@ struct HUDView: View {
     /// notes never moves a button; `everyModeFitsThePillWidth` checks it.
     static let width: CGFloat = 485
 
+    /// The flow, the session and the notes.
     @ObservedObject var controller: AnnotationController
+    // The parts of the session whose state the HUD shows.
+    @ObservedObject private var hud: HUDPlacement
+    @ObservedObject private var notices: Notices
+    @ObservedObject private var drawing: DrawingNotes
+    @ObservedObject private var browserOffer: BrowserOffer
+    /// What Record records, which the controller reads for the source's name.
+    @ObservedObject private var scope: SessionScope
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
     /// does not move, and tooltips drawn by the browser.
-    var isEmbedded = false
+    let isEmbedded: Bool
     /// Called when a drag of the pill moves.
-    var onDrag: () -> Void = {}
+    let onDrag: () -> Void
     /// Reports the frame of the visible content in the window, top-left origin.
-    var onContentFrame: (CGRect) -> Void = { _ in }
+    let onContentFrame: (CGRect) -> Void
     @State private var isPillHovered = false
     /// How often recording mode began, which bounces the record button.
     @State private var recordModeEntries = 0
+
+    init(
+        controller: AnnotationController, isEmbedded: Bool = false, onDrag: @escaping () -> Void = {},
+        onContentFrame: @escaping (CGRect) -> Void = { _ in }
+    ) {
+        self.controller = controller
+        hud = controller.hud
+        notices = controller.notices
+        drawing = controller.drawing
+        browserOffer = controller.browserOffer
+        scope = controller.scope
+        self.isEmbedded = isEmbedded
+        self.onDrag = onDrag
+        self.onContentFrame = onContentFrame
+    }
 
     var body: some View {
         if isEmbedded {
@@ -337,7 +360,7 @@ struct HUDView: View {
     private var floating: some View {
         VStack(spacing: HUDAccessory.gap) {
             // In Tilde's browser the main bar is on the toolbar, below the canvas.
-            if !controller.hud.isInBrowser {
+            if !hud.isInBrowser {
                 // Its own width, also above a wider accessory picker.
                 pill
                     .fixedSize()
@@ -348,19 +371,19 @@ struct HUDView: View {
                     .fixedSize()
                     .transition(.opacity)
             }
-            if controller.hud.isShown, controller.showsBrowserAccessory {
-                HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: controller.browserOffer.dismiss)
+            if hud.isShown, controller.showsBrowserAccessory {
+                HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: browserOffer.dismiss)
                     .transition(Self.zoom)
             }
-            if controller.hud.isShown, let notice = controller.notices.pause {
-                PauseCard(notice: notice, controller: controller)
+            if hud.isShown, let notice = notices.pause {
+                PauseCard(notice: notice, notices: notices)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if controller.hud.isShown, controller.isOpen, controller.hud.showsList, !controller.drafts.isEmpty {
+            if hud.isShown, controller.isOpen, hud.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
                     .transition(Self.zoom)
             }
-            if controller.hud.isShown, controller.isPickingWindow {
+            if hud.isShown, controller.isPickingWindow {
                 HUDAccessoryPicker(
                     model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
                     selectedID: controller.clipSource.id,
@@ -374,22 +397,22 @@ struct HUDView: View {
         .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: onContentFrame)
         .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
-        .animation(.spring(duration: 0.28), value: controller.hud.showsList)
+        .animation(.spring(duration: 0.28), value: hud.showsList)
         .animation(.spring(duration: 0.28), value: controller.isPickingWindow)
         .animation(.spring(duration: 0.3, bounce: 0), value: controller.isSourcePickerOpen)
         .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
         .animation(HUDPanel.motion, value: controller.sentConfirmation)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
-        .animation(.easeOut(duration: 0.15), value: controller.notices.pause)
-        .animation(.spring(duration: 0.28), value: controller.browserOffer.url)
+        .animation(.easeOut(duration: 0.15), value: notices.pause)
+        .animation(.spring(duration: 0.28), value: browserOffer.url)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
     private static let zoom = AnyTransition.scale(scale: 0.5, anchor: .top).combined(with: .opacity)
 
     private var pillScale: CGFloat {
-        if !controller.hud.isShown {
+        if !hud.isShown {
             return 0.5
         }
         return isPillHovered ? 1.015 : 1
@@ -421,7 +444,7 @@ struct HUDView: View {
         HStack(spacing: 4) {
             if let confirmation = controller.sentConfirmation {
                 HStack(spacing: PillMetrics.iconGap) {
-                    switch controller.notices.sentStatus {
+                    switch notices.sentStatus {
                     case .done:
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -459,7 +482,7 @@ struct HUDView: View {
     private var drawingContent: some View {
         let size = HUDAccessory.size
         ForEach(Self.drawingTools, id: \.tool) { entry in
-            HUDButton(image: Image(systemName: entry.symbol), isOn: controller.drawing.tool == entry.tool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
+            HUDButton(image: Image(systemName: entry.symbol), isOn: drawing.tool == entry.tool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
                 controller.setDrawingTool(entry.tool)
             }
         }
@@ -471,7 +494,7 @@ struct HUDView: View {
                 Circle()
                     .fill(Color(hex: entry.hex))
                     .frame(width: size.swatchSize, height: size.swatchSize)
-                    .overlay(Circle().strokeBorder(Color.white.opacity(controller.drawing.color == entry.hex ? 1 : 0.25), lineWidth: controller.drawing.color == entry.hex ? 2 : 1))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(drawing.color == entry.hex ? 1 : 0.25), lineWidth: drawing.color == entry.hex ? 2 : 1))
                     .padding(1)
                     .contentShape(Circle())
             }
@@ -524,7 +547,7 @@ struct HUDView: View {
         // pointer it grows a little to show that it can be dragged; a drag that starts on a
         // button moves the HUD and does not press it.
         .scaleEffect(pillScale)
-        .opacity(controller.hud.isShown ? 1 : 0)
+        .opacity(hud.isShown ? 1 : 0)
         .animation(.spring(duration: 0.25), value: isPillHovered)
         .onHover { isPillHovered = $0 }
         .gesture(
@@ -536,7 +559,7 @@ struct HUDView: View {
     private var drawingAccessoryBar: some View {
         let size = HUDAccessory.size
         return capsule(HStack(spacing: size.scaled(4)) { drawingContent }, width: size.scaled(HUDView.width), size: size)
-            .opacity(controller.hud.isShown ? 1 : 0)
+            .opacity(hud.isShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
                     .onChanged { _ in onDrag() }
@@ -611,7 +634,7 @@ struct HUDView: View {
 
 
         Group {
-            HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: controller.hud.showsList, help: controller.hud.showsList ? "Hide notes" : "Show notes") {
+            HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: hud.showsList, help: hud.showsList ? "Hide notes" : "Show notes") {
                 controller.dispatch(.toggleList)
             }
             .disabled(count == 0)
@@ -861,7 +884,7 @@ struct HUDView: View {
     }
 
     private var subtitleState: SubtitleState {
-        if let notice = controller.notices.notice {
+        if let notice = notices.notice {
             return .notice(notice.rawValue)
         }
         if controller.isPickingWindow {
@@ -1185,7 +1208,7 @@ struct HUDAccessoryBrowserBar: View {
 /// once on resume, discard or send; the pointer on it keeps it.
 struct PauseCard: View {
     let notice: PauseNotice
-    @ObservedObject var controller: AnnotationController
+    let notices: Notices
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1202,7 +1225,7 @@ struct PauseCard: View {
         .frame(maxWidth: HUDView.width, alignment: .leading)
         .hudCard(cornerRadius: 12)
         .fixedSize()
-        .onHover { controller.notices.holdPause($0) }
+        .onHover { notices.holdPause($0) }
     }
 
     private var text: String {

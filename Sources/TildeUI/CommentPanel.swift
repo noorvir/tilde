@@ -240,7 +240,9 @@ private final class FocusedTextView: NSTextView {
 }
 
 struct CommentView: View {
+    /// The flow, for the question on the box and whether notes can change.
     @ObservedObject var controller: AnnotationController
+    @ObservedObject private var commentBox: CommentBox
     let chip: String
     let isEditing: Bool
     /// Called with the change in height just before the box changes size.
@@ -250,12 +252,13 @@ struct CommentView: View {
 
     init(controller: AnnotationController, chip: String, isEditing: Bool, onHeightChange: @escaping (CGFloat) -> Void = { _ in }) {
         self.controller = controller
+        commentBox = controller.commentBox
         self.chip = chip
         self.isEditing = isEditing
         self.onHeightChange = onHeightChange
         // The right size from the start, so that nothing has to correct it after the first layout.
-        _editorHeight = State(initialValue: CommentEditor.height(of: controller.commentBox.draft.text))
-        _isEmpty = State(initialValue: controller.commentBox.draft.text.isEmpty)
+        _editorHeight = State(initialValue: CommentEditor.height(of: controller.commentBox.text))
+        _isEmpty = State(initialValue: controller.commentBox.text.isEmpty)
     }
 
     var body: some View {
@@ -268,7 +271,7 @@ struct CommentView: View {
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.white.opacity(0.08)))
                 Spacer()
-                if isEditing, case .edit(let id) = controller.commentBox.composer {
+                if isEditing, case .edit(let id) = commentBox.composer {
                     Button {
                         controller.deleteDraft(id)
                     } label: {
@@ -283,7 +286,7 @@ struct CommentView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                CommentEditor(draft: controller.commentBox.draft, height: $editorHeight, isEmpty: $isEmpty, onHeightChange: onHeightChange) {
+                CommentEditor(draft: commentBox.draft, height: $editorHeight, isEmpty: $isEmpty, onHeightChange: onHeightChange) {
                     controller.dispatch(.submitComment)
                 } onCancel: {
                     controller.escapePressed()

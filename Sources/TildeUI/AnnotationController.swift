@@ -5,8 +5,8 @@ import os
 
 /// The session on screen. It sends every event to `SessionFlow` and runs the effects, keeps
 /// the session's notes, and starts, stops and joins the parts that do the work: each part
-/// tells the controller what happened, and the controller tells the other parts. Views
-/// observe it.
+/// tells the controller what happened, and the controller tells the other parts. A view
+/// observes it for the flow, the session and the notes, and each part whose state it shows.
 @MainActor
 final class AnnotationController: ObservableObject {
     typealias PauseReason = SessionFlow.PauseReason
@@ -141,8 +141,6 @@ final class AnnotationController: ObservableObject {
     private let defaults: UserDefaults?
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
     private var subscription: AnyCancellable?
-    /// Views observe the controller; it sends on the changes of the parts that the HUD shows.
-    private var partChanges: [AnyCancellable] = []
     /// The app that was in front when an agent's session opened Tilde's browser. The session
     /// ends with the browser closed and this app in front again, so the user is back in the chat.
     private var returnApp: NSRunningApplication?
@@ -169,13 +167,6 @@ final class AnnotationController: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
-        let parts = [
-            notices.objectWillChange, scope.objectWillChange, drawing.objectWillChange, browserOffer.objectWillChange,
-            commentBox.objectWillChange, previewCard.objectWillChange, hud.objectWillChange,
-        ]
-        partChanges = parts.map { changes in
-            changes.sink { [weak self] in self?.objectWillChange.send() }
-        }
         joinParts()
     }
 

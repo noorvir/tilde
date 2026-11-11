@@ -173,16 +173,29 @@ private final class KeyPanel: FloatingPanel {
 }
 
 struct PreviewView: View {
+    /// The notes, and the flow for whether they can change.
     @ObservedObject var controller: AnnotationController
+    @ObservedObject private var previewCard: PreviewCard
     /// Called when a drag of the header moves.
-    var onDrag: () -> Void = {}
+    let onDrag: () -> Void
     /// The corner grip's drag, by its distance since it began, and its end.
-    var onResize: (CGSize) -> Void = { _ in }
-    var onResizeEnded: () -> Void = {}
+    let onResize: (CGSize) -> Void
+    let onResizeEnded: () -> Void
+
+    init(
+        controller: AnnotationController, onDrag: @escaping () -> Void = {}, onResize: @escaping (CGSize) -> Void = { _ in },
+        onResizeEnded: @escaping () -> Void = {}
+    ) {
+        self.controller = controller
+        previewCard = controller.previewCard
+        self.onDrag = onDrag
+        self.onResize = onResize
+        self.onResizeEnded = onResizeEnded
+    }
 
     var body: some View {
         Group {
-            if let id = controller.previewCard.id, let index = controller.drafts.firstIndex(where: { $0.id == id }) {
+            if let id = previewCard.id, let index = controller.drafts.firstIndex(where: { $0.id == id }) {
                 card(index: index, draft: controller.drafts[index])
             }
         }
@@ -228,7 +241,7 @@ struct PreviewView: View {
                 images(of: annotation)
 
                 // An enlarged screenshot gets the whole card below the header.
-                if controller.previewCard.expandedImage == nil {
+                if previewCard.expandedImage == nil {
                     CommentEditor(controller: controller, id: draft.id, initial: annotation.comment)
                         .id(draft.id)
                     footer(id: draft.id)
@@ -249,10 +262,10 @@ struct PreviewView: View {
     private func footer(id: Draft.ID) -> some View {
         HStack(spacing: 6) {
             CardButton(symbol: "chevron.left", keys: ["←"], help: "Previous") {
-                controller.previewCard.step(-1, in: controller.drafts)
+                previewCard.step(-1, in: controller.drafts)
             }
             CardButton(symbol: "chevron.right", keys: ["→"], help: "Next") {
-                controller.previewCard.step(1, in: controller.drafts)
+                previewCard.step(1, in: controller.drafts)
             }
             Spacer()
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
@@ -267,7 +280,7 @@ struct PreviewView: View {
     /// screenshot replaces both, under a Back button.
     @ViewBuilder
     private func images(of annotation: Annotation) -> some View {
-        switch controller.previewCard.expandedImage {
+        switch previewCard.expandedImage {
         case .closeUp:
             enlarged(title: "Close-up", data: annotation.image)
         case .context:
@@ -285,12 +298,12 @@ struct PreviewView: View {
                     }
                 } else {
                     Screenshot(title: "Close-up", data: annotation.image) {
-                        controller.previewCard.expandedImage = .closeUp
+                        previewCard.expandedImage = .closeUp
                     }
                 }
                 if annotation.contextImage != nil {
                     Screenshot(title: "Context", data: annotation.contextImage) {
-                        controller.previewCard.expandedImage = .context
+                        previewCard.expandedImage = .context
                     }
                     .frame(width: 240, height: 180)
                 }
@@ -302,7 +315,7 @@ struct PreviewView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 CardButton(symbol: "chevron.left", title: "Back", keys: ["Esc"], help: "Back") {
-                    controller.previewCard.expandedImage = nil
+                    previewCard.expandedImage = nil
                 }
                 Text(title)
                     .font(.system(size: 12.5, weight: .semibold))
