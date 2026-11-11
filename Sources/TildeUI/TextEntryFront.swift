@@ -1,4 +1,7 @@
 import AppKit
+import os
+
+private let debugLog = Logger(subsystem: "dev.tilde.app", category: "front")
 
 /// Puts Tilde in front while a text view of one of its panels has the keyboard, and gives the
 /// front back after. The panels do not activate Tilde, so the app behind them stays in front,
@@ -21,12 +24,14 @@ enum TextEntryFront {
             return
         }
         stopObserving()
+        debugLog.notice("take from \(front.processIdentifier) for \(panel.className, privacy: .public)")
         lender = front
         holder = panel
         NSApp.activate()
         // Another app in front while the user writes is the user's choice: it keeps the front.
         observe(NSWorkspace.didActivateApplicationNotification, from: NSWorkspace.shared.notificationCenter) { note in
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            debugLog.notice("activated \(app?.processIdentifier ?? 0) while lent")
             if app != .current {
                 lender = nil
                 holder = nil
@@ -38,6 +43,7 @@ enum TextEntryFront {
     /// The text view of `panel` let go of the keyboard for good: its box closed, or its
     /// editing ended.
     static func giveBack(from panel: NSPanel) {
+        debugLog.notice("giveBack from \(panel.className, privacy: .public) holder \(holder === panel) lender \(lender?.processIdentifier ?? 0)")
         guard holder === panel, let app = lender else {
             return
         }
@@ -48,20 +54,32 @@ enum TextEntryFront {
             return
         }
 
-        // Tilde loses its key window with the front. The window that has the keyboard then,
-        // such as the overlay, takes it again, as before the text view had it.
+        // Tilde loses its key window with the front. Once the other app is in front, the
+        // window that had the keyboard, such as the overlay, takes it again, as before the
+        // text view had it.
         var keyWindow: NSWindow?
         observe(NSApplication.willResignActiveNotification, from: .default) { _ in
             keyWindow = NSApp.keyWindow
+            debugLog.notice("willResign key \(keyWindow?.className ?? "none", privacy: .public)")
         }
-        observe(NSApplication.didResignActiveNotification, from: .default) { _ in
+        observe(NSWorkspace.didActivateApplicationNotification, from: NSWorkspace.shared.notificationCenter) { note in
+            let activated = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            debugLog.notice("activated \(activated?.processIdentifier ?? 0) after yield, key \(keyWindow?.className ?? "none", privacy: .public), front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)")
+            guard activated == app else {
+                return
+            }
             stopObserving()
             if let keyWindow, keyWindow.isVisible, keyWindow.canBecomeKey {
                 keyWindow.makeKey()
             }
+            debugLog.notice("made key, front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                debugLog.notice("later, front \(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0) active \(NSApp.isActive) key \(NSApp.keyWindow?.className ?? "none", privacy: .public)")
+            }
         }
         NSApp.yieldActivation(to: app)
         ElementPicker.bringToFront(app)
+        debugLog.notice("yielded to \(app.processIdentifier), active \(NSApp.isActive)")
     }
 
     private static func observe(_ name: Notification.Name, from center: NotificationCenter, _ handle: @escaping @MainActor (Notification) -> Void) {

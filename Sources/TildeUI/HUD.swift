@@ -253,10 +253,16 @@ class FloatingPanel: NSPanel {
         guard isKeyWindow else {
             return
         }
-        if firstResponder is NSTextView {
-            TextEntryFront.take(for: self)
-        } else {
+        guard firstResponder is NSTextView else {
             TextEntryFront.giveBack(from: self)
+            return
+        }
+        // A panel that opens can give a text view the keyboard for a moment, before its own
+        // code takes it away: only a text view that keeps it counts.
+        DispatchQueue.main.async { [weak self] in
+            if let self, isKeyWindow, firstResponder is NSTextView {
+                TextEntryFront.take(for: self)
+            }
         }
     }
 }
