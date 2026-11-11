@@ -19,7 +19,7 @@ extension AnnotationController {
     }
 
     func mouseMoved(to point: CGPoint) {
-        guard commentBox.composer == nil, previewCard.id == nil else {
+        guard commentBox.composer == nil, previewCard.id == nil, wireframe == nil else {
             return
         }
         hoverPicker.pointerMoved(isOverPanel: isOverPanel(point))

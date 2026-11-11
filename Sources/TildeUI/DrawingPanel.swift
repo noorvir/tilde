@@ -95,9 +95,60 @@ final class DrawingPanel {
         active?.resumeDrawing()
     }
 
+    /// The canvas takes the keyboard, and with it the pointer's moves.
+    func focus() {
+        active?.focus()
+    }
+
     /// The element to snap to, in Quartz screen coordinates.
     func setSnapFrame(_ frame: CGRect?) {
         active?.setSnapFrame(frame)
+    }
+
+    /// Wireframe mode's tool and fill as JSON, or `null` to leave it.
+    func setWireframe(_ json: String) {
+        active?.wireframe = json
+    }
+
+    func runWireframe(_ call: String) {
+        active?.run(call)
+    }
+
+    /// Lines for wireframe shapes to snap to, in Quartz screen coordinates.
+    func setSnapTargets(rects: [CGRect], containers: [CGRect], window: CGRect?, screen: CGRect?) {
+        guard let active else {
+            return
+        }
+        let origin = active.frame.flipped.origin
+        func values(_ rect: CGRect) -> [Double] {
+            [rect.minX - origin.x, rect.minY - origin.y, rect.width, rect.height]
+        }
+        let targets: [String: Any] = [
+            "rects": rects.map(values), "containers": containers.map(values),
+            "window": window.map(values) ?? NSNull(), "screen": screen.map(values) ?? NSNull(),
+        ]
+        active.run("setSnapTargets(\(Self.json(targets)))")
+    }
+
+    /// The window a wireframe is on, in Quartz screen coordinates; its components move with it.
+    func setWireframeWindow(_ frame: CGRect) {
+        guard let active else {
+            return
+        }
+        let origin = active.frame.flipped.origin
+        let values = [frame.minX - origin.x, frame.minY - origin.y, frame.width, frame.height]
+        active.run("setWireframeWindow(\(Self.json(values)))")
+    }
+
+    /// A wireframe note's shapes, as its report has them, from `origin` in Quartz screen
+    /// coordinates.
+    func restoreWireframe(shapes: [[String: Any]], origin: CGPoint) {
+        guard let active else {
+            return
+        }
+        let canvasOrigin = active.frame.flipped.origin
+        let state: [String: Any] = ["shapes": shapes, "origin": [origin.x - canvasOrigin.x, origin.y - canvasOrigin.y]]
+        active.restoredWireframe = Self.json(state)
     }
 
     /// The shapes with these ids, wherever they are.
@@ -169,6 +220,20 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private var isPreparing = false
     private var pendingTool = "arrow"
     private var pendingColor: String?
+    var wireframe = "null" {
+        didSet {
+            run("setWireframe(\(wireframe))")
+        }
+    }
+    /// A wireframe note's components to show again once the page is ready.
+    var restoredWireframe: String? {
+        didSet {
+            if isReady, let restoredWireframe {
+                run("restoreWireframe(\(restoredWireframe))")
+                self.restoredWireframe = nil
+            }
+        }
+    }
     var onEscape: () -> Void = {}
     var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
@@ -228,6 +293,10 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     func hide() {
         panel?.ignoresMouseEvents = true
         panel?.orderOut(nil)
+    }
+
+    func focus() {
+        panel?.makeKey()
     }
 
     func resumeDrawing() {
@@ -312,6 +381,11 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             setTool(pendingTool)
             if let pendingColor {
                 setColor(pendingColor)
+            }
+            run("setWireframe(\(wireframe))")
+            if let restoredWireframe {
+                run("restoreWireframe(\(restoredWireframe))")
+                self.restoredWireframe = nil
             }
         case "escape":
             onEscape()

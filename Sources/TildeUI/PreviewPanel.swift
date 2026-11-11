@@ -268,6 +268,12 @@ struct PreviewView: View {
                 previewCard.step(1, in: controller.drafts)
             }
             Spacer()
+            if controller.drafts.first(where: { $0.id == id })?.chip == "Wireframe" {
+                CardButton(symbol: "pencil", title: "Edit Wireframe", help: "Edit the wireframe on the screen") {
+                    controller.editWireframe(id)
+                }
+                .disabled(!controller.canEditNotes)
+            }
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
                 controller.deleteDraft(id)
             }

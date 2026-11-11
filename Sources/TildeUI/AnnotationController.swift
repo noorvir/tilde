@@ -18,6 +18,7 @@ final class AnnotationController: ObservableObject {
         didSet {
             updateOverlayInput()
             tracker.isPaused = !pauses.isEmpty
+            saveLastMode()
         }
     }
     var mode: SessionFlow.Mode { flow.mode }
@@ -46,6 +47,10 @@ final class AnnotationController: ObservableObject {
     /// A question in the pill, waiting for the user.
     var confirmation: SessionFlow.Question? { flow.session?.question }
     var isDrawing: Bool { flow.session?.isDrawing ?? false }
+    /// Annotation mode: annotating, not paused and not drawing.
+    var isAnnotating: Bool {
+        flow.session?.activity == .annotating && flow.session?.pauses.isEmpty == true && !isDrawing
+    }
     /// Whether the overlay takes the pointer (hover, picks, clicks, the crosshair) and the
     /// keyboard: while annotating, and while choosing a window in any mode.
     var overlayTakesInput: Bool { flow.overlayTakesInput }
@@ -97,6 +102,11 @@ final class AnnotationController: ObservableObject {
     }
     /// Draw mode: the canvas, and the notes that shapes become.
     let drawing: DrawingNotes
+    /// Wireframe mode, while it is on.
+    @Published var wireframe: Wireframe? {
+        didSet { saveLastMode() }
+    }
+    var isFindingWireframeSnaps = false
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -139,8 +149,9 @@ final class AnnotationController: ObservableObject {
     private let store: SessionStore
     let browser: BrowserController
     let shortcuts: ShortcutStore
-    /// Keeps how the user last chose a window across launches; nil keeps it only in memory.
-    private let defaults: UserDefaults?
+    /// Keeps how the user last chose a window, and the last mode, across launches; nil keeps
+    /// them only in memory.
+    let defaults: UserDefaults?
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
     private var subscription: AnyCancellable?
     /// The app that was in front when an agent's session opened Tilde's browser. The session
@@ -237,10 +248,16 @@ final class AnnotationController: ObservableObject {
             if isOverLabel {
                 hover = nil
             }
+            if wireframe != nil, !isOverLabel {
+                drawing.panel.setOverLabel(false)
+                findWireframeSnaps(at: point)
+                return
+            }
             drawing.pointerMoved(to: point, isOverLabel: isOverLabel)
         }
         canvas.onKey = { [weak self] in self?.handleKey($0, in: .canvas) ?? false }
         canvas.onPress = { [weak self] point in
+            self?.chooseWireframeWindow(at: point)
             guard let self, let id = tracker.label(at: point) else {
                 return false
             }
@@ -321,6 +338,7 @@ final class AnnotationController: ObservableObject {
         case .openShapeComment:
             Task { await addDrawingNote() }
         case .keepDrawing:
+            endWireframe()
             drawing.panel.endEditing()
             drawing.panel.stopDrawing()
             drawing.panel.setSnapFrame(nil)
@@ -404,6 +422,11 @@ final class AnnotationController: ObservableObject {
             sourcePicker.openApp = nil
             return
         }
+        // In Draw and Wireframe Esc puts the tool down; only Pause pauses.
+        if isDrawing, !isDrawingPaused, flow.session?.panel == nil, flow.session?.question == nil {
+            putDrawingToolDown()
+            return
+        }
         dispatch(.escape)
     }
 
@@ -467,6 +490,7 @@ final class AnnotationController: ObservableObject {
         // first; Annotate in the HUD (or the pause shortcut) starts annotating.
         let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
         scopesNextLocalSessionToBrowser = false
+        let lastMode = savedLastMode
         dispatch(.begin(inBrowser: isInBrowser))
 
         layoutOverlays()
@@ -475,6 +499,7 @@ final class AnnotationController: ObservableObject {
             openBrowser(at: session.url)
         } else {
             placeHUD()
+            start(in: lastMode)
         }
     }
 
@@ -722,6 +747,14 @@ final class AnnotationController: ObservableObject {
         hoverPicker.logNext()
         log.notice("annotating \(self.pauses.isEmpty ? "on" : "paused", privacy: .public) (\(String(describing: self.pauses), privacy: .public), overlays \(self.overlays.count))")
         hover = nil
+        // Draw and Wireframe stay through a pause, on screen; the mouse goes through them.
+        if isDrawing {
+            if pauses.isEmpty {
+                drawing.panel.resumeDrawing()
+            } else {
+                drawing.panel.stopDrawing()
+            }
+        }
         overlays.orderAbove(scope.window?.number)
         makeOverlayKey()
     }
@@ -750,6 +783,9 @@ final class AnnotationController: ObservableObject {
     /// or the preview has it or annotating is paused.
     func makeOverlayKey() {
         guard overlayTakesInput, commentBox.composer == nil, previewCard.id == nil else {
+            return
+        }
+        if focusWireframeCanvas() {
             return
         }
         overlays.makeKey()
@@ -807,10 +843,13 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// The scoped window closed: annotations cover everything again.
+    /// The scoped window closed: annotations cover everything again, with no mode on.
     private func scopeEnded() {
         // A clip of the window ends with it, at its last frame.
         dispatch(.captureStopped)
+        if flow.session?.activity == .annotating, flow.session?.pauses.isEmpty == true {
+            dispatch(.togglePause)
+        }
         scope.set(nil)
         notices.show(.windowClosed)
     }
@@ -877,10 +916,12 @@ final class AnnotationController: ObservableObject {
         if hud.isInBrowser {
             hud.showPanel()
         }
+        drawing.hasNoTool = false
         drawing.start()
     }
 
     func setDrawingTool(_ tool: String) {
+        drawing.hasNoTool = false
         drawing.setTool(tool)
         if commentBox.composer != nil {
             commentBox.focus()
@@ -937,6 +978,13 @@ final class AnnotationController: ObservableObject {
     private func redoLastDrawing() {
         if let draft = drawing.takeUndone() {
             drafts.append(draft)
+        }
+    }
+
+    /// Puts an edited wireframe's note in the place of the note it was.
+    func replaceDraft(_ draft: Draft) {
+        if let index = drafts.firstIndex(where: { $0.id == draft.id }) {
+            drafts[index] = draft
         }
     }
 

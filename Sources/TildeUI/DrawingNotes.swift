@@ -9,6 +9,8 @@ final class DrawingNotes: ObservableObject {
     let panel = DrawingPanel()
     @Published private(set) var tool = "arrow"
     @Published private(set) var color = "#2F76FF"
+    /// Esc put Draw's tool down: nothing draws until one is chosen.
+    @Published var hasNoTool = false
     /// The window that the session is limited to.
     var scope: () -> ElementPicker.WindowInfo? = { nil }
     /// Whether a note's label is at a Quartz point.

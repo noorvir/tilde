@@ -124,6 +124,8 @@ struct SessionFlow: Equatable {
         /// The session ended elsewhere, such as the agent cancelling it.
         case ended
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
+        /// The Annotate button and its key: annotation mode on, from any other mode, or off.
+        case toggleAnnotating
         /// History's or the menu's Restore, and the menu's Open Browser, while a session is on screen.
         case restore, openBrowser
         /// A note deleted, or its comment changed, from the list, the preview or the browser.
@@ -234,8 +236,13 @@ struct SessionFlow: Equatable {
     /// none for a mode's key, so that it never leaves drawing. A drawing tool or colour changes
     /// no mode.
     func events(forKey action: ShortcutStore.Action) -> [Event] {
-        guard case .open(let open) = mode, open.question == nil, !(open.isDrawing && action.group == .modes) else {
+        guard case .open(let open) = mode, open.question == nil else {
             return []
+        }
+        // Draw paused resumes by its own key or Space; no other mode's key leaves it.
+        if open.isDrawing, action.group == .modes {
+            let resumes = !open.pauses.isEmpty && (action == .drawingMode || action == .pauseOrResume)
+            return resumes ? [.resume] : []
         }
         let isBusy = switch open.activity {
         case .recording(.starting), .recording(.finishing): true
@@ -243,7 +250,7 @@ struct SessionFlow: Equatable {
         }
         switch action {
         case .annotationMode:
-            return isRecordMode && !isBusy ? [.toggleRecordingMode] : []
+            return isBusy || isPicking ? [] : [.toggleAnnotating]
         case .recordingMode:
             return isBusy ? [] : [.toggleRecordingMode]
         case .drawingMode:
@@ -331,9 +338,10 @@ struct SessionFlow: Equatable {
     /// A session starts only when none is on screen.
     private mutating func handleWithoutSession(_ event: Event) -> [Effect] {
         switch event {
-        case .begin(let inBrowser):
-            // A session in the browser starts paused, so the user can type an address and browse.
-            mode = .open(Open(pauses: inBrowser ? [.user] : []))
+        case .begin:
+            // Annotation mode never turns on by itself: a session starts with no mode, the
+            // HUD on screen and the apps below taking clicks, until the user turns it on.
+            mode = .open(Open(pauses: [.user]))
             return []
         case .startShortcut:
             return [.startLocalSession]
@@ -451,6 +459,9 @@ struct SessionFlow: Equatable {
 
         case .togglePause:
             return togglePause(&open)
+
+        case .toggleAnnotating:
+            return toggleAnnotating(&open)
 
         case .resume:
             guard open.activity == .annotating else {
@@ -585,7 +596,12 @@ struct SessionFlow: Equatable {
             }
             let closes = closePanel(&open)
             open.isDrawing = true
-            return closes + [.showCanvas]
+            // Draw is a mode of its own, also from no mode.
+            guard open.pauses.contains(.user) else {
+                return closes + [.showCanvas]
+            }
+            open.pauses.remove(.user)
+            return closes + [.applyPause, .showCanvas]
 
         case .shapeFinished:
             return open.isDrawing && open.panel != .comment ? [.openShapeComment] : []
@@ -597,7 +613,7 @@ struct SessionFlow: Equatable {
             return open.isDrawing ? [.redoShape] : []
 
         case .finishDrawing:
-            return finishDrawing(&open)
+            return leaveDrawing(&open)
 
         case .toggleRecordingMode:
             if case .recording = open.activity {
@@ -688,8 +704,13 @@ struct SessionFlow: Equatable {
         if open.panel == .preview {
             return closePreview(&open)
         }
+        // Esc never ends Draw: it pauses it, and the drawing waits.
         if open.isDrawing {
-            return finishDrawing(&open)
+            guard open.pauses.isEmpty else {
+                return []
+            }
+            open.pauses.insert(.user)
+            return [.applyPause, .keepKeyboard]
         }
         if case .recording = open.activity {
             return leaveRecording(&open)
@@ -737,16 +758,50 @@ struct SessionFlow: Equatable {
         case .annotating:
             break
         }
-        // The canvas would keep the mouse from the screen that a pause gives back.
-        let finished = finishDrawing(&open)
+        // A pause keeps Draw, with the drawing on screen; the canvas lets the mouse through.
         if open.pauses.contains(.user) {
             // Annotate pressed on purpose resumes, whatever app was last in front.
             open.pauses.remove(.user)
             open.pauses.remove(.otherApp)
-            return finished + [.applyPause, .takeKeyboard]
+            return [.applyPause, .takeKeyboard]
         }
         open.pauses.insert(.user)
-        return finished + [.applyPause, .giveKeyboardBack, .takeKeyboard]
+        return [.applyPause, .giveKeyboardBack, .takeKeyboard]
+    }
+
+    /// Annotation mode on: from Draw, recording mode (unless a clip asks first) or no mode.
+    /// Off: no mode.
+    private func toggleAnnotating(_ open: inout Open) -> [Effect] {
+        if case .recording = open.activity {
+            let left = leaveRecording(&open)
+            guard open.activity == .annotating else {
+                return left
+            }
+            return left + startAnnotating(&open)
+        }
+        guard open.activity == .annotating else {
+            return []
+        }
+        if open.isDrawing {
+            return finishDrawing(&open) + startAnnotating(&open)
+        }
+        return togglePause(&open)
+    }
+
+    private func startAnnotating(_ open: inout Open) -> [Effect] {
+        open.pauses.remove(.user)
+        open.pauses.remove(.otherApp)
+        return [.applyPause, .takeKeyboard]
+    }
+
+    /// Done or Esc in Draw: no mode, not annotation mode; Tilde keeps the keyboard for its keys.
+    private func leaveDrawing(_ open: inout Open) -> [Effect] {
+        let finished = finishDrawing(&open)
+        guard !finished.isEmpty else {
+            return []
+        }
+        open.pauses.insert(.user)
+        return finished + [.applyPause, .keepKeyboard]
     }
 
     /// The leading button in recording mode: starts a clip, pauses it, resumes it.
@@ -780,7 +835,7 @@ struct SessionFlow: Equatable {
         return [.startPicking] + (choosesInPicker ? [.openPicker] : [])
     }
 
-    /// Back to annotating; a clip that is not stopped is lost, so that asks first. A clip being
+    /// Back to no mode; a clip that is not stopped is lost, so that asks first. A clip being
     /// saved finishes first.
     private func leaveRecording(_ open: inout Open) -> [Effect] {
         switch open.activity {
@@ -802,6 +857,7 @@ struct SessionFlow: Equatable {
     private func exitRecording(_ open: inout Open) -> [Effect] {
         let closes = closePanel(&open)
         open.activity = .annotating
+        open.pauses.insert(.user)
         return closes + [.exitRecording, .applyPause]
     }
 

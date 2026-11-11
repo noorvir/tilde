@@ -481,37 +481,67 @@ struct HUDView: View {
     @ViewBuilder
     private var drawingContent: some View {
         let size = HUDAccessory.size
-        ForEach(Self.drawingTools, id: \.tool) { entry in
-            HUDButton(image: Image(systemName: entry.symbol), isOn: drawing.tool == entry.tool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
-                controller.setDrawingTool(entry.tool)
+        // While paused the tools wait; Done still finishes.
+        Group {
+            ForEach(Self.drawingTools, id: \.tool) { entry in
+                HUDButton(image: Image(systemName: entry.symbol), isOn: drawing.tool == entry.tool && !drawing.hasNoTool, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingTool == entry.tool }), help: entry.help) {
+                    controller.setDrawingTool(entry.tool)
+                }
+            }
+            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
+            ForEach(Self.drawingColors, id: \.hex) { entry in
+                Button {
+                    controller.setDrawingColor(entry.hex)
+                } label: {
+                    Circle()
+                        .fill(Color(hex: entry.hex))
+                        .frame(width: size.swatchSize, height: size.swatchSize)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(drawing.color == entry.hex ? 1 : 0.25), lineWidth: drawing.color == entry.hex ? 2 : 1))
+                        .padding(1)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .tildeTooltip(entry.name, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingColor?.hex == entry.hex }))
+                .accessibilityLabel(entry.name)
+            }
+            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
+            HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
+                controller.dispatch(.undoDrawing)
+            }
+            HUDButton(image: Image(systemName: "arrow.uturn.forward"), help: "Redo") {
+                controller.dispatch(.redoDrawing)
             }
         }
-        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
-        ForEach(Self.drawingColors, id: \.hex) { entry in
-            Button {
-                controller.setDrawingColor(entry.hex)
-            } label: {
-                Circle()
-                    .fill(Color(hex: entry.hex))
-                    .frame(width: size.swatchSize, height: size.swatchSize)
-                    .overlay(Circle().strokeBorder(Color.white.opacity(drawing.color == entry.hex ? 1 : 0.25), lineWidth: drawing.color == entry.hex ? 2 : 1))
-                    .padding(1)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .tildeTooltip(entry.name, keys: keys(ShortcutStore.Action.allCases.first { $0.drawingColor?.hex == entry.hex }))
-            .accessibilityLabel(entry.name)
-        }
-        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
-        HUDButton(image: Image(systemName: "arrow.uturn.backward"), help: "Undo") {
-            controller.dispatch(.undoDrawing)
-        }
-        HUDButton(image: Image(systemName: "arrow.uturn.forward"), help: "Redo") {
-            controller.dispatch(.redoDrawing)
-        }
+        .disabled(controller.isDrawingPaused)
         Spacer(minLength: 0)
-        PillTextButton(title: "Done", key: "esc", isDestructive: false) {
+        PillTextButton(title: "Done", key: "⌘↩", isDestructive: false) {
             controller.dispatch(.finishDrawing)
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var wireframeContent: some View {
+        let size = HUDAccessory.size
+        // While paused the tools wait; Done still finishes.
+        Group {
+            ForEach(Wireframe.tools, id: \.tool) { entry in
+                HUDButton(image: Image(systemName: entry.symbol), isOn: controller.wireframe?.tool == entry.tool, keys: [entry.key.uppercased()], help: entry.help) {
+                    controller.setWireframeTool(entry.tool)
+                }
+            }
+            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: size.scaled(20))
+            HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: ["⌘Z"], help: "Undo") {
+                controller.undoWireframe()
+            }
+            HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: ["⇧⌘Z"], help: "Redo") {
+                controller.redoWireframe()
+            }
+        }
+        .disabled(controller.isDrawingPaused)
+        Spacer(minLength: 0)
+        PillTextButton(title: "Done", key: "⌘↩", isDestructive: false) {
+            controller.finishWireframe()
         }
         .fixedSize()
     }
@@ -558,7 +588,13 @@ struct HUDView: View {
 
     private var drawingAccessoryBar: some View {
         let size = HUDAccessory.size
-        return capsule(HStack(spacing: size.scaled(4)) { drawingContent }, width: size.scaled(HUDView.width), size: size)
+        return capsule(HStack(spacing: size.scaled(4)) {
+            if controller.wireframe != nil {
+                wireframeContent
+            } else {
+                drawingContent
+            }
+        }, width: size.scaled(HUDView.width), size: size)
             .opacity(hud.isShown ? 1 : 0)
             .gesture(
                 DragGesture(minimumDistance: 4, coordinateSpace: .global)
@@ -609,8 +645,13 @@ struct HUDView: View {
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
+            HUDButton(image: Image(systemName: "hand.point.up.left"), isOn: controller.isAnnotating, keys: keys(.annotationMode), help: "Annotate") {
+                controller.dispatch(.toggleAnnotating)
+            }
+            .disabled(!controller.accepts(.toggleAnnotating))
+
             // Recording mode starts by choosing what to record.
-            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, keys: recordToggleKeys, help: controller.isRecordMode ? "Annotate" : "Record screen") {
+            HUDButton(image: Image(systemName: "rectangle.dashed.badge.record"), isOn: controller.isRecordMode, keys: recordToggleKeys, help: "Record screen") {
                 controller.dispatch(.toggleRecordingMode)
             }
             .disabled(status.isBusy)
@@ -622,14 +663,28 @@ struct HUDView: View {
                 }
                 .disabled(controller.recording != .recording && controller.recording != .paused)
             } else {
-                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing, keys: keys(.drawingMode), help: "Draw") {
-                    if controller.isDrawing {
+                HUDButton(image: Image(systemName: "pencil.tip"), isOn: controller.isDrawing && controller.wireframe == nil, keys: keys(.drawingMode), help: "Draw") {
+                    if controller.isDrawingPaused {
+                        controller.dispatch(.resume)
+                    } else if controller.isDrawing {
                         controller.dispatch(.finishDrawing)
                     } else {
                         controller.dispatch(.startDrawing)
                     }
                 }
+                .disabled(controller.wireframe != nil)
             }
+            // In recording mode too, disabled, so that no button moves.
+            HUDButton(image: Image(systemName: "squareshape.split.2x2.dotted"), isOn: controller.wireframe != nil, keys: controller.wireframe == nil ? ["W"] : ["⌘↩"], help: "Wireframe") {
+                if controller.wireframe != nil, controller.isDrawingPaused {
+                    controller.dispatch(.resume)
+                } else if controller.wireframe != nil {
+                    controller.finishWireframe()
+                } else {
+                    controller.startWireframe()
+                }
+            }
+            .disabled(controller.isRecordMode)
         }
 
 

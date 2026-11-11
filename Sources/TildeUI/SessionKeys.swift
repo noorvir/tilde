@@ -45,7 +45,12 @@ extension AnnotationController {
             // The same action and rule as the Send button, paused too; the flow ignores it while
             // choosing a window or with nothing to send.
             if isCommand, key == kVK_Return {
-                dispatch(.send)
+                // In Draw and Wireframe it is their Done.
+                if isDrawing {
+                    finishDrawingMode()
+                } else {
+                    dispatch(.send)
+                }
                 return true
             }
             // Space on a note's marker previews it, before Space pauses.
@@ -122,6 +127,9 @@ extension AnnotationController {
     /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that
     /// enables that button. True when the key is one of them, whether it did anything or not.
     func performShortcut(_ event: NSEvent) -> Bool {
+        if performWireframeShortcut(event) {
+            return true
+        }
         guard session != nil, confirmation == nil,
               let action = shortcuts.inAppAction(keyCode: event.keyCode, modifiers: event.modifierFlags, isDrawing: isDrawing)
         else {
@@ -224,6 +232,10 @@ extension AnnotationController {
     func holdChanged(_ output: HoldGesture.Output) {
         switch output {
         case .began:
+            // In wireframe mode ⌥ and a drag copies a component.
+            guard wireframe == nil else {
+                return
+            }
             dispatch(.holdBegan)
             // With the browser in front, its page takes the first click only when it is key.
             if pauses.contains(.hold), NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid(), browser.window?.isVisible == true {
