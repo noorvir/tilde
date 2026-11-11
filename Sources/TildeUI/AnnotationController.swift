@@ -3,11 +3,6 @@ import AppKit
 import Combine
 import os
 
-@MainActor
-final class HoverHighlight: ObservableObject {
-    @Published var picked: Picked?
-}
-
 /// Runs annotate mode for the active session: hover, pick, comment, send.
 /// Owns the overlay, HUD and comment windows; views read its published state.
 @MainActor
@@ -67,12 +62,11 @@ final class AnnotationController: ObservableObject {
             saver.saveSoon()
         }
     }
-    /// The element under the pointer. It changes at pointer rate and only the overlay draws
-    /// it, so it is apart from the state that the HUD and the panels redraw on.
-    let hoverHighlight = HoverHighlight()
+    /// The element under the pointer.
+    let hoverPicker: HoverPicker
     var hover: Picked? {
-        get { hoverHighlight.picked }
-        set { hoverHighlight.picked = newValue }
+        get { hoverPicker.picked }
+        set { hoverPicker.picked = newValue }
     }
     /// The comment box's data while `flow` has it open.
     @Published private(set) var composer: Composer? {
@@ -145,9 +139,9 @@ final class AnnotationController: ObservableObject {
     let browser: BrowserController
     let shortcuts: ShortcutStore
     private let picker: ElementPicker
-    private var overlays: [OverlayWindow] = []
-    /// The window the overlays are on; nil for one per screen.
-    private var overlaysWindow: Int?
+    private lazy var overlays = OverlayStack { [unowned self] frame, level, isWindowSized in
+        OverlayWindow(frame: frame, level: level, isWindowSized: isWindowSized, controller: self)
+    }
     private lazy var hud = HUDPanel(controller: self)
     private lazy var commentPanel = CommentPanel(controller: self)
     private lazy var previewPanel = PreviewPanel(controller: self)
@@ -155,12 +149,9 @@ final class AnnotationController: ObservableObject {
     /// Views observe the controller; it sends on the changes of the parts that the HUD shows.
     private var partChanges: [AnyCancellable] = []
 
-    private var latestHoverPoint: CGPoint?
     /// Whether the last pointer move was over Tilde's own UI; a pick that finishes after the
     /// pointer moved onto the UI must not highlight what is under it.
     private var isPointerOverPanel = false
-    /// Picks the element under the latest pointer position, one at a time.
-    private var hoverTask: Task<Void, Never>?
     /// The app that was in front when an agent's session opened Tilde's browser. The session
     /// ends with the browser closed and this app in front again, so the user is back in the chat.
     private var returnApp: NSRunningApplication?
@@ -168,9 +159,7 @@ final class AnnotationController: ObservableObject {
     private var scopesNextLocalSessionToBrowser = false
     /// Follows the window that the session is limited to.
     private let scopeFollower = ScopeFollower()
-    private var hoverAfterScroll: Task<Void, Never>?
-    /// Logs the first highlight after each resume, to measure how soon hover works.
-    private var hasLoggedHover = false
+    /// Logs the first pointer move after each resume, to measure how soon hover works.
     private var hasLoggedMove = false
     /// The icon of the agent app with this display name, for the HUD; nil when unknown.
     var clientIcon: (String) -> NSImage? = { _ in nil }
@@ -198,6 +187,7 @@ final class AnnotationController: ObservableObject {
         self.defaults = defaults
         self.shortcuts = shortcuts ?? ShortcutStore()
         picker = ElementPicker(browser: browser)
+        hoverPicker = HoverPicker(picker: picker)
         tracker = NoteTracker(windows: picker.windows)
         flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
@@ -208,6 +198,14 @@ final class AnnotationController: ObservableObject {
         notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
         partChanges = [notices.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }]
         saver.snapshot = { [weak self] in self?.snapshot }
+        hoverPicker.scope = { [weak self] in self?.scope }
+        hoverPicker.shows = { [weak self] in
+            guard let self else {
+                return false
+            }
+            return composer == nil && !isPointerOverPanel && !isPickingWindow
+        }
+        hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
         doubleTap = DoubleTapMonitor { [weak self] in
             guard let self else {
                 return []
@@ -387,11 +385,7 @@ final class AnnotationController: ObservableObject {
         commentPanel.close()
         previewPanel.close()
         previewID = nil
-        for overlay in overlays {
-            overlay.parent?.removeChildWindow(overlay)
-            overlay.close()
-        }
-        overlays = []
+        overlays.close()
         hover = nil
         composer = nil
     }
@@ -526,14 +520,9 @@ final class AnnotationController: ObservableObject {
     /// and a pick in progress is dropped.
     private func updateOverlayInput() {
         let takesInput = overlayTakesInput
-        for overlay in overlays {
-            overlay.takesInput = takesInput
-        }
+        overlays.setTakesInput(takesInput)
         if !takesInput {
-            hoverTask?.cancel()
-            hoverTask = nil
-            latestHoverPoint = nil
-            hover = nil
+            hoverPicker.stop()
         }
     }
 
@@ -897,8 +886,7 @@ final class AnnotationController: ObservableObject {
         case .keepKeyboard:
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
             if !isHUDInBrowser {
-                let pointer = NSEvent.mouseLocation
-                (overlays.first { $0.frame.contains(pointer) } ?? overlays.first)?.makeKey()
+                overlays.makeKey()
             }
         case .giveKeyboardBack:
             // A key overlay would keep the keyboard; give it back to the user's app.
@@ -1167,51 +1155,15 @@ final class AnnotationController: ObservableObject {
         return scope.frame.flipped
     }
 
-    /// One overlay per screen above everything, or one on the scoped window just above it,
-    /// unless the overlays are already that. While choosing a source, every screen has one.
-    /// Overlay panels are non-activating: the user's app stays frontmost while annotating.
+    /// One overlay per screen above everything, or one on the scoped window just above it.
+    /// While choosing a source, every screen has one.
     private func layoutOverlays() {
         let scope = isPickingWindow ? nil : scope
-        if !overlays.isEmpty, overlaysWindow == scope?.number {
-            updateOverlayInput()
-            return
-        }
-        for overlay in overlays {
-            overlay.parent?.removeChildWindow(overlay)
-            overlay.close()
-        }
-        overlaysWindow = scope?.number
-        if let scope {
-            // The same level as the window, such as a floating one of Tilde's, so ordering above
-            // it works; other apps' windows are normal ones.
-            let level = NSApp.window(withWindowNumber: scope.number)?.level ?? .normal
-            overlays = [OverlayWindow(frame: overlayFrame(for: scope), level: level, isWindowSized: true, controller: self)]
-            orderAboveScope()
-        } else {
-            overlays = NSScreen.screens.map { OverlayWindow(screen: $0, controller: self) }
-            for overlay in overlays {
-                overlay.orderFrontRegardless()
-            }
-        }
+        let isNew = overlays.layout(on: scope.map { ($0.number, overlayFrame(for: $0)) })
         updateOverlayInput()
-        applyPause()
-    }
-
-    /// Keeps the scoped window's overlay directly above it, so other windows in front of it
-    /// also cover the overlay.
-    /// Tilde's own windows take it as a child window, which AppKit moves with them and keeps
-    /// above them.
-    private func orderAboveScope() {
-        guard let scope, let overlay = overlays.first, overlay.isWindowSized else {
-            return
+        if isNew {
+            applyPause()
         }
-        if let own = NSApp.window(withWindowNumber: scope.number) {
-            if overlay.parent !== own {
-                own.addChildWindow(overlay, ordered: .above)
-            }
-            return
-        }
-        overlay.order(.above, relativeTo: scope.number)
     }
 
     /// Puts the overlays in step with the pause state; every start, resume and scope change
@@ -1221,11 +1173,11 @@ final class AnnotationController: ObservableObject {
         if pauses.isEmpty {
             notices.clearPause()
         }
-        hasLoggedHover = false
+        hoverPicker.logNextHighlight()
         hasLoggedMove = false
         log.notice("annotating \(self.pauses.isEmpty ? "on" : "paused", privacy: .public) (\(String(describing: self.pauses), privacy: .public), overlays \(self.overlays.count))")
         hover = nil
-        orderAboveScope()
+        overlays.orderAbove(scope?.number)
         makeOverlayKey()
     }
 
@@ -1244,7 +1196,7 @@ final class AnnotationController: ObservableObject {
             log.notice("\(waits ? "auto-paused" : "auto-resumed", privacy: .public) for frontmost pid \(pid ?? 0, privacy: .public)")
             dispatch(waits ? .otherAppInFront : .scopeAppInFront)
         }
-        orderAboveScope()
+        overlays.orderAbove(scope?.number)
     }
 
     // MARK: - Recording
@@ -1476,12 +1428,9 @@ final class AnnotationController: ObservableObject {
             let delta = CGVector(dx: current.frame.minX - scope.frame.minX, dy: current.frame.minY - scope.frame.minY)
             hover = hover?.moved(by: delta)
         }
-        let frame = overlayFrame(for: current)
-        if let overlay = overlays.first, overlay.isWindowSized, overlay.frame != frame {
-            overlay.setFrame(frame, display: true)
-        }
+        overlays.setFrame(overlayFrame(for: current))
         // The window may have come forward over its overlay, such as on a click in it.
-        orderAboveScope()
+        overlays.orderAbove(current.number)
         if current.frame != scope.frame {
             tracker.windowMoved()
         }
@@ -1598,8 +1547,7 @@ final class AnnotationController: ObservableObject {
         }
         isPointerOverPanel = isOverPanel(point)
         if isPointerOverPanel || !allows(point) || noteLabel(at: point) != nil {
-            latestHoverPoint = nil
-            hover = nil
+            hoverPicker.clear()
             return
         }
         if isPickingWindow {
@@ -1607,29 +1555,7 @@ final class AnnotationController: ObservableObject {
             return
         }
 
-        latestHoverPoint = point
-        guard hoverTask == nil else {
-            return
-        }
-
-        hoverTask = Task {
-            while let next = latestHoverPoint {
-                latestHoverPoint = nil
-                let picked = await picker.pick(at: next, isMoving: true, in: scope)
-                // The overlay stopped taking input meanwhile.
-                if Task.isCancelled {
-                    return
-                }
-                if picked != nil, !hasLoggedHover {
-                    hasLoggedHover = true
-                    log.notice("first highlight \(picked?.chip ?? "", privacy: .public)")
-                }
-                if composer == nil && !isPointerOverPanel && !isPickingWindow {
-                    hover = picked
-                }
-            }
-            hoverTask = nil
-        }
+        hoverPicker.pick(at: point)
     }
 
     /// Picks again under the pointer after the page moved under it, such as on scroll, so the
@@ -1650,19 +1576,12 @@ final class AnnotationController: ObservableObject {
         ScrollForwarder.forward(event, at: point, to: window)
         if window.number != browser.windowNumber {
             tracker.scrolled()
-            hoverAfterScroll?.cancel()
-            hoverAfterScroll = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(60))
-                if !Task.isCancelled {
-                    self?.refreshHover()
-                }
-            }
+            hoverPicker.scrolled()
         }
     }
 
     func mouseExited() {
-        latestHoverPoint = nil
-        hover = nil
+        hoverPicker.clear()
     }
 
     func click(at point: CGPoint) {
@@ -1944,17 +1863,14 @@ final class AnnotationController: ObservableObject {
             return
         }
         NSApp.activate(ignoringOtherApps: true)
-        let pointer = NSEvent.mouseLocation
-        (overlays.first { $0.frame.contains(pointer) } ?? overlays.first)?.makeKey()
+        overlays.makeKey()
     }
 
     func makeOverlayKey() {
         guard overlayTakesInput, composer == nil, previewID == nil else {
             return
         }
-        let pointer = NSEvent.mouseLocation
-        let overlay = overlays.first { $0.frame.contains(pointer) } ?? overlays.first
-        overlay?.makeKey()
+        overlays.makeKey()
     }
 
     /// Whether a Quartz point is over Tilde's own HUD, comment box or preview.

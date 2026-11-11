@@ -23,10 +23,6 @@ final class OverlayWindow: NSPanel {
         }
     }
 
-    convenience init(screen: NSScreen, controller: AnnotationController) {
-        self.init(frame: screen.frame, level: Self.overlayLevel, isWindowSized: false, controller: controller)
-    }
-
     /// `frame` in AppKit screen coordinates.
     init(frame: CGRect, level: NSWindow.Level, isWindowSized: Bool, controller: AnnotationController) {
         self.isWindowSized = isWindowSized
@@ -89,7 +85,7 @@ final class OverlayView: NSView {
         self.controller = controller
         super.init(frame: .zero)
         // The browser's notes move with its page; the hover highlight and the notes' places change on their own.
-        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange, controller.hoverHighlight.objectWillChange, controller.tracker.objectWillChange)
+        subscription = controller.objectWillChange.merge(with: controller.browser.objectWillChange, controller.hoverPicker.highlight.objectWillChange, controller.tracker.objectWillChange)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.needsDisplay = true }
     }
