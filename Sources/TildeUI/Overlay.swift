@@ -271,7 +271,7 @@ final class OverlayView: NSView {
         let blue = NSColor.tildeBlue
 
         // A window-sized overlay outlines its window; Tilde's browser has its dark frame.
-        if controller.scope != nil, !controller.isInBrowser, (window as? OverlayWindow)?.isWindowSized == true {
+        if controller.scope.window != nil, !controller.scope.isBrowser, (window as? OverlayWindow)?.isWindowSized == true {
             let outline = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 10, yRadius: 10)
             outline.lineWidth = 2
             blue.withAlphaComponent(0.6).setStroke()

@@ -376,13 +376,13 @@ final class Harness {
         try await until("Open Browser limits the session to the browser") { self.isScopedToBrowser }
         try check(controller.pauses.contains(.user), "Open Browser starts paused")
         browser.close()
-        try await until("the scope ends when the browser closes", timeout: 5) { self.controller.scope == nil }
+        try await until("the scope ends when the browser closes", timeout: 5) { self.controller.scope.window == nil }
         try check(controller.notices.notice == .windowClosed, "the HUD says the window closed")
         controller.requestCancel()
     }
 
     private var isScopedToBrowser: Bool {
-        controller.scope != nil && controller.scope?.number == browser.windowNumber
+        controller.scope.isBrowser
     }
 
     // MARK: - Page

@@ -97,16 +97,8 @@ final class AnnotationController: ObservableObject {
     private(set) var restoreRecord: SessionRecord?
     /// Takes ↩ and Esc for the question from any of Tilde's windows, also from a text field.
     private var confirmationKeyMonitor: Any?
-    /// What the session annotates and records: a window (which limits the session to it), a
-    /// screen or a phone; nil until the user chooses, which means everything on screen.
-    @Published private(set) var source: RecordingSource?
-    /// The window annotations are limited to; nil means anything on screen.
-    var scope: ElementPicker.WindowInfo? {
-        if case .window(let window) = source {
-            return window
-        }
-        return nil
-    }
+    /// What the session annotates and records, and the window it is limited to.
+    let scope: SessionScope
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -157,8 +149,6 @@ final class AnnotationController: ObservableObject {
     private var returnApp: NSRunningApplication?
     /// The next session that starts from Tilde is limited to the browser window.
     private var scopesNextLocalSessionToBrowser = false
-    /// Follows the window that the session is limited to.
-    private let scopeFollower = ScopeFollower()
     /// Logs the first pointer move after each resume, to measure how soon hover works.
     private var hasLoggedMove = false
     /// The icon of the agent app with this display name, for the HUD; nil when unknown.
@@ -188,6 +178,7 @@ final class AnnotationController: ObservableObject {
         self.shortcuts = shortcuts ?? ShortcutStore()
         picker = ElementPicker(browser: browser)
         hoverPicker = HoverPicker(picker: picker)
+        scope = SessionScope(picker: picker, browser: browser)
         tracker = NoteTracker(windows: picker.windows)
         flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
@@ -196,9 +187,18 @@ final class AnnotationController: ObservableObject {
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
         notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
-        partChanges = [notices.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }]
+        partChanges = [notices.objectWillChange, scope.objectWillChange].map { changes in
+            changes.sink { [weak self] in self?.objectWillChange.send() }
+        }
+        scope.onChange = { [weak self] in self?.sourceChanged() }
+        scope.onCheck = { [weak self] delta in self?.scopeChecked(movedBy: delta) }
+        scope.onGone = { [weak self] in self?.scopeEnded() }
+        scope.onFrontApp = { [weak self] pid in self?.frontmostAppChanged(to: pid) }
+        scope.canChange = { [weak self] in self?.flow.canPick == true && self?.isPickingWindow == false }
+        // The window never came on screen: the session covers everything.
+        scope.onBrowserMissing = { [weak self] in self?.placeHUD() }
         saver.snapshot = { [weak self] in self?.snapshot }
-        hoverPicker.scope = { [weak self] in self?.scope }
+        hoverPicker.scope = { [weak self] in self?.scope.window }
         hoverPicker.shows = { [weak self] in
             guard let self else {
                 return false
@@ -284,7 +284,7 @@ final class AnnotationController: ObservableObject {
         composer = nil
         previewID = nil
         showsList = false
-        setSource(nil)
+        scope.reset()
         PageIdentity.askAppsToDescribeWebContent()
         drawingPanel.prepare()
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
@@ -308,9 +308,7 @@ final class AnnotationController: ObservableObject {
         // Also when the stack is the same: the browser's page notes can have come or gone.
         picker.windows.onRead = { [weak self] isChanged in
             self?.tracker.refreshCovers()
-            // Also for windows that send no move notifications, and for a window that came
-            // forward over its overlay.
-            self?.refreshScope()
+            self?.scope.windowsRead()
             if isChanged {
                 self?.tracker.somethingChanged()
             }
@@ -344,7 +342,7 @@ final class AnnotationController: ObservableObject {
         saver.stop()
         session = nil
         drafts = []
-        setSource(nil)
+        scope.reset()
         browserAccessoryURL = nil
 
         if let returnApp {
@@ -449,11 +447,6 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Whether the session is limited to Tilde's browser, which then shows the notes panel.
-    var isInBrowser: Bool {
-        scope != nil && scope?.number == browser.windowNumber
-    }
-
     /// Opens the browser's notes panel with a note selected, such as from its card on the page.
     func showNoteInPanel(_ id: Draft.ID) {
         browser.showsNotes = true
@@ -466,7 +459,7 @@ final class AnnotationController: ObservableObject {
     }
 
     private func toggleList() {
-        if isInBrowser {
+        if scope.isBrowser {
             browser.showsNotes.toggle()
         } else {
             showsList.toggle()
@@ -674,8 +667,8 @@ final class AnnotationController: ObservableObject {
     /// The smallest element at a point. A window that shows no elements gets a label at the
     /// point, as a click does; `fallback` is then the frame of the note.
     private func noteLink(at point: CGPoint, fallback: CGRect) async -> NoteLink {
-        guard let picked = await picker.pick(at: point, in: scope) else {
-            let window = scope ?? picker.window(at: point)
+        guard let picked = await picker.pick(at: point, in: scope.window) else {
+            let window = scope.window ?? picker.window(at: point)
             return NoteLink(frame: fallback, marker: point, element: nil, window: window, anchor: nil, tracked: nil, pictureArea: Self.pictureArea(around: point))
         }
 
@@ -793,7 +786,7 @@ final class AnnotationController: ObservableObject {
         }
         isFindingSnapFrame = true
         Task {
-            let picked = await picker.pick(at: point, isMoving: true, in: scope)
+            let picked = await picker.pick(at: point, isMoving: true, in: scope.window)
             isFindingSnapFrame = false
             guard noteLabel(at: point) == nil else {
                 return
@@ -918,13 +911,10 @@ final class AnnotationController: ObservableObject {
             PlainClickTap.stop()
         case .enterRecording:
             hover = nil
-            annotationSource = source
+            scope.enterRecording()
         case .exitRecording:
             clips.discard()
-            // What a clip recorded does not limit the notes: back to what annotating had.
-            if source != annotationSource {
-                setSource(annotationSource)
-            }
+            scope.exitRecording()
             frontmostAppChanged(to: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         case .startClip: startClip()
         case .pauseClip: clips.pause()
@@ -1036,7 +1026,7 @@ final class AnnotationController: ObservableObject {
         guard let session else {
             return nil
         }
-        return SessionSaver.Snapshot(session: session, drafts: drafts, pageURL: isInBrowser ? browser.pageURL : nil, scopeApp: scopeName)
+        return SessionSaver.Snapshot(session: session, drafts: drafts, pageURL: scope.isBrowser ? browser.pageURL : nil, scopeApp: scope.name)
     }
 
     /// Brings back a saved session's notes, also a sent one, to edit and send again: into the
@@ -1130,7 +1120,7 @@ final class AnnotationController: ObservableObject {
         }
         // In Tilde's browser the HUD stays in its toolbar, and the floating panel shows only
         // the picker, under the toolbar, while choosing.
-        isHUDInBrowser = isInBrowser
+        isHUDInBrowser = scope.isBrowser
         if isHUDInBrowser, isPickingWindow, let frame = browser.window?.frame {
             hud.show(top: NSPoint(x: frame.midX, y: frame.maxY - BrowserMetrics.toolbarHeight + 10))
         } else if isHUDInBrowser {
@@ -1148,18 +1138,18 @@ final class AnnotationController: ObservableObject {
     /// Where the overlay of a session limited to one window goes, in AppKit screen
     /// coordinates: on Tilde's browser, its page only, so the toolbar (with the HUD) and the
     /// notes work as usual.
-    private func overlayFrame(for scope: ElementPicker.WindowInfo) -> CGRect {
-        if scope.number == browser.windowNumber, let page = browser.pageFrame {
+    private func overlayFrame(for window: ElementPicker.WindowInfo) -> CGRect {
+        if window.number == browser.windowNumber, let page = browser.pageFrame {
             return page
         }
-        return scope.frame.flipped
+        return window.frame.flipped
     }
 
     /// One overlay per screen above everything, or one on the scoped window just above it.
     /// While choosing a source, every screen has one.
     private func layoutOverlays() {
-        let scope = isPickingWindow ? nil : scope
-        let isNew = overlays.layout(on: scope.map { ($0.number, overlayFrame(for: $0)) })
+        let window = isPickingWindow ? nil : scope.window
+        let isNew = overlays.layout(on: window.map { ($0.number, overlayFrame(for: $0)) })
         updateOverlayInput()
         if isNew {
             applyPause()
@@ -1177,26 +1167,18 @@ final class AnnotationController: ObservableObject {
         hasLoggedMove = false
         log.notice("annotating \(self.pauses.isEmpty ? "on" : "paused", privacy: .public) (\(String(describing: self.pauses), privacy: .public), overlays \(self.overlays.count))")
         hover = nil
-        overlays.orderAbove(scope?.number)
+        overlays.orderAbove(scope.window?.number)
         makeOverlayKey()
-    }
-
-    /// Whether a session limited to one window waits while another app is in front.
-    nonisolated static func autoPauses(frontmost: pid_t?, scopePID: pid_t?, ownPID: pid_t) -> Bool {
-        guard let scopePID, let frontmost else {
-            return false
-        }
-        return frontmost != scopePID && frontmost != ownPID
     }
 
     /// The frontmost app changed: pause or resume, and put the overlay back above its window.
     func frontmostAppChanged(to pid: pid_t?) {
-        let waits = Self.autoPauses(frontmost: pid, scopePID: scope?.pid, ownPID: ProcessInfo.processInfo.processIdentifier)
+        let waits = SessionScope.autoPauses(frontmost: pid, scopePID: scope.window?.pid, ownPID: ProcessInfo.processInfo.processIdentifier)
         if waits != pauses.contains(.otherApp) {
             log.notice("\(waits ? "auto-paused" : "auto-resumed", privacy: .public) for frontmost pid \(pid ?? 0, privacy: .public)")
             dispatch(waits ? .otherAppInFront : .scopeAppInFront)
         }
-        overlays.orderAbove(scope?.number)
+        overlays.orderAbove(scope.window?.number)
     }
 
     // MARK: - Recording
@@ -1219,14 +1201,14 @@ final class AnnotationController: ObservableObject {
 
     /// What Record records: the chosen source, or the screen with the HUD when there is none.
     var clipSource: RecordingSource {
-        source ?? .screen(hudDisplay ?? CGMainDisplayID())
+        scope.source ?? .screen(hudDisplay ?? CGMainDisplayID())
     }
 
     /// The name of what Record records, such as "Studio Display", for the HUD.
     var clipSourceName: String {
         switch clipSource {
         case .screen(let display): screenName(display)
-        case .window(let window): scopeName ?? window.app
+        case .window(let window): scope.name ?? window.app
         case .phone(let phone): phone.name
         }
     }
@@ -1248,11 +1230,11 @@ final class AnnotationController: ObservableObject {
         let frame: CGRect
         switch recordingSource {
         case .window(let window):
-            name = "\(scopeName ?? window.app) window"
+            name = "\(scope.name ?? window.app) window"
             frame = window.frame
         case .screen(let display):
             name = SourcePickerModel.name(of: display)
-            frame = NSScreen.screens.first { Self.displayID(of: $0) == display }?.frame.flipped ?? .zero
+            frame = NSScreen.screens.first { $0.displayID == display }?.frame.flipped ?? .zero
         case .phone(let phone):
             name = phone.name
             frame = .zero
@@ -1266,45 +1248,9 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - Window scope
 
-    /// Whether annotate mode takes a Quartz point: anywhere, or only inside the scoped window.
-    nonisolated static func allows(_ point: CGPoint, scope: CGRect?) -> Bool {
-        scope?.contains(point) ?? true
-    }
-
-    /// The part of a dragged region inside the scoped window, or nil when none is left.
-    nonisolated static func clamped(_ rect: CGRect, scope: CGRect?) -> CGRect? {
-        guard let scope else {
-            return rect
-        }
-        let inside = rect.intersection(scope)
-        return inside.isNull || inside.width < 8 || inside.height < 8 ? nil : inside
-    }
-
     /// While choosing a source, a session limited to a window also takes the other windows.
     func allows(_ point: CGPoint) -> Bool {
-        Self.allows(point, scope: isPickingWindow ? nil : scope?.frame)
-    }
-
-    /// The name the HUD shows for the scoped window: its app's name.
-    var scopeName: String? {
-        guard let scope else {
-            return nil
-        }
-        if scope.pid == ProcessInfo.processInfo.processIdentifier {
-            return "Tilde Browser"
-        }
-        return NSRunningApplication(processIdentifier: scope.pid)?.localizedName ?? scope.app
-    }
-
-    /// The scoped window's app icon, for the HUD.
-    var scopeIcon: NSImage? {
-        guard let scope else {
-            return nil
-        }
-        if scope.pid == ProcessInfo.processInfo.processIdentifier {
-            return NSApp.applicationIconImage
-        }
-        return NSRunningApplication(processIdentifier: scope.pid)?.icon
+        SessionScope.allows(point, scope: isPickingWindow ? nil : scope.window?.frame)
     }
 
     /// The HUD's window button: starts choosing a source on screen, or stops choosing with no
@@ -1344,96 +1290,44 @@ final class AnnotationController: ObservableObject {
     /// or phone lifts the limit. A phone only records.
     func choose(_ source: RecordingSource) {
         dispatch(.choose(drawable: source.isDrawable), with: [.applySource: { [self] in
-            browserScopeRequest += 1
-            if case .window(let window) = source {
-                setSource(.window(picker.currentWindow(number: window.number) ?? window))
-            } else {
-                setSource(source)
-            }
+            scope.choose(source)
         }])
     }
 
-    static func displayID(of screen: NSScreen?) -> CGDirectDisplayID? {
-        (screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { CGDirectDisplayID($0.uint32Value) }
-    }
-
-    /// Limits annotations to `window`, or lifts the limit with nil.
-    func setScope(_ window: ElementPicker.WindowInfo?) {
-        setSource(window.map(RecordingSource.window))
-    }
-
-    /// Annotates and records `source` from now on: a window limits the session to it, a screen
-    /// or a phone lifts the limit; nil is everything on screen.
-    private func setSource(_ source: RecordingSource?) {
-        let window: ElementPicker.WindowInfo?
-        if case .window(let chosen) = source {
-            window = chosen
-        } else {
-            window = nil
-        }
-        if window != scope {
-            log.notice("scope \(window.map { "window \($0.number) of \($0.app)" } ?? "none", privacy: .public)")
-        }
-        self.source = source
-        // The front app now counts for the new window.
+    /// The session has another source: the front app now counts for the new window, and the
+    /// overlays and the HUD go where it is.
+    private func sourceChanged() {
         dispatch(.scopeAppInFront)
         hover = nil
-        scopeFollower.stop()
         if isOpen, !overlays.isEmpty {
             layoutOverlays()
         }
         placeHUD()
         saver.saveSoon()
-        guard let window else {
-            return
-        }
-        scopeFollower.onCheck = { [weak self] frame in self?.refreshScope(frame: frame) }
-        scopeFollower.onAppQuit = { [weak self] in
-            if self?.scope?.pid == window.pid {
-                self?.endScope()
-            }
-        }
-        scopeFollower.onFrontApp = { [weak self] pid in self?.frontmostAppChanged(to: pid) }
-        scopeFollower.start(window, page: window.number == browser.windowNumber ? browser.webView : nil)
-        frontmostAppChanged(to: Self.frontmostPID)
     }
 
-    /// The frontmost app. Right after Tilde activates, NSWorkspace can still name the app
-    /// before it, so Tilde's own state wins.
-    private static var frontmostPID: pid_t? {
-        if NSApp.isActive {
-            return ProcessInfo.processInfo.processIdentifier
-        }
-        return NSWorkspace.shared.frontmostApplication?.processIdentifier
-    }
-
-    /// Takes the window's new frame, or ends the scope with a note when the window is gone,
-    /// hidden or minimised.
-    /// `frame`: the window's frame as the window itself reported it, which can be ahead of the
-    /// window list.
-    func refreshScope(frame: CGRect? = nil) {
-        guard let scope else {
+    /// The scoped window was checked: what is on it goes along when it moved.
+    private func scopeChecked(movedBy delta: CGVector?) {
+        guard let window = scope.window else {
             return
         }
-        guard var current = picker.currentWindow(number: scope.number) else {
-            endScope()
-            return
-        }
-        if let frame {
-            current = ElementPicker.WindowInfo(number: current.number, pid: current.pid, app: current.app, title: current.title, frame: frame)
-        }
-        if current.frame != scope.frame {
-            source = .window(current)
-            // The highlighted element moved with its window.
-            let delta = CGVector(dx: current.frame.minX - scope.frame.minX, dy: current.frame.minY - scope.frame.minY)
+        if let delta {
             hover = hover?.moved(by: delta)
         }
-        overlays.setFrame(overlayFrame(for: current))
+        overlays.setFrame(overlayFrame(for: window))
         // The window may have come forward over its overlay, such as on a click in it.
-        overlays.orderAbove(current.number)
-        if current.frame != scope.frame {
+        overlays.orderAbove(window.number)
+        if delta != nil {
             tracker.windowMoved()
         }
+    }
+
+    /// The scoped window closed: annotations cover everything again.
+    private func scopeEnded() {
+        // A clip of the window ends with it, at its last frame.
+        dispatch(.captureStopped)
+        scope.set(nil)
+        notices.show(.windowClosed)
     }
 
     /// Opens `url` (or just the browser) in Tilde's browser and limits the session to its
@@ -1444,7 +1338,7 @@ final class AnnotationController: ObservableObject {
         if url == nil, !browser.hasPage {
             browser.openLocation(nil)
         }
-        scopeToBrowser()
+        scope.limitToBrowser()
     }
 
     /// The first click on an element in another browser in a session offers to open its page
@@ -1489,50 +1383,6 @@ final class AnnotationController: ObservableObject {
         browserURLToOpen = url
         dispatch(.openBrowser)
         browserURLToOpen = nil
-    }
-
-    /// The browser window can take a moment to reach the window list after it opens. The
-    /// scope is applied to the session that asked, only while its source can change (no clip
-    /// in progress, not choosing) and no other source was chosen meanwhile.
-    private func scopeToBrowser() {
-        guard let sessionID = session?.id else {
-            return
-        }
-        browserScopeRequest += 1
-        let request = browserScopeRequest
-        let delays = [0.0, 0.3, 0.8]
-        for delay in delays {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self, self.browserScopeRequest == request, self.session?.id == sessionID, self.flow.canPick, !self.isPickingWindow else {
-                    return
-                }
-                if let number = self.browser.windowNumber, let window = self.picker.currentWindow(number: number) {
-                    self.browserScopeRequest += 1
-                    if self.scope?.number != number {
-                        self.setScope(window)
-                    }
-                } else if delay == delays.last {
-                    // The window never came on screen: the session covers everything.
-                    self.placeHUD()
-                }
-            }
-        }
-    }
-
-    /// What annotating was limited to (nothing, or Tilde's browser) before recording mode,
-    /// which it gets back after.
-    private var annotationSource: RecordingSource?
-
-    /// Counts requests to limit the session to the browser; a choice of another source or a
-    /// newer request makes an older one stale.
-    private var browserScopeRequest = 0
-
-    /// The scoped window closed: annotations cover everything again.
-    private func endScope() {
-        // A clip of the window ends with it, at its last frame.
-        dispatch(.captureStopped)
-        setScope(nil)
-        notices.show(.windowClosed)
     }
 
     // MARK: - Picking
@@ -1596,7 +1446,7 @@ final class AnnotationController: ObservableObject {
             // A window, or outside windows the screen.
             if let window = picker.window(at: point) {
                 choose(.window(window))
-            } else if let display = Self.displayID(of: NSScreen.screens.first { $0.frame.contains(point.flipped) }) {
+            } else if let display = NSScreen.screens.first(where: { $0.frame.contains(point.flipped) })?.displayID {
                 choose(.screen(display))
             }
             return
@@ -1612,7 +1462,7 @@ final class AnnotationController: ObservableObject {
         Task {
             var picked = hover
             if picked?.frame.contains(point) != true {
-                picked = await picker.pick(at: point, in: scope)
+                picked = await picker.pick(at: point, in: scope.window)
             }
             guard let picked else {
                 return
@@ -1636,7 +1486,7 @@ final class AnnotationController: ObservableObject {
         if isPickingWindow {
             return
         }
-        guard let rect = Self.clamped(rect, scope: scope?.frame) else {
+        guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
             return
         }
         if composer != nil {
@@ -1644,7 +1494,7 @@ final class AnnotationController: ObservableObject {
             return
         }
         let marker = CGPoint(x: rect.maxX, y: rect.minY)
-        let window = scope ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
+        let window = scope.window ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
         let isOverBrowser = window?.number == browser.windowNumber
         Task {
             let anchor = isOverBrowser ? await browser.regionAnchor(for: rect) : nil
@@ -2003,7 +1853,7 @@ extension AnnotationController {
         self.hover = hover
         self.composer = composer
         self.previewID = previewID
-        self.source = source
+        scope.setStateForTesting(source: source)
         self.isHUDInBrowser = isHUDInBrowser
         self.browserAccessoryURL = browserAccessoryURL
         self.restoreRecord = restoreRecord

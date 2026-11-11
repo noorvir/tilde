@@ -228,7 +228,7 @@ struct BehaviourTests {
         controller.annotateInBrowser()
         #expect(controller.drafts.count == 1)
         #expect(controller.confirmation == nil)
-        #expect(controller.scope == nil)
+        #expect(controller.scope.window == nil)
     }
 
     /// While the report is made, notes are neither deleted nor edited.
@@ -393,15 +393,15 @@ struct BehaviourTests {
         let phone = Phone(id: "phone", name: "iPhone")
         open(activity: .picking(isRecordMode: false, isPickerOpen: false))
         controller.choose(.phone(phone))
-        #expect(controller.source == nil)
+        #expect(controller.scope.source == nil)
         #expect(controller.isPickingWindow)
 
         open(activity: .picking(isRecordMode: true, isPickerOpen: false))
         controller.choose(.phone(phone))
-        #expect(controller.source == .phone(phone))
+        #expect(controller.scope.source == .phone(phone))
         controller.toggleRecordingMode()
         #expect(controller.recording == nil)
-        #expect(controller.source == nil)
+        #expect(controller.scope.source == nil)
     }
 
     // MARK: - Captures
@@ -485,7 +485,7 @@ struct BehaviourTests {
 
         NotificationCenter.default.post(name: NSWindow.didChangeScreenNotification, object: panel.window)
 
-        let display = try #require(AnnotationController.displayID(of: screen))
+        let display = try #require(screen.displayID)
         #expect(controller.hudDisplay == display)
         #expect(controller.clipSource == .screen(display))
     }
@@ -604,18 +604,18 @@ struct BehaviourTests {
     @Test func scopedSessionsTakeOnlyPointsInTheWindow() {
         let window = CGRect(x: 100, y: 100, width: 400, height: 300)
 
-        #expect(AnnotationController.allows(CGPoint(x: 900, y: 900), scope: nil))
-        #expect(AnnotationController.allows(CGPoint(x: 120, y: 380), scope: window))
-        #expect(!AnnotationController.allows(CGPoint(x: 99, y: 200), scope: window))
-        #expect(!AnnotationController.allows(CGPoint(x: 300, y: 401), scope: window))
+        #expect(SessionScope.allows(CGPoint(x: 900, y: 900), scope: nil))
+        #expect(SessionScope.allows(CGPoint(x: 120, y: 380), scope: window))
+        #expect(!SessionScope.allows(CGPoint(x: 99, y: 200), scope: window))
+        #expect(!SessionScope.allows(CGPoint(x: 300, y: 401), scope: window))
     }
 
     @Test func regionsAreCutToTheScopedWindow() {
         let window = CGRect(x: 100, y: 100, width: 400, height: 300)
 
-        #expect(AnnotationController.clamped(CGRect(x: 50, y: 150, width: 200, height: 100), scope: window) == CGRect(x: 100, y: 150, width: 150, height: 100))
-        #expect(AnnotationController.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: window) == nil)
-        #expect(AnnotationController.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: nil) == CGRect(x: 0, y: 0, width: 50, height: 50))
+        #expect(SessionScope.clamped(CGRect(x: 50, y: 150, width: 200, height: 100), scope: window) == CGRect(x: 100, y: 150, width: 150, height: 100))
+        #expect(SessionScope.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: window) == nil)
+        #expect(SessionScope.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: nil) == CGRect(x: 0, y: 0, width: 50, height: 50))
     }
 
     /// Annotating has no source to choose. Before Record, a click on the source name picks on
@@ -636,7 +636,7 @@ struct BehaviourTests {
         #expect(!controller.isPickingWindow)
 
         controller.choose(.window(Fixtures.window))
-        #expect(controller.source == nil)
+        #expect(controller.scope.source == nil)
 
         controller.toggleWindowPick()
         controller.choose(.window(Fixtures.window))
@@ -655,11 +655,11 @@ struct BehaviourTests {
         open(activity: .picking(isRecordMode: true, isPickerOpen: false), source: .window(Fixtures.window))
         controller.choose(.screen(1))
         #expect(!controller.isPickingWindow)
-        #expect(controller.source == .screen(1))
+        #expect(controller.scope.source == .screen(1))
 
         controller.toggleRecordingMode()
         #expect(!controller.isRecordMode)
-        #expect(controller.scope == nil)
+        #expect(controller.scope.window == nil)
         #expect(controller.allows(elsewhere))
     }
 
@@ -680,7 +680,7 @@ struct BehaviourTests {
         open(activity: .picking(isRecordMode: true, isPickerOpen: true))
         controller.click(at: CGPoint(x: -5000, y: -5000))
         #expect(controller.isSourcePickerOpen)
-        #expect(controller.source == nil)
+        #expect(controller.scope.source == nil)
 
         controller.sourcePicker.openApp = Fixtures.window.pid
         controller.stepBackInSourcePicker()
@@ -698,11 +698,11 @@ struct BehaviourTests {
 
     @Test func scopeEndsWhenTheWindowIsGone() {
         controller.setStateForTesting(session: Fixtures.session())
-        controller.setScope(Fixtures.window)
+        controller.scope.set(.window(Fixtures.window))
 
-        controller.refreshScope()
+        controller.scope.check()
 
-        #expect(controller.scope == nil)
+        #expect(controller.scope.window == nil)
         #expect(controller.notices.notice?.rawValue == "Window closed")
     }
 
@@ -768,12 +768,12 @@ struct BehaviourTests {
     // MARK: - Auto-pause
 
     @Test func scopedSessionsWaitWhileAnotherAppIsInFront() {
-        #expect(AnnotationController.autoPauses(frontmost: 42, scopePID: 7, ownPID: 1))
-        #expect(!AnnotationController.autoPauses(frontmost: 7, scopePID: 7, ownPID: 1))
+        #expect(SessionScope.autoPauses(frontmost: 42, scopePID: 7, ownPID: 1))
+        #expect(!SessionScope.autoPauses(frontmost: 7, scopePID: 7, ownPID: 1))
         // Tilde in front, such as its HUD or comment box, keeps the session going.
-        #expect(!AnnotationController.autoPauses(frontmost: 1, scopePID: 7, ownPID: 1))
+        #expect(!SessionScope.autoPauses(frontmost: 1, scopePID: 7, ownPID: 1))
         // Sessions on all windows never wait.
-        #expect(!AnnotationController.autoPauses(frontmost: 42, scopePID: nil, ownPID: 1))
+        #expect(!SessionScope.autoPauses(frontmost: 42, scopePID: nil, ownPID: 1))
     }
 
     @Test func annotateResumesAWindowSessionThatPausedByItself() async throws {

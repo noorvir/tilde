@@ -126,7 +126,7 @@ final class HUDPanel {
     }
 
     private func screenChanged() {
-        if let display = AnnotationController.displayID(of: screen), display != controller.hudDisplay {
+        if let display = screen?.displayID, display != controller.hudDisplay {
             controller.hudDisplay = display
         }
     }
@@ -362,7 +362,7 @@ struct HUDView: View {
             if controller.isHUDShown, controller.isPickingWindow {
                 HUDAccessoryPicker(
                     model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
-                    selectedID: controller.isRecordMode ? controller.clipSource.id : controller.source?.id,
+                    selectedID: controller.isRecordMode ? controller.clipSource.id : controller.scope.source?.id,
                     onOpen: controller.openSourcePicker, onBack: controller.stepBackInSourcePicker, onChoose: controller.choose
                 )
                     .transition(Self.zoom)
