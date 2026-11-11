@@ -15,6 +15,8 @@ struct AgentSetupTests {
         environment.authorization = "Bearer secret"
         let setup = AgentSetup(installer: Installer(environment: environment), placeholderIcon: Fixtures.appIcon)
         let texts = Dictionary(uniqueKeysWithValues: setup.copySetups.map { ($0.title, $0.text) })
+        // None is for another machine: Remote machines sets those up, and keeps the token here.
+        #expect(setup.copySetups.map(\.title) == ["Claude Code Command", "Codex Config (config.toml)", "JSON Config (HTTP)", "JSON Config (stdio)"])
 
         for title in ["Claude Code Command", "Codex Config (config.toml)", "JSON Config (HTTP)"] {
             #expect(texts[title]?.contains("Bearer secret") == true, "\(title)")

@@ -34,7 +34,7 @@ struct AgentSettings: View {
             NodesSection(nodes: setup.nodes, open: open)
 
             SettingsSection("Other agents") {
-                SettingsRow(title: "Copy setup", subtitle: "For agents not listed or on another machine") {
+                SettingsRow(title: "Copy setup", subtitle: "For agents not listed") {
                     Menu {
                         ForEach(setup.copySetups) { item in
                             Button(item.title) {

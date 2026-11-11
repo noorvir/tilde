@@ -129,10 +129,6 @@ Without `default_tools_approval_mode`, Codex asks before each call, and `codex e
 `tilde-mcp` forwards stdio to the HTTP endpoint with the token, which it reads itself, and
 starts Tilde when it is not running.
 
-The last item copies an `ssh -R` command that forwards Tilde's port to another machine, where
-an entry with the token then works. For a server, use Remote machines (below): the token
-stays on your Mac.
-
 **Remote agents** (the agent runs on a server, you annotate on your Mac)
 
 Settings → Agents → Remote machines lists the hosts of your ssh config and connections. Install
