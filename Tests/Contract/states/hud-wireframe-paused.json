@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    600,
+    130
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "wireframe": true,
+  "paused": true,
+  "notes": 1
+}

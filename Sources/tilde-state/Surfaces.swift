@@ -135,9 +135,13 @@ enum Surfaces {
         }
     }
 
-    /// The state's notes; with `clip`, the first is a recording.
+    /// The state's notes; with `wireframeNote`, the last is a wireframe; with `clip`, the first
+    /// is a recording.
     private static func drafts(_ state: UIState) throws -> [Draft] {
-        let drafts = Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true)
+        var drafts = Fixtures.drafts(state.notes ?? 0, withImages: state.images ?? true)
+        if state.wireframeNote == true, !drafts.isEmpty {
+            drafts[drafts.count - 1] = Fixtures.wireframe()
+        }
         guard state.clip == true else {
             return drafts
         }

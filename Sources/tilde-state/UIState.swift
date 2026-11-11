@@ -90,6 +90,8 @@ struct UIState: Decodable {
     var notice: Notice?
     /// The first note is a stopped recording of the Safari window, 12 s long.
     var clip: Bool?
+    /// The last note is a wireframe on the Safari window.
+    var wireframeNote: Bool?
     /// The source picker while it lists ("listing"), after it failed ("failed"), with nothing
     /// to offer ("empty"), while it takes the tiles' pictures ("picturing"), or when it could not
     /// take them ("noPictures").
