@@ -89,7 +89,10 @@ final class AnnotationController: ObservableObject {
 
     /// What the session on screen does; every change goes through `dispatch(_:)`.
     @Published private(set) var flow = SessionFlow(mode: .idle) {
-        didSet { updateOverlayInput() }
+        didSet {
+            updateOverlayInput()
+            saveLastMode()
+        }
     }
     var mode: SessionFlow.Mode { flow.mode }
     /// A session is on screen, also while its report is being made.
@@ -270,7 +273,7 @@ final class AnnotationController: ObservableObject {
     var inbox = inboxRoot
     var pasteboard = NSPasteboard.general
     /// Keeps how the user last chose a window across launches; nil keeps it only in memory.
-    private let defaults: UserDefaults?
+    let defaults: UserDefaults?
     /// When the session on screen started, for its saved record.
     private var sessionStarted = Date()
     private var saveTask: Task<Void, Never>?
@@ -403,6 +406,7 @@ final class AnnotationController: ObservableObject {
         // first; Annotate in the HUD (or the pause shortcut) starts annotating.
         let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
         scopesNextLocalSessionToBrowser = false
+        let lastMode = savedLastMode
         dispatch(.begin(inBrowser: isInBrowser))
 
         layoutOverlays()
@@ -411,6 +415,7 @@ final class AnnotationController: ObservableObject {
             openBrowser(at: session.url)
         } else {
             placeHUD()
+            start(in: lastMode)
         }
     }
 
@@ -1259,7 +1264,9 @@ final class AnnotationController: ObservableObject {
     private var isCheckingContent = false
     let drawingPanel = DrawingPanel()
     @Published private(set) var drawingTool = "arrow"
-    @Published var wireframe: Wireframe?
+    @Published var wireframe: Wireframe? {
+        didSet { saveLastMode() }
+    }
     @Published private(set) var drawingColor = "#2F76FF"
     private var undoneDrawings: [Draft] = []
     var isFindingSnapFrame = false

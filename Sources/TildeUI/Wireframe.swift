@@ -86,7 +86,62 @@ struct Wireframe: Equatable {
     }
 }
 
+/// The mode a new session starts in: the one active last, saved whenever it changes, and
+/// annotation mode until one is saved. Recording mode needs a source, so it saves as no mode.
+enum LastMode: String {
+    case annotating, none, draw, wireframe
+}
+
 extension AnnotationController {
+    /// The mode on screen, or nil while there is none to keep: no session, a report being
+    /// made, choosing a source, or a pause by the hold key or another app.
+    private var currentMode: LastMode? {
+        guard case .open(let open) = flow.mode else {
+            return nil
+        }
+        if wireframe != nil {
+            return .wireframe
+        }
+        if open.isDrawing {
+            return .draw
+        }
+        switch open.activity {
+        case .recording:
+            return LastMode.none
+        case .picking:
+            return nil
+        case .annotating:
+            if open.pauses.isEmpty {
+                return .annotating
+            }
+            return open.pauses.contains(.user) ? LastMode.none : nil
+        }
+    }
+
+    func saveLastMode() {
+        if let mode = currentMode {
+            defaults?.set(mode.rawValue, forKey: "LastMode")
+        }
+    }
+
+    var savedLastMode: LastMode {
+        defaults?.string(forKey: "LastMode").flatMap(LastMode.init) ?? .annotating
+    }
+
+    /// A new session, which begins with no mode, goes into the mode that was active last.
+    func start(in mode: LastMode) {
+        switch mode {
+        case .annotating:
+            dispatch(.toggleAnnotating)
+        case .draw:
+            dispatch(.startDrawing)
+        case .wireframe:
+            startWireframe()
+        case .none:
+            break
+        }
+    }
+
     /// Starts wireframe mode, or switches Draw to it.
     func startWireframe() {
         if !isDrawing {
