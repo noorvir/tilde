@@ -678,6 +678,15 @@ final class ChangingWindow {
         return (state.contains("fullscreen=true"), exits)
     }
 
+    /// The process's id: the app whose text field has the keyboard on the page "typing".
+    var pid: Int { Int(process.processIdentifier) }
+
+    /// On the page "typing": the key code of each key the app got, in order.
+    var keys: [Int] {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: file.path + ".keys"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").compactMap { Int($0) }
+    }
+
     func show(_ page: String) throws {
         try page.write(to: file, atomically: true, encoding: .utf8)
     }

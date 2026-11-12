@@ -82,6 +82,23 @@ func startGlide() {
     glide?.begin()
 }
 
+// "typing", also with "fullscreen": the app comes in front with the keyboard in a text field, as when the user types in
+// another app. "<file>.keys" lists the key code of each key the app gets, in order.
+let field = NSTextField(frame: NSRect(x: 24, y: 370, width: 440, height: 24))
+field.isHidden = true
+content.addSubview(field)
+let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+    let line = "\(event.keyCode)\n"
+    if let handle = FileHandle(forWritingAtPath: file + ".keys") {
+        handle.seekToEndOfFile()
+        handle.write(Data(line.utf8))
+        try? handle.close()
+    } else {
+        try? line.write(toFile: file + ".keys", atomically: true, encoding: .utf8)
+    }
+    return event
+}
+
 var lastToggle = Date.distantPast
 var fullScreenExits = 0
 let exitObserver = NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { _ in
@@ -112,6 +129,12 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         app.activate(ignoringOtherApps: true)
         window.toggleFullScreen(nil)
     }
+    if page.contains("typing"), field.isHidden {
+        field.isHidden = false
+        app.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(field)
+    }
     // The window moved, by a program or by the user.
     if page.hasPrefix("moved"), window.frame.minX < 400 {
         window.setFrameOrigin(NSPoint(x: window.frame.minX + 200, y: window.frame.minY))
@@ -120,6 +143,6 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         row.stringValue = text
     }
 }
-withExtendedLifetime((timer, awake, exitObserver)) {
+withExtendedLifetime((timer, awake, exitObserver, keyMonitor)) {
     app.run()
 }

@@ -601,6 +601,58 @@ struct UXSpecs {
         }
     }
 
+    /// Double Ctrl in another app, while the user types in its text field, opens the HUD with the
+    /// keyboard: ↩, a letter and the HUD's shortcuts reach Tilde without a click, and Esc
+    /// pauses, then closes it. The text field gets none of them. Then the same in an app in full
+    /// screen, which stays in full screen.
+    @Test func doubleControlInATextFieldGivesTheHUDTheKeys() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await useHUDKeys(app, over: window, page: "typing")
+            #expect(window.keys == [])
+
+            try window.show("fullscreen typing")
+            for _ in 0..<60 where window.fullScreen?.isOn != true {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try await useHUDKeys(app, over: window, page: "fullscreen typing")
+            #expect(window.keys == [])
+            #expect(window.fullScreen?.isOn == true)
+            #expect(window.fullScreen?.exits == 0)
+        }
+    }
+
+    /// With the keyboard in the window's text field, double Ctrl opens the HUD; ↩, B, D (Draw)
+    /// and ⌘↩ (Done, which pauses) work in Tilde, and Esc closes the HUD. Opened again, paused
+    /// as it ended, Esc closes it.
+    private func useHUDKeys(_ app: TildeApp, over window: ChangingWindow, page: String) async throws {
+        try window.show(page)
+        for _ in 0..<60 where try await app.focus().app != window.pid {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let typing = try await app.focus()
+        try #require(typing.app == window.pid)
+        #expect(typing.role == "AXTextField")
+
+        try await app.doubleTap("control")
+        try await app.waitToSee("Annotating")
+        try await app.key(.enter)
+        try await app.key(.b)
+        try await app.key(.d)
+        try await app.waitToSee("Done, ⌘↩", timeout: 5)
+        try await app.key(.enter, command: true)
+        try await app.waitToSee("Paused", timeout: 5)
+        try await app.key(.escape)
+        try await app.waitNotToSee("Paused", timeout: 5)
+
+        // The next session starts as the last one ended: paused, with no mode.
+        try await app.doubleTap("control")
+        try await app.waitToSee("Paused")
+        try await app.key(.escape)
+        try await app.waitNotToSee("Paused", timeout: 5)
+    }
+
     // MARK: - Wireframe
 
     /// A wireframe drawn on another app's window reaches the agent. W starts wireframe mode, a
