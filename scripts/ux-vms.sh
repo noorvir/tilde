@@ -9,7 +9,7 @@ set -- ${TILDE_UX_VMS:-tilde-ux tilde-ux-2}
 first=$1
 second=$2
 # About half of the time: the specs of the second VM.
-split="aNodeIsInstalled|aClickInAnotherBrowser|aPasteInACommentBox"
+split="aNodeIsInstalled|aClickInAnotherBrowser"
 
 # Built once, here: both runs copy it.
 proxy/build.sh

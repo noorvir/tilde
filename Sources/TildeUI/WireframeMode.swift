@@ -141,7 +141,7 @@ final class WireframeMode: ObservableObject {
 
     /// The window list was read: also for windows that send no move notifications.
     func windowsRead() {
-        checkWindow()
+        checkWindow(frame: follower.frame)
     }
 
     private func follow(_ window: ElementPicker.WindowInfo) {

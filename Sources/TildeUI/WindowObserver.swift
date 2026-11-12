@@ -11,7 +11,17 @@ final class WindowObserver {
     private var tokens: [NSObjectProtocol] = []
     private var observer: AXObserver?
     private var element: AXUIElement?
+    private weak var own: NSWindow?
     private let onChange: (CGRect?) -> Void
+
+    /// The window's frame now, in Quartz coordinates, from the window itself: ahead of the
+    /// window list while the window moves. Nil when it is unknown.
+    var frame: CGRect? {
+        if let own {
+            return own.frame.flipped
+        }
+        return element.flatMap(Self.frame(of:))
+    }
 
     init?(window: ElementPicker.WindowInfo, onChange: @escaping (CGRect?) -> Void) {
         self.onChange = onChange
@@ -19,6 +29,7 @@ final class WindowObserver {
             guard let own = NSApp.windows.first(where: { $0.windowNumber == window.number }) else {
                 return nil
             }
+            self.own = own
             let center = NotificationCenter.default
             // A click raises the window above its overlay; coming forward is a change too.
             tokens = [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didBecomeKeyNotification, NSWindow.didBecomeMainNotification].map { name in

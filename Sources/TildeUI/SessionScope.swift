@@ -128,7 +128,7 @@ final class SessionScope: ObservableObject {
     /// The window list was read: also for windows that send no move notifications, and for a
     /// window that came forward over its overlay.
     func windowsRead() {
-        check()
+        check(frame: follower.frame)
         if waitsForBrowser {
             takeBrowser()
         }

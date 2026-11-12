@@ -17,6 +17,13 @@ final class ScopeFollower {
     private var followTimer: Timer?
     private var followsUntil = Date.distantPast
 
+    /// The window's frame now, from the window itself, where it says so: the window list can be
+    /// some frames behind while the window moves, and a check with it would move what follows
+    /// the window back. Nil when only the window list knows.
+    var frame: CGRect? {
+        windowObserver?.frame
+    }
+
     /// Follows `window`; `page` is the view of Tilde's browser page when it is the browser's.
     func start(_ window: ElementPicker.WindowInfo, page: NSView?) {
         stop()
@@ -55,7 +62,8 @@ final class ScopeFollower {
     }
 
     /// The window moved or resized: check it at once, then at display rate for 300 ms, as move
-    /// notifications can come in bursts and end before the last frame.
+    /// notifications can come in bursts and end before the last frame. The checks read the
+    /// window's own frame.
     private func windowMoved(to frame: CGRect?) {
         onCheck(frame)
         followsUntil = Date().addingTimeInterval(0.3)
@@ -69,7 +77,7 @@ final class ScopeFollower {
                     self?.followTimer = nil
                     return
                 }
-                self.onCheck(nil)
+                self.onCheck(self.frame)
             }
         }
     }
