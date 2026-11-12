@@ -694,6 +694,15 @@ final class ChangingWindow {
         return numbers.count == 2 ? CGPoint(x: numbers[0], y: numbers[1]) : nil
     }
 
+    /// Whether the pointer moved over the window since `forgetPointer()`.
+    var hasPointer: Bool {
+        FileManager.default.fileExists(atPath: file.path + ".pointer")
+    }
+
+    func forgetPointer() {
+        try? FileManager.default.removeItem(atPath: file.path + ".pointer")
+    }
+
     func show(_ page: String) throws {
         try page.write(to: file, atomically: true, encoding: .utf8)
     }

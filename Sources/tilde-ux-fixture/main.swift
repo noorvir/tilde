@@ -16,12 +16,22 @@ window.level = .floating
 window.backgroundColor = .white
 
 /// The window's content, which knows when a press reached it, also the first press while
-/// another app is in front.
+/// another app is in front. "<file>.pointer" is there once the pointer moved over it.
 final class PressedView: NSView {
     private(set) var isPressed = false
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        FileManager.default.createFile(atPath: file + ".pointer", contents: nil)
     }
 
     override func mouseDown(with event: NSEvent) {

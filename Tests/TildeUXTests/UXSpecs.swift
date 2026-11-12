@@ -580,8 +580,7 @@ struct UXSpecs {
             let mark = CGRect(x: frame.minX + 1, y: frame.minY + 50, width: 4, height: 300)
             try await waitFor(app, at: mark, Picture.isMark, atMost: 0)
             let beside = CGPoint(x: frame.minX + 480, y: frame.minY + 330)
-            try await app.hover(over: beside)
-            try await Task.sleep(for: .milliseconds(50))
+            try await move(app, to: beside, reaching: window)
             try await app.click(at: beside)
             try await waitFor(app, at: mark, Picture.isMark, atLeast: 200)
 
@@ -685,6 +684,17 @@ struct UXSpecs {
         try await app.waitNotToSee("Paused", timeout: 5)
     }
 
+    /// Moves the pointer to `point`, a little at a time as a hand does, until the window behind
+    /// the canvas gets it: the canvas lets it through once the page checked the place.
+    private func move(_ app: TildeApp, to point: CGPoint, reaching window: ChangingWindow, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        window.forgetPointer()
+        for step in 0..<40 where !window.hasPointer {
+            try await app.hover(over: CGPoint(x: point.x + Double(step % 2), y: point.y))
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(window.hasPointer, "the pointer does not reach the window behind", sourceLocation: sourceLocation)
+    }
+
     // MARK: - Wireframe
 
     /// A wireframe drawn on another app's window reaches the agent. W starts wireframe mode, a
@@ -737,8 +747,7 @@ struct UXSpecs {
             let pressMark = CGRect(x: frame.minX + 1, y: frame.minY + 50, width: 4, height: 300)
             try await waitFor(app, at: pressMark, Picture.isMark, atMost: 0)
             let empty = CGRect(x: frame.minX + 350, y: frame.minY + 250, width: 80, height: 80)
-            try await app.hover(over: CGPoint(x: empty.maxX + 50, y: empty.minY))
-            try await Task.sleep(for: .milliseconds(50))
+            try await move(app, to: CGPoint(x: empty.maxX + 50, y: empty.minY), reaching: window)
             try await app.drag(from: CGPoint(x: empty.maxX + 50, y: empty.minY), to: CGPoint(x: empty.minX, y: empty.maxY))
             try await waitFor(app, at: pressMark, Picture.isMark, atLeast: 200)
             try await Task.sleep(for: .milliseconds(300))
