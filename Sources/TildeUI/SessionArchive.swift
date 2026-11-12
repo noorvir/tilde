@@ -79,7 +79,7 @@ final class SessionArchive: @unchecked Sendable {
         self.root = root
     }
 
-    /// Application Support, or the folder in `TILDE_SESSIONS` (tests and the e2e use their own).
+    /// Application Support, or the folder in `TILDE_SESSIONS` (the UX specs use their own).
     static let defaultRoot: URL = {
         if let path = ProcessInfo.processInfo.environment["TILDE_SESSIONS"], !path.isEmpty {
             return URL(fileURLWithPath: path, isDirectory: true)

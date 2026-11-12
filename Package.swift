@@ -26,8 +26,6 @@ let package = Package(
         .executableTarget(name: "tilde-mcp", dependencies: ["TildeInstaller"], swiftSettings: strict),
         // Writes the app icon from TildeMark; see scripts/build-app.sh.
         .executableTarget(name: "tilde-icon", dependencies: ["TildeUI"], swiftSettings: strict),
-        // Drives the real UI in-process with synthesized events; see scripts/e2e.sh.
-        .executableTarget(name: "tilde-e2e", dependencies: ["TildeCore", "TildeUI"], exclude: ["fixture.html"], swiftSettings: strict),
         // Posts real input and captures the screen for tests on a real display; see scripts/build-driver.sh.
         .executableTarget(name: "tilde-driver", dependencies: ["TildeCore"], swiftSettings: strict),
         // A window whose whole content changes, for the UX specs: stands in for an app that

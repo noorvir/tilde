@@ -103,7 +103,7 @@ public func writePrivate(_ data: Data, to file: URL) throws {
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
 }
 
-/// `~/.tilde/inbox`, or the folder in `TILDE_INBOX` (the e2e harness uses its own).
+/// `~/.tilde/inbox`, or the folder in `TILDE_INBOX` (the UX specs use their own).
 public let inboxRoot: URL = {
     if let path = ProcessInfo.processInfo.environment["TILDE_INBOX"], !path.isEmpty {
         return URL(fileURLWithPath: path, isDirectory: true)

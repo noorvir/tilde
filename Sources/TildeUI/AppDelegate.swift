@@ -125,11 +125,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         browserEvents = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .keyDown]) { [browser] event in
             browser.handle(event) ? nil : event
         }
-        if let folder = UserDefaults.standard.string(forKey: "captureSettings") {
-            Task {
-                await SettingsCapture.run(settings, model: model, browser: self.browser, to: URL(fileURLWithPath: (folder as NSString).expandingTildeInPath))
-            }
-        }
         startServer()
         setup.nodes.startLinks()
         offerUnfinishedSession()
