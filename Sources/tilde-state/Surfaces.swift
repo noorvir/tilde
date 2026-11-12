@@ -28,18 +28,13 @@ enum Surfaces {
             return try await hosted(InstallToastView(state: toast), size: size)
 
         case .settings:
-            // Settings reads the look from the defaults, as the app does.
+            // Settings reads the look from the defaults, as the app does. The registration
+            // domain is this process's own: the states are drawn in several at once.
             let look = state.look?.value ?? WireframeLook()
-            let defaults = UserDefaults.standard
-            defaults.set(look.style.rawValue, forKey: WireframeLook.Key.style)
-            defaults.set(look.fill, forKey: WireframeLook.Key.fill)
-            defaults.set(look.blur, forKey: WireframeLook.Key.blur)
-            defaults.set(look.fade, forKey: WireframeLook.Key.fade)
-            defer {
-                for key in [WireframeLook.Key.style, WireframeLook.Key.fill, WireframeLook.Key.blur, WireframeLook.Key.fade] {
-                    defaults.removeObject(forKey: key)
-                }
-            }
+            UserDefaults.standard.register(defaults: [
+                WireframeLook.Key.style: look.style.rawValue, WireframeLook.Key.fill: look.fill,
+                WireframeLook.Key.blur: look.blur, WireframeLook.Key.fade: look.fade,
+            ])
             return try await hosted(SettingsView(model: try settings(state.settings!)), size: size)
 
         case .canvas:
