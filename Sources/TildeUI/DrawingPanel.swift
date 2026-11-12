@@ -511,16 +511,6 @@ private final class CanvasPanel: FloatingPanel {
     private var heldEvents: [NSEvent]?
     private var isPressTaken = false
 
-    /// The canvas is the end of its keys' way. A key that neither Tilde nor the page used, such
-    /// as Return or ←, comes here twice: as the key, which WebKit gives back, and as the key's
-    /// command, such as `insertNewline:`. Neither does anything here, and neither plays the
-    /// alert sound that a window plays for them.
-    override func keyDown(with event: NSEvent) {}
-
-    override func doCommand(by selector: Selector) {
-        _ = tryToPerform(selector, with: nil)
-    }
-
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, !isTyping, onKey(event) {
             return

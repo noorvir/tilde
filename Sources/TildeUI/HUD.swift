@@ -224,10 +224,21 @@ final class HUDPanel {
 /// While one of its text views has the keyboard, Tilde is the app in front, as with any text
 /// field on the Mac: dictation and paste tools look for the focused element in the app in
 /// front. The app that was in front before gets it back when the text view lets go.
+///
+/// It is the end of its keys' way. A key that nothing in it used, such as Return on the
+/// overlay or on the canvas's page, comes here as the key, and from a text field or a web view
+/// also as the key's command, such as `insertNewline:`. Neither does anything here, and neither
+/// plays the alert sound that a window plays for them.
 class FloatingPanel: NSPanel {
     private var returnApp: NSRunningApplication?
 
     override var canBecomeKey: Bool { true }
+
+    override func keyDown(with event: NSEvent) {}
+
+    override func doCommand(by selector: Selector) {
+        _ = tryToPerform(selector, with: nil)
+    }
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, insertNewlineOnShiftReturn(event, in: self) {

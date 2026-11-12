@@ -4,7 +4,7 @@ import Combine
 /// Transparent window that receives hover, click and drag while annotating: one per screen
 /// above everything, or, for a session limited to one window, one the size of that window
 /// ordered just above it, so windows brought in front of it cover it too.
-final class OverlayWindow: NSPanel {
+final class OverlayWindow: FloatingPanel {
     static let overlayLevel = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
 
     /// On one window, ordered just above it, instead of on a whole screen.
@@ -43,8 +43,6 @@ final class OverlayWindow: NSPanel {
         // Esc and ⌘↩ reach the view only when it is the first responder.
         makeFirstResponder(view)
     }
-
-    override var canBecomeKey: Bool { true }
 
     /// Close (⌘W) acts on the key window. On Tilde's browser that is often this overlay, a
     /// child window with no close button, so Close goes to the browser.
