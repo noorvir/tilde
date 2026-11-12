@@ -45,7 +45,7 @@ export function wireframeElements(kind, { x, y, width, height }, data, groupIds 
 // A new kind keeps the rect and the label, and the fill or rows where the new kind has them.
 export function changedKind(frame, kind) {
   const old = frame.customData;
-  const data = { ...newData(kind), tildeWireframe: kind, label: old.label };
+  const data = { ...newData(kind), tildeWireframe: kind, label: old.label, comment: old.comment };
   if (old.borders) data.borders = old.borders;
   if (old.radius) data.radius = old.radius;
   if ("filled" in data && old.filled !== undefined) data.filled = old.filled;

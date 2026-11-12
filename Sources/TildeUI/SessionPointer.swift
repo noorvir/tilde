@@ -119,6 +119,11 @@ extension AnnotationController {
     /// A press on the canvas, at a Quartz point. True: it opened the preview of the note
     /// whose label is there, and the canvas does not get it.
     func canvasPressed(at point: CGPoint) -> Bool {
+        // A press beside the Style menu closes it, and does nothing more.
+        if wireframe.isStyleMenuOpen {
+            wireframe.isStyleMenuOpen = false
+            return true
+        }
         if isWireframe {
             wireframe.pressed(at: point)
         }

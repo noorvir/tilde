@@ -20,6 +20,14 @@ enum Surfaces {
             return try await Renderer.render(hosting, size: size, appearance: appearance)
         }
 
+        // Settings and the Style menu read the look from the defaults, as the app does. The
+        // registration domain is this process's own: the states are drawn in several at once.
+        let look = state.look?.value ?? WireframeLook()
+        UserDefaults.standard.register(defaults: [
+            WireframeLook.Key.style: look.style.rawValue, WireframeLook.Key.fill: look.fill,
+            WireframeLook.Key.blur: look.blur, WireframeLook.Key.fade: look.fade,
+        ])
+
         switch state.surface {
         case .toast:
             let toast = InstallToastState()
@@ -28,13 +36,6 @@ enum Surfaces {
             return try await hosted(InstallToastView(state: toast), size: size)
 
         case .settings:
-            // Settings reads the look from the defaults, as the app does. The registration
-            // domain is this process's own: the states are drawn in several at once.
-            let look = state.look?.value ?? WireframeLook()
-            UserDefaults.standard.register(defaults: [
-                WireframeLook.Key.style: look.style.rawValue, WireframeLook.Key.fill: look.fill,
-                WireframeLook.Key.blur: look.blur, WireframeLook.Key.fade: look.fade,
-            ])
             return try await hosted(SettingsView(model: try await settings(state.settings!, look: look)), size: size)
 
         case .canvas:
@@ -76,7 +77,14 @@ enum Surfaces {
             return try await hosted(toolbar, size: CGSize(width: BrowserMetrics.minWindowWidth, height: BrowserMetrics.toolbarHeight))
 
         case .hud:
-            return try await hosted(HUDView(controller: try await controller(state)), size: size)
+            let controller = try await controller(state)
+            if state.styleMenu == true {
+                // Its tiles drawn before it shows, as it draws them.
+                controller.wireframe.previews = WireframePreviews(html: { try? CanvasSurface.html() })
+                try await controller.wireframe.previews.draw(look)
+                controller.wireframe.isStyleMenuOpen = true
+            }
+            return try await hosted(HUDView(controller: controller), size: size)
 
         case .comment:
             let controller = try await controller(state)

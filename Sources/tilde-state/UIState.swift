@@ -155,6 +155,8 @@ struct UIState: Decodable {
     var toast: Toast?
     var settings: Settings?
     var look: Look?
+    /// The wireframe bar's Style menu is open.
+    var styleMenu: Bool?
     var chip: Chip?
 
     init(file: URL) throws {

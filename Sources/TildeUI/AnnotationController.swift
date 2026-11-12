@@ -180,7 +180,7 @@ final class AnnotationController: ObservableObject {
         hoverPicker = HoverPicker(picker: picker)
         scope = SessionScope(picker: picker, browser: browser)
         drawing = DrawingNotes(picker: picker)
-        wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser)
+        wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
         flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
 
@@ -440,6 +440,10 @@ final class AnnotationController: ObservableObject {
 
     /// Esc, and the picker's "‹ Back".
     func escapePressed() {
+        if wireframe.isStyleMenuOpen {
+            wireframe.isStyleMenuOpen = false
+            return
+        }
         // In the picker, Esc first goes from an app's windows back to the apps.
         if isSourcePickerOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
@@ -1045,8 +1049,9 @@ final class AnnotationController: ObservableObject {
         focusCanvas()
     }
 
-    /// Done: the components become one note, whose comment box opens, or they replace the
-    /// note that they were shown from; then the mode ends. Nothing drawn: the mode only ends.
+    /// Done: the components become one note, with no comment box, as each component has its
+    /// own comment; or they replace the note that they were shown from. Then the mode ends.
+    /// Nothing drawn: the mode only ends.
     private func takeWireframe() async {
         if let taken = await wireframe.take() {
             keep(taken)
@@ -1056,7 +1061,8 @@ final class AnnotationController: ObservableObject {
 
     private func keep(_ taken: WireframeMode.Taken) {
         guard let replaced = taken.replaces else {
-            openComposer(taken.note)
+            let pending = Pending(taken.note, browser: browser, withContext: session?.capturesContext ?? false)
+            add(pending, comment: "")
             return
         }
         if let index = drafts.firstIndex(where: { $0.id == replaced }) {
@@ -1135,27 +1141,32 @@ final class AnnotationController: ObservableObject {
             }
 
         case .new(let pending):
-            let capture = drawing.finish(pending, windowFrame: pending.sourceWindow.flatMap { tracker.windowFrames[$0] })
-            let draft = Draft(pending, comment: comment, capture: capture)
-            drafts.append(draft)
-            tracker.notesAdded()
-            if let tracked = pending.tracked {
-                tracker.follow(draft.id, element: tracked)
-            }
-            Task {
-                let captures = await capture.value
-                guard let index = drafts.firstIndex(where: { $0.id == draft.id }) else {
-                    return
-                }
-                let current = drafts[index].annotation
-                drafts[index].annotation = Annotation(
-                    id: current.id, comment: current.comment, target: current.target, frame: current.frame,
-                    image: captures.image, contextImage: captures.contextImage
-                )
-            }
+            add(pending, comment: comment)
         }
 
         hideComposer()
+    }
+
+    /// A new note in the list; its pictures join it once they are made.
+    private func add(_ pending: Pending, comment: String) {
+        let capture = drawing.finish(pending, windowFrame: pending.sourceWindow.flatMap { tracker.windowFrames[$0] })
+        let draft = Draft(pending, comment: comment, capture: capture)
+        drafts.append(draft)
+        tracker.notesAdded()
+        if let tracked = pending.tracked {
+            tracker.follow(draft.id, element: tracked)
+        }
+        Task {
+            let captures = await capture.value
+            guard let index = drafts.firstIndex(where: { $0.id == draft.id }) else {
+                return
+            }
+            let current = drafts[index].annotation
+            drafts[index].annotation = Annotation(
+                id: current.id, comment: current.comment, target: current.target, frame: current.frame,
+                image: captures.image, contextImage: captures.contextImage
+            )
+        }
     }
 
     func deleteDraft(_ id: Draft.ID) {

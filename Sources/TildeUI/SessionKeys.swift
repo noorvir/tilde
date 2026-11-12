@@ -138,6 +138,11 @@ extension AnnotationController {
             return false
 
         case .canvas:
+            // Esc closes the wireframe's Style menu before it steps back on the canvas.
+            if key == kVK_Escape, wireframe.isStyleMenuOpen {
+                wireframe.isStyleMenuOpen = false
+                return true
+            }
             // ⌘↩ is Done in Draw and Wireframe.
             if isDrawing, key == kVK_Return, event.modifierFlags.contains(.command) {
                 dispatch(.finishDrawing)

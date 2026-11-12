@@ -291,6 +291,44 @@ struct WireframeTests {
         #expect(defaults.string(forKey: "LastMode") == "annotating")
     }
 
+    /// The tool chosen last stays: after Esc put it down and the mode started again, and in
+    /// the next session, from the defaults.
+    @Test func wireframeModeStartsWithTheToolChosenLast() throws {
+        let suite = "tilde-wireframe-tool-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+        }
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
+        controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open()))
+        controller.dispatch(.startWireframe)
+        #expect(controller.wireframe.tool == "card")
+        controller.setWireframeTool("table")
+        controller.escapePressed()
+        #expect(controller.wireframe.tool == nil)
+        controller.dispatch(.toggleAnnotating)
+        controller.dispatch(.startWireframe)
+        #expect(controller.wireframe.tool == "table")
+
+        let next = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
+        #expect(next.wireframe.tool == "table")
+    }
+
+    /// The Style menu closes first: on Esc, and on a press on the canvas, which does nothing
+    /// more; the tool stays.
+    @Test func escAndAPressCloseTheStyleMenuFirst() {
+        open(Open(canvas: .wireframe))
+        controller.wireframe.isStyleMenuOpen = true
+        controller.escapePressed()
+        #expect(!controller.wireframe.isStyleMenuOpen)
+        #expect(controller.wireframe.tool == "card")
+
+        controller.wireframe.isStyleMenuOpen = true
+        #expect(controller.canvasPressed(at: CGPoint(x: 400, y: 300)))
+        #expect(!controller.wireframe.isStyleMenuOpen)
+        #expect(controller.isWireframe)
+    }
+
     // MARK: - The note and the report
 
     /// The report of a wireframe has its components from the top left of their window (or of

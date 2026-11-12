@@ -384,6 +384,10 @@ struct HUDView: View {
                     .fixedSize()
                     .transition(.opacity)
             }
+            if hud.isShown, controller.isWireframe, wireframe.isStyleMenuOpen {
+                WireframeStyleMenu(previews: wireframe.previews)
+                    .transition(Self.zoom)
+            }
             if hud.isShown, controller.showsBrowserAccessory {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: browserOffer.dismiss)
                     .transition(Self.zoom)
@@ -411,6 +415,7 @@ struct HUDView: View {
         .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: hud.showsList)
+        .animation(.spring(duration: 0.28), value: wireframe.isStyleMenuOpen)
         .animation(.spring(duration: 0.28), value: controller.isPickingWindow)
         .animation(.spring(duration: 0.3, bounce: 0), value: controller.isSourcePickerOpen)
         .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
@@ -494,7 +499,9 @@ struct HUDView: View {
     /// The bar under the pill in Draw and Wireframe: the mode's tools, Undo and Redo, then
     /// Done. While paused the tools wait; Done still finishes.
     @ViewBuilder
-    private func canvasBarContent(undoKeys: [String] = [], redoKeys: [String] = [], @ViewBuilder tools: () -> some View) -> some View {
+    private func canvasBarContent(
+        undoKeys: [String] = [], redoKeys: [String] = [], @ViewBuilder tools: () -> some View, @ViewBuilder afterRedo: () -> some View = { EmptyView() }
+    ) -> some View {
         Group {
             tools()
             barDivider
@@ -504,6 +511,7 @@ struct HUDView: View {
             HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: redoKeys, help: "Redo") {
                 controller.dispatch(.redoDrawing)
             }
+            afterRedo()
         }
         .disabled(controller.isDrawingPaused)
         Spacer(minLength: 0)
@@ -598,7 +606,14 @@ struct HUDView: View {
         let size = HUDAccessory.size
         return capsule(HStack(spacing: size.scaled(4)) {
             if controller.isWireframe {
-                canvasBarContent(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"]) { wireframeTools }
+                canvasBarContent(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"]) {
+                    wireframeTools
+                } afterRedo: {
+                    barDivider
+                    HUDButton(image: Image(systemName: "paintpalette"), isOn: wireframe.isStyleMenuOpen, help: "Style") {
+                        wireframe.isStyleMenuOpen.toggle()
+                    }
+                }
             } else {
                 canvasBarContent { drawingTools }
             }
