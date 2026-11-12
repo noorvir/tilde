@@ -128,6 +128,18 @@ struct WireframeLookTests {
         #expect(try await count(##"rect[fill="#1D5BD8"]"##) == 3)
     }
 
+    /// Wireframe mode draws with no colour of Excalidraw's own; Draw, after it, draws in its
+    /// colour again.
+    @Test func drawKeepsItsColourAfterWireframeMode() async throws {
+        try await page.draw("setColor('#FF3B30')")
+        try await page.draw("setWireframe({tool: 'card', icons: {}})")
+        try await page.draw("setWireframe(null)")
+        try await page.draw("setTool('arrow')")
+        try await page.drag(from: CGPoint(x: 100, y: 100), to: CGPoint(x: 300, y: 200))
+        let shapes = try await page.rawShapes()
+        #expect(shapes.map { $0["color"] as? String } == ["#FF3B30"])
+    }
+
     /// The look is the default until Settings change it; a value out of its range is kept to it.
     @Test func theSavedLookStaysInItsRanges() throws {
         let name = "WireframeLookTests"

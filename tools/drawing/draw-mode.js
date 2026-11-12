@@ -61,7 +61,11 @@ export function resetEditing() {
   isWaitingForEdit = false;
 }
 
+// Draw's colour, which wireframe mode gives back when it ends.
+export let drawColor = "#2F76FF";
+
 export function setColor(color) {
+  drawColor = color;
   if (wireframe) return;
   api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });
 }

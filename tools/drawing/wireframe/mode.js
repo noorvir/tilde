@@ -3,7 +3,7 @@
 // Done takes them all. Each component is one element, which wireframe/look.js draws.
 
 import { moveCursor, setSelectMode } from "../cursor.js";
-import { useTool } from "../draw-mode.js";
+import { drawColor, useTool } from "../draw-mode.js";
 import { api, taken, live, changeElements, isTextField } from "../scene.js";
 import { selection, setKindIcons, deleteComponent, hideHandles } from "./chip.js";
 import { kindNames, wireframeElements } from "./components.js";
@@ -32,7 +32,10 @@ export function setWireframe(state) {
     moveCursor.textContent = "";
     changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), () => ({ isDeleted: true }));
     clearHistory();
-    api.updateScene({ appState: { currentItemStrokeStyle: "solid", currentItemStrokeWidth: 2, currentItemRoundness: "round", selectedElementIds: {} }, captureUpdate: "NEVER" });
+    api.updateScene({
+      appState: { currentItemStrokeColor: drawColor, currentItemStrokeStyle: "solid", currentItemStrokeWidth: 2, currentItemRoundness: "round", selectedElementIds: {} },
+      captureUpdate: "NEVER",
+    });
     return;
   }
   api.updateScene({
