@@ -646,11 +646,6 @@ final class ChangingWindow {
         Thread.sleep(forTimeInterval: 0.2)
     }
 
-    /// The app of the window.
-    var pid: Int {
-        Int(process.processIdentifier)
-    }
-
     /// The window's frame with its title bar, as the window server has it.
     var bounds: CGRect? {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []

@@ -573,16 +573,15 @@ struct UXSpecs {
             try await app.waitNotToSee("add")
             try await app.waitToSeeText(containing: "1 note")
 
+            // The window shows its red mark once a press reaches it.
             try await app.key(.escape)
-            #expect(try await app.focus().frontmost != window.pid)
-            let beside = CGPoint(x: frame.minX + 400, y: frame.minY + 330)
+            let mark = CGRect(x: frame.minX + 1, y: frame.minY + 50, width: 4, height: 300)
+            try await waitFor(app, at: mark, Picture.isMark, atMost: 0)
+            let beside = CGPoint(x: frame.minX + 480, y: frame.minY + 330)
             try await app.hover(over: beside)
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(50))
             try await app.click(at: beside)
-            for _ in 0..<40 where try await app.focus().frontmost != window.pid {
-                try await Task.sleep(for: .milliseconds(50))
-            }
-            #expect(try await app.focus().frontmost == window.pid, "The click did not reach the window behind")
+            try await waitFor(app, at: mark, Picture.isMark, atLeast: 200)
         }
     }
 
@@ -630,24 +629,22 @@ struct UXSpecs {
             step("button snapped")
 
             // Esc puts the tool down: the canvas takes the pointer only on the button. A drag
-            // beside it goes to the window behind, which comes to the front, and draws nothing;
+            // beside it goes to the window behind, which shows its red mark, and draws nothing;
             // a drag on the button moves it. The pointer gets to each place before the press,
             // as a hand does.
             try await app.key(.escape)
-            #expect(try await app.focus().frontmost != window.pid)
+            let pressMark = CGRect(x: frame.minX + 1, y: frame.minY + 50, width: 4, height: 300)
+            try await waitFor(app, at: pressMark, Picture.isMark, atMost: 0)
             let empty = CGRect(x: frame.minX + 350, y: frame.minY + 250, width: 80, height: 80)
-            try await app.hover(over: CGPoint(x: empty.minX, y: empty.minY))
-            try await Task.sleep(for: .milliseconds(100))
-            try await app.drag(from: CGPoint(x: empty.minX, y: empty.minY), to: CGPoint(x: empty.maxX, y: empty.maxY))
-            for _ in 0..<40 where try await app.focus().frontmost != window.pid {
-                try await Task.sleep(for: .milliseconds(50))
-            }
-            #expect(try await app.focus().frontmost == window.pid, "The drag beside the button did not reach the window behind")
-            try await Task.sleep(for: .milliseconds(500))
+            try await app.hover(over: CGPoint(x: empty.maxX + 50, y: empty.minY))
+            try await Task.sleep(for: .milliseconds(50))
+            try await app.drag(from: CGPoint(x: empty.maxX + 50, y: empty.minY), to: CGPoint(x: empty.minX, y: empty.maxY))
+            try await waitFor(app, at: pressMark, Picture.isMark, atLeast: 200)
+            try await Task.sleep(for: .milliseconds(300))
             try await waitFor(app, at: empty, Picture.isWireframe, atMost: 0)
             let grab = CGPoint(x: start.x + 80, y: start.y + 20)
             try await app.hover(over: grab)
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(50))
             try await app.drag(from: grab, to: CGPoint(x: start.x + 80, y: start.y + 120))
             try await waitFor(app, at: CGRect(x: start.x + 20, y: start.y + 110, width: 120, height: 20), Picture.isWireframe, atLeast: 200)
             try await waitFor(app, at: CGRect(x: start.x + 20, y: start.y + 10, width: 120, height: 20), Picture.isWireframe, atMost: 0)
@@ -714,7 +711,7 @@ struct UXSpecs {
             try await waitFor(app, at: button, Picture.isWireframe, atLeast: 200)
             try await app.key(.escape)
             try await app.hover(over: CGPoint(x: button.midX, y: middle))
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(50))
             try await app.drag(from: CGPoint(x: button.midX, y: middle), to: CGPoint(x: button.midX, y: middle + 60))
             let moved = button.offsetBy(dx: 0, dy: 60)
             try await waitFor(app, at: moved, Picture.isWireframe, atLeast: 200)

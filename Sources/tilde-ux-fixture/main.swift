@@ -15,6 +15,22 @@ window.title = "Fixture"
 window.level = .floating
 window.backgroundColor = .white
 
+/// The window's content, which knows when a press reached it, also the first press while
+/// another app is in front.
+final class PressedView: NSView {
+    private(set) var isPressed = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+    }
+}
+let content = PressedView()
+window.contentView = content
+
 let wordsA = ["Starlink outages disrupt drone operations", "Users campaign to save the old model", "Developer ditches tool over security", "Notaries in Europe face new rules", "Live news is hosting a broadcast now", "Today in the markets stocks were flat", "A new phone was announced this week", "Scientists find water on a far moon", "Trains are late again across the north", "The final match ends in a tie after all"]
 let wordsB = ["Mountain weather turns cold for skiers", "Garden tips for planting in the autumn", "Cooking with fewer pans saves an hour", "Museum opens wing for modern painters", "River levels rise after a week of rain", "Chess champion wins with a bold attack", "Library extends its hours for students", "Bakery on the corner sells out by noon", "Hikers rescued from ridge in thick fog", "Orchestra plays a free concert in town"]
 
@@ -28,7 +44,7 @@ for index in 0..<10 {
     rows.append(row)
 }
 // A red mark down the left of the content, on the pages "marked" and "glide": where the window
-// is, in each picture of the screen.
+// is, in each picture of the screen. A press on the window shows it too.
 let mark = NSView(frame: NSRect(x: 0, y: 0, width: 6, height: 400))
 mark.wantsLayer = true
 mark.layer?.backgroundColor = NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1).cgColor
@@ -55,7 +71,7 @@ func startGlide() {
 
 let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     let page = (try? String(contentsOfFile: file, encoding: .utf8)) ?? "a"
-    mark.isHidden = !page.hasPrefix("marked") && !page.hasPrefix("glide")
+    mark.isHidden = !content.isPressed && !page.hasPrefix("marked") && !page.hasPrefix("glide")
     if page.hasPrefix("glide"), glide == nil {
         startGlide()
     }
