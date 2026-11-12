@@ -1,12 +1,14 @@
 // Editing a component after it is drawn. Over one, it shows as selected: a drag anywhere on it
 // moves it (a section only by its chip: a drag on a section draws in it), ⌥ and a drag moves a
 // copy, and a double-click edits its label. A chip just below it moves it too: a click on its
-// name changes the kind, its Borders button opens the borders, its other controls set the rows
-// and columns of a table or list or the fill of a rectangle or ellipse, and × deletes it. A
+// name changes the kind, its Borders button opens the borders, its Comment button its comment,
+// its other controls set the rows and columns of a table or list or the fill of a rectangle or
+// ellipse, and × deletes it. A
 // handle at its bottom right resizes it. Moves and resizes snap. Only components not sent yet
 // can change; each change can be undone.
 
 import { editing } from "../draw-mode.js";
+import { commentBox } from "./comment.js";
 import { live, changeElements } from "../scene.js";
 import { rowsOf, allBorders, kindNames, frameOf, clamp } from "./components.js";
 import { record } from "./history.js";
@@ -49,7 +51,7 @@ const gap = { below: 6, above: 2 };
 
 // The component under the pointer, the component that a click selected (its handles show
 // while the pointer is not over another one), and the chip's menu that is open: "kinds",
-// "borders" or null.
+// "borders", "comment" or null.
 export const selection = { hovered: null, selected: null, menu: null };
 
 export const isHandle = (target) => Boolean(target?.closest?.("[data-wireframe-handle]"));
@@ -79,6 +81,14 @@ function bordersButton(borders) {
   return `<span data-menu="borders" role="button" aria-haspopup="menu" aria-expanded="${isOpen}" aria-label="Borders" title="Borders" style="${chipButton};${background}gap:2px;margin-left:4px;padding:0 4px">${bordersIcon(borders)}<span aria-hidden="true">▾</span></span>`;
 }
 
+// The button that opens the comment, filled while the component has one.
+function commentButton(hasComment) {
+  const isOpen = selection.menu === "comment";
+  const background = isOpen ? "background:rgba(255,255,255,.2);" : "";
+  const bubble = `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2.5 3.5h9v6h-5l-3 2.5v-2.5h-1z" fill="${hasComment ? "#fff" : "none"}" stroke="#fff" stroke-width="1.3" stroke-linejoin="round"/></svg>`;
+  return `<span data-menu="comment" role="button" aria-label="Comment" aria-expanded="${isOpen}" title="Comment" style="${chipButton};${background}margin-left:2px">${bubble}</span>`;
+}
+
 // − and + around a count of rows or columns.
 function stepper(name, value) {
   const unit = name === "rows" ? "rows" : "cols";
@@ -93,7 +103,7 @@ function fillToggle(isOn) {
 function chipControls(frame) {
   const data = frame.customData;
   const kind = data.tildeWireframe;
-  let controls = bordersButton(data.borders ?? []);
+  let controls = bordersButton(data.borders ?? []) + commentButton(Boolean(data.comment));
   if (kind === "table" || kind === "list") {
     const counts = rowsOf(kind, frame, data);
     controls += stepper("rows", counts.rows) + (kind === "table" ? stepper("columns", counts.columns) : "");
@@ -176,6 +186,7 @@ export function showHandles() {
     if (bordersMenu.innerHTML !== items) bordersMenu.innerHTML = items;
     placeMenu(bordersMenu, chip.querySelector("[data-menu=borders]"));
   }
+  if (selection.menu === "comment") placeMenu(commentBox, chip.querySelector("[data-menu=comment]"));
 }
 
 // The chip goes just below the component, at its left edge; where it would leave the screen

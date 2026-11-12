@@ -8,6 +8,7 @@ import { api, taken, live, changeElements, isTextField } from "../scene.js";
 import { selection, setKindIcons, deleteComponent, hideHandles } from "./chip.js";
 import { kindNames, wireframeElements } from "./components.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./history.js";
+import { commented, closeComment } from "./comment.js";
 import { labelled, endLabel } from "./labels.js";
 import { stopAdjusting } from "./pointer.js";
 import { hideGuides } from "./snap.js";
@@ -25,6 +26,7 @@ export function setWireframe(state) {
   if (!state) {
     if (!wasOn) return;
     stopAdjusting();
+    if (commented) closeComment(true);
     selection.selected = null;
     if (labelled) endLabel(false);
     hideHandles();
@@ -54,7 +56,7 @@ export function setWireframe(state) {
 export function restoreWireframe({ shapes, origin: [left, top] }) {
   const elements = shapes.filter((shape) => kindNames[shape.type]).flatMap((shape) => {
     const [x, y, width, height] = shape.rect;
-    const data = Object.fromEntries(["label", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
+    const data = Object.fromEntries(["label", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
     return wireframeElements(shape.type, { x: x + left, y: y + top, width, height }, data);
   });
   api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
@@ -65,6 +67,7 @@ export function restoreWireframe({ shapes, origin: [left, top] }) {
 // outline shows in the pictures.
 export function finishEdits() {
   if (labelled) endLabel(true);
+  if (commented) closeComment(true);
   selection.selected = null;
   hideHandles();
   hideGuides();

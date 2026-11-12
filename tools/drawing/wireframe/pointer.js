@@ -1,11 +1,13 @@
-// What the pointer does in wireframe mode: a drag draws a component, moves one, resizes one
-// or, with ⌥, copies one; a click selects one, and a double-click edits its label.
+// What the pointer does in wireframe mode: a drag draws a component, also in another, or with
+// no tool moves one; the chip moves one too, the corner handle resizes one, and ⌥ and a drag
+// copies one. A click selects one, and a double-click or a click on its tag edits its label.
 
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
 import { api, postPointer, live } from "../scene.js";
 import { resizer, typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles, toggleMenu } from "./chip.js";
 import { newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
+import { commentBox, commented, openComment, closeComment } from "./comment.js";
 import { record } from "./history.js";
 import { labelField, labelled, editLabel, endLabel, isDoubleClick } from "./labels.js";
 import { tagAt } from "./look.js";
@@ -63,11 +65,11 @@ function startAdjusting(event, frame, mode, from) {
   showHandles();
 }
 
-// The component a press on it moves, or with ⌥ copies: not a section without ⌥ while a tool
-// is chosen, as a drag draws in it then.
+// The component a press on it moves, or with ⌥ copies. While a tool is chosen a press draws,
+// also on a component, so that one can be drawn in another: a component then moves by its chip.
 function movableAt(event) {
   const component = componentAt(event.clientX, event.clientY);
-  return component && (component.customData.tildeWireframe !== "section" || event.altKey || isSelectMode) ? component : null;
+  return component && (isSelectMode || event.altKey) ? component : null;
 }
 
 function adjust(event) {
@@ -135,6 +137,12 @@ function editWireframe(event) {
     }
     return true;
   }
+  // The comment box takes its own presses, which place the caret.
+  if (commentBox.contains(event.target)) {
+    event.stopImmediatePropagation();
+    return true;
+  }
+  if (event.type === "pointerdown" && commented && !event.target.closest?.("[data-menu=comment]")) closeComment(true);
   if (event.type === "pointerdown" && labelled && event.target !== labelField) endLabel(true);
   if (!isHandle(event.target)) {
     // A click on a component's tag types its label.
@@ -159,7 +167,7 @@ function editWireframe(event) {
     if (event.type === "pointermove" && !isPressed) {
       // Over a tag is over its component.
       const group = (componentAt(event.clientX, event.clientY) ?? tagged)?.groupIds[0] ?? null;
-      if (group !== selection.hovered) selection.menu = null;
+      if (group !== selection.hovered && !commented) selection.menu = null;
       selection.hovered = group;
       const isMovable = Boolean(movableAt(event)) && !labelled;
       isOverComponent = isMovable || (Boolean(tagged) && !labelled);
@@ -180,6 +188,25 @@ function editWireframe(event) {
   if (event.type !== "pointerdown" || !frame) return true;
   if (event.target.closest("[data-menu=borders]")) {
     toggleMenu("borders");
+    return true;
+  }
+  // The Comment button opens the component's comment, or closes it, keeping what was typed.
+  if (event.target.closest("[data-menu=comment]")) {
+    if (commented) {
+      closeComment(true);
+      return true;
+    }
+    // The component is selected while its comment is typed, and as it was after: a comment
+    // adds no step to Esc.
+    const selectedBefore = selection.selected;
+    selection.selected = group;
+    selection.menu = "comment";
+    showHandles();
+    openComment(frame, () => {
+      selection.selected = selectedBefore;
+      selection.menu = null;
+      showHandles();
+    });
     return true;
   }
   const action = event.target.closest("[data-action]")?.dataset.action;

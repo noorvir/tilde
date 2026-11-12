@@ -54,7 +54,7 @@ export function describe(element) {
   if (element.customData?.tildeWireframe) {
     shape.type = element.customData.tildeWireframe;
     delete shape.color;
-    for (const key of ["label", "borders", "rows", "columns", "filled", "radius"]) {
+    for (const key of ["label", "comment", "borders", "rows", "columns", "filled", "radius"]) {
       if (element.customData[key] !== undefined) shape[key] = element.customData[key];
     }
   }

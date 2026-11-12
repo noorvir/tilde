@@ -168,13 +168,24 @@ struct WireframeCanvasTests {
 
     // MARK: - Move, resize and copy
 
-    /// A drag on a component moves it, also while a tool is chosen, and draws nothing.
-    @Test func aDragOnAComponentMovesIt() async throws {
-        try await drawComponent("card")
-        try await page.drag(from: inside, to: CGPoint(x: inside.x + 60, y: inside.y + 40))
+    /// With no tool a drag on a component moves it. With a tool a drag draws, also on a
+    /// component: a section in a section, a card in it; the chip still moves one.
+    @Test func aToolDrawsInAComponentAndNoToolMovesIt() async throws {
+        try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
+        try await drawComponent("section", from: CGPoint(x: 150, y: 150), to: CGPoint(x: 450, y: 400))
+        try await drawComponent("card", from: CGPoint(x: 200, y: 200), to: CGPoint(x: 400, y: 300))
+        let drawn = try await page.shapes()
+        #expect(drawn.map(\.type) == ["section", "section", "card"])
+        #expect(drawn.map(\.rect) == [[100, 100, 600, 400], [150, 150, 300, 250], [200, 200, 200, 100]])
+
+        try await page.hover(CGPoint(x: 300, y: 250))
+        try await page.drag(from: CGPoint(x: 210, y: 315), to: CGPoint(x: 230, y: 325), on: Self.chip)
+        #expect(try await rects().last == [220, 210, 200, 100])
+
+        try await start(tool: "")
+        try await page.drag(from: CGPoint(x: 300, y: 250), to: CGPoint(x: 360, y: 290))
         let moved = try await page.shapes()
-        #expect(moved.map(\.rect) == [[260, 190, 240, 120]])
-        #expect(moved.map(\.type) == ["card"])
+        #expect(moved.map(\.rect) == [[100, 100, 600, 400], [150, 150, 300, 250], [280, 250, 200, 100]])
     }
 
     /// A drag on a section draws in it while a tool is chosen: the section stays. Its chip
@@ -291,6 +302,7 @@ struct WireframeCanvasTests {
         #expect(try await rects().last == [200, 400, 240, 100])
 
         // Moved by 243 to the right: its left edge is 3 points from the first one's right edge.
+        try await start(tool: "")
         try await page.drag(from: CGPoint(x: 320, y: 450), to: CGPoint(x: 563, y: 450))
         #expect(try await rects().last == [440, 400, 240, 100])
 
@@ -334,6 +346,7 @@ struct WireframeCanvasTests {
     @Test func aMovedComponentSnapsToTheLayoutLines() async throws {
         try await page.draw("setSnapTargets({rects: [[600, 400, 300, 200]], containers: [], window: null, screen: null})")
         try await drawComponent("card")
+        try await start(tool: "")
         // Its right edge would be at 596 and its bottom at 396: 4 points from the lines.
         try await page.drag(from: inside, to: CGPoint(x: inside.x + 156, y: inside.y + 126))
         #expect(try await rects() == [[360, 280, 240, 120]])
@@ -347,6 +360,7 @@ struct WireframeCanvasTests {
     /// Undo and redo step through every change: a new component, a move, a label, a delete.
     @Test func undoAndRedoStepThroughEveryChange() async throws {
         try await drawComponent("card")
+        try await start(tool: "")
         try await page.drag(from: inside, to: CGPoint(x: inside.x + 60, y: inside.y + 40))
         try await page.click(CGPoint(x: 380, y: 250))
         try await page.click(CGPoint(x: 380, y: 250))
@@ -452,6 +466,60 @@ struct WireframeCanvasTests {
         #expect(try await page.shapes().map(\.filled) == [false, false])
     }
 
+    /// The chip's Comment button opens a box for that component's comment only. ⌘Return, a
+    /// click elsewhere or a second click on the button keeps it, and the report has it; Esc
+    /// closes only the box and keeps the comment as it was, and leaves no step for Esc after.
+    @Test func theChipsCommentButtonOpensTheComponentsComment() async throws {
+        try await drawComponent("card")
+        try await drawComponent("table", from: CGPoint(x: 600, y: 400), to: CGPoint(x: 800, y: 600))
+        let button = "#tilde-chip [data-menu=\"comment\"]"
+        try await page.hover(inside)
+        #expect(try await !page.shows("#tilde-comment"))
+
+        try await page.click(on: button)
+        #expect(try await page.shows("#tilde-comment"))
+        try await typeComment("Use the brand blue")
+        try await page.press("Enter", meta: true)
+        #expect(try await !page.shows("#tilde-comment"))
+        #expect(try await comments() == ["Use the brand blue", nil])
+
+        try await page.hover(inside)
+        try await page.click(on: button)
+        #expect(try await page.run("document.getElementById('tilde-comment-field').value") as? String == "Use the brand blue")
+        try await typeComment("Another")
+        try await page.press("Escape")
+        #expect(try await !page.shows("#tilde-comment"))
+        #expect(try await comments() == ["Use the brand blue", nil])
+        // The comment took no step of Esc: the next one reaches Tilde.
+        #expect(!page.messages.contains("escape"))
+        try await page.press("Escape")
+        #expect(page.messages.contains("escape"))
+
+        try await page.hover(inside)
+        try await page.click(on: button)
+        try await typeComment("Wider")
+        try await page.click(CGPoint(x: 1000, y: 100))
+        #expect(try await comments() == ["Wider", nil])
+
+        try await page.hover(inside)
+        try await page.click(on: button)
+        try await typeComment("Narrower")
+        try await page.click(on: button)
+        #expect(try await !page.shows("#tilde-comment"))
+        #expect(try await comments() == ["Narrower", nil])
+
+        let taken = try await page.run("window.tildeDraw.takeNewShapes()") as? String ?? ""
+        #expect(taken.contains(#""comment":"Narrower""#))
+    }
+
+    private func typeComment(_ text: String) async throws {
+        try await page.run("(() => { const field = document.getElementById('tilde-comment-field'); field.value = '\(text)'; return 0; })()")
+    }
+
+    private func comments() async throws -> [String?] {
+        try await page.rawShapes().map { $0["comment"] as? String }
+    }
+
     // MARK: - Esc
 
     /// Esc steps back one level at a time: the kinds, then the selection; only with nothing
@@ -482,6 +550,7 @@ struct WireframeCanvasTests {
         try await drawComponent("card")
         try await page.draw("setWireframeWindow([100, 100, 800, 600])")
         #expect(try await rects() == [[200, 150, 240, 120]])
+        try await start(tool: "")
         try await page.drag(from: inside, to: CGPoint(x: inside.x + 60, y: inside.y + 40))
 
         try await page.draw("setWireframeWindow([130, 120, 800, 600])")
@@ -512,6 +581,7 @@ struct WireframeCanvasTests {
         #expect(shown.map(\.columns) == [nil, 2])
         #expect(shown.map(\.borders) == [allBorders, ["top", "bottom"]])
 
+        try await start(tool: "")
         try await page.drag(from: CGPoint(x: 300, y: 240), to: CGPoint(x: 700, y: 240), meta: true)
         #expect(try await rects().first == [590, 180, 240, 120])
     }

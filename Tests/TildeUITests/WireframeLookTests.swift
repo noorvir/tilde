@@ -89,6 +89,7 @@ struct WireframeLookTests {
         // An outline has no white under it either.
         #expect(try await count(##"rect[fill="#FFFFFF"]"##) == 1)
 
+        try await page.draw("setWireframe({tool: '', icons: {}})")
         try await page.drag(from: CGPoint(x: 60, y: 35), to: CGPoint(x: 60, y: 135))
         #expect(try under() == "[[10,110,100,50,0],[400,10,60,60,1]]")
 
