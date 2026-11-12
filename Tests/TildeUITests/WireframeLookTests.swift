@@ -34,8 +34,8 @@ struct WireframeLookTests {
     }
 
     /// A style change redraws the components already drawn, at once, with the marks of the
-    /// style: Technical's offset edge, Hatched's lines, Construction's dashes, ticks and image
-    /// cross, Blueprint's lines past the corners.
+    /// style: Technical's offset edge, Hatched's lines, Construction's dashes and ticks,
+    /// Blueprint's lines past the corners.
     @Test func eachStyleRedrawsTheComponentsAtOnce() async throws {
         try await page.draw("setWireframe({tool: 'card', icons: {}})")
         try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
@@ -54,9 +54,8 @@ struct WireframeLookTests {
         #expect(try await count(offsetEdge) == 0)
 
         try await setLook("construction")
-        #expect(try await count(dashes) >= 4)
+        #expect(try await count(dashes) == 1)
         #expect(try await count(##"path[stroke-width="1.5"]"##) == 4)
-        #expect(try await count(##"rect[x="390"][width="38"]"##) == 1)
         #expect(try await count(hatching) == 0)
 
         try await setLook("blueprint")
@@ -119,13 +118,87 @@ struct WireframeLookTests {
         try await page.draw("setWireframe({tool: 'list', icons: {}})")
         try await page.run("fire('pointermove', 200, 150); window.pressed = fire('pointerdown', 200, 150); fire('pointermove', 300, 270, {isPressed: true, target: window.pressed}); 0")
         try await page.settle()
-        #expect(try await count(##"rect[fill="#1D5BD8"]"##) == 3)
+        // The lines between its rows, and no content.
+        #expect(try await count(##"line[stroke="#2F7BF6"]"##) >= 2)
+        #expect(try await count(##"rect[height="6"]"##) == 0)
         #expect(try await count(##"path[stroke="#1D5BD8"][stroke-width="3"]"##) == 1)
 
         try await page.run("fire('pointerup', 300, 270, {target: window.pressed}); 0")
         try await page.settle()
         #expect(try await page.shapes().map(\.type) == ["list"])
-        #expect(try await count(##"rect[fill="#1D5BD8"]"##) == 3)
+        #expect(try await count(##"line[stroke="#2F7BF6"]"##) >= 2)
+    }
+
+    /// No component shows content, which is not known: a card, a section, a rectangle and a
+    /// circle each have one darker block a padding in (less in a small one), a dropdown one in
+    /// its value's place. A table, a list and a button keep only the lines and the fill of
+    /// their kind. An outline has no block.
+    @Test func eachComponentHasOneInnerBlockInPlaceOfContent() async throws {
+        try await restore(
+            "[{type: 'card', rect: [100, 100, 240, 120]}, {type: 'card', rect: [400, 100, 60, 30]}, {type: 'dropdown', rect: [500, 100, 160, 30]}, "
+                + "{type: 'ellipse', rect: [700, 100, 100, 80], filled: true}, {type: 'rectangle', rect: [850, 100, 100, 80], filled: false}, "
+                + "{type: 'table', rect: [100, 300, 240, 120]}, {type: 'list', rect: [400, 300, 100, 120]}, {type: 'button', rect: [550, 300, 80, 30]}]"
+        )
+        let block = ##"[fill="#1D5BD8"][fill-opacity="0.132"]"##
+        #expect(try await count(block) == 4)
+        #expect(try await count(##"rect[x="112"][y="112"][width="216"][height="96"]"## + block) == 1)
+        // 30 high: a padding of 6.
+        #expect(try await count(##"rect[x="406"][y="106"][width="48"][height="18"]"## + block) == 1)
+        #expect(try await count(##"rect[x="506"][y="106"][width="114"][height="18"]"## + block) == 1)
+        #expect(try await count("ellipse" + block) == 1)
+        #expect(try await count(##"rect[height="6"]"##) == 0)
+    }
+
+    /// Every component has a tag, also with no label: a short empty one. With the pointer over
+    /// the component, or over its tag, the tag is active and says "Add label"; then empty again.
+    @Test func anEmptyTagSaysAddLabelUnderThePointer() async throws {
+        try await page.draw("setWireframe({tool: 'card', icons: {}})")
+        try await restore("[{type: 'card', rect: [200, 150, 240, 120]}]")
+        let emptyTag = ##"rect[x="200"][y="133"][width="28"][height="15"][fill="#2F7BF6"]"##
+        #expect(try await count(emptyTag) == 1)
+        #expect(try await count("text") == 0)
+
+        try await page.hover(CGPoint(x: 320, y: 210))
+        #expect(try await count(##"rect[x="200"][y="133"][width="73"][fill="#1D5BD8"]"##) == 1)
+        #expect(try await texts() == "Add label")
+        try await page.hover(CGPoint(x: 260, y: 140))
+        #expect(try await texts() == "Add label")
+
+        try await page.hover(CGPoint(x: 800, y: 600))
+        #expect(try await count(emptyTag) == 1)
+        #expect(try await count("text") == 0)
+    }
+
+    /// A click on a tag types the label in place, on the tag, which grows with the text. Return
+    /// or a click elsewhere keeps it; Esc keeps the label as it was.
+    @Test func aClickOnTheTagEditsTheLabel() async throws {
+        try await page.draw("setWireframe({tool: 'card', icons: {}})")
+        try await restore("[{type: 'card', rect: [200, 150, 240, 120]}]")
+        try await page.click(CGPoint(x: 210, y: 140))
+        #expect(try await page.shows("#tilde-label"))
+        let place = "[getComputedStyle(document.getElementById('tilde-label')).left, getComputedStyle(document.getElementById('tilde-label')).top].join()"
+        #expect(try await page.run(place) as? String == "200px,133px")
+        try await page.typeLabel("Pricing plans")
+        #expect(try await page.run("document.getElementById('tilde-label').style.width") as? String == "101px")
+        try await page.press("Enter")
+        #expect(try await page.shapes().map(\.label) == ["Pricing plans"])
+        #expect(try await page.shapes().map(\.rect) == [[200, 150, 240, 120]])
+
+        try await page.click(CGPoint(x: 210, y: 140))
+        try await page.typeLabel("Plans")
+        try await page.press("Escape")
+        #expect(try await page.shapes().map(\.label) == ["Pricing plans"])
+
+        try await page.click(CGPoint(x: 210, y: 140))
+        try await page.typeLabel("Plans")
+        try await page.click(CGPoint(x: 800, y: 600))
+        #expect(try await page.shapes().map(\.label) == ["Plans"])
+        #expect(try await texts() == "Plans")
+    }
+
+    /// The texts of the look, joined with commas.
+    private func texts() async throws -> String? {
+        try await page.run("[...document.querySelectorAll('#tilde-look text')].map((text) => text.textContent).join()") as? String
     }
 
     /// Wireframe mode draws with no colour of Excalidraw's own; Draw, after it, draws in its

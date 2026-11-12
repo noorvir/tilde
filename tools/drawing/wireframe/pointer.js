@@ -8,6 +8,7 @@ import { resizer, typeMenu, bordersMenu, selection, isHandle, deleteComponent, s
 import { newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { record } from "./history.js";
 import { labelField, labelled, editLabel, endLabel, isDoubleClick } from "./labels.js";
+import { tagAt } from "./look.js";
 import { wireframe } from "./mode.js";
 import { snapLines, nearest, nearestOf, hideGuides, showGuides } from "./snap.js";
 
@@ -15,7 +16,8 @@ import { snapLines, nearest, nearestOf, hideGuides, showGuides } from "./snap.js
 let wireframePress = null;
 // The move or resize under way.
 export let adjusting = null;
-export let isOverMovable = false;
+// The pointer is over a component that moves, or over a tag: a press there draws nothing.
+export let isOverComponent = false;
 
 // The mode ended: no move is under way.
 export function stopAdjusting() {
@@ -135,6 +137,15 @@ function editWireframe(event) {
   }
   if (event.type === "pointerdown" && labelled && event.target !== labelField) endLabel(true);
   if (!isHandle(event.target)) {
+    // A click on a component's tag types its label.
+    const tagged = tagAt(event.clientX, event.clientY);
+    if (event.type === "pointerdown" && tagged) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      selectGroup(tagged.groupIds[0]);
+      editLabel(tagged);
+      return true;
+    }
     if (event.type === "pointerdown") {
       const component = movableAt(event);
       if (component) {
@@ -146,11 +157,15 @@ function editWireframe(event) {
       hideHandles();
     }
     if (event.type === "pointermove" && !isPressed) {
-      const group = componentAt(event.clientX, event.clientY)?.groupIds[0] ?? null;
+      // Over a tag is over its component.
+      const group = (componentAt(event.clientX, event.clientY) ?? tagged)?.groupIds[0] ?? null;
       if (group !== selection.hovered) selection.menu = null;
       selection.hovered = group;
-      isOverMovable = Boolean(movableAt(event)) && !labelled;
-      const cursor = isOverMovable ? (event.altKey ? "copy" : "move") : isSelectMode ? "default" : "";
+      const isMovable = Boolean(movableAt(event)) && !labelled;
+      isOverComponent = isMovable || (Boolean(tagged) && !labelled);
+      let cursor = isSelectMode ? "default" : "";
+      if (isMovable) cursor = event.altKey ? "copy" : "move";
+      if (tagged && !labelled) cursor = "text";
       moveCursor.textContent = cursor ? `canvas { cursor: ${cursor} !important; }` : "";
       showHandles();
     }
@@ -248,7 +263,7 @@ export function snapPointer(event) {
   }
   const tool = api?.getAppState().activeTool.type;
   const pointer = { x: event.clientX, y: event.clientY };
-  if (tool !== "rectangle" || editing || labelled || isOverMovable) {
+  if (tool !== "rectangle" || editing || labelled || isOverComponent) {
     hideGuides();
     return;
   }

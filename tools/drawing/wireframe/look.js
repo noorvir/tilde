@@ -1,10 +1,11 @@
 // The look of the components: an SVG over the canvas that draws each one from its element, in
-// the style, fill and fade of Tilde's settings. Each has square corners, placeholder bars for
-// its text, and its label on a tag at its top left. Under a component with a fill, the screen
-// is faded here, and blurred by Tilde, which gets the shapes to blur from the `under:` message.
+// the style, fill and fade of Tilde's settings. Each has square corners, a plain inner block in
+// place of its content, which is not known, the lines that make its kind, and a label tag at
+// its top left, empty until it has a label. Under a component with a fill, the screen is faded
+// here, and blurred by Tilde, which gets the shapes to blur from the `under:` message.
 
-import { api, live, post } from "../scene.js";
-import { newData, rowsOf } from "./components.js";
+import { api, live, post, taken } from "../scene.js";
+import { clamp, newData, rowsOf } from "./components.js";
 import { wireframe } from "./mode.js";
 
 const blue = "#2F7BF6";
@@ -40,11 +41,47 @@ export function tagTop({ y }) {
   return y >= 17 ? y - 17 : y + 2;
 }
 
-export function tagWidth(label) {
-  return label.length * 7 + 10;
+// A tag as wide as its text, or a short empty one.
+export function tagWidth(text) {
+  return text ? text.length * 7 + 10 : 28;
 }
 
-// What each component looks like now, by element id: the version and look it was drawn for.
+const placeholder = "Add label";
+
+// The tag of the component under the pointer is active: darker, and with "Add label" when it
+// has no label.
+let activeGroup = null;
+
+export function setActiveTag(group) {
+  if (group === activeGroup) return;
+  activeGroup = group;
+  drawLook();
+}
+
+// A component's tag as it shows now: its text, whether that is the placeholder, and whether
+// it is active.
+function tagText(frame) {
+  const label = frame.customData.label;
+  const isActive = frame.groupIds[0] === activeGroup;
+  if (label) return { text: label, isPlaceholder: false, isActive };
+  if (isActive) return { text: placeholder, isPlaceholder: true, isActive };
+  return { text: "", isPlaceholder: false, isActive };
+}
+
+export function shownTagWidth(frame) {
+  return tagWidth(tagText(frame).text);
+}
+
+// The component whose tag is at a point; not one that Done took.
+export function tagAt(x, y) {
+  return live().filter((element) => element.customData?.tildeWireframe && !taken.has(element.id) && !element.customData.isLabelling).reverse().find((frame) => {
+    const top = tagTop(frame);
+    return x >= frame.x && x <= frame.x + shownTagWidth(frame) && y >= top && y <= top + 15;
+  });
+}
+
+// What each component looks like now, by element id: the version, look and tag it was drawn
+// for.
 let shown = [];
 
 // Draws the components that changed since the last time; Excalidraw calls it on every change.
@@ -53,17 +90,19 @@ export function drawLook() {
   const lookKey = `${look.style} ${look.fill} ${look.fade}`;
   const components = live().filter((element) => element.customData?.tildeWireframe).map((element) => ({
     id: element.id, version: element.version, kind: element.customData.tildeWireframe, rect: element, data: element.customData,
+    tag: tagText(element),
   }));
   // The rectangle being drawn, which Excalidraw draws in no colour, shows as the component.
   const drawing = api.getAppState().newElement;
   if (wireframe?.tool && drawing?.type === "rectangle" && !drawing.customData) {
-    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool) });
+    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool), tag: { text: "", isPlaceholder: false, isActive: false } });
   }
 
   const next = components.map((component) => {
     const old = shown.find((entry) => entry.id === component.id);
-    if (old?.version === component.version && old.lookKey === lookKey) return old;
-    return { id: component.id, version: component.version, lookKey, ...componentNodes(component) };
+    const tagKey = `${component.tag.text} ${component.tag.isActive}`;
+    if (old?.version === component.version && old.lookKey === lookKey && old.tagKey === tagKey) return old;
+    return { id: component.id, version: component.version, lookKey, tagKey, ...componentNodes(component) };
   });
   const isSameOrder = next.length === shown.length && next.every((entry, index) => entry.id === shown[index].id);
   if (isSameOrder) {
@@ -96,7 +135,7 @@ function postUnder(components) {
 }
 
 // A component's two parts: the faded screen under it, and its look.
-function componentNodes({ kind, rect: { x, y, width, height }, data }) {
+function componentNodes({ kind, rect: { x, y, width, height }, data, tag }) {
   const { style, fill, fade } = look;
   const under = node("g");
   const top = node("g");
@@ -111,8 +150,14 @@ function componentNodes({ kind, rect: { x, y, width, height }, data }) {
     return node("rect", { x, y, width, height, ...attributes });
   };
   const line = (x1, y1, x2, y2, lineWidth = 1) => add("line", { x1, y1, x2, y2, stroke: blue, "stroke-width": lineWidth, "stroke-dasharray": dash });
-  const bar = (left, barTop, barWidth) => {
-    if (barWidth >= 8) add("rect", { x: left, y: barTop, width: barWidth, height: 6, fill: dark, "fill-opacity": 0.6 });
+  // The block that stands for the content: a darker tint of the fill, a padding in.
+  const pad = clamp(Math.min(width, height) * 0.2, 4, 12);
+  const innerBox = (boxWidth) => {
+    const boxHeight = height - 2 * pad;
+    if (!isFilled || boxWidth < 4 || boxHeight < 4) return;
+    const tint = { fill: dark, "fill-opacity": fill * 0.6 };
+    if (isEllipse) add("ellipse", { cx: x + width / 2, cy: y + height / 2, rx: boxWidth / 2, ry: boxHeight / 2, ...tint });
+    else add("rect", { x: x + pad, y: y + pad, width: boxWidth, height: boxHeight, ...tint });
   };
 
   if (isFilled) under.append(shape({ fill: "#FFFFFF", "fill-opacity": fade }));
@@ -126,51 +171,37 @@ function componentNodes({ kind, rect: { x, y, width, height }, data }) {
   }
   drawBorders({ x, y, width, height }, borders, isEllipse, { top, add, line, shape, style, strokeWidth, dash });
 
-  if (kind === "card") {
-    const hasImage = style === "construction" && width >= 120 && height >= 40;
-    const room = width - (hasImage ? 74 : 24);
-    bar(x + 12, y + 16, Math.min(90, room));
-    if (height >= 44) bar(x + 12, y + 32, Math.min(130, room));
-    if (hasImage) {
-      add("rect", { x: x + width - 50, y: y + 12, width: 38, height: height - 24, fill: "none", stroke: blue, "stroke-dasharray": dash });
-      line(x + width - 50, y + 12, x + width - 12, y + height - 12);
-      line(x + width - 12, y + 12, x + width - 50, y + height - 12);
-    }
-  } else if (kind === "table") {
+  if (kind === "table") {
     const { header, rows, columns } = rowsOf(kind, { width, height }, data);
     const row = (height - header) / rows;
     const column = width / columns;
     line(x, y + header, x + width, y + header, 1.4);
     for (let index = 1; index < rows; index++) line(x, y + header + index * row, x + width, y + header + index * row);
     for (let index = 1; index < columns; index++) line(x + index * column, y, x + index * column, y + height);
-    for (let index = 0; index < columns; index++) {
-      const left = x + index * column + 12;
-      bar(left, y + (header - 6) / 2, Math.min([30, 40, 36][index % 3], column - 24));
-      if (row < 10) continue;
-      for (let rowIndex = 0; rowIndex < rows; rowIndex++) {
-        bar(left, y + header + rowIndex * row + (row - 6) / 2, Math.min([80, 50, 64][index % 3], column - 24));
-      }
-    }
   } else if (kind === "list") {
     const { rows } = rowsOf(kind, { width, height }, data);
     const row = height / rows;
     for (let index = 1; index < rows; index++) line(x, y + index * row, x + width, y + index * row);
-    if (row >= 10) {
-      for (let index = 0; index < rows; index++) bar(x + 10, y + index * row + (row - 6) / 2, Math.min(width * 0.6, width - 20));
-    }
   } else if (kind === "dropdown") {
-    bar(x + 10, y + (height - 6) / 2, Math.min(70, width - 54));
+    // The value's place, left of the chevron's.
+    innerBox(width - 34 - 2 * pad);
     add("path", { d: `M${x + width - 22} ${y + height / 2 - 3}l6 6 6-6`, fill: "none", stroke: dark, "stroke-width": 1.5 });
     line(x + width - 34, y, x + width - 34, y + height);
-  } else if (kind === "button" && width > 12 && height > 12) {
-    add("rect", { x: x + 6, y: y + 6, width: width - 12, height: height - 12, fill: blue, "fill-opacity": Math.min(1, 0.25 + fill * 2) });
+  } else if (kind === "button") {
+    if (width > 12 && height > 12) add("rect", { x: x + 6, y: y + 6, width: width - 12, height: height - 12, fill: blue, "fill-opacity": Math.min(1, 0.25 + fill * 2) });
+  } else {
+    innerBox(width - 2 * pad);
   }
 
-  if (data.label) {
+  // While the label is typed, the field stands in for the tag.
+  if (!data.isLabelling) {
     const labelTop = tagTop({ y });
-    add("rect", { x, y: labelTop, width: tagWidth(data.label), height: 15, fill: blue });
-    const text = add("text", { x: x + 5, y: labelTop + 11, "font-size": 11, fill: "#FFFFFF", "font-family": "ui-monospace,Menlo,monospace" });
-    text.textContent = data.label;
+    add("rect", { x, y: labelTop, width: tagWidth(tag.text), height: 15, fill: tag.isActive ? dark : blue });
+    if (tag.text) {
+      const color = tag.isPlaceholder ? "rgba(255,255,255,.7)" : "#FFFFFF";
+      const text = add("text", { x: x + 5, y: labelTop + 11, "font-size": 11, fill: color, "font-family": "ui-monospace,Menlo,monospace" });
+      text.textContent = tag.text;
+    }
   }
   return { under, top };
 }

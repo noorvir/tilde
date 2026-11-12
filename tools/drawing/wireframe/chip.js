@@ -11,7 +11,7 @@ import { live, changeElements } from "../scene.js";
 import { rowsOf, allBorders, kindNames, frameOf, clamp } from "./components.js";
 import { record } from "./history.js";
 import { labelled } from "./labels.js";
-import { tagWidth } from "./look.js";
+import { setActiveTag, shownTagWidth } from "./look.js";
 import { wireframe } from "./mode.js";
 
 const menuStyle = "position:fixed;z-index:10000;display:none;flex-direction:column;padding:4px;border-radius:10px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif;user-select:none";
@@ -147,6 +147,7 @@ export function showHandles() {
   const group = selection.hovered ?? selection.selected;
   const frame = group ? frameOf(group) : null;
   const isShown = Boolean(frame && wireframe && !labelled && !editing);
+  setActiveTag(isShown && selection.hovered ? selection.hovered : null);
   handleOutline.style.display = isShown ? "block" : "none";
   chip.style.display = isShown ? "flex" : "none";
   resizer.style.display = isShown ? "block" : "none";
@@ -186,8 +187,7 @@ function placeChip(frame) {
   let top = frame.y + frame.height + gap.below;
   if (top + height > window.innerHeight) {
     side = "above";
-    const label = frame.customData.label;
-    left = label ? frame.x + tagWidth(label) + 4 : frame.x;
+    left = frame.x + shownTagWidth(frame) + 4;
     top = frame.y - gap.above - height;
   }
   chip.dataset.side = side;

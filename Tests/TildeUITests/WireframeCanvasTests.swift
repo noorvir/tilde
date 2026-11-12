@@ -586,8 +586,8 @@ struct WireframeCanvasTests {
         #expect(try await page.shows("#tilde-chip"))
     }
 
-    /// At the bottom of the screen the chip goes just above the component, after its label's
-    /// tag; without a label, at its left edge.
+    /// At the bottom of the screen the chip goes just above the component, after its tag, as the
+    /// tag shows: with no label, "Add label" while the pointer is over it.
     @Test func atTheBottomTheChipIsAboveTheComponentAfterTheTag() async throws {
         try await restore("[{type: 'card', rect: [300, 720, 200, 60], label: 'Plan'}, {type: 'card', rect: [700, 720, 200, 60]}]")
         try await page.hover(CGPoint(x: 400, y: 750))
@@ -595,8 +595,9 @@ struct WireframeCanvasTests {
         #expect(try await chipBox() == [342, 696, chipWidth()])
 
         try await page.hover(CGPoint(x: 800, y: 750))
-        #expect(try await chipBox() == [700, 696, chipWidth()])
-        try await page.hover(CGPoint(x: 710, y: 719))
+        // "Add label" makes the tag 73 wide.
+        #expect(try await chipBox() == [777, 696, chipWidth()])
+        try await page.hover(CGPoint(x: 790, y: 719))
         #expect(try await page.shows("#tilde-chip"))
     }
 
