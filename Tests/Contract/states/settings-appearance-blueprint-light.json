@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    920,
+    805
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "appearance"
+  },
+  "look": {
+    "style": "blueprint"
+  }
+}

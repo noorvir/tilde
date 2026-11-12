@@ -3,9 +3,11 @@
 
 import { isSelectMode, setOverLabel } from "./cursor.js";
 import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame } from "./draw-mode.js";
-import { api, taken, post, live, changeElements, describe, isPart, withGroups, isTextField } from "./scene.js";
+import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
+import { drawLook, setWireframeLook } from "./wireframe/look.js";
+import { showPreview } from "./wireframe/preview.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
 import { snapAgain, takesPointer as wireframeTakesPointer, pointerWentThrough } from "./wireframe/pointer.js";
 import { setSnapTargets } from "./wireframe/snap.js";
@@ -13,7 +15,7 @@ import { setWireframeWindow } from "./wireframe/window.js";
 
 function shapesOf(ids) {
   const wanted = new Set(ids);
-  return JSON.stringify(live().filter((element) => wanted.has(element.id) && !isPart(element)).map(describe));
+  return JSON.stringify(live().filter((element) => wanted.has(element.id)).map(describe));
 }
 
 function clear() {
@@ -25,7 +27,7 @@ function clear() {
 
 // The shapes drawn and not taken yet, as `takeNewShapes` gives them; they stay as they are.
 function newShapes() {
-  return JSON.stringify(live().filter((element) => !taken.has(element.id) && !isPart(element)).map(describe));
+  return JSON.stringify(live().filter((element) => !taken.has(element.id)).map(describe));
 }
 
 // The shapes drawn since the last call, in points from the top left of the canvas.
@@ -36,10 +38,12 @@ function takeNewShapes() {
   elements.forEach((element) => taken.add(element.id));
   api.history.clear();
   clearHistory();
-  return JSON.stringify(elements.filter((element) => !isPart(element)).map(describe));
+  // Their empty tags go before the pictures are taken.
+  drawLook();
+  return JSON.stringify(elements.map(describe));
 }
 
-// With the parts of each shape: a wireframe box is several elements in one group.
+// With the other elements of each shape's group.
 function remove(ids) {
   changeElements(withGroups(ids), () => ({ isDeleted: true }));
 }
@@ -61,7 +65,7 @@ function takesPointer(x, y) {
 window.tildeDraw = {
   setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect, setSnapFrame,
   shapesOf, clear, newShapes, takeNewShapes, remove, takesPointer, pointerWentThrough,
-  setWireframe, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
+  setWireframe, setWireframeLook, showPreview, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 
 // Tilde takes its own keys before the page; it must know when a text field here has the
@@ -86,12 +90,12 @@ export function escapePressed(event) {
   // Excalidraw ends the text being typed.
   if (wireframe && isTextField(event.target)) return;
   event.preventDefault();
-  // In wireframe mode Esc steps back one level: the kind menu, then the selection; with
+  // In wireframe mode Esc steps back one level: the chip's menu, then the selection; with
   // nothing selected it reaches Tilde, which puts the tool down.
-  if (wireframe && (selection.isMenuOpen || selection.selected)) {
+  if (wireframe && (selection.menu || selection.selected)) {
     event.stopPropagation();
-    if (selection.isMenuOpen) {
-      selection.isMenuOpen = false;
+    if (selection.menu) {
+      selection.menu = null;
       showHandles();
     } else {
       selectGroup(null);

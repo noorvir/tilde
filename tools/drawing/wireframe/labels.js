@@ -1,26 +1,25 @@
-// The label typed in place: at the centre of the component, in the label's own font and size,
-// as wide as its text, on the label's chip where the component has one. Return or a click
-// elsewhere keeps it, Esc does not.
+// The label typed in place: on the component's label tag, in the tag's own font, as wide as its
+// text. Return or a click elsewhere keeps it, Esc does not.
 
 import { api } from "../scene.js";
 import { hideHandles } from "./chip.js";
-import { skeleton, clamp, plainLabels, frameOf, rebuild } from "./components.js";
+import { frameOf, rebuild } from "./components.js";
 import { record } from "./history.js";
+import { tagTop, tagWidth } from "./look.js";
 
 export const labelField = document.createElement("input");
 labelField.id = "tilde-label";
-labelField.placeholder = "Label";
-labelField.style.cssText = "position:fixed;z-index:10000;transform:translate(-50%,-50%);box-sizing:content-box;margin:0;color:#4A4D55;font-family:Helvetica,sans-serif;text-align:center;outline:none;caret-color:#2F76FF;display:none";
+labelField.placeholder = "Add label";
+labelField.style.cssText = "position:fixed;z-index:10000;box-sizing:border-box;height:15px;margin:0;padding:0 5px;border:0;border-radius:0;background:#2F7BF6;color:#fff;font:11px ui-monospace,Menlo,monospace;outline:1.5px solid #1D5BD8;caret-color:#fff;display:none";
 export const labelStyle = document.createElement("style");
-labelStyle.textContent = "#tilde-label::placeholder { color: #A9ADB5; } [data-kind]:hover, [data-action]:hover { background: rgba(255,255,255,.14); }";
-const measure = document.createElement("canvas").getContext("2d");
+labelStyle.textContent = "#tilde-label::placeholder { color: rgba(255,255,255,.7); } [data-kind]:hover, [data-action]:hover { background: rgba(255,255,255,.14); }";
 // { group, label } of the component whose label is typed.
 export let labelled = null;
 let labelBefore = null;
 
+// As wide as the tag of the same text.
 function sizeLabelField() {
-  measure.font = `${labelField.style.fontSize} Helvetica, sans-serif`;
-  labelField.style.width = `${Math.ceil(measure.measureText(labelField.value || labelField.placeholder).width) + 2}px`;
+  labelField.style.width = `${tagWidth(labelField.value || labelField.placeholder)}px`;
 }
 labelField.addEventListener("input", sizeLabelField);
 
@@ -32,12 +31,7 @@ export function editLabel(component) {
   hideHandles();
   // The component without its label meanwhile: the field shows it in its place.
   rebuild(group, component, { ...data, label: undefined, isLabelling: true });
-  const isPlain = plainLabels.has(data.tildeWireframe);
-  Object.assign(labelField.style, {
-    left: `${component.x + component.width / 2}px`, top: `${component.y + component.height / 2}px`,
-    fontSize: `${isPlain ? clamp(component.height * 0.32, 12, 20) : 15}px`, padding: isPlain ? "0" : "5px 10px",
-    background: isPlain ? "transparent" : "#fff", border: isPlain ? "0" : `1px solid ${skeleton.line}`, borderRadius: "6px", display: "block",
-  });
+  Object.assign(labelField.style, { left: `${component.x}px`, top: `${tagTop(component)}px`, display: "block" });
   labelField.value = data.label ?? "";
   sizeLabelField();
   labelField.focus();

@@ -33,6 +33,32 @@ final class DrawingPanel {
     var onKey: (NSEvent) -> Bool = { _ in false }
     /// Whether a note's label, which a press opens, is at a Quartz point.
     var isOnLabel: (CGPoint) -> Bool = { _ in false }
+    /// Tilde's windows that the blurred screen under the wireframe's components shows.
+    var underKeeps: () -> Set<CGWindowID> = { [] } {
+        didSet {
+            canvases.forEach { $0.underKeeps = underKeeps }
+        }
+    }
+    private var look = WireframeLook.saved()
+    private var lookObserver: NSObjectProtocol?
+
+    init() {
+        // A change in Settings shows at once on an open wireframe.
+        lookObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.lookChanged()
+            }
+        }
+    }
+
+    private func lookChanged() {
+        let look = WireframeLook.saved()
+        guard look != self.look else {
+            return
+        }
+        self.look = look
+        canvases.forEach { $0.look = look }
+    }
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
     var windowNumbers: [Int] {
@@ -156,6 +182,7 @@ final class DrawingPanel {
         let origin = active.frame.flipped.origin
         let values = [frame.minX - origin.x, frame.minY - origin.y, frame.width, frame.height]
         active.run("setWireframeWindow(\(Self.json(values)))")
+        active.captureUnderSoon()
     }
 
     /// A wireframe note's shapes, as its report has them, from `origin` in Quartz screen
@@ -216,6 +243,8 @@ final class DrawingPanel {
             return canvas
         }
         let canvas = DrawingCanvas(frame: frame)
+        canvas.look = look
+        canvas.underKeeps = underKeeps
         canvases.append(canvas)
         return canvas
     }
@@ -232,6 +261,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     let frame: CGRect
     private var panel: FloatingPanel?
     private var webView: WKWebView?
+    private var underBlur: UnderBlurView?
+    private var underCapture: Task<Void, Never>?
     private var openedAt: Date?
     private var isReady = false
     private var isLoaded = false
@@ -261,6 +292,12 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     var onPointer: (CGPoint) -> Void = { _ in }
     var onKey: (NSEvent) -> Bool = { _ in false }
     var isOnLabel: (CGPoint) -> Bool = { _ in false }
+    var look = WireframeLook() {
+        didSet {
+            applyLook()
+        }
+    }
+    var underKeeps: () -> Set<CGWindowID> = { [] }
 
     init(frame: CGRect) {
         self.frame = frame
@@ -311,6 +348,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             setTool(tool)
             setColor(color)
         }
+        captureUnder()
     }
 
     func stopDrawing() {
@@ -320,6 +358,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     func hide() {
         passThrough.isActive = false
         panel?.orderOut(nil)
+        underBlur?.forget()
     }
 
     func focus() {
@@ -329,6 +368,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     func resumeDrawing() {
         passThrough.isActive = true
         panel?.makeKey()
+        captureUnder()
     }
 
     func setSnapFrame(_ frame: CGRect?) {
@@ -355,6 +395,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel?.orderOut(nil)
         passThrough.isActive = false
         run("clear()")
+        underBlur?.forget()
     }
 
     func close() {
@@ -364,6 +405,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel = nil
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
         webView = nil
+        underBlur = nil
         isReady = false
         isLoaded = false
     }
@@ -412,6 +454,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
                 setColor(pendingColor)
             }
             run("setWireframe(\(wireframe))")
+            applyLook()
             if let restoredWireframe {
                 run("restoreWireframe(\(restoredWireframe))")
                 self.restoredWireframe = nil
@@ -434,6 +477,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
                 let origin = frame.flipped.origin
                 onPointer(CGPoint(x: origin.x + values[0], y: origin.y + values[1]))
             }
+        case _ where text.hasPrefix("under:"):
+            underChanged(text.dropFirst("under:".count))
         case _ where text.hasPrefix("error: "):
             log.error("drawing canvas \(text, privacy: .public)")
         default:
@@ -453,6 +498,61 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         let origin = frame.flipped.origin
         let call = "window.tildeDraw ? window.tildeDraw.takesPointer(\(point.x - origin.x), \(point.y - origin.y)) : true"
         return (try? await webView.evaluateJavaScript(call) as? Bool) ?? true
+    }
+
+    // MARK: - The look and the blur under the components
+
+    /// A new radius blurs the same picture again; a blur that was off needs a picture.
+    private func applyLook() {
+        run("setWireframeLook(\(look.pageJSON))")
+        underBlur?.radius = look.blur
+        if underBlur?.picture == nil {
+            captureUnder()
+        }
+    }
+
+    /// The page's components moved, came or went: the blur follows their shapes. The first
+    /// ones take a picture of the screen under the canvas.
+    private func underChanged(_ json: Substring) {
+        guard let underBlur, let values = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[Double]] else {
+            return
+        }
+        underBlur.shapes = values.filter { $0.count == 5 }.map {
+            UnderBlurView.Shape(rect: CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]), isEllipse: $0[4] == 1)
+        }
+        if underBlur.shapes.isEmpty {
+            underBlur.forget()
+        } else if underBlur.picture == nil {
+            captureUnder()
+        }
+    }
+
+    /// A new picture of the screen under the canvas, when the blur shows: one capture, without
+    /// Tilde's windows, which the shapes then only mask.
+    private func captureUnder() {
+        guard let underBlur, look.blur > 0, !underBlur.shapes.isEmpty, panel?.isVisible == true else {
+            return
+        }
+        underCapture?.cancel()
+        underCapture = Task { [weak self, frame, underKeeps] in
+            let capture = await ScreenCapture.image(of: frame.flipped, keeping: underKeeps())
+            guard let self, !Task.isCancelled, let capture else {
+                return
+            }
+            self.underBlur?.show(capture.image)
+        }
+    }
+
+    /// The screen under the canvas changed, such as a window that moved: a new picture once it
+    /// has rested for a moment.
+    func captureUnderSoon() {
+        underCapture?.cancel()
+        underCapture = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            if !Task.isCancelled {
+                self?.captureUnder()
+            }
+        }
     }
 
     private func load(_ page: String) {
@@ -494,9 +594,19 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         let web = CanvasWebView(frame: panel.contentLayoutRect, configuration: configuration)
         web.setValue(false, forKey: "drawsBackground")
         web.autoresizingMask = [.width, .height]
-        panel.contentView = web
+        // The blurred screen under the components, under the page.
+        let blur = UnderBlurView(frame: panel.contentLayoutRect)
+        blur.autoresizingMask = [.width, .height]
+        blur.radius = look.blur
+        let content = NSView(frame: panel.contentLayoutRect)
+        content.addSubview(blur)
+        content.addSubview(web)
+        panel.contentView = content
+        panel.initialFirstResponder = web
+        panel.makeFirstResponder(web)
         self.panel = panel
         webView = web
+        underBlur = blur
     }
 }
 

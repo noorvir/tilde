@@ -55,6 +55,8 @@ final class WireframeMode: ObservableObject {
         self.canvas = canvas
         self.picker = picker
         self.browser = browser
+        // The blurred screen under the components shows Tilde's browser, as Done's pictures do.
+        canvas.underKeeps = { [weak browser] in Set(browser?.windowNumber.map { [CGWindowID($0)] } ?? []) }
     }
 
     // MARK: - The mode and its tool

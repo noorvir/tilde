@@ -4,10 +4,11 @@
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
 import { api, postPointer, live } from "../scene.js";
-import { resizer, typeMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles } from "./chip.js";
+import { resizer, typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles, toggleMenu } from "./chip.js";
 import { newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { record } from "./history.js";
 import { labelField, labelled, editLabel, endLabel, isDoubleClick } from "./labels.js";
+import { tagAt } from "./look.js";
 import { wireframe } from "./mode.js";
 import { snapLines, nearest, nearestOf, hideGuides, showGuides } from "./snap.js";
 
@@ -15,25 +16,26 @@ import { snapLines, nearest, nearestOf, hideGuides, showGuides } from "./snap.js
 let wireframePress = null;
 // The move or resize under way.
 export let adjusting = null;
-export let isOverMovable = false;
+// The pointer is over a component that moves, or over a tag: a press there draws nothing.
+export let isOverComponent = false;
 
 // The mode ended: no move is under way.
 export function stopAdjusting() {
   adjusting = null;
 }
 
-// With no tool, whether a press at this point is for the page: on a component or its handles,
-// or anywhere while a label is typed or a component moves. Tilde lets every other press
-// through to the app behind.
+// With no tool, whether a press at this point is for the page: on a component, its label tag
+// or its handles, or anywhere while a label is typed or a component moves. Tilde lets every
+// other press through to the app behind.
 export function takesPointer(x, y) {
-  return Boolean(labelled || adjusting || componentAt(x, y) || isHandle(document.elementFromPoint(x, y)));
+  return Boolean(labelled || adjusting || componentAt(x, y) || tagAt(x, y) || isHandle(document.elementFromPoint(x, y)));
 }
 
 // The pointer went through to the app behind, which gets its moves meanwhile: as over empty
 // space here, no component is under it, and a press there ends the selection.
 export function pointerWentThrough(isPress) {
   if (!wireframe) return;
-  isOverMovable = false;
+  isOverComponent = false;
   if (isPress) selection.selected = null;
   hideHandles();
 }
@@ -65,10 +67,11 @@ export function finishWireframeShape() {
 
 function startAdjusting(event, frame, mode, from) {
   selection.hovered = frame.groupIds[0];
-  selection.isMenuOpen = false;
+  const menuBefore = selection.menu;
+  selection.menu = null;
   const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
   adjusting = {
-    mode, from, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false,
+    mode, from, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false, menuBefore,
     before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && event.altKey,
   };
   event.target.setPointerCapture?.(event.pointerId);
@@ -134,7 +137,7 @@ function editWireframe(event) {
     event.preventDefault();
     if (event.type === "pointermove") adjust(event);
     if (event.type === "pointerup") {
-      const { from, moved } = adjusting;
+      const { from, moved, menuBefore } = adjusting;
       const frame = frameOf(adjusting.group);
       adjusting = null;
       hideGuides();
@@ -142,13 +145,23 @@ function editWireframe(event) {
         selectGroup(frame.groupIds[0]);
         if (isDoubleClick(frame.groupIds[0])) editLabel(frame);
       }
-      if (!moved && from === "chip") selection.isMenuOpen = !selection.isMenuOpen;
+      // A click on the chip's name opens the kinds, or closes them.
+      if (!moved && from === "chip") selection.menu = menuBefore === "kinds" ? null : "kinds";
       showHandles();
     }
     return true;
   }
   if (event.type === "pointerdown" && labelled && event.target !== labelField) endLabel(true);
   if (!isHandle(event.target)) {
+    // A click on a component's tag types its label.
+    const tagged = tagAt(event.clientX, event.clientY);
+    if (event.type === "pointerdown" && tagged) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      selectGroup(tagged.groupIds[0]);
+      editLabel(tagged);
+      return true;
+    }
     if (event.type === "pointerdown") {
       const component = movableAt(event);
       if (component) {
@@ -160,11 +173,15 @@ function editWireframe(event) {
       hideHandles();
     }
     if (event.type === "pointermove" && !isPressed) {
-      const group = componentAt(event.clientX, event.clientY)?.groupIds[0] ?? null;
-      if (group !== selection.hovered) selection.isMenuOpen = false;
+      // Over a tag is over its component.
+      const group = (componentAt(event.clientX, event.clientY) ?? tagged)?.groupIds[0] ?? null;
+      if (group !== selection.hovered) selection.menu = null;
       selection.hovered = group;
-      isOverMovable = Boolean(movableAt(event)) && !labelled;
-      const cursor = isOverMovable ? (event.altKey ? "copy" : "move") : isSelectMode ? "default" : "";
+      const isMovable = Boolean(movableAt(event)) && !labelled;
+      isOverComponent = isMovable || (Boolean(tagged) && !labelled);
+      let cursor = isSelectMode ? "default" : "";
+      if (isMovable) cursor = event.altKey ? "copy" : "move";
+      if (tagged && !labelled) cursor = "text";
       moveCursor.textContent = cursor ? `canvas { cursor: ${cursor} !important; }` : "";
       showHandles();
     }
@@ -177,6 +194,10 @@ function editWireframe(event) {
   const group = selection.hovered ?? selection.selected;
   const frame = group ? frameOf(group) : null;
   if (event.type !== "pointerdown" || !frame) return true;
+  if (event.target.closest("[data-menu=borders]")) {
+    toggleMenu("borders");
+    return true;
+  }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (action === "delete") {
     deleteComponent(group);
@@ -192,11 +213,11 @@ function editWireframe(event) {
   if (kind) {
     record();
     rebuild(group, frame, changedKind(frame, kind));
-    selection.isMenuOpen = false;
+    selection.menu = null;
     showHandles();
     return true;
   }
-  if (typeMenu.contains(event.target)) return true;
+  if (typeMenu.contains(event.target) || bordersMenu.contains(event.target)) return true;
   startAdjusting(event, frame, resizer.contains(event.target) ? "resize" : "move", resizer.contains(event.target) ? "resizer" : "chip");
   return true;
 }
@@ -258,7 +279,7 @@ export function snapPointer(event) {
   }
   const tool = api?.getAppState().activeTool.type;
   const pointer = { x: event.clientX, y: event.clientY };
-  if (tool !== "rectangle" || editing || labelled || isOverMovable) {
+  if (tool !== "rectangle" || editing || labelled || isOverComponent) {
     hideGuides();
     return;
   }

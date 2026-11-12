@@ -626,7 +626,8 @@ struct UXSpecs {
             step("wireframe mode")
 
             // B chooses the button. Its bottom edge, drawn 1 pt below the top of the window's
-            // fourth row, snaps to it, and a guide runs across the screen there.
+            // fourth row, snaps to it, and a guide runs across the screen there. Under the edge
+            // is the 3 pt offset edge of the Technical style, and then the window.
             let frame = ChangingWindow.frame
             let row = frame.minY + 140
             let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
@@ -641,7 +642,7 @@ struct UXSpecs {
             try await waitFor(app, at: guide, every: 1, Picture.isTildeBlue, atLeast: 150)
             try await app.mouseUp(at: end)
             try await waitFor(app, at: CGRect(x: start.x + 20, y: row - 6, width: 120, height: 4), Picture.isWireframe, atLeast: 40)
-            try await waitFor(app, at: CGRect(x: start.x + 20, y: row + 2, width: 120, height: 4), Picture.isWireframe, atMost: 0)
+            try await waitFor(app, at: CGRect(x: start.x + 20, y: row + 7, width: 120, height: 4), Picture.isWireframe, atMost: 0)
             step("button snapped")
 
             // Esc puts the tool down: the canvas takes the pointer only on the button. A drag
@@ -778,6 +779,49 @@ struct UXSpecs {
             try await app.waitToSee("Paused", timeout: 15)
             #expect(try await !app.seen().contains { $0.name == "Done, ⌘↩" })
             step("start modes")
+        }
+    }
+
+    /// The look of the components comes from the style tiles of Settings' Appearance page, and a
+    /// change shows at once on the components drawn. Blueprint's lines run past the corners and
+    /// it has no offset edge; Technical, the default, has a hard offset edge under the bottom and
+    /// no lines past the corners.
+    @Test func aStyleChosenInSettingsShowsOnTheWireframe() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        // A button on the fixture's white window, left of where Settings opens.
+        let frame = ChangingWindow.frame
+        let button = CGRect(x: frame.minX + 12, y: frame.minY + 100, width: 84, height: 40)
+        let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
+        let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
+        try await withApp { app in
+            // The fixture's window can be in front of Settings, which stays open meanwhile.
+            try await app.menu("Settings")
+            try await app.accessibilityPress("Appearance")
+            try await app.waitToSee("Dragged, snapping")
+            try await app.accessibilityPress("Blueprint")
+            step("blueprint chosen")
+
+            // ⌘ draws without snapping, at the very place of the drag.
+            try await app.menu("Start Annotation")
+            try await app.waitToSee("Annotating")
+            try await app.key(.w)
+            try await app.waitToSee("Done, ⌘↩")
+            try await app.waitToSee("Drawing canvas", timeout: 15)
+            try await app.key(.b)
+            try await app.hold("command", down: true)
+            try await app.slowDrag(from: button.origin, to: CGPoint(x: button.maxX, y: button.maxY))
+            try await app.hold("command", down: false)
+            try await waitFor(app, at: button.insetBy(dx: 10, dy: 10), Picture.isWireframe, atLeast: 200)
+            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atLeast: 2)
+            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atMost: 0)
+            step("blueprint drawn")
+
+            // Settings, under the canvas, change the style: the button shows it at once.
+            try await app.accessibilityPress("Technical")
+            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
+            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
+            step("technical shown")
         }
     }
 

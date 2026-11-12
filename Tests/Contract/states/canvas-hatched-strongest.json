@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "surface": "canvas",
+  "look": {
+    "style": "hatched",
+    "fill": 0.6,
+    "blur": 8,
+    "fade": 0.8
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    920,
+    805
+  ],
+  "appearance": "dark",
+  "settings": {
+    "page": "appearance"
+  },
+  "look": {
+    "style": "blueprint",
+    "fill": 0.4,
+    "blur": 6.5,
+    "fade": 0.3
+  }
+}

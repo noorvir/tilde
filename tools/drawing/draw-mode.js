@@ -6,7 +6,7 @@ import { ringStyle } from "./rings.js";
 import { api, taken, post, postPointer, live, changeElements } from "./scene.js";
 import { isHandle } from "./wireframe/chip.js";
 import { wireframe } from "./wireframe/mode.js";
-import { isOverMovable, finishWireframeShape } from "./wireframe/pointer.js";
+import { isOverComponent, finishWireframeShape } from "./wireframe/pointer.js";
 import { isWireframeSnapped } from "./wireframe/snap.js";
 
 let drawingTool = "arrow";
@@ -61,7 +61,11 @@ export function resetEditing() {
   isWaitingForEdit = false;
 }
 
+// Draw's colour, which wireframe mode gives back when it ends.
+export let drawColor = "#2F76FF";
+
 export function setColor(color) {
+  drawColor = color;
   if (wireframe) return;
   api.updateScene({ appState: { currentItemStrokeColor: color }, captureUpdate: "NEVER" });
 }
@@ -118,7 +122,7 @@ const cursorTools = new Set([...drawingTools, "freedraw"]);
 function showCursorRing(event, isSnapping) {
   const tool = api?.getAppState().activeTool.type;
   const isShown = cursorTools.has(tool) && !isSelectMode && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target)
-    && !(wireframe && isOverMovable);
+    && !(wireframe && isOverComponent);
   cursorRing.style.display = isShown ? "block" : "none";
   if (!isShown) return;
   // Wireframe shapes have their own colours: the ring is Tilde's blue.

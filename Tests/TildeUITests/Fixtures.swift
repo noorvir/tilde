@@ -256,12 +256,12 @@ enum Fixtures {
     }
 
     /// Settings with fixed agent apps, default shortcuts and a fixed version.
-    static func settingsModel(page: SettingsWindow.Page, history: HistoryModel? = nil) throws -> SettingsModel {
+    static func settingsModel(page: SettingsWindow.Page, history: HistoryModel? = nil, wireframePreviews: WireframePreviews? = nil) throws -> SettingsModel {
         let defaults = UserDefaults(suiteName: "tilde-tests-\(UUID().uuidString)")!
         let model = SettingsModel(
             setup: try agentSetup(), shortcuts: ShortcutStore(defaults: defaults), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
             server: ServerState(port: 7311), version: "0.1.0 (42)",
-            browserProfiles: { [] }, permissions: { (true, false) }
+            browserProfiles: { [] }, permissions: { (true, false) }, wireframePreviews: wireframePreviews
         )
         model.page = page
         return model

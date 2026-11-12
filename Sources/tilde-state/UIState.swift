@@ -6,7 +6,7 @@ import TildeInstaller
 /// A key or a value that it does not know is an error, so a typo cannot record another picture.
 struct UIState: Decodable {
     enum Surface: String, Decodable {
-        case toast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, comment, preview, overlay
+        case toast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, comment, preview, overlay, canvas
     }
     enum Appearance: String, Decodable {
         case light, dark
@@ -28,6 +28,10 @@ struct UIState: Decodable {
     }
     enum SentStatus: String, Decodable {
         case done, failed
+    }
+    /// The first component on the canvas, selected with its chip and its borders menu open.
+    enum Chip: String, Decodable {
+        case borders
     }
     enum Enlarged: String, Decodable {
         case closeUp, context
@@ -62,9 +66,22 @@ struct UIState: Decodable {
         var agentsOff: [Harness]?
     }
 
+    /// The look of wireframe components; what is missing is the default.
+    struct Look: Decodable {
+        var style: WireframeLook.Style?
+        var fill: Double?
+        var blur: Double?
+        var fade: Double?
+
+        var value: WireframeLook {
+            let defaults = WireframeLook()
+            return WireframeLook(style: style ?? defaults.style, fill: fill ?? defaults.fill, blur: blur ?? defaults.blur, fade: fade ?? defaults.fade)
+        }
+    }
+
     struct Settings: Decodable {
         enum Page: String, Decodable {
-            case agents, general, shortcuts, history
+            case agents, general, shortcuts, history, appearance
         }
 
         let page: Page
@@ -137,6 +154,8 @@ struct UIState: Decodable {
     var pageNotes: Bool?
     var toast: Toast?
     var settings: Settings?
+    var look: Look?
+    var chip: Chip?
 
     init(file: URL) throws {
         let data = try Data(contentsOf: file)
@@ -181,3 +200,4 @@ struct UIState: Decodable {
 extension Notice: Decodable {}
 extension NodeSetup.Dot: Decodable {}
 extension Harness: Decodable {}
+extension WireframeLook.Style: Decodable {}

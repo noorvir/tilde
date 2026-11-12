@@ -14,6 +14,18 @@ enum ScreenCapture {
     /// rect so the agent sees which element was meant. The long side is at most `maxSide`
     /// pixels. Returns nil when Screen Recording is not allowed or the capture fails.
     static func png(of rect: CGRect, outline: CGRect?, keeping ownWindowIDs: Set<CGWindowID>, maxSide: Double) async -> Data? {
+        guard let capture = await image(of: rect, keeping: ownWindowIDs) else {
+            return nil
+        }
+        let box = outline.map { $0.offsetBy(dx: -capture.area.minX, dy: -capture.area.minY) }
+        return png(from: capture.image, outline: box, scale: capture.scale, maxSide: maxSide)
+    }
+
+    /// Captures `rect` of the screen (Quartz coordinates) without Tilde's windows, except the
+    /// ones in `keeping`, at the screen's resolution. `area`: the part of `rect` on the screen;
+    /// `scale`: image pixels per point. Nil when Screen Recording is not allowed or the capture
+    /// fails.
+    static func image(of rect: CGRect, keeping ownWindowIDs: Set<CGWindowID>) async -> (image: CGImage, area: CGRect, scale: CGFloat)? {
         guard isAllowed else {
             return nil
         }
@@ -43,7 +55,7 @@ enum ScreenCapture {
             configuration.captureResolution = .best
 
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-            return png(from: image, outline: outline.map { $0.offsetBy(dx: -area.minX, dy: -area.minY) }, scale: scale, maxSide: maxSide)
+            return (image, area, scale)
         } catch {
             Logger(subsystem: "dev.tilde.app", category: "capture").error("screen capture failed: \(error.localizedDescription, privacy: .public)")
             return nil

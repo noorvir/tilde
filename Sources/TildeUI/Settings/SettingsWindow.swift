@@ -11,6 +11,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         case configuration
         case shortcuts
         case history
+        case appearance
 
         var id: String { rawValue }
 
@@ -20,6 +21,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             case .configuration: "Configuration"
             case .shortcuts: "Shortcuts"
             case .history: "History"
+            case .appearance: "Appearance"
             }
         }
 
@@ -29,6 +31,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             case .configuration: "gearshape.fill"
             case .shortcuts: "keyboard.fill"
             case .history: "clock.fill"
+            case .appearance: "paintpalette.fill"
             }
         }
 
@@ -38,6 +41,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             case .configuration: Color(white: 0.55)
             case .shortcuts: Color(white: 0.3)
             case .history: .purple
+            case .appearance: .blue
             }
         }
     }
@@ -117,6 +121,8 @@ final class SettingsModel: ObservableObject {
     let browser: BrowserController
     let history: HistoryModel
     let server: ServerState
+    /// The wireframe pictures of the Appearance page.
+    let wireframePreviews: WireframePreviews
     let version: String
     let onResult: (InstallResult) -> Void
     let onResetHUD: () -> Void
@@ -129,7 +135,8 @@ final class SettingsModel: ObservableObject {
         setup: AgentSetup, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, version: String,
         onResult: @escaping (InstallResult) -> Void = { _ in }, onResetHUD: @escaping () -> Void = {},
         browserProfiles: @escaping () -> [ChromiumProfile] = { BrowserCookies.profiles() },
-        permissions: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (ScreenCapture.isAllowed, AXIsProcessTrusted()) }
+        permissions: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (ScreenCapture.isAllowed, AXIsProcessTrusted()) },
+        wireframePreviews: WireframePreviews? = nil
     ) {
         self.setup = setup
         self.shortcuts = shortcuts
@@ -141,6 +148,7 @@ final class SettingsModel: ObservableObject {
         self.onResetHUD = onResetHUD
         self.permissions = permissions
         self.browserProfiles = browserProfiles
+        self.wireframePreviews = wireframePreviews ?? WireframePreviews()
     }
 
     /// "0.1.0 (12)" from the app bundle.
@@ -200,6 +208,8 @@ struct SettingsView: View {
             ShortcutSettings(shortcuts: model.shortcuts, recording: $model.recordingShortcut)
         case .history:
             HistorySettings(history: model.history)
+        case .appearance:
+            AppearanceSettings(previews: model.wireframePreviews)
         }
     }
 }
