@@ -46,16 +46,14 @@ struct AppearanceSettings: View {
             }
 
             SettingsSection("Strength") {
-                LookSlider(title: "Fill", subtitle: "The blue in each component", value: $fill, range: WireframeLook.fillRange, step: 0.01) {
-                    $0.formatted(.percent.precision(.fractionLength(0)))
-                }
-                SettingsDivider()
-                LookSlider(title: "Blur under", subtitle: "Blurs the app under each component", value: $blur, range: WireframeLook.blurRange, step: 0.5) {
-                    "\($0.formatted(.number.precision(.fractionLength(0...1)))) pt"
-                }
-                SettingsDivider()
-                LookSlider(title: "Fade under", subtitle: "Lightens the app under each component", value: $fade, range: WireframeLook.fadeRange, step: 0.01) {
-                    $0.formatted(.percent.precision(.fractionLength(0)))
+                ForEach(LookStrength.allCases) { strength in
+                    if strength != LookStrength.allCases.first {
+                        SettingsDivider()
+                    }
+                    SettingsRow(title: strength.title, subtitle: strength.subtitle) {
+                        LookSlider(strength)
+                            .frame(width: 234)
+                    }
                 }
             }
         }
@@ -69,8 +67,8 @@ struct AppearanceSettings: View {
 }
 
 /// A style's picture with its name under it: a button that chooses the style, with an accent
-/// ring while it is the one chosen.
-private struct StyleTile: View {
+/// ring while it is the one chosen. On the Appearance page and in the wireframe's Style menu.
+struct StyleTile: View {
     let title: String
     let image: NSImage?
     let size: CGSize
@@ -99,7 +97,7 @@ private struct StyleTile: View {
 
 /// A picture of the wireframe at its own proportions, or a plain area of the same shape while
 /// it is drawn.
-private struct Preview: View {
+struct Preview: View {
     let image: NSImage?
     let size: CGSize
 
@@ -119,35 +117,91 @@ private struct Preview: View {
     }
 }
 
-/// A slider with its value as text after it. It moves smoothly, without tick marks, and keeps
-/// its value to whole steps.
-private struct LookSlider: View {
-    let title: String
-    let subtitle: String
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let step: Double
-    let text: (Double) -> String
+/// One of the look's three strengths, as its slider sets it.
+enum LookStrength: String, CaseIterable, Identifiable {
+    case fill, blur, fade
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fill: "Fill"
+        case .blur: "Blur under"
+        case .fade: "Fade under"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .fill: "The blue in each component"
+        case .blur: "Blurs the app under each component"
+        case .fade: "Lightens the app under each component"
+        }
+    }
+
+    fileprivate var key: String {
+        switch self {
+        case .fill: WireframeLook.Key.fill
+        case .blur: WireframeLook.Key.blur
+        case .fade: WireframeLook.Key.fade
+        }
+    }
+
+    fileprivate var range: ClosedRange<Double> {
+        switch self {
+        case .fill: WireframeLook.fillRange
+        case .blur: WireframeLook.blurRange
+        case .fade: WireframeLook.fadeRange
+        }
+    }
+
+    fileprivate var step: Double {
+        self == .blur ? 0.5 : 0.01
+    }
+
+    fileprivate var standard: Double {
+        switch self {
+        case .fill: WireframeLook().fill
+        case .blur: WireframeLook().blur
+        case .fade: WireframeLook().fade
+        }
+    }
+
+    fileprivate func text(_ value: Double) -> String {
+        if self == .blur {
+            return "\(value.formatted(.number.precision(.fractionLength(0...1)))) pt"
+        }
+        return value.formatted(.percent.precision(.fractionLength(0)))
+    }
+}
+
+/// A strength's slider with its value as text after it, bound to the setting. It moves
+/// smoothly, without tick marks, and keeps its value to whole steps.
+struct LookSlider: View {
+    let strength: LookStrength
+    @AppStorage private var value: Double
+
+    init(_ strength: LookStrength) {
+        self.strength = strength
+        _value = AppStorage(wrappedValue: strength.standard, strength.key)
+    }
 
     var body: some View {
-        SettingsRow(title: title, subtitle: subtitle) {
-            HStack(spacing: 10) {
-                Slider(value: stepped, in: range) {
-                    Text(title)
-                }
-                .labelsHidden()
-                .frame(width: 180)
-                .accessibilityValue(text(value))
-                Text(text(value))
-                    .font(.system(size: 13))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
+        HStack(spacing: 10) {
+            Slider(value: stepped, in: strength.range) {
+                Text(strength.title)
             }
+            .labelsHidden()
+            .accessibilityValue(strength.text(value))
+            Text(strength.text(value))
+                .font(.system(size: 13))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
         }
     }
 
     private var stepped: Binding<Double> {
-        Binding(get: { value }, set: { value = ($0 / step).rounded() * step })
+        Binding(get: { value }, set: { value = ($0 / strength.step).rounded() * strength.step })
     }
 }

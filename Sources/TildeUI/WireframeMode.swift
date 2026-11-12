@@ -9,14 +9,20 @@ import TildeCore
 final class WireframeMode: ObservableObject {
     /// The tool that draws. Nil after Esc put it down: nothing draws, and the components can
     /// still be selected, moved, resized, copied and changed.
-    @Published private(set) var tool: String? = WireframeMode.firstTool
+    @Published private(set) var tool: String?
     /// The window that the session is limited to.
     var scope: () -> ElementPicker.WindowInfo? = { nil }
     /// Done's pictures are being made.
     private(set) var isTaking = false
+    /// The bar's Style menu is open.
+    @Published var isStyleMenuOpen = false
+    /// The pictures of the Style menu's tiles.
+    let previews = WireframePreviews()
 
     private let canvas: DrawingPanel
     private let picker: ElementPicker
+    /// Where the tool chosen last is kept, for the next start of the mode.
+    private let defaults: UserDefaults?
     private let browser: BrowserController
     /// The window of the first press: the components keep their place on it when it moves.
     private var window: ElementPicker.WindowInfo?
@@ -47,24 +53,32 @@ final class WireframeMode: ObservableObject {
         (tool: "rectangle", symbol: "rectangle", key: "r", help: "Rectangle"),
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
     ]
+    /// The tool of the first start, before one was chosen.
     nonisolated static let firstTool = "card"
     /// The chip of a wireframe's note.
     nonisolated static let chip = "Wireframe"
 
-    init(canvas: DrawingPanel, picker: ElementPicker, browser: BrowserController) {
+    init(canvas: DrawingPanel, picker: ElementPicker, browser: BrowserController, defaults: UserDefaults? = nil) {
         self.canvas = canvas
         self.picker = picker
         self.browser = browser
+        self.defaults = defaults
+        tool = lastTool
         // The blurred screen under the components shows Tilde's browser, as Done's pictures do.
         canvas.underKeeps = { [weak browser] in Set(browser?.windowNumber.map { [CGWindowID($0)] } ?? []) }
     }
 
     // MARK: - The mode and its tool
 
-    /// The canvas goes to wireframe mode, with the first tool and no window.
+    /// The tool chosen last, in this session or an earlier one.
+    private var lastTool: String {
+        defaults?.string(forKey: "WireframeTool").flatMap { saved in Self.tools.first { $0.tool == saved }?.tool } ?? Self.firstTool
+    }
+
+    /// The canvas goes to wireframe mode, with the tool chosen last and no window.
     func start() {
         reset()
-        tool = Self.firstTool
+        tool = lastTool
         canvas.setSnapFrame(nil)
         sendTool()
     }
@@ -72,11 +86,13 @@ final class WireframeMode: ObservableObject {
     /// The canvas leaves wireframe mode: the components that Done did not take go.
     func end() {
         reset()
+        isStyleMenuOpen = false
         canvas.setWireframe("null")
     }
 
     func setTool(_ tool: String) {
         self.tool = tool
+        defaults?.set(tool, forKey: "WireframeTool")
         sendTool()
     }
 
@@ -262,7 +278,7 @@ final class WireframeMode: ObservableObject {
     nonisolated static func report(of shapes: [[String: Any]], origin: CGPoint, isOnWindow: Bool) -> String {
         let encoded = DrawingShapes.encode(shapes, origin: origin, element: nil)
         var report = (try? JSONSerialization.jsonObject(with: Data(encoded.utf8))) as? [String: Any] ?? [:]
-        report["wireframe"] = "A wireframe of the change: the image shows it drawn over the screen, the context image the screen under it."
+        report["wireframe"] = "A wireframe of the change: the image shows it drawn over the screen, the context image the screen under it. A component's comment, where it has one, is what the user said about it."
         report["originIs"] = isOnWindow ? "window" : "screen"
         return DrawingPanel.json(report)
     }
