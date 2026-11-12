@@ -83,7 +83,8 @@ func startGlide() {
 }
 
 // "typing", also with "fullscreen": the app comes in front with the keyboard in a text field, as when the user types in
-// another app. "<file>.keys" lists the key code of each key the app gets, in order.
+// another app. "<file>.keys" lists the key code of each key the app gets, in order, and
+// "<file>.field" where the field is: "x y" of a point on it, in screen points from the top left.
 let field = NSTextField(frame: NSRect(x: 24, y: 370, width: 440, height: 24))
 field.isHidden = true
 content.addSubview(field)
@@ -128,6 +129,11 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         window.collectionBehavior.insert(.fullScreenPrimary)
         app.activate(ignoringOtherApps: true)
         window.toggleFullScreen(nil)
+    }
+    if page.contains("typing") {
+        let frame = window.convertToScreen(field.convert(field.bounds, to: nil))
+        let point = "\(Int(frame.minX + 60)) \(Int(NSScreen.screens[0].frame.height - frame.midY))"
+        try? point.write(toFile: file + ".field", atomically: true, encoding: .utf8)
     }
     if page.contains("typing"), field.isHidden {
         field.isHidden = false

@@ -625,7 +625,8 @@ struct UXSpecs {
 
     /// With the keyboard in the window's text field, double Ctrl opens the HUD, as `opensAs`
     /// says; ↩, B, D (Draw) and ⌘↩ (Done, which pauses) work in Tilde, and Esc closes the HUD.
-    /// Opened again, paused as it ended, Esc closes it at once.
+    /// Opened again, paused as it ended, Esc closes it at once. Opened once more, Esc still
+    /// closes it after a click in the text field gave the app the keyboard back.
     private func useHUDKeys(_ app: TildeApp, over window: ChangingWindow, page: String, opensAs title: String) async throws {
         try window.show(page)
         for _ in 0..<60 where try await app.focus().app != window.pid {
@@ -648,6 +649,17 @@ struct UXSpecs {
 
         try await app.doubleTap("control")
         try await app.waitToSee("Paused")
+        try await app.key(.escape)
+        try await app.waitNotToSee("Paused", timeout: 5)
+
+        try await app.doubleTap("control")
+        try await app.waitToSee("Paused")
+        let field = try #require(window.field)
+        try await app.click(at: field)
+        for _ in 0..<40 where try await app.focus().app != window.pid {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(try await app.focus().app == window.pid)
         try await app.key(.escape)
         try await app.waitNotToSee("Paused", timeout: 5)
     }

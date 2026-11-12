@@ -3,7 +3,8 @@ import Carbon.HIToolbox
 import Combine
 
 /// System-wide shortcuts. Carbon hot keys need no Accessibility or Input Monitoring permission.
-/// They follow the `ShortcutStore` and are off while Settings records a new shortcut.
+/// They follow the `ShortcutStore` and are off while Settings records a new shortcut. While a
+/// session is open, Esc is one of them: no other app gets it, also one in full screen.
 @MainActor
 final class HotKeys {
     private let actions: [UInt32: () -> Void]
@@ -11,12 +12,14 @@ final class HotKeys {
     private var references: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
     private var subscription: AnyCancellable?
+    private var isSessionOpen = false
 
     init(controller: AnnotationController, shortcuts: ShortcutStore) {
         self.shortcuts = shortcuts
         actions = [
             1: { controller.dispatch(.startShortcut) },
             2: { controller.dispatch(.togglePause) },
+            3: { controller.globalEscapePressed() },
         ]
 
         var event = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -34,9 +37,12 @@ final class HotKeys {
             return noErr
         }, 1, &event, context, &handler)
 
-        subscription = shortcuts.$shortcuts.combineLatest(shortcuts.$isRecording)
+        subscription = shortcuts.$shortcuts.combineLatest(shortcuts.$isRecording, controller.$session.map { $0 != nil }.removeDuplicates())
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _ in self?.registerAll() }
+            .sink { [weak self] _, _, isSessionOpen in
+                self?.isSessionOpen = isSessionOpen
+                self?.registerAll()
+            }
     }
 
     private func registerAll() {
@@ -54,12 +60,19 @@ final class HotKeys {
             guard let shortcut = shortcuts.shortcut(for: action)?.combo else {
                 continue
             }
-            var reference: EventHotKeyRef?
-            let hotKey = EventHotKeyID(signature: OSType(0x544C_4445), id: id) // "TLDE"
-            let status = RegisterEventHotKey(shortcut.keyCode, shortcut.carbonModifiers, hotKey, GetApplicationEventTarget(), 0, &reference)
-            if status == noErr, let reference {
-                references.append(reference)
-            }
+            register(keyCode: shortcut.keyCode, modifiers: shortcut.carbonModifiers, id: id)
+        }
+        if isSessionOpen {
+            register(keyCode: UInt32(kVK_Escape), modifiers: 0, id: 3)
+        }
+    }
+
+    private func register(keyCode: UInt32, modifiers: UInt32, id: UInt32) {
+        var reference: EventHotKeyRef?
+        let hotKey = EventHotKeyID(signature: OSType(0x544C_4445), id: id) // "TLDE"
+        let status = RegisterEventHotKey(keyCode, modifiers, hotKey, GetApplicationEventTarget(), 0, &reference)
+        if status == noErr, let reference {
+            references.append(reference)
         }
     }
 }

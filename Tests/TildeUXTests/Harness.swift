@@ -687,6 +687,13 @@ final class ChangingWindow {
         return text.split(separator: "\n").compactMap { Int($0) }
     }
 
+    /// On the page "typing": a point on the text field, in screen points from the top left.
+    var field: CGPoint? {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: file.path + ".field"), encoding: .utf8)) ?? ""
+        let numbers = text.split(separator: " ").compactMap { Double($0) }
+        return numbers.count == 2 ? CGPoint(x: numbers[0], y: numbers[1]) : nil
+    }
+
     func show(_ page: String) throws {
         try page.write(to: file, atomically: true, encoding: .utf8)
     }
