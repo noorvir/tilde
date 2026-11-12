@@ -540,7 +540,8 @@ struct UXSpecs {
     // MARK: - Draw
 
     /// In Draw, Esc on a shape's comment with text asks first, and Esc again keeps the comment
-    /// with the keyboard in it, so typing goes on in the box.
+    /// with the keyboard in it, so typing goes on in the box. With the comment saved, Esc puts
+    /// the tool down, and a click goes through the canvas to the window behind.
     @Test func escTwiceOnAShapesCommentKeepsTypingInTheBox() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -571,6 +572,17 @@ struct UXSpecs {
             try await app.key(.enter)
             try await app.waitNotToSee("add")
             try await app.waitToSeeText(containing: "1 note")
+
+            try await app.key(.escape)
+            #expect(try await app.focus().frontmost != window.pid)
+            let beside = CGPoint(x: frame.minX + 400, y: frame.minY + 330)
+            try await app.hover(over: beside)
+            try await Task.sleep(for: .milliseconds(100))
+            try await app.click(at: beside)
+            for _ in 0..<40 where try await app.focus().frontmost != window.pid {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            #expect(try await app.focus().frontmost == window.pid, "The click did not reach the window behind")
         }
     }
 
@@ -578,8 +590,8 @@ struct UXSpecs {
 
     /// A wireframe drawn on another app's window reaches the agent. W starts wireframe mode, a
     /// tool's letter chooses the tool, an edge snaps to the window's layout with a guide, Esc
-    /// puts the tool down and the components still move, and they keep to the window while it
-    /// moves. Done asks for the comment at once, and Edit Wireframe in the preview draws the
+    /// puts the tool down: the components still move, and the pointer goes through to the
+    /// window beside them. The components keep to the window while it moves. Done asks for the comment at once, and Edit Wireframe in the preview draws the
     /// note again in place. The agent gets the component and two pictures: the wireframe over
     /// the window, and the window under it. The next session starts in the mode that was on
     /// last, and Tilde's browser with no mode.
@@ -617,17 +629,29 @@ struct UXSpecs {
             try await waitFor(app, at: CGRect(x: start.x + 20, y: row + 2, width: 120, height: 4), Picture.isWireframe, atMost: 0)
             step("button snapped")
 
-            // Esc puts the tool down: a drag where nothing is draws nothing, and a drag on the
-            // button moves it.
+            // Esc puts the tool down: the canvas takes the pointer only on the button. A drag
+            // beside it goes to the window behind, which comes to the front, and draws nothing;
+            // a drag on the button moves it. The pointer gets to each place before the press,
+            // as a hand does.
             try await app.key(.escape)
+            #expect(try await app.focus().frontmost != window.pid)
             let empty = CGRect(x: frame.minX + 350, y: frame.minY + 250, width: 80, height: 80)
+            try await app.hover(over: CGPoint(x: empty.minX, y: empty.minY))
+            try await Task.sleep(for: .milliseconds(100))
             try await app.drag(from: CGPoint(x: empty.minX, y: empty.minY), to: CGPoint(x: empty.maxX, y: empty.maxY))
+            for _ in 0..<40 where try await app.focus().frontmost != window.pid {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            #expect(try await app.focus().frontmost == window.pid, "The drag beside the button did not reach the window behind")
             try await Task.sleep(for: .milliseconds(500))
             try await waitFor(app, at: empty, Picture.isWireframe, atMost: 0)
-            try await app.drag(from: CGPoint(x: start.x + 80, y: start.y + 20), to: CGPoint(x: start.x + 80, y: start.y + 120))
+            let grab = CGPoint(x: start.x + 80, y: start.y + 20)
+            try await app.hover(over: grab)
+            try await Task.sleep(for: .milliseconds(100))
+            try await app.drag(from: grab, to: CGPoint(x: start.x + 80, y: start.y + 120))
             try await waitFor(app, at: CGRect(x: start.x + 20, y: start.y + 110, width: 120, height: 20), Picture.isWireframe, atLeast: 200)
             try await waitFor(app, at: CGRect(x: start.x + 20, y: start.y + 10, width: 120, height: 20), Picture.isWireframe, atMost: 0)
-            step("tool down, button moved")
+            step("tool down, the window behind clicked, button moved")
 
             // The window glides away and back to rest: in every picture of the screen, the
             // button keeps its place on the window.
@@ -689,6 +713,8 @@ struct UXSpecs {
             let button = CGRect(x: mark + before.button + 10, y: middle - 10, width: 100, height: 20)
             try await waitFor(app, at: button, Picture.isWireframe, atLeast: 200)
             try await app.key(.escape)
+            try await app.hover(over: CGPoint(x: button.midX, y: middle))
+            try await Task.sleep(for: .milliseconds(100))
             try await app.drag(from: CGPoint(x: button.midX, y: middle), to: CGPoint(x: button.midX, y: middle + 60))
             let moved = button.offsetBy(dx: 0, dy: 60)
             try await waitFor(app, at: moved, Picture.isWireframe, atLeast: 200)
