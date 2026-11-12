@@ -785,14 +785,17 @@ final class AnnotationController: ObservableObject {
         makeOverlayKey()
     }
 
-    /// A click on the floating HUD gives Tilde the keyboard, so Esc and ↩ reach it next. The
-    /// HUD is a non-activating panel: without this, keys stay with the app in front.
+    /// A click on the floating HUD gives Tilde the keyboard, so Esc and ↩ reach it next: the
+    /// overlay, or in Draw and Wireframe the canvas, which has their keys. The HUD is a
+    /// non-activating panel: without this, keys stay with the app in front.
     func takeKeyboard() {
         guard session != nil else {
             return
         }
         NSApp.activate(ignoringOtherApps: true)
-        overlays.makeKey()
+        if !focusCanvas() {
+            overlays.makeKey()
+        }
     }
 
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
