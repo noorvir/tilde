@@ -881,6 +881,151 @@ struct UXSpecs {
         }
     }
 
+    /// Each corner of a part resizes it from that corner: the opposite sides stay, and the two
+    /// sides of the corner follow the pointer. The grip on its top edge moves it whole. Lines
+    /// on the window behind can snap a side by a few points, so the sides are found on the
+    /// screen.
+    @Test func eachCornerResizesAPartAndTheTopGripMovesIt() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        let frame = ChangingWindow.frame
+        let drawn = CGRect(x: frame.minX + 80, y: frame.minY + 120, width: 200, height: 100)
+        try await withApp { app in
+            try await drawCard(app, in: drawn)
+            try await app.key(.escape)
+            var part = try await sides(app, near: drawn)
+            step("card drawn")
+
+            let corners: [(name: String, corner: (CGRect) -> CGPoint, by: CGVector)] = [
+                ("se", { CGPoint(x: $0.maxX, y: $0.maxY) }, CGVector(dx: 20, dy: 20)),
+                ("nw", { CGPoint(x: $0.minX, y: $0.minY) }, CGVector(dx: -20, dy: -20)),
+                ("ne", { CGPoint(x: $0.maxX, y: $0.minY) }, CGVector(dx: 20, dy: -20)),
+                ("sw", { CGPoint(x: $0.minX, y: $0.maxY) }, CGVector(dx: -20, dy: 20)),
+            ]
+            for (name, corner, by) in corners {
+                try await drag(app, from: corner(part), by: by)
+                let wanted = CGRect(
+                    x: by.dx < 0 ? part.minX + by.dx : part.minX, y: by.dy < 0 ? part.minY + by.dy : part.minY,
+                    width: part.width + abs(by.dx), height: part.height + abs(by.dy)
+                )
+                let resized = try await sides(app, near: wanted)
+                // The sides away from the corner stay; those of the corner move 20 points out,
+                // or a few points more or less where they snap.
+                let moved = (
+                    left: part.minX - resized.minX, right: resized.maxX - part.maxX,
+                    top: part.minY - resized.minY, bottom: resized.maxY - part.maxY
+                )
+                let stays = (by.dx < 0 ? [moved.right] : [moved.left]) + (by.dy < 0 ? [moved.bottom] : [moved.top])
+                let grows = (by.dx < 0 ? [moved.left] : [moved.right]) + (by.dy < 0 ? [moved.top] : [moved.bottom])
+                #expect(stays.allSatisfy { abs($0) <= 1 }, "\(name): \(part) became \(resized)")
+                #expect(grows.allSatisfy { (11...29).contains($0) }, "\(name): \(part) became \(resized)")
+                part = resized
+                step("\(name) corner resized")
+            }
+
+            // The grip is on the middle of the top edge, from 2 points above it.
+            try await drag(app, from: CGPoint(x: part.midX, y: part.minY + 2), by: CGVector(dx: 30, dy: 30), restingAt: CGPoint(x: part.midX, y: part.midY))
+            let moved = try await sides(app, near: part.offsetBy(dx: 30, dy: 30))
+            #expect(abs(moved.width - part.width) <= 1 && abs(moved.height - part.height) <= 1, "\(part) became \(moved)")
+            #expect((21...39).contains(moved.minX - part.minX) && (21...39).contains(moved.minY - part.minY), "\(part) became \(moved)")
+            step("moved by the grip")
+        }
+    }
+
+    /// A drag starts where it was pressed. The pointer leaves a part at its right, clicks the
+    /// window behind, and comes back to drag the part to the left at once: in every frame of the
+    /// screen, the part is where it was or left of it, never on the side where the pointer left.
+    @Test func aDragStartsWhereItWasPressed() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        let frame = ChangingWindow.frame
+        let drawn = CGRect(x: frame.minX + 120, y: frame.minY + 120, width: 200, height: 100)
+        try await withApp { app in
+            try await drawCard(app, in: drawn)
+            try await app.key(.escape)
+            let part = try await sides(app, near: drawn)
+            try await app.hover(over: CGPoint(x: part.maxX - 10, y: part.midY))
+            try await Task.sleep(for: .milliseconds(200))
+            try await app.hover(over: CGPoint(x: part.maxX + 120, y: part.midY))
+            try await Task.sleep(for: .milliseconds(200))
+            try await app.click(at: CGPoint(x: part.maxX + 120, y: part.maxY + 60))
+            step("pointer left at the right")
+
+            // A row through the part's label tag, which is solid from the part's left side.
+            let row = part.minY - 10
+            let start = try #require(try await app.screen().firstX(onRow: row, from: part.minX - 100, to: part.maxX, where: Picture.isWireframe))
+            async let recorded = app.recordRow(at: row, from: part.minX - 100, width: part.width + 300, seconds: 2)
+            try await Task.sleep(for: .milliseconds(150))
+            let press = CGPoint(x: part.minX + 30, y: part.midY)
+            try await app.mouseDown(at: press)
+            for step in 1...8 {
+                try await app.mouseDragged(to: CGPoint(x: press.x - CGFloat(step) * 5, y: press.y))
+            }
+            try await app.mouseUp(at: CGPoint(x: press.x - 40, y: press.y))
+            let frames = try await recorded
+            let lefts = frames.compactMap { $0.firstX(onRow: row, from: part.minX - 100, to: part.maxX + 200, where: Picture.isWireframe) }
+            #expect(lefts.count >= 10, "Too few frames: \(lefts)")
+            #expect(lefts.allSatisfy { $0 <= start + 1 }, "The part went right of \(start): \(lefts)")
+            #expect(lefts.contains { $0 <= start - 30 }, "The part did not move left of \(start): \(lefts)")
+            step("drag recorded")
+        }
+    }
+
+    /// Starts wireframe mode and draws a card with ⌘ over `rect`.
+    private func drawCard(_ app: TildeApp, in rect: CGRect) async throws {
+        try await app.menu("Start Annotation")
+        try await app.waitToSee("Annotating")
+        try await app.key(.w)
+        try await app.waitToSee("Done, ⌘↩")
+        try await app.waitToSee("Drawing canvas", timeout: 15)
+        try await app.key(.c)
+        try await app.hold("command", down: true)
+        try await app.slowDrag(from: rect.origin, to: CGPoint(x: rect.maxX, y: rect.maxY))
+        try await app.hold("command", down: false)
+    }
+
+    /// A drag with ⌘ from a point, by an offset, after the pointer rests on the part so that its
+    /// handles show: by default inside it, back from the start.
+    private func drag(_ app: TildeApp, from start: CGPoint, by offset: CGVector, restingAt rest: CGPoint? = nil) async throws {
+        try await app.hover(over: rest ?? CGPoint(x: start.x - offset.dx * 2, y: start.y - offset.dy * 2))
+        try await Task.sleep(for: .milliseconds(150))
+        try await app.hold("command", down: true)
+        try await app.mouseDown(at: start)
+        for step in 1...4 {
+            try await app.mouseDragged(to: CGPoint(x: start.x + offset.dx * CGFloat(step) / 4, y: start.y + offset.dy * CGFloat(step) / 4))
+        }
+        try await app.mouseUp(at: CGPoint(x: start.x + offset.dx, y: start.y + offset.dy))
+        try await app.hold("command", down: false)
+    }
+
+    /// The sides of the part near `rect` as the screen shows them: for each side, the line
+    /// within 12 points of that side of `rect` with the most wireframe pixels, along a part of
+    /// it clear of the corners, the tag, the grip and the chip.
+    private func sides(_ app: TildeApp, near rect: CGRect, sourceLocation: SourceLocation = #_sourceLocation) async throws -> CGRect {
+        let offsets = stride(from: -12.0, through: 12.0, by: 0.5)
+        let end = Date().addingTimeInterval(4)
+        while true {
+            try await Task.sleep(for: .milliseconds(300))
+            let picture = try await app.screen()
+            func line(_ around: Double, _ strip: (Double) -> CGRect) -> Double? {
+                let scored = offsets.map { (around + $0, picture.count(in: strip(around + $0), every: 1, where: Picture.isWireframe)) }
+                guard let best = scored.max(by: { $0.1 < $1.1 }), best.1 >= 10 else {
+                    return nil
+                }
+                return best.0
+            }
+            let column = { (x: Double) in CGRect(x: x, y: rect.minY + rect.height * 0.3, width: 0.5, height: rect.height * 0.4) }
+            let row = { (y: Double) in CGRect(x: rect.minX + rect.width * 0.25, y: y, width: rect.width * 0.15, height: 0.5) }
+            if let left = line(rect.minX, column), let right = line(rect.maxX, column), let top = line(rect.minY, row), let bottom = line(rect.maxY, row) {
+                return CGRect(x: left, y: top, width: right - left, height: bottom - top)
+            }
+            if Date() > end {
+                await app.saveFailure(named: "sides-\(sourceLocation.line)")
+                throw UXFailure(description: "No part near \(rect)")
+            }
+        }
+    }
+
     /// Waits until the area of the screen has at least, or at most, this many pixels that match.
     private func waitFor(_ app: TildeApp, at area: CGRect, every step: Int = 2, _ matches: (Picture.Color) -> Bool, atLeast: Int = 0, atMost: Int = .max, sourceLocation: SourceLocation = #_sourceLocation) async throws {
         let end = Date().addingTimeInterval(6)
@@ -893,6 +1038,7 @@ struct UXSpecs {
             try await Task.sleep(for: .milliseconds(40))
         }
         Issue.record("\(last) pixels in \(area), expected \(atLeast)...\(atMost)", sourceLocation: sourceLocation)
+        await app.saveFailure(named: "pixels-\(sourceLocation.line)")
     }
 }
 

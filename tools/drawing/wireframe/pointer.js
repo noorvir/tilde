@@ -1,11 +1,11 @@
 // What the pointer does in wireframe mode: a drag draws a component, also in another, or with
-// no tool moves one; the chip moves one too, the corner handle resizes one, and ⌥ and a drag
-// copies one. A click selects one, and a double-click or a click on its tag edits its label.
+// no tool moves one; the chip and the top grip move one too, a corner handle resizes one from
+// that corner, and ⌥ and a drag copies one. A click selects one, and a double-click or a click on its tag edits its label.
 
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
 import { api, postPointer, live } from "../scene.js";
-import { resizer, typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles, toggleMenu } from "./chip.js";
+import { typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles, toggleMenu } from "./chip.js";
 import { newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { commentBox, commented, openComment, closeComment } from "./comment.js";
 import { record } from "./history.js";
@@ -69,13 +69,14 @@ export function finishWireframeShape() {
   api.updateScene({ elements: [...rest, ...elements], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
 }
 
-function startAdjusting(event, frame, mode, from) {
+// `corner` of a resize: "nw", "ne", "sw" or "se", the one that the pointer moves.
+function startAdjusting(event, frame, mode, from, corner = null) {
   selection.hovered = frame.groupIds[0];
   const menuBefore = selection.menu;
   selection.menu = null;
   const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
   adjusting = {
-    mode, from, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false, menuBefore,
+    mode, from, corner, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false, menuBefore,
     before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && event.altKey,
   };
   event.target.setPointerCapture?.(event.pointerId);
@@ -122,11 +123,18 @@ function adjust(event) {
     next.y += snapY?.shift ?? 0;
     point = { x: snapX?.value ?? pointer.x, y: snapY?.value ?? pointer.y };
   } else {
-    const corner = { x: rect.x + rect.width + dx, y: rect.y + rect.height + dy };
+    // The corner follows the pointer, and the opposite one stays: the component is never
+    // smaller than 16 × 12, and never turns over.
+    const isLeft = adjusting.corner.includes("w");
+    const isTop = adjusting.corner.includes("n");
+    const fixed = { x: isLeft ? rect.x + rect.width : rect.x, y: isTop ? rect.y + rect.height : rect.y };
+    const corner = { x: (isLeft ? rect.x : rect.x + rect.width) + dx, y: (isTop ? rect.y : rect.y + rect.height) + dy };
     snapX = nearest(lines.x, corner.x);
     snapY = nearest(lines.y, corner.y);
     point = { x: snapX?.value ?? corner.x, y: snapY?.value ?? corner.y };
-    next = { ...rect, width: Math.max(16, point.x - rect.x), height: Math.max(12, point.y - rect.y) };
+    const width = Math.max(16, isLeft ? fixed.x - point.x : point.x - fixed.x);
+    const height = Math.max(12, isTop ? fixed.y - point.y : point.y - fixed.y);
+    next = { ...rect, x: isLeft ? fixed.x - width : fixed.x, y: isTop ? fixed.y - height : fixed.y, width, height };
   }
   showGuides(snapX, snapY, point);
   rebuild(group, next, data);
@@ -149,6 +157,8 @@ function editWireframe(event) {
         selectGroup(frame.groupIds[0]);
         if (isDoubleClick(frame.groupIds[0])) editLabel(frame);
       }
+      // A click on the grip selects the component, as one on it does.
+      if (!moved && frame && from === "grip") selectGroup(frame.groupIds[0]);
       // A click on the chip's name opens the kinds, or closes them.
       if (!moved && from === "chip") selection.menu = menuBefore === "kinds" ? null : "kinds";
       showHandles();
@@ -247,7 +257,12 @@ function editWireframe(event) {
     return true;
   }
   if (typeMenu.contains(event.target) || bordersMenu.contains(event.target)) return true;
-  startAdjusting(event, frame, resizer.contains(event.target) ? "resize" : "move", resizer.contains(event.target) ? "resizer" : "chip");
+  const corner = event.target.closest("[data-corner]")?.dataset.corner;
+  if (corner) {
+    startAdjusting(event, frame, "resize", "corner", corner);
+    return true;
+  }
+  startAdjusting(event, frame, "move", event.target.closest("#tilde-grip") ? "grip" : "chip");
   return true;
 }
 

@@ -30,8 +30,10 @@ struct UIState: Decodable {
         case done, failed
     }
     /// The first component on the canvas, selected with its chip and its borders menu open.
+    /// The first component's handles: with its borders menu open, with the pointer over it,
+    /// or selected with the pointer away.
     enum Chip: String, Decodable {
-        case borders
+        case borders, hovered, selected
     }
     enum Enlarged: String, Decodable {
         case closeUp, context

@@ -265,6 +265,93 @@ struct WireframeCanvasTests {
         #expect(try await page.shapes().map(\.type) == ["table"])
     }
 
+    /// Each corner resizes a component from that corner, with the cursor of its diagonal: the
+    /// opposite corner stays, also when the pointer goes past it, and the component is never
+    /// smaller than 16 × 12. The pointer finds each corner's square itself.
+    @Test(arguments: [
+        ("nw", CGPoint(x: 200, y: 150), CGPoint(x: 160, y: 120), [160.0, 120, 280, 150], [424.0, 258, 16, 12], "nwse-resize"),
+        ("ne", CGPoint(x: 440, y: 150), CGPoint(x: 480, y: 120), [200.0, 120, 280, 150], [200.0, 258, 16, 12], "nesw-resize"),
+        ("sw", CGPoint(x: 200, y: 270), CGPoint(x: 160, y: 300), [160.0, 150, 280, 150], [424.0, 150, 16, 12], "nesw-resize"),
+        ("se", CGPoint(x: 440, y: 270), CGPoint(x: 480, y: 300), [200.0, 150, 280, 150], [200.0, 150, 16, 12], "nwse-resize"),
+    ])
+    func eachCornerResizesFromThatCorner(corner: String, from: CGPoint, to: CGPoint, grown: [Double], smallest: [Double], cursor: String) async throws {
+        try await drawComponent("table")
+        try await start(tool: "")
+        try await page.hover(inside)
+        let found = "(() => { const e = document.elementFromPoint(\(from.x), \(from.y)); return [e.dataset.corner, getComputedStyle(e).cursor].join(); })()"
+        #expect(try await page.run(found) as? String == "\(corner),\(cursor)")
+        try await page.drag(from: from, to: to)
+        #expect(try await rects() == [grown])
+
+        // Past the opposite corner, from the original size.
+        try await page.draw("undoWireframe()")
+        try await page.hover(inside)
+        let opposite = CGPoint(x: 640 - from.x, y: 420 - from.y)
+        try await page.drag(from: from, to: CGPoint(x: opposite.x + (opposite.x - from.x), y: opposite.y + (opposite.y - from.y)))
+        #expect(try await rects() == [smallest])
+        #expect(try await page.shapes().map(\.type) == ["table"])
+    }
+
+    /// The place, colour and cursor of the grip on a component's top edge.
+    private func gripInfo() async throws -> String? {
+        try await page.run("(() => { const e = document.getElementById('tilde-grip'); if (getComputedStyle(e).display === 'none') return null; const box = e.getBoundingClientRect(); return [box.left, box.top, box.width, box.height, getComputedStyle(e).backgroundColor, getComputedStyle(e).cursor].join(); })()") as? String
+    }
+
+    /// A grip on the middle of a component's top edge, in its kind's colour, moves it: with no
+    /// tool and with one. It shows with the pointer over the component, and while it is
+    /// selected.
+    @Test func theTopGripMovesAComponent() async throws {
+        try await page.draw("restoreWireframe({shapes: [{type: 'card', rect: [200, 150, 240, 120], label: 'Plan'}, {type: 'table', rect: [600, 150, 200, 120]}], origin: [0, 0]})")
+        try await start(tool: "")
+        #expect(try await gripInfo() == nil)
+        try await page.hover(inside)
+        // 24 × 8, from 2 points above the edge, clear of the tag at the left.
+        #expect(try await gripInfo() == "308,148,24,8,rgb(47, 123, 246),move")
+        try await page.hover(CGPoint(x: 700, y: 210))
+        #expect(try await gripInfo() == "688,148,24,8,rgb(14, 147, 132),move")
+
+        try await page.hover(inside)
+        try await page.drag(from: CGPoint(x: 320, y: 152), to: CGPoint(x: 360, y: 192))
+        #expect(try await rects() == [[240, 190, 240, 120], [600, 150, 200, 120]])
+
+        // With a tool, a press on the grip moves and draws nothing.
+        try await start(tool: "card")
+        try await page.hover(CGPoint(x: 360, y: 250))
+        try await page.drag(from: CGPoint(x: 360, y: 192), to: CGPoint(x: 340, y: 172))
+        #expect(try await rects() == [[220, 170, 240, 120], [600, 150, 200, 120]])
+
+        // A click on it selects the component: the grip stays with the pointer away.
+        try await start(tool: "")
+        try await page.hover(CGPoint(x: 340, y: 230))
+        try await page.click(CGPoint(x: 340, y: 172))
+        try await page.hover(CGPoint(x: 1000, y: 700))
+        #expect(try await gripInfo() == "328,168,24,8,rgb(47, 123, 246),move")
+    }
+
+    /// On a narrow component the grip stays at the middle, and the corners win where they meet
+    /// it. The grip never covers the label's tag or a chip above the component.
+    @Test func theGripLeavesTheCornersTheTagAndTheChipFree() async throws {
+        try await page.draw("restoreWireframe({shapes: [{type: 'button', rect: [500, 400, 30, 20]}], origin: [0, 0]})")
+        try await start(tool: "")
+        try await page.hover(CGPoint(x: 515, y: 412))
+        #expect(try await gripInfo()?.hasPrefix("503,398,24,8,") == true)
+        #expect(try await page.run("document.elementFromPoint(529, 401).dataset.corner") as? String == "ne")
+        #expect(try await page.run("document.elementFromPoint(515, 402).id") as? String == "tilde-grip")
+
+        // At the top of the screen the tag is inside the component; a long label leaves no room
+        // after it, so the grip goes under it.
+        try await page.draw("restoreWireframe({shapes: [{type: 'card', rect: [100, 5, 100, 60], label: 'A long label'}], origin: [0, 0]})")
+        try await page.hover(CGPoint(x: 150, y: 50))
+        #expect(try await gripInfo()?.hasPrefix("138,24,24,8,") == true)
+
+        // At the bottom of the screen the chip is above the component, after the tag.
+        try await page.draw("restoreWireframe({shapes: [{type: 'card', rect: [100, 740, 300, 50], label: 'Plan'}], origin: [0, 0]})")
+        try await page.hover(CGPoint(x: 250, y: 770))
+        let overlap = "(() => { const a = document.getElementById('tilde-grip').getBoundingClientRect(); const b = document.getElementById('tilde-chip').getBoundingClientRect(); return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top; })()"
+        #expect(try await page.run(overlap) as? Bool == false)
+        #expect(try await page.run("document.getElementById('tilde-chip').dataset.side") as? String == "above")
+    }
+
     /// ⌥ and a drag moves a copy: the first component stays, and the copy has its kind, its
     /// label and its size.
     @Test func optionAndADragCopiesAComponent() async throws {
@@ -838,8 +925,10 @@ struct WireframeCanvasTests {
         return (try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Bool]) ?? [:]
     }
 
-    /// The handles of a component: the chip just below it, and the square at its bottom right.
-    private static let chip = "[data-wireframe-handle][style*=\"cursor: move\"]"
+    /// The handles of a component: the chip just below it, the square at each corner, and the
+    /// grip on its top edge.
+    private static let chip = "#tilde-chip"
     private static let bordersButton = "#tilde-chip [data-menu=\"borders\"]"
-    private static let resizer = "[data-wireframe-handle][style*=\"nwse-resize\"]"
+    private static let resizer = "[data-corner=\"se\"]"
+    private static let grip = "#tilde-grip"
 }

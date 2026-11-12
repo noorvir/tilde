@@ -30,7 +30,7 @@ enum CanvasSurface {
     static func image(look: WireframeLook, chip: UIState.Chip?, isNested: Bool) async throws -> CGImage {
         let app = try await Renderer.render(NSHostingView(rootView: MockApp()), size: size, appearance: .aqua)
         let page = try await WireframePicturePage.load(html: html())
-        let state = chip == .borders ? "borders" : "normal"
+        let state = chip?.rawValue ?? "normal"
         return try await page.picture(of: isNested ? nestedShapes : shapes, look: look, state: state, over: app, size: size)
     }
 

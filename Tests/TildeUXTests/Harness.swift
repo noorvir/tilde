@@ -475,7 +475,7 @@ final class TildeApp {
 
     /// Keeps a picture of the screen for a failed expectation, and the app's last 30 s of note
     /// decisions, in the temporary folder.
-    private func saveFailure(named name: String) async {
+    func saveFailure(named name: String) async {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-failure-\(name.prefix(12))")
         let log = Process()
         log.executableURL = URL(fileURLWithPath: "/usr/bin/log")

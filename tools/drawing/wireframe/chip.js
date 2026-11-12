@@ -4,8 +4,9 @@
 // name changes the kind, its Borders button opens the borders, its Comment button its comment,
 // its other controls set the rows and columns of a table or list or the fill of a rectangle or
 // ellipse, and × deletes it. A
-// handle at its bottom right resizes it. Moves and resizes snap. Only components not sent yet
-// can change; each change can be undone.
+// handle at each corner resizes it, and its opposite corner stays; a grip at the middle of its
+// top edge moves it. Moves and resizes snap. Only components not sent yet can change; each
+// change can be undone.
 
 import { editing } from "../draw-mode.js";
 import { commentBox } from "./comment.js";
@@ -13,7 +14,7 @@ import { live, changeElements } from "../scene.js";
 import { rowsOf, allBorders, kindNames, frameOf, clamp } from "./components.js";
 import { record } from "./history.js";
 import { labelled } from "./labels.js";
-import { setActiveTag, shownTagWidth } from "./look.js";
+import { paletteOf, setActiveTag, shownTagWidth, tagTop } from "./look.js";
 import { wireframe } from "./mode.js";
 
 const menuStyle = "position:fixed;z-index:10000;display:none;flex-direction:column;padding:4px;border-radius:10px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif;user-select:none";
@@ -24,9 +25,25 @@ export const chip = document.createElement("div");
 chip.id = "tilde-chip";
 chip.dataset.wireframeHandle = "";
 chip.style.cssText = "position:fixed;z-index:9999;display:none;align-items:center;gap:2px;height:22px;padding:0 4px 0 8px;border-radius:11px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif;cursor:move;user-select:none;white-space:nowrap";
-export const resizer = document.createElement("div");
-resizer.dataset.wireframeHandle = "";
-resizer.style.cssText = "position:fixed;z-index:9999;display:none;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff;cursor:nwse-resize";
+// A square on each corner, with the cursor of its diagonal. Over the grip: where the two meet on
+// a narrow component, the corners win.
+export const corners = ["nw", "ne", "sw", "se"].map((corner) => {
+  const handle = document.createElement("div");
+  handle.dataset.wireframeHandle = "";
+  handle.dataset.corner = corner;
+  const cursor = corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize";
+  handle.style.cssText = `position:fixed;z-index:9999;display:none;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff;cursor:${cursor}`;
+  return handle;
+});
+// The grip that moves a component: a short bar in the component's colour, with square corners
+// as its tag has, on the middle of its top edge.
+export const grip = document.createElement("div");
+grip.id = "tilde-grip";
+grip.dataset.wireframeHandle = "";
+grip.title = "Move";
+grip.style.cssText = "position:fixed;z-index:9998;display:none;box-sizing:border-box;width:24px;height:8px;padding:2px 6px;flex-direction:column;justify-content:space-between;cursor:move";
+grip.innerHTML = '<span style="height:1px;background:#fff"></span><span style="height:1px;background:#fff"></span>';
+const gripSize = { width: 24, height: 8 };
 export const typeMenu = document.createElement("div");
 typeMenu.id = "tilde-kinds";
 typeMenu.dataset.wireframeHandle = "";
@@ -160,16 +177,23 @@ export function showHandles() {
   setActiveTag(isShown && selection.hovered ? selection.hovered : null);
   handleOutline.style.display = isShown ? "block" : "none";
   chip.style.display = isShown ? "flex" : "none";
-  resizer.style.display = isShown ? "block" : "none";
+  for (const handle of corners) handle.style.display = isShown ? "block" : "none";
+  grip.style.display = isShown ? "flex" : "none";
   typeMenu.style.display = isShown && selection.menu === "kinds" ? "flex" : "none";
   bordersMenu.style.display = isShown && selection.menu === "borders" ? "flex" : "none";
   if (!isShown) return;
   const kind = frame.customData.tildeWireframe;
   Object.assign(handleOutline.style, { left: `${frame.x}px`, top: `${frame.y}px`, width: `${frame.width}px`, height: `${frame.height}px` });
-  Object.assign(resizer.style, { left: `${frame.x + frame.width}px`, top: `${frame.y + frame.height}px` });
+  for (const handle of corners) {
+    const { corner } = handle.dataset;
+    const x = corner.includes("w") ? frame.x : frame.x + frame.width;
+    const y = corner.includes("n") ? frame.y : frame.y + frame.height;
+    Object.assign(handle.style, { left: `${x}px`, top: `${y}px` });
+  }
   const content = `<span data-menu="kinds" title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>${chipControls(frame)}${deleteButton}`;
   if (chip.innerHTML !== content) chip.innerHTML = content;
   placeChip(frame);
+  placeGrip(frame);
 
   if (selection.menu === "kinds") {
     const items = Object.entries(kindNames).map(([value, name]) => {
@@ -206,6 +230,23 @@ function placeChip(frame) {
     left: `${clamp(left, 0, window.innerWidth - width)}px`,
     top: `${clamp(top, 0, window.innerHeight - height)}px`,
   });
+}
+
+// The grip sits on the top edge, at its middle, from 2 points above it, where the tag and a chip
+// above the component end, so it never covers them. A tag inside the component, at the top of
+// the screen, pushes it right, or under the tag where there is no room.
+function placeGrip(frame) {
+  grip.style.background = paletteOf(frame.customData.tildeWireframe).main;
+  let left = frame.x + frame.width / 2 - gripSize.width / 2;
+  let top = frame.y - 2;
+  const tag = { left: frame.x, right: frame.x + shownTagWidth(frame), top: tagTop(frame), bottom: tagTop(frame) + 15 };
+  const isOverTag = (x, y) => x < tag.right && x + gripSize.width > tag.left && y < tag.bottom && y + gripSize.height > tag.top;
+  if (isOverTag(left, top)) {
+    const afterTag = tag.right + 4;
+    if (afterTag + gripSize.width <= frame.x + frame.width - 8) left = afterTag;
+    else top = tag.bottom + 2;
+  }
+  Object.assign(grip.style, { left: `${left}px`, top: `${top}px` });
 }
 
 // A chip's menu opens under its button, or over it where there is no room under it, and stays
