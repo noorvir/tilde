@@ -92,8 +92,6 @@ struct NodeLinkTests {
         }
     }
 
-    /// A node with an older Tilde's URL entries in several apps moves to its socket in one
-    /// Install: all its apps start tproxy, or, when one cannot change, all keep their URL.
     /// A machine takes one change at a time: while one is under way (here the move), an app's
     /// switch changes nothing, and a page that no longer speaks for the machine changes nothing.
     /// The machine's link reads the same during a change.
@@ -127,6 +125,8 @@ struct NodeLinkTests {
         #expect(local.installer.status(of: .codex) == .installed)
     }
 
+    /// A node with an older Tilde's URL entries in several apps moves to its socket in one
+    /// Install: all its apps start tproxy, or, when one cannot change, all keep their URL.
     @Test func aNodeMovesAllItsAppsToTheSocketOrNone() throws {
         let home = try home()
         defer {

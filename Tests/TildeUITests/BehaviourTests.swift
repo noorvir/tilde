@@ -119,7 +119,7 @@ struct BehaviourTests {
         #expect(restored.compactMap(Fixtures.video).count == 1)
     }
 
-    // MARK: - Regressions of round 2
+    // MARK: - Rules of the flow
 
     /// The first comment saved enables Send at once, and deleting the last note disables it.
     @Test func sendFollowsTheNotes() throws {
@@ -365,7 +365,7 @@ struct BehaviourTests {
     }
 
     /// A source with no size, as an iPhone reports before it streams, is an error, not the
-    /// exception that crashed Tilde; a phone's screen in portrait is fine.
+    /// exception that AVAssetWriterInput raises for it; a phone's screen in portrait is fine.
     @Test func aRecordingNeedsASizeItCanWrite() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-writer-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -834,8 +834,8 @@ struct BehaviourTests {
         }
     }
 
-    /// The open picker takes no clicks on screen. "‹ Back" and Esc step back one level: an
-    /// app's windows, then the picker, then choosing.
+    /// The open picker takes no clicks on screen. "All apps", "Select on screen" and Esc step
+    /// back one level: an app's windows, then the picker, then choosing.
     @Test func theOpenPickerStepsBackOneLevelAtATime() {
         open(activity: .picking(isPickerOpen: true))
         controller.click(at: CGPoint(x: -5000, y: -5000))
@@ -925,8 +925,7 @@ struct BehaviourTests {
         }
     }
 
-    /// The subtitle says where the report goes in full, in every mode; the window the session is
-    /// limited to is on the window button instead.
+    /// The subtitle says where the report goes in full, while annotating and while paused.
     @Test func subtitlesSayWhereTheReportGoesInBothStates() {
         let local = HUDView.subtitlePart(client: "Clipboard", clientIcon: nil, machine: nil, state: .annotating)
         #expect(local == HUDView.SubtitlePart(prefix: "for", text: "Clipboard"))
@@ -1100,7 +1099,7 @@ struct BehaviourTests {
         #expect(controller.confirmation == nil)
         #expect(controller.drafts.count == 2)
 
-        // Paused in a popped-out session: Esc asks, ↩ answers.
+        // Paused, with no question: Esc asks to close the session, and ↩ answers.
         controller.escapePressed()
         #expect(controller.confirmation == .cancelSession)
         open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)

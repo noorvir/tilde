@@ -168,7 +168,6 @@ struct SessionFlowTests {
         }
     }
 
-    /// A session starts only when none is on screen.
     @Test func aSessionStartsOnlyFromNone() {
         everyTransition { state, event, next, _ in
             guard case .begin = event else {

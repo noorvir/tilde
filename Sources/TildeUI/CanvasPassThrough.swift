@@ -7,7 +7,6 @@ import AppKit
 /// decides at each place that the pointer moves to, and takes or ignores the mouse from there.
 @MainActor
 final class CanvasPassThrough {
-    /// The canvas's window.
     weak var window: NSWindow?
     /// The canvas is on screen to draw on: shown, and not paused.
     var isActive = false {
@@ -15,7 +14,6 @@ final class CanvasPassThrough {
             update()
         }
     }
-    /// No tool is chosen.
     var hasNoTool = false {
         didSet {
             update()

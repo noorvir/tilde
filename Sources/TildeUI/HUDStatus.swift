@@ -106,7 +106,7 @@ extension HUDView {
         var machine: Machine?
     }
 
-    /// A remote machine and its status, drawn as on the Agents page.
+    /// A remote machine and its status, drawn as on the Home page of Settings.
     struct Machine: Equatable {
         let host: String
         let dot: NodeSetup.Dot

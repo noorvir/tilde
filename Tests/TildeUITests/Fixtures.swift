@@ -7,8 +7,6 @@ import AppKit
 /// every run and every Mac.
 @MainActor
 enum Fixtures {
-    /// A controller with an empty store. Waits for the store's first update, which arrives
-    /// on the next run loop pass and would otherwise reset the state a test sets.
     /// An empty archive in a temporary folder.
     static func archive() -> SessionArchive {
         SessionArchive(root: FileManager.default.temporaryDirectory.appendingPathComponent("tilde-sessions-\(UUID().uuidString)", isDirectory: true))
@@ -31,7 +29,9 @@ enum Fixtures {
         )
     }
 
-    /// A controller whose reports and copies never reach the user's inbox or clipboard.
+    /// A controller with an empty store, whose reports and copies never reach the user's inbox
+    /// or clipboard. Waits for the store's first update, which arrives on the next run loop
+    /// pass and would otherwise reset the state a test sets.
     static func controller() async throws -> AnnotationController {
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive(), defaults: MemoryDefaults())
         controller.sender.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
@@ -77,7 +77,6 @@ enum Fixtures {
         }
     }
 
-    /// The hover highlight on the first draft's web element.
     /// A stopped clip of the Safari window, 12 s long, with its video file at `video`.
     static func clip(in video: URL) throws -> Draft {
         try Data([0, 0, 0, 0x18]).write(to: video)
@@ -111,6 +110,7 @@ enum Fixtures {
         return nil
     }
 
+    /// The hover highlight on the first draft's web element.
     static func hover() -> Picked {
         let draft = drafts(1)[0]
         guard case .element(let element) = draft.annotation.target else {

@@ -8,7 +8,7 @@ import SwiftUI
 enum CanvasSurface {
     static let size = CGSize(width: 680, height: 420)
 
-    /// The components of the owner's reference picture, over `MockApp`.
+    /// Two cards, a dropdown, a table, a list and a button, over `MockApp`.
     private static let shapes: [[String: Any]] = [
         ["type": "card", "rect": [18, 118, 216, 66], "label": "Plan card", "borders": allBorders],
         ["type": "card", "rect": [244, 118, 216, 66], "label": "Plan card", "borders": allBorders],
@@ -44,7 +44,7 @@ enum CanvasSurface {
     }
 }
 
-/// An app under the wireframe, as in the owner's reference picture: a header, plans and a table.
+/// An app under the wireframe: a header, plans and a table.
 private struct MockApp: View {
     private let ink = Color(red: 0.12, green: 0.12, blue: 0.11)
     private let muted = Color(red: 0.42, green: 0.42, blue: 0.4)

@@ -473,7 +473,7 @@ extension Installer {
             )
         case .windsurf:
             return Target(
-                // Windsurf is now Devin Desktop; it moved its config from ~/.codeium/windsurf.
+                // Windsurf's app is Devin Desktop, with its config in devin/; older versions had ~/.codeium/windsurf.
                 config: configFolder.appendingPathComponent("devin/mcp_config.json"),
                 format: .json(path: ["mcpServers", "tilde"], entry: server(urlKey: "serverUrl")),
                 skills: agentSkills,

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A remote machine: the laptop symbol with its status dot, as on the Agents page and in the HUD.
+/// A remote machine: the laptop symbol with its status dot, as on the Home page of Settings and in the HUD.
 struct MachineIcon: View {
     let dot: NodeSetup.Dot
     /// The icon's square; the symbol and the dot scale with it.

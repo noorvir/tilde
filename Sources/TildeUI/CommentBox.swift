@@ -63,7 +63,6 @@ final class CommentBox: ObservableObject {
         panel.follow(near: pending.marker, below: pending.frame)
     }
 
-    /// Gives the box the keyboard.
     func focus() {
         panel.focus()
     }

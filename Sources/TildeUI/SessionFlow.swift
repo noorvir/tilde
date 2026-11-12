@@ -74,7 +74,6 @@ struct SessionFlow: Equatable {
 
     enum Activity: Equatable {
         case annotating
-        /// Recording mode.
         case recording(Clip)
         /// Choosing what to record, in recording mode with no clip in progress; the session
         /// goes back there after the choice. The picker is open in full, or only its "Use

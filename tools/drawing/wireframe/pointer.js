@@ -45,7 +45,7 @@ export function pointerWentThrough(isPress) {
 }
 
 // After Excalidraw has finished the rectangle of a drag: it becomes the component of the tool.
-// A click instead labels the component under it.
+// A click instead selects the component under it, and a double-click edits its label.
 export function finishWireframeShape() {
   const press = wireframePress;
   wireframePress = null;

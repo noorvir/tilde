@@ -338,7 +338,7 @@ struct HUDView: View {
         // places with the disabled look. While the report is made, nothing works.
         Group {
             HStack(spacing: PillMetrics.iconGap) {
-                // Where the status dot was: in recording mode the record button, else pause and play.
+                // The status button: in recording mode the record button, else pause and play.
                 HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, keys: controller.isDrawing ? [] : status.keys + keys(.pauseOrResume), help: status.help) {
                     controller.pressStatusButton()
                 }

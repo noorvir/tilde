@@ -110,7 +110,7 @@ final class SettingsModel: ObservableObject {
             machinePath = []
         }
     }
-    /// The machine whose page is open, on the Agents page.
+    /// The machine whose page is open, on the Home page.
     @Published var machinePath: [String] = []
     /// The agent rows that show their files.
     @Published var expandedAgents: Set<String> = []

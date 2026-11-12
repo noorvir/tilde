@@ -3,7 +3,7 @@ import TildeInstaller
 import AppKit
 import Combine
 
-/// Status of the local MCP endpoint, shown in the menu.
+/// Status of the local MCP endpoint, shown in Settings.
 @MainActor
 final class ServerState {
     let port: UInt16

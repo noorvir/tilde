@@ -29,7 +29,6 @@ struct UIState: Decodable {
     enum SentStatus: String, Decodable {
         case done, failed
     }
-    /// The first component on the canvas, selected with its chip and its borders menu open.
     /// The first component's handles: with its borders menu open, with the pointer over it,
     /// or selected with the pointer away.
     enum Chip: String, Decodable {
@@ -104,7 +103,7 @@ struct UIState: Decodable {
     var sent: String?
     /// Send was pressed and the report is being made.
     var sending: Bool?
-    /// A short note in the HUD's subtitle, such as "Could not start recording".
+    /// A short note in the HUD's subtitle, such as "Recording failed".
     var notice: Notice?
     /// The first note is a stopped recording of the Safari window, 12 s long.
     var clip: Bool?

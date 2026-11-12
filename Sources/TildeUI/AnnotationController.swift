@@ -448,7 +448,7 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Esc, and the picker's "‹ Back".
+    /// Esc, and the picker's "Select on screen" and "All apps".
     func escapePressed() {
         if wireframe.isStyleMenuOpen {
             wireframe.isStyleMenuOpen = false
@@ -1272,8 +1272,8 @@ final class AnnotationController: ObservableObject {
 
 #if DEBUG
 extension AnnotationController {
-    /// Puts the controller in a given state without opening any window, for snapshot and
-    /// behaviour tests. Debug builds only.
+    /// Puts the controller in a given state without opening any window, for the contract's
+    /// pictures and the behaviour tests. Debug builds only.
     func setStateForTesting(
         session: SessionStore.Session?,
         drafts: [Draft] = [],

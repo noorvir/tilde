@@ -99,6 +99,31 @@ extension AnnotationController {
         }
     }
 
+    func dragEnded(with rect: CGRect) {
+        if previewCard.id != nil {
+            dispatch(.closePreview)
+            return
+        }
+        // While choosing, only a click chooses.
+        if isPickingWindow {
+            return
+        }
+        guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
+            return
+        }
+        if commentBox.composer != nil {
+            dispatch(.clickAway)
+            return
+        }
+        let marker = CGPoint(x: rect.maxX, y: rect.minY)
+        let window = scope.window ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
+        let isOverBrowser = window?.number == browser.windowNumber
+        Task {
+            let anchor = isOverBrowser ? await browser.regionAnchor(for: rect) : nil
+            openComposer(NewNote(target: .region, frame: rect, marker: marker, chip: "Region", window: window, anchor: anchor))
+        }
+    }
+
     // MARK: - The drawing canvas
 
     /// The pointer moved on the canvas, at a Quartz point: over a note's label nothing snaps;
@@ -132,30 +157,5 @@ extension AnnotationController {
         }
         preview(id)
         return true
-    }
-
-    func dragEnded(with rect: CGRect) {
-        if previewCard.id != nil {
-            dispatch(.closePreview)
-            return
-        }
-        // While choosing, only a click chooses.
-        if isPickingWindow {
-            return
-        }
-        guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
-            return
-        }
-        if commentBox.composer != nil {
-            dispatch(.clickAway)
-            return
-        }
-        let marker = CGPoint(x: rect.maxX, y: rect.minY)
-        let window = scope.window ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
-        let isOverBrowser = window?.number == browser.windowNumber
-        Task {
-            let anchor = isOverBrowser ? await browser.regionAnchor(for: rect) : nil
-            openComposer(NewNote(target: .region, frame: rect, marker: marker, chip: "Region", window: window, anchor: anchor))
-        }
     }
 }

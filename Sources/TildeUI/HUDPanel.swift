@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Floating indicator while annotating: status, agent message, tools and the list of
-/// annotations. It sits at the top centre of the screen with the pointer, unless the user
+/// Floating indicator while annotating: status, tools, the bars and cards under the pill, and
+/// the list of annotations. It sits at the top centre of the screen with the pointer, unless the user
 /// dragged the pill somewhere else on that screen; the position is kept per screen.
 ///
 /// The panel keeps one size and the content sits at its top. Resizing an NSHostingView
@@ -23,7 +23,7 @@ final class HUDPanel {
     }
     /// Drags the pill, snapping it home, and remembers where it was dropped on each screen.
     private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: PillMetrics.height / 2, positionsKey: "HUDPositions")
-    /// The visible content (pill, message, list) in the panel's SwiftUI coordinates, which
+    /// The visible content (the pill and what shows under it) in the panel's SwiftUI coordinates, which
     /// have a top-left origin. The hosting view has no sizing options, so its fitting size
     /// is zero and cannot give this.
     private var contentFrame: CGRect = .zero

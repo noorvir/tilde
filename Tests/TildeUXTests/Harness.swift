@@ -630,7 +630,6 @@ final class MCPAgent {
     }
 }
 
-/// A window of another app whose whole content changes, like a page change in the Simulator.
 /// Prints the time since the last step of a flow, for the log of a run.
 func step(_ name: String) {
     let now = Date()
@@ -640,6 +639,7 @@ func step(_ name: String) {
 
 private let lastStep = OSAllocatedUnfairLock(initialState: Date())
 
+/// A window of another app whose whole content changes, like a page change in the Simulator.
 final class ChangingWindow {
     /// The window on screen, in screen points from the top left.
     static let frame = CGRect(x: 300, y: 200, width: 500, height: 400)

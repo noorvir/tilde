@@ -37,7 +37,7 @@ let package = Package(
         .executableTarget(name: "tilde-ui-check", swiftSettings: strict),
         .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill", "tilde-mcp"]),
         .testTarget(name: "TildeInstallerTests", dependencies: ["TildeInstaller", "TildeSkill"]),
-        // Snapshot and behaviour tests of the UI; they render offscreen and need a logged-in Mac.
+        // Behaviour tests of the UI; they render offscreen and need a logged-in Mac.
         .testTarget(name: "TildeUITests", dependencies: ["TildeCore", "TildeUI"]),
         // Black-box UX specs: they import nothing of Tilde and drive the built app like a user,
         // so they survive a rewrite. They take over the screen; run them with scripts/ux.sh.

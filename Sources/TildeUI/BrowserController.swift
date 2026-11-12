@@ -87,7 +87,6 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
         ]
     }
 
-    /// The browser window's number while it is on screen.
     /// The page's frame on screen, in AppKit coordinates, while the window is open.
     var pageFrame: CGRect? {
         #if DEBUG
@@ -101,6 +100,7 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
         return window.convertToScreen(webView.convert(webView.bounds, to: nil))
     }
 
+    /// The browser window's number while it is on screen.
     var windowNumber: Int? {
         guard let window, window.isVisible else {
             return nil
