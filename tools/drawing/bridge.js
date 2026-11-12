@@ -3,9 +3,10 @@
 
 import { setOverLabel } from "./cursor.js";
 import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame } from "./draw-mode.js";
-import { api, taken, post, live, changeElements, describe, isPart, withGroups, isTextField } from "./scene.js";
+import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
+import { setWireframeLook } from "./wireframe/look.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
 import { snapAgain } from "./wireframe/pointer.js";
 import { setSnapTargets } from "./wireframe/snap.js";
@@ -13,7 +14,7 @@ import { setWireframeWindow } from "./wireframe/window.js";
 
 function shapesOf(ids) {
   const wanted = new Set(ids);
-  return JSON.stringify(live().filter((element) => wanted.has(element.id) && !isPart(element)).map(describe));
+  return JSON.stringify(live().filter((element) => wanted.has(element.id)).map(describe));
 }
 
 function clear() {
@@ -25,7 +26,7 @@ function clear() {
 
 // The shapes drawn and not taken yet, as `takeNewShapes` gives them; they stay as they are.
 function newShapes() {
-  return JSON.stringify(live().filter((element) => !taken.has(element.id) && !isPart(element)).map(describe));
+  return JSON.stringify(live().filter((element) => !taken.has(element.id)).map(describe));
 }
 
 // The shapes drawn since the last call, in points from the top left of the canvas.
@@ -36,10 +37,10 @@ function takeNewShapes() {
   elements.forEach((element) => taken.add(element.id));
   api.history.clear();
   clearHistory();
-  return JSON.stringify(elements.filter((element) => !isPart(element)).map(describe));
+  return JSON.stringify(elements.map(describe));
 }
 
-// With the parts of each shape: a wireframe box is several elements in one group.
+// With the other elements of each shape's group.
 function remove(ids) {
   changeElements(withGroups(ids), () => ({ isDeleted: true }));
 }
@@ -53,7 +54,7 @@ function setSnapTargetsHere(targets) {
 window.tildeDraw = {
   setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect, setSnapFrame,
   shapesOf, clear, newShapes, takeNewShapes, remove,
-  setWireframe, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
+  setWireframe, setWireframeLook, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 
 // Tilde takes its own keys before the page; it must know when a text field here has the

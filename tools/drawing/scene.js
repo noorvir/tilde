@@ -70,9 +70,6 @@ export function describe(element) {
   return shape;
 }
 
-// A part of a wireframe component, which is several elements in one group.
-export const isPart = (element) => element.customData?.tildePart === true;
-
 export function withGroups(ids) {
   const wanted = new Set(ids);
   const groups = new Set(live().filter((element) => wanted.has(element.id)).flatMap((element) => element.groupIds));

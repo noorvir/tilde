@@ -1,7 +1,6 @@
-// Wireframe mode: skeletons of components (section, card, table, button, dropdown, list, and
-// plain rectangles and ellipses) over
-// the screen, sent together as one note. Its shapes stay until Done takes them all. Each
-// component is a group of flat elements, made again whole when its label changes.
+// Wireframe mode: components (section, card, table, button, dropdown, list, and plain
+// rectangles and ellipses) over the screen, sent together as one note. Its shapes stay until
+// Done takes them all. Each component is one element, which wireframe/look.js draws.
 
 import { moveCursor, setSelectMode } from "../cursor.js";
 import { useTool } from "../draw-mode.js";
@@ -38,7 +37,8 @@ export function setWireframe(state) {
   }
   api.updateScene({
     appState: {
-      currentItemStrokeColor: "#8A8D95", currentItemStrokeStyle: "dashed", currentItemStrokeWidth: 1, currentItemBackgroundColor: "transparent",
+      // The rectangle being drawn shows only as the look of the tool's component.
+      currentItemStrokeColor: "transparent", currentItemStrokeStyle: "solid", currentItemStrokeWidth: 1, currentItemBackgroundColor: "transparent",
       currentItemRoundness: "sharp", selectedElementIds: {},
     },
     captureUpdate: "NEVER",

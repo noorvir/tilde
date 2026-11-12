@@ -7,7 +7,8 @@
 //   cursor.js, rings.js      the cursor on the canvas and the rings at the pointer
 //   draw-mode.js             Draw mode
 //   wireframe/mode.js        wireframe mode on and off, a note's components shown again, its keys
-//   wireframe/components.js  what a component is made of
+//   wireframe/components.js  what a component is: its kinds and its data
+//   wireframe/look.js        what a component looks like, in the style of Tilde's settings
 //   wireframe/pointer.js     drawing, moving, resizing and copying with the pointer
 //   wireframe/chip.js        a component's handles: the chip, the kinds, the resize square
 //   wireframe/labels.js      a label typed in place
@@ -27,6 +28,7 @@ import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
 import { blockPressWithNoTool, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
 import { chip, handleOutline, resizer, selectionOutline, typeMenu } from "./wireframe/chip.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
+import { drawLook, lookLayer } from "./wireframe/look.js";
 import { keyPressed } from "./wireframe/mode.js";
 import { snapPointer } from "./wireframe/pointer.js";
 import { guideLabel, guideX, guideY, snapRing } from "./wireframe/snap.js";
@@ -35,7 +37,7 @@ import { windowOutline } from "./wireframe/window.js";
 document.addEventListener("DOMContentLoaded", () => {
   document.head.appendChild(labelCursor);
   document.body.append(
-    labelField, labelStyle, handleOutline, selectionOutline, chip, resizer, typeMenu, moveCursor, windowOutline,
+    lookLayer, labelField, labelStyle, handleOutline, selectionOutline, chip, resizer, typeMenu, moveCursor, windowOutline,
     guideX, guideY, guideLabel, snapRing, ring, cursorRing,
   );
 });
@@ -75,6 +77,7 @@ const initialData = {
 createRoot(document.getElementById("root")).render(
   <Excalidraw
     initialData={initialData}
+    onChange={drawLook}
     excalidrawAPI={(value) => {
       setAPI(value);
       post("ready");
