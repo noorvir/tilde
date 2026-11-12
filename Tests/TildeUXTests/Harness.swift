@@ -228,9 +228,16 @@ final class TildeApp {
         waitForExit(task)
     }
 
-    /// Fresh settings and sessions, as on a new Mac.
-    static func launched() async throws -> TildeApp {
+    /// Fresh settings and sessions, as on a new Mac, with `defaults` set.
+    static func launched(defaults: [String: String] = [:]) async throws -> TildeApp {
         resetSettings()
+        for (key, value) in defaults {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            task.arguments = ["write", "dev.tilde.ux", key, value]
+            try task.run()
+            waitForExit(task)
+        }
         let app = try TildeApp()
         try await app.waitForServer()
         return app
