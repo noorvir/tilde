@@ -2,11 +2,12 @@ import AppKit
 import WebKit
 import os
 
-/// The canvas of one screen.
+/// The canvas of one screen. It tells its panel what happens on its page.
 @MainActor
 final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private let log = Logger(subsystem: "dev.tilde.app", category: "drawing")
     let frame: CGRect
+    private weak var owner: DrawingPanel?
     private var panel: FloatingPanel?
     private var webView: WKWebView?
     private var underBlur: UnderBlurView?
@@ -32,23 +33,15 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             }
         }
     }
-    var onEscape: () -> Void = {}
-    var onShape: () -> Void = {}
-    var onEdited: () -> Void = {}
-    var onClickAway: () -> Void = {}
-    var onPress: (CGPoint) -> Bool = { _ in false }
-    var onPointer: (CGPoint) -> Void = { _ in }
-    var onKey: (NSEvent) -> Bool = { _ in false }
-    var isOnLabel: (CGPoint) -> Bool = { _ in false }
     var look = WireframeLook() {
         didSet {
             applyLook()
         }
     }
-    var underKeeps: () -> Set<CGWindowID> = { [] }
 
-    init(frame: CGRect) {
+    init(frame: CGRect, owner: DrawingPanel) {
         self.frame = frame
+        self.owner = owner
         super.init()
         passThrough.takesPointer = { [weak self] point in
             await self?.takesPointer(at: point) ?? false
@@ -208,13 +201,13 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
                 self.restoredWireframe = nil
             }
         case "escape":
-            onEscape()
+            owner?.onEscape()
         case "shape":
-            onShape()
+            owner?.onShape()
         case "edited":
-            onEdited()
+            owner?.onEdited()
         case "clickAway":
-            onClickAway()
+            owner?.onClickAway()
         case "typing", "notTyping":
             (panel as? CanvasPanel)?.isTyping = text == "typing"
         case "noTool", "tool":
@@ -223,7 +216,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             let values = text.dropFirst(8).split(separator: ",").compactMap { Double($0) }
             if values.count == 2 {
                 let origin = frame.flipped.origin
-                onPointer(CGPoint(x: origin.x + values[0], y: origin.y + values[1]))
+                owner?.onPointer(CGPoint(x: origin.x + values[0], y: origin.y + values[1]))
             }
         case _ where text.hasPrefix("under:"):
             underChanged(text.dropFirst("under:".count))
@@ -237,7 +230,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     /// Whether a press at a Quartz point is for the canvas: on a note's label, or on what the
     /// page takes a press on.
     private func takesPointer(at point: CGPoint) async -> Bool {
-        if isOnLabel(point) {
+        if owner?.isOnLabel(point) == true {
             return true
         }
         guard let webView else {
@@ -282,8 +275,9 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             return
         }
         underCapture?.cancel()
-        underCapture = Task { [weak self, frame, underKeeps] in
-            let capture = await ScreenCapture.image(of: frame.flipped, keeping: underKeeps())
+        let keeps = owner?.underKeeps() ?? []
+        underCapture = Task { [weak self, frame] in
+            let capture = await ScreenCapture.image(of: frame.flipped, keeping: keeps)
             guard let self, !Task.isCancelled, let capture else {
                 return
             }
@@ -334,8 +328,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel.ignoresMouseEvents = true
         panel.setFrame(frame, display: false)
         passThrough.window = panel
-        panel.onPress = { [weak self] in self?.onPress($0) ?? false }
-        panel.onKey = { [weak self] in self?.onKey($0) ?? false }
+        panel.onPress = { [weak self] in self?.owner?.onPress($0) ?? false }
+        panel.onKey = { [weak self] in self?.owner?.onKey($0) ?? false }
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(self, name: "tilde")

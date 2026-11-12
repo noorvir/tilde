@@ -248,7 +248,6 @@ final class AnnotationController: ObservableObject {
 
         drawing.scope = { [weak self] in self?.scope.window }
         wireframe.scope = { [weak self] in self?.scope.window }
-        drawing.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         let canvas = drawing.panel
         canvas.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         canvas.onEscape = { [weak self] in self?.escapePressed() }

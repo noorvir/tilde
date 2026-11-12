@@ -31,11 +31,7 @@ final class DrawingPanel {
     /// Whether a note's label, which a press opens, is at a Quartz point.
     var isOnLabel: (CGPoint) -> Bool = { _ in false }
     /// Tilde's windows that the blurred screen under the wireframe's components shows.
-    var underKeeps: () -> Set<CGWindowID> = { [] } {
-        didSet {
-            canvases.forEach { $0.underKeeps = underKeeps }
-        }
-    }
+    var underKeeps: () -> Set<CGWindowID> = { [] }
     private var look = WireframeLook.saved()
     private var lookObserver: NSObjectProtocol?
 
@@ -74,14 +70,6 @@ final class DrawingPanel {
     func startDrawing(on screen: NSScreen, tool: String) {
         let canvas = canvas(for: screen.frame)
         active = canvas
-        canvas.onEscape = { [weak self] in self?.onEscape() }
-        canvas.onShape = { [weak self] in self?.onShape() }
-        canvas.onEdited = { [weak self] in self?.onEdited() }
-        canvas.onClickAway = { [weak self] in self?.onClickAway() }
-        canvas.onPress = { [weak self] in self?.onPress($0) ?? false }
-        canvas.onPointer = { [weak self] in self?.onPointer($0) }
-        canvas.onKey = { [weak self] in self?.onKey($0) ?? false }
-        canvas.isOnLabel = { [weak self] in self?.isOnLabel($0) ?? false }
         canvas.startDrawing(tool: tool, color: color)
     }
 
@@ -239,9 +227,8 @@ final class DrawingPanel {
         if let canvas = canvases.first(where: { $0.frame == frame }) {
             return canvas
         }
-        let canvas = DrawingCanvas(frame: frame)
+        let canvas = DrawingCanvas(frame: frame, owner: self)
         canvas.look = look
-        canvas.underKeeps = underKeeps
         canvases.append(canvas)
         return canvas
     }
