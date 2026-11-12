@@ -589,8 +589,10 @@ struct UXSpecs {
             for _ in 0..<60 where window.fullScreen?.isOn != true {
                 try await Task.sleep(for: .milliseconds(100))
             }
-            // The new Space slides in.
-            try await Task.sleep(for: .milliseconds(1000))
+            // The new Space slides in, and the canvas takes the keyboard back there.
+            for _ in 0..<40 where try await app.focus().app != app.pid {
+                try await Task.sleep(for: .milliseconds(50))
+            }
             try await app.key(.escape)
             try await app.key(.enter, command: true)
             try await app.waitNotToSee("Done, ⌘↩")

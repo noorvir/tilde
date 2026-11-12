@@ -5,6 +5,8 @@
 #   brew install cirruslabs/cli/tart
 #   tart clone ghcr.io/cirruslabs/macos-tahoe-xcode:latest tilde-ux
 #   scripts/ux-vm.sh [test name filter]     TILDE_UX_NODE=<ssh host> links that machine
+#   TILDE_UX_VM=<vm> runs in another VM, TILDE_UX_SKIP=<test name pattern> leaves those specs
+#   out, and TILDE_UX_PROXY_BUILT=1 uses proxy/dist as it is; scripts/ux-vms.sh uses them.
 set -eu
 PATH="$HOME/tools/tart-dl/tart.app/Contents/MacOS:$PATH"
 
@@ -30,7 +32,7 @@ until in_vm true 2>/dev/null; do sleep 3; done
 
 # This checkout as it is, committed or not, with tproxy built here, as the VM has no Go; the
 # VM keeps its build folders between runs.
-proxy/build.sh
+[ "${TILDE_UX_PROXY_BUILT:-}" = 1 ] || proxy/build.sh
 in_vm "mkdir -p tilde && find tilde -mindepth 1 -maxdepth 1 ! -name .build ! -name build -exec rm -rf {} +"
 (git ls-files; git ls-files -o --exclude-standard; ls proxy/dist/* 2>/dev/null) | COPYFILE_DISABLE=1 tar czf - -T - | in_vm "tar xzf - -C tilde"
 
@@ -46,6 +48,7 @@ in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*(N) /tmp/tilde-u
 <key>WorkingDirectory</key><string>/Users/admin/tilde</string>
 <key>EnvironmentVariables</key><dict>
     <key>TILDE_UX_NODE</key><string>${TILDE_UX_NODE:-vmself}</string>
+    <key>TILDE_UX_SKIP</key><string>${TILDE_UX_SKIP:-}</string>
 </dict>
 <key>LimitLoadToSessionType</key><string>Aqua</string>
 <key>RunAtLoad</key><true/>
@@ -53,7 +56,7 @@ in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*(N) /tmp/tilde-u
 <key>StandardErrorPath</key><string>/tmp/tilde-ux.log</string>
 </dict></plist>
 PLIST
-run=build/ux-vm/$(date +%Y%m%d-%H%M%S)
+run=build/ux-vm/$(date +%Y%m%d-%H%M%S)-$vm
 mkdir -p "$run"
 in_vm "launchctl bootout gui/\$(id -u)/dev.tilde.ux 2>/dev/null; launchctl bootstrap gui/\$(id -u) /tmp/dev.tilde.ux.plist
     until grep -q __exit /tmp/tilde-ux.log 2>/dev/null; do sleep 2; done

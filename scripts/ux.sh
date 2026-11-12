@@ -68,6 +68,9 @@ status=0
 # Only the flows that need real input and real apps; Tests/Contract covers the rest without them.
 limit=${TILDE_UX_LIMIT:-180}
 set -- --filter "$filter"
+if [ -n "${TILDE_UX_SKIP:-}" ]; then
+    set -- "$@" --skip "$TILDE_UX_SKIP"
+fi
 swift build --build-tests >/dev/null
 # A run that was killed leaves its page servers on their ports.
 pkill -f "http.server 739" 2>/dev/null || true
