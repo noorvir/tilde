@@ -39,7 +39,7 @@ MainActor.assumeIsolated {
 final class Harness {
     let store = SessionStore()
     let browser = BrowserController()
-    lazy var controller = AnnotationController(store: store, browser: browser)
+    lazy var controller = AnnotationController(store: store, browser: browser, archive: SessionArchive(), defaults: .standard)
     lazy var mcp = MCPServer(store: store, localToken: Agent.token)
     var servers: [HTTPServer] = []
 

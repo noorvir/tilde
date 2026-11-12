@@ -179,7 +179,7 @@ struct WireframeTests {
     /// paused it. A pause by the user gives the keyboard to the app in front until the session
     /// goes on; another app in front that pauses the session keeps it too.
     @Test func theSessionHoldsTheKeyboardUntilTheUserPauses() {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: nil)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: MemoryDefaults())
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
         controller.dispatch(.toggleAnnotating)
         #expect(controller.holdsKeyboard)
@@ -300,11 +300,7 @@ struct WireframeTests {
 
     /// The mode on screen goes to the defaults when it changes, for the next session.
     @Test func theModeOnScreenIsSavedForTheNextSession() throws {
-        let suite = "tilde-start-mode-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-        }
+        let defaults = MemoryDefaults()
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
         #expect(defaults.string(forKey: "LastMode") == nil)
@@ -331,11 +327,7 @@ struct WireframeTests {
     /// The tool chosen last stays: after Esc put it down and the mode started again, and in
     /// the next session, from the defaults.
     @Test func wireframeModeStartsWithTheToolChosenLast() throws {
-        let suite = "tilde-wireframe-tool-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-        }
+        let defaults = MemoryDefaults()
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open()))
         controller.dispatch(.startWireframe)

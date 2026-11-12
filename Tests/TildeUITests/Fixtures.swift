@@ -33,7 +33,7 @@ enum Fixtures {
 
     /// A controller whose reports and copies never reach the user's inbox or clipboard.
     static func controller() async throws -> AnnotationController {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive(), defaults: nil)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive(), defaults: MemoryDefaults())
         controller.sender.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
         controller.sender.pasteboard = NSPasteboard(name: NSPasteboard.Name("tilde-tests-\(UUID().uuidString)"))
         try await Task.sleep(for: .milliseconds(20))
@@ -257,9 +257,8 @@ enum Fixtures {
 
     /// Settings with fixed agent apps, default shortcuts and a fixed version.
     static func settingsModel(page: SettingsWindow.Page, history: HistoryModel? = nil, wireframePreviews: WireframePreviews? = nil) throws -> SettingsModel {
-        let defaults = UserDefaults(suiteName: "tilde-tests-\(UUID().uuidString)")!
         let model = SettingsModel(
-            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: defaults), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
+            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: MemoryDefaults()), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
             server: ServerState(port: 7311), version: "0.1.0 (42)",
             browserProfiles: { [] }, permissions: { (true, false) }, wireframePreviews: wireframePreviews
         )
@@ -273,5 +272,24 @@ enum Fixtures {
             InstallResult.App(name: name, icon: appIcon, failed: index >= names.count - failed, changed: true)
         }
         return InstallResult(action: action, apps: apps)
+    }
+}
+
+/// User defaults in memory, for what Tilde keeps across launches: a test changes no domain of
+/// this Mac and leaves no file in ~/Library/Preferences. A suite leaves an empty file there,
+/// also after its domain is removed.
+final class MemoryDefaults: UserDefaults {
+    private var values: [String: Any] = [:]
+
+    override func object(forKey key: String) -> Any? {
+        values[key]
+    }
+
+    override func set(_ value: Any?, forKey key: String) {
+        values[key] = value
+    }
+
+    override func removeObject(forKey key: String) {
+        values[key] = nil
     }
 }

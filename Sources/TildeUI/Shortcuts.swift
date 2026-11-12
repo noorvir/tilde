@@ -292,7 +292,7 @@ final class ShortcutStore: ObservableObject {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults) {
         self.defaults = defaults
         holdKey = DoubleTapKey(rawValue: defaults.string(forKey: "Shortcut.holdKey") ?? DoubleTapKey.option.rawValue)
         for action in Action.allCases {

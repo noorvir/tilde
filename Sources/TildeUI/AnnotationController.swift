@@ -151,7 +151,7 @@ final class AnnotationController: ObservableObject {
     /// The comment box next to a new note or one that is edited, while `flow` has it open.
     private(set) lazy var commentBox = CommentBox { [unowned self] in CommentPanel(controller: self) }
     /// The preview card on a note, while `flow` has it open.
-    private(set) lazy var previewCard = PreviewCard { [unowned self] in PreviewPanel(controller: self) }
+    private(set) lazy var previewCard = PreviewCard { [unowned self] in PreviewPanel(controller: self, defaults: defaults) }
     /// Where the HUD is: floating, or in the toolbar of Tilde's browser.
     private(set) lazy var hud = HUDPlacement(browser: browser) { [unowned self] in HUDPanel(controller: self) }
     private lazy var overlays = OverlayStack(browser: browser) { [unowned self] frame, level, isWindowSized in
@@ -161,9 +161,9 @@ final class AnnotationController: ObservableObject {
     private let store: SessionStore
     let browser: BrowserController
     let shortcuts: ShortcutStore
-    /// Keeps how the user last chose a window, and the mode that was on last, across launches;
-    /// nil keeps them only in memory.
-    private let defaults: UserDefaults?
+    /// Keeps how the user last chose a window, the mode that was on last and the preview's
+    /// size across launches.
+    private let defaults: UserDefaults
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
     private var subscription: AnyCancellable?
     /// The app that was in front when an agent's session opened Tilde's browser. The session
@@ -173,14 +173,13 @@ final class AnnotationController: ObservableObject {
     /// The next session that starts from Tilde is limited to the browser window.
     private var scopesNextLocalSessionToBrowser = false
 
-    init(store: SessionStore, browser: BrowserController, shortcuts: ShortcutStore? = nil, archive: SessionArchive = SessionArchive(), defaults: UserDefaults? = .standard) {
+    init(store: SessionStore, browser: BrowserController, archive: SessionArchive, defaults: UserDefaults) {
         self.store = store
         self.browser = browser
         self.archive = archive
         saver = SessionSaver(archive: archive)
         self.defaults = defaults
-        let shortcuts = shortcuts ?? ShortcutStore()
-        self.shortcuts = shortcuts
+        shortcuts = ShortcutStore(defaults: defaults)
         keyMonitors = KeyMonitors(shortcuts: shortcuts)
         picker = ElementPicker(browser: browser)
         hoverPicker = HoverPicker(picker: picker)
@@ -188,7 +187,7 @@ final class AnnotationController: ObservableObject {
         drawing = DrawingNotes(picker: picker)
         wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
-        flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
+        flow.choosesInPicker = defaults.bool(forKey: "ChoosesInPicker")
 
         subscription = store.$sessions
             .receive(on: RunLoop.main)
@@ -307,10 +306,10 @@ final class AnnotationController: ObservableObject {
         let effects = next.handle(event, facts)
         let questionChanged = next.session?.question != flow.session?.question
         if next.choosesInPicker != flow.choosesInPicker {
-            defaults?.set(next.choosesInPicker, forKey: "ChoosesInPicker")
+            defaults.set(next.choosesInPicker, forKey: "ChoosesInPicker")
         }
         if let startMode = next.startMode, startMode != flow.startMode {
-            defaults?.set(startMode.rawValue, forKey: "LastMode")
+            defaults.set(startMode.rawValue, forKey: "LastMode")
         }
         flow = next
         if questionChanged {
@@ -525,7 +524,7 @@ final class AnnotationController: ObservableObject {
         // Annotate in the HUD (or the pause shortcut) starts annotating.
         let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
         scopesNextLocalSessionToBrowser = false
-        let startMode = SessionFlow.StartMode(saved: defaults?.string(forKey: "LastMode"), inBrowser: isInBrowser)
+        let startMode = SessionFlow.StartMode(saved: defaults.string(forKey: "LastMode"), inBrowser: isInBrowser)
         dispatch(.begin)
 
         layoutOverlays()

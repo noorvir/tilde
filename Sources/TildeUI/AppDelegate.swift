@@ -18,7 +18,7 @@ final class ServerState {
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = SessionStore()
     private let browser = BrowserController()
-    private lazy var controller = AnnotationController(store: store, browser: browser)
+    private lazy var controller = AnnotationController(store: store, browser: browser, archive: SessionArchive(), defaults: .standard)
 
     private var mcp: MCPServer?
     private var server: HTTPServer?

@@ -114,7 +114,7 @@ struct SessionArchiveTests {
 
     @Test func aSessionIsSavedSoonAfterAChange() async throws {
         let archive = Fixtures.archive()
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         let session = Fixtures.session()
         controller.setStateForTesting(session: session, drafts: Fixtures.drafts(2))
@@ -137,7 +137,7 @@ struct SessionArchiveTests {
         archive.flush()
 
         // Tilde starts again: the session is still marked active, so it is unfinished.
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         #expect(archive.all().filter { $0.state == .active }.map(\.id) == [record.id])
 
@@ -155,7 +155,7 @@ struct SessionArchiveTests {
         let record = Fixtures.record(state: .sent, notes: 2, pageURL: nil)
         archive.save(record)
         archive.flush()
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         #expect(HistoryModel(archive: archive).canRestore(record))
 
@@ -171,7 +171,7 @@ struct SessionArchiveTests {
         let record = Fixtures.record(state: .cancelled, notes: 3, pageURL: nil)
         archive.save(record)
         archive.flush()
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         controller.setStateForTesting(session: Fixtures.session(), drafts: Array(Fixtures.drafts(1)))
 
@@ -193,7 +193,7 @@ struct SessionArchiveTests {
         archive.flush()
 
         let store = SessionStore()
-        let controller = AnnotationController(store: store, browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: store, browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         store.reattach = { id, node in controller.reattach(id, node: node) }
         try await Task.sleep(for: .milliseconds(20))
 
@@ -385,7 +385,7 @@ struct SessionArchiveTests {
 @MainActor
 struct CommentTypingTests {
     @Test func typingDoesNotRedrawTheHUDOrTheOverlay() {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController())
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: MemoryDefaults())
         var changes = 0
         let subscription = controller.objectWillChange.sink { changes += 1 }
         controller.commentBox.text = "typed"
@@ -397,7 +397,7 @@ struct CommentTypingTests {
     /// A view observes the controller for the flow, the session and the notes, and each part it
     /// shows: a change of a part redraws only the views that observe that part.
     @Test func aPartDoesNotRedrawTheViewsOfTheOtherParts() {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: nil)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: MemoryDefaults())
         var changes = 0
         let subscription = controller.objectWillChange.sink { changes += 1 }
         controller.previewCard.expandedImage = .context

@@ -159,9 +159,7 @@ struct BehaviourTests {
     /// Recording mode starts choosing the way the user last chose, also after a restart: in
     /// the picker once they opened it, on screen once they went back to clicking there.
     @Test func recordingModeStartsChoosingTheWayTheUserLastChose() async throws {
-        let suite = "tilde-picker-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         func restarted() -> AnnotationController {
             let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
             controller.sourcePicker.injected = (Fixtures.sources().screens, Fixtures.sources().apps, .done)
@@ -522,9 +520,7 @@ struct BehaviourTests {
     /// The preview opens at the size it was last resized to, inside the screen and no smaller
     /// than its minimum; at home it is centred, and a dropped place keeps it on the screen.
     @Test func thePreviewOpensAtItsSavedSize() throws {
-        let suite = "tilde-preview-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         let visible = NSRect(x: 0, y: 25, width: 1800, height: 1100)
 
         #expect(PreviewPanel.size(on: visible, defaults: defaults) == NSSize(width: 1000, height: 640))
@@ -706,8 +702,8 @@ struct BehaviourTests {
     // MARK: - Shortcuts
 
     @Test func shortcutsAreSavedClearedResetAndNeverShared() {
-        let suite = "tilde-tests-\(UUID().uuidString)"
-        let store = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let defaults = MemoryDefaults()
+        let store = ShortcutStore(defaults: defaults)
         let controlShiftK = Shortcut.keys(KeyCombo(keyCode: 40, modifiers: NSEvent.ModifierFlags([.control, .shift]).rawValue, key: "K"))
 
         #expect(store.set(controlShiftK, for: .startAnnotation) == nil)
@@ -716,24 +712,24 @@ struct BehaviourTests {
         #expect(store.set(.doubleTap(.option), for: .togglePause) == nil)
         #expect(store.set(nil, for: .togglePause) == nil)
 
-        let reopened = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let reopened = ShortcutStore(defaults: defaults)
         #expect(reopened.shortcut(for: .startAnnotation)?.caps == ["⌃", "⇧", "K"])
         #expect(reopened.shortcut(for: .togglePause) == nil)
 
         reopened.reset(.startAnnotation)
-        #expect(ShortcutStore(defaults: UserDefaults(suiteName: suite)!).shortcut(for: .startAnnotation)?.title == "Double-tap ⌃")
+        #expect(ShortcutStore(defaults: defaults).shortcut(for: .startAnnotation)?.title == "Double-tap ⌃")
     }
 
     @Test func aDoubleTapIsSavedAndMayBeSharedByStartAndPause() {
-        let suite = "tilde-tests-\(UUID().uuidString)"
-        let store = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let defaults = MemoryDefaults()
+        let store = ShortcutStore(defaults: defaults)
         #expect(store.shortcut(for: .startAnnotation) == .doubleTap(.control))
         #expect(store.shortcut(for: .togglePause) == nil)
 
         #expect(store.set(.doubleTap(.control), for: .togglePause) == nil)
         #expect(store.doubleTapKeys == [.control])
 
-        let reopened = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let reopened = ShortcutStore(defaults: defaults)
         #expect(reopened.shortcut(for: .startAnnotation) == .doubleTap(.control))
         #expect(reopened.shortcut(for: .startAnnotation)?.caps == ["⌃", "⌃"])
         #expect(reopened.shortcut(for: .startAnnotation)?.combo == nil)
