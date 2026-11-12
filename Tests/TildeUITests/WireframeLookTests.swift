@@ -169,6 +169,17 @@ struct WireframeLookTests {
         #expect(try await count("text") == 0)
     }
 
+    /// Done takes the components for the agent's pictures: an empty tag goes, a label stays.
+    @Test func doneLeavesNoEmptyTagInThePictures() async throws {
+        try await page.draw("setWireframe({tool: 'card', icons: {}})")
+        try await restore("[{type: 'card', rect: [200, 150, 240, 120]}, {type: 'card', rect: [600, 150, 240, 120], label: 'Plan'}]")
+        #expect(try await count(##"rect[height="15"]"##) == 2)
+
+        _ = try await page.takeShapes()
+        #expect(try await count(##"rect[height="15"]"##) == 1)
+        #expect(try await texts() == "Plan")
+    }
+
     /// A click on a tag types the label in place, on the tag, which grows with the text. Return
     /// or a click elsewhere keeps it; Esc keeps the label as it was.
     @Test func aClickOnTheTagEditsTheLabel() async throws {

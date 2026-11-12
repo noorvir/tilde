@@ -58,14 +58,15 @@ export function setActiveTag(group) {
   drawLook();
 }
 
-// A component's tag as it shows now: its text, whether that is the placeholder, and whether
-// it is active.
+// A component's tag as it shows now: its text, whether that is the placeholder, whether it is
+// active, and whether it shows. Once Done took the component, its empty tag no longer shows:
+// the pictures that the agent gets would only have it as noise.
 function tagText(frame) {
   const label = frame.customData.label;
   const isActive = frame.groupIds[0] === activeGroup;
-  if (label) return { text: label, isPlaceholder: false, isActive };
-  if (isActive) return { text: placeholder, isPlaceholder: true, isActive };
-  return { text: "", isPlaceholder: false, isActive };
+  if (label) return { text: label, isPlaceholder: false, isActive, isShown: true };
+  if (isActive) return { text: placeholder, isPlaceholder: true, isActive, isShown: true };
+  return { text: "", isPlaceholder: false, isActive, isShown: !taken.has(frame.id) };
 }
 
 export function shownTagWidth(frame) {
@@ -95,12 +96,12 @@ export function drawLook() {
   // The rectangle being drawn, which Excalidraw draws in no colour, shows as the component.
   const drawing = api.getAppState().newElement;
   if (wireframe?.tool && drawing?.type === "rectangle" && !drawing.customData) {
-    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool), tag: { text: "", isPlaceholder: false, isActive: false } });
+    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool), tag: { text: "", isPlaceholder: false, isActive: false, isShown: true } });
   }
 
   const next = components.map((component) => {
     const old = shown.find((entry) => entry.id === component.id);
-    const tagKey = `${component.tag.text} ${component.tag.isActive}`;
+    const tagKey = `${component.tag.text} ${component.tag.isActive} ${component.tag.isShown}`;
     if (old?.version === component.version && old.lookKey === lookKey && old.tagKey === tagKey) return old;
     return { id: component.id, version: component.version, lookKey, tagKey, ...componentNodes(component) };
   });
@@ -194,7 +195,7 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }) {
   }
 
   // While the label is typed, the field stands in for the tag.
-  if (!data.isLabelling) {
+  if (!data.isLabelling && tag.isShown) {
     const labelTop = tagTop({ y });
     add("rect", { x, y: labelTop, width: tagWidth(tag.text), height: 15, fill: tag.isActive ? dark : blue });
     if (tag.text) {

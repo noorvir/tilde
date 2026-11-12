@@ -6,7 +6,7 @@ import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEdi
 import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
-import { setWireframeLook } from "./wireframe/look.js";
+import { drawLook, setWireframeLook } from "./wireframe/look.js";
 import { showPreview } from "./wireframe/preview.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
 import { snapAgain } from "./wireframe/pointer.js";
@@ -38,6 +38,8 @@ function takeNewShapes() {
   elements.forEach((element) => taken.add(element.id));
   api.history.clear();
   clearHistory();
+  // Their empty tags go before the pictures are taken.
+  drawLook();
   return JSON.stringify(elements.map(describe));
 }
 
