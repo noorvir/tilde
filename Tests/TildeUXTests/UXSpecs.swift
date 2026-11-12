@@ -786,10 +786,10 @@ struct UXSpecs {
         }
     }
 
-    /// The look of the components comes from the style tiles of Settings' Appearance page, and a
-    /// change shows at once on the components drawn. Blueprint's lines run past the corners and
-    /// it has no offset edge; Technical has a hard offset edge under the bottom and no lines past
-    /// the corners.
+    /// The look of the components comes from the style and colour tiles of Settings' Appearance
+    /// page, and a change shows at once on the components drawn. Blueprint's lines run past the
+    /// corners and it has no offset edge; Technical has a hard offset edge under the bottom and
+    /// no lines past the corners. A button is orange by kind, and blue in One colour.
     @Test func aStyleChosenInSettingsShowsOnTheWireframe() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -826,12 +826,20 @@ struct UXSpecs {
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
             try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
             step("technical shown")
+
+            let inside = button.insetBy(dx: 10, dy: 10)
+            try await waitFor(app, at: inside, Picture.isWireframeOrange, atLeast: 200)
+            try await app.accessibilityPress("One colour")
+            try await waitFor(app, at: inside, Picture.isWireframeBlue, atLeast: 200)
+            try await waitFor(app, at: inside, Picture.isWireframeOrange, atMost: 0)
+            step("one colour shown")
         }
     }
 
-    /// The wireframe bar's Style button opens Tilde's own menu: a style's name changes the look
-    /// of the components drawn at once, and Esc closes the menu. Construction, the default, has
-    /// ticks past the corners and no offset edge; Technical has an offset edge and no ticks.
+    /// The wireframe bar's Style button opens Tilde's own menu: a style's or a colour's name
+    /// changes the look of the components drawn at once, and Esc closes the menu. Construction,
+    /// the default, has ticks past the corners and no offset edge; Technical has an offset edge
+    /// and no ticks. A button is orange by kind, the default, and blue in One colour.
     @Test func theStyleMenuChangesTheLookAtOnce() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -858,6 +866,13 @@ struct UXSpecs {
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
             try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
             step("technical chosen")
+
+            let inside = button.insetBy(dx: 10, dy: 10)
+            try await waitFor(app, at: inside, Picture.isWireframeOrange, atLeast: 200)
+            try await app.press("One colour")
+            try await waitFor(app, at: inside, Picture.isWireframeBlue, atLeast: 200)
+            try await waitFor(app, at: inside, Picture.isWireframeOrange, atMost: 0)
+            step("one colour chosen")
 
             try await app.key(.escape)
             try await app.waitNotToSee("Technical")

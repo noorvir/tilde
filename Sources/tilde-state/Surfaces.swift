@@ -25,7 +25,7 @@ enum Surfaces {
         let look = state.look?.value ?? WireframeLook()
         UserDefaults.standard.register(defaults: [
             WireframeLook.Key.style: look.style.rawValue, WireframeLook.Key.fill: look.fill,
-            WireframeLook.Key.blur: look.blur, WireframeLook.Key.fade: look.fade,
+            WireframeLook.Key.blur: look.blur, WireframeLook.Key.fade: look.fade, WireframeLook.Key.colours: look.colours.rawValue,
         ])
 
         switch state.surface {
@@ -39,7 +39,7 @@ enum Surfaces {
             return try await hosted(SettingsView(model: try await settings(state.settings!, look: look)), size: size)
 
         case .canvas:
-            return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip)
+            return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip, isNested: state.nested == true)
 
         case .restorePrompt:
             let restore = RestoreToastState()

@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// The look of wireframe components: a tile for each style, the components of the chosen style
-/// in each state, and three strengths. The pictures and an open wireframe change at once.
+/// in each state, the colours, and three strengths. The pictures and an open wireframe change
+/// at once.
 struct AppearanceSettings: View {
     private typealias Key = WireframeLook.Key
 
@@ -10,9 +11,10 @@ struct AppearanceSettings: View {
     @AppStorage(Key.fill) private var fill = WireframeLook().fill
     @AppStorage(Key.blur) private var blur = WireframeLook().blur
     @AppStorage(Key.fade) private var fade = WireframeLook().fade
+    @AppStorage(Key.colours) private var colours = WireframeLook().colours
 
     private var look: WireframeLook {
-        WireframeLook(style: style, fill: fill, blur: blur, fade: fade)
+        WireframeLook(style: style, fill: fill, blur: blur, fade: fade, colours: colours)
     }
 
     var body: some View {
@@ -20,8 +22,10 @@ struct AppearanceSettings: View {
             SettingsSection("Wireframe style") {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 14)], spacing: 14) {
                     ForEach(WireframeLook.Style.allCases) { tile in
-                        StyleTile(title: tile.title, image: previews.tiles[tile], size: WireframePreviews.tileSize, isSelected: tile == style) {
+                        ChoiceTile(title: tile.title, isSelected: tile == style) {
                             style = tile
+                        } picture: {
+                            Preview(image: previews.tiles[tile], size: WireframePreviews.tileSize)
                         }
                     }
                 }
@@ -45,11 +49,22 @@ struct AppearanceSettings: View {
                 .padding(16)
             }
 
-            SettingsSection("Strength") {
-                ForEach(LookStrength.allCases) { strength in
-                    if strength != LookStrength.allCases.first {
-                        SettingsDivider()
+            SettingsSection("Colours and strength") {
+                SettingsRow(title: "Colours", subtitle: "Blue, teal and orange by kind, or all blue") {
+                    HStack(spacing: 12) {
+                        ForEach(WireframeLook.Colours.allCases) { tile in
+                            ChoiceTile(title: tile.title, isSelected: tile == colours) {
+                                colours = tile
+                            } picture: {
+                                ColourSwatch(colours: tile)
+                            }
+                        }
                     }
+                    .frame(width: 234)
+                    .padding(.vertical, 6)
+                }
+                ForEach(LookStrength.allCases) { strength in
+                    SettingsDivider()
                     SettingsRow(title: strength.title, subtitle: strength.subtitle) {
                         LookSlider(strength)
                             .frame(width: 234)
@@ -66,19 +81,18 @@ struct AppearanceSettings: View {
     }
 }
 
-/// A style's picture with its name under it: a button that chooses the style, with an accent
-/// ring while it is the one chosen. On the Appearance page and in the wireframe's Style menu.
-struct StyleTile: View {
+/// A choice's picture with its name under it: a button that chooses it, with an accent ring
+/// while it is the one chosen. For the styles and the colours.
+struct ChoiceTile<Picture: View>: View {
     let title: String
-    let image: NSImage?
-    let size: CGSize
     let isSelected: Bool
     let action: () -> Void
+    @ViewBuilder let picture: Picture
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
-                Preview(image: image, size: size)
+                picture
                     .overlay {
                         RoundedRectangle(cornerRadius: 8)
                             .strokeBorder(isSelected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: isSelected ? 3 : 1)
@@ -92,6 +106,39 @@ struct StyleTile: View {
         .buttonStyle(.plain)
         .accessibilityLabel(title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
+/// The colours of the components, as three small parts on white: blue, teal and orange by
+/// kind, or three blue ones. The colours of the canvas's page, wireframe/look.js.
+struct ColourSwatch: View {
+    let colours: WireframeLook.Colours
+
+    private static let blue = Color(red: 0x2F / 255, green: 0x7B / 255, blue: 0xF6 / 255)
+    private static let teal = Color(red: 0x0E / 255, green: 0x93 / 255, blue: 0x84 / 255)
+    private static let orange = Color(red: 0xE0 / 255, green: 0x66 / 255, blue: 0x0F / 255)
+
+    private var parts: [Color] {
+        switch colours {
+        case .byKind: [Self.blue, Self.teal, Self.orange]
+        case .oneColour: [Self.blue, Self.blue, Self.blue]
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(parts.indices, id: \.self) { index in
+                Rectangle()
+                    .fill(parts[index].opacity(0.12))
+                    .overlay(Rectangle().strokeBorder(parts[index], lineWidth: 1.5))
+                    .frame(width: 22, height: 14)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 32)
+        .background(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityHidden(true)
     }
 }
 
@@ -133,7 +180,7 @@ enum LookStrength: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .fill: "The blue in each component"
+        case .fill: "The colour in each component"
         case .blur: "Blurs the app under each component"
         case .fade: "Lightens the app under each component"
         }

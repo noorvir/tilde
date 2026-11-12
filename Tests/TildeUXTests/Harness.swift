@@ -141,10 +141,26 @@ struct Picture {
         color.blue > 0.8 && color.red < 0.35 && color.green > 0.25 && color.green < 0.65
     }
 
-    /// A blue of a wireframe component: its fill, lines, bars and edges, unlike the greys of a
-    /// window and its text.
+    /// A colour of a wireframe component, in any of its kinds' colours: its fill, lines and
+    /// edges, unlike the greys of a window and its text.
     static func isWireframe(_ color: Color) -> Bool {
+        isWireframeBlue(color) || isWireframeTeal(color) || isWireframeOrange(color)
+    }
+
+    /// The blue of a section, a card, a rectangle and a circle, and of all in One colour.
+    static func isWireframeBlue(_ color: Color) -> Bool {
         color.blue > 0.8 && color.blue - color.red > 0.1
+    }
+
+    /// The teal of a table and a list.
+    static func isWireframeTeal(_ color: Color) -> Bool {
+        color.green - color.red > 0.25 && color.blue - color.red > 0.2 && color.blue < color.green + 0.15
+    }
+
+    /// The orange of a button and a dropdown, also a button's light inside and its dark edge;
+    /// not the fixture's red mark, which has no green.
+    static func isWireframeOrange(_ color: Color) -> Bool {
+        color.red > 0.65 && color.green > 0.25 && color.red - color.blue > 0.25
     }
 
     /// The fixture's red mark.

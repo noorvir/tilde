@@ -237,7 +237,7 @@ final class WireframePicturePage {
             throw Failed(reason: "no background")
         }
         let preview: [String: Any] = [
-            "look": ["style": look.style.rawValue, "fill": look.fill, "fade": look.fade], "shapes": shapes, "state": state,
+            "look": look.pageValues, "shapes": shapes, "state": state,
             "background": "data:image/png;base64,\(png.base64EncodedString())", "size": [size.width, size.height],
         ]
         _ = try await webView.callAsyncJavaScript("await window.tildeDraw.showPreview(preview)", arguments: ["preview": preview], contentWorld: .page)

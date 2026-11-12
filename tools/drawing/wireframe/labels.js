@@ -5,12 +5,12 @@ import { api } from "../scene.js";
 import { hideHandles } from "./chip.js";
 import { frameOf, rebuild } from "./components.js";
 import { record } from "./history.js";
-import { tagTop, tagWidth } from "./look.js";
+import { paletteOf, tagTop, tagWidth } from "./look.js";
 
 export const labelField = document.createElement("input");
 labelField.id = "tilde-label";
 labelField.placeholder = "Add label";
-labelField.style.cssText = "position:fixed;z-index:10000;box-sizing:border-box;height:15px;margin:0;padding:0 5px;border:0;border-radius:0;background:#2F7BF6;color:#fff;font:11px ui-monospace,Menlo,monospace;outline:1.5px solid #1D5BD8;caret-color:#fff;display:none";
+labelField.style.cssText = "position:fixed;z-index:10000;box-sizing:border-box;height:15px;margin:0;padding:0 5px;border:0;border-radius:0;color:#fff;font:11px ui-monospace,Menlo,monospace;caret-color:#fff;display:none";
 export const labelStyle = document.createElement("style");
 labelStyle.textContent = "#tilde-label::placeholder { color: rgba(255,255,255,.7); } [data-kind]:hover, [data-action]:hover { background: rgba(255,255,255,.14); }";
 // { group, label } of the component whose label is typed.
@@ -31,7 +31,9 @@ export function editLabel(component) {
   hideHandles();
   // The component without its label meanwhile: the field shows it in its place.
   rebuild(group, component, { ...data, label: undefined, isLabelling: true });
-  Object.assign(labelField.style, { left: `${component.x}px`, top: `${tagTop(component)}px`, display: "block" });
+  // In the colours of the tag it stands in for.
+  const { main, dark } = paletteOf(data.tildeWireframe);
+  Object.assign(labelField.style, { left: `${component.x}px`, top: `${tagTop(component)}px`, background: main, outline: `1.5px solid ${dark}`, display: "block" });
   labelField.value = data.label ?? "";
   sizeLabelField();
   // After the press that opened it: the press itself moves the focus when it ends.

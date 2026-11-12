@@ -72,10 +72,14 @@ struct UIState: Decodable {
         var fill: Double?
         var blur: Double?
         var fade: Double?
+        var colours: WireframeLook.Colours?
 
         var value: WireframeLook {
             let defaults = WireframeLook()
-            return WireframeLook(style: style ?? defaults.style, fill: fill ?? defaults.fill, blur: blur ?? defaults.blur, fade: fade ?? defaults.fade)
+            return WireframeLook(
+                style: style ?? defaults.style, fill: fill ?? defaults.fill, blur: blur ?? defaults.blur, fade: fade ?? defaults.fade,
+                colours: colours ?? defaults.colours
+            )
         }
     }
 
@@ -158,6 +162,8 @@ struct UIState: Decodable {
     /// The wireframe bar's Style menu is open.
     var styleMenu: Bool?
     var chip: Chip?
+    /// The canvas has its components inside a section, and a button inside a card.
+    var nested: Bool?
 
     init(file: URL) throws {
         let data = try Data(contentsOf: file)
@@ -203,3 +209,4 @@ extension Notice: Decodable {}
 extension NodeSetup.Dot: Decodable {}
 extension Harness: Decodable {}
 extension WireframeLook.Style: Decodable {}
+extension WireframeLook.Colours: Decodable {}

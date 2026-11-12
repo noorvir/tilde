@@ -1,18 +1,32 @@
 // The look of the components: an SVG over the canvas that draws each one from its element, in
-// the style, fill and fade of Tilde's settings. Each has square corners, a plain inner block in
-// place of its content, which is not known, the lines that make its kind, and a label tag at
-// its top left, empty until it has a label. Under a component with a fill, the screen is faded
-// here, and blurred by Tilde, which gets the shapes to blur from the `under:` message.
+// the style, fill, fade and colours of Tilde's settings. Each has square corners, a plain inner
+// block in place of its content, which is not known, the lines that make its kind, and a label
+// tag at its top left, empty until it has a label. A component inside another has a white gap
+// around its border. Under a component with a fill, the screen is faded here, and blurred by
+// Tilde, which gets the shapes to blur from the `under:` message.
 
 import { api, live, post, taken } from "../scene.js";
 import { clamp, newData, rowsOf } from "./components.js";
 import { wireframe } from "./mode.js";
 
-const blue = "#2F7BF6";
-const dark = "#1D5BD8";
+// Each group of kinds has a colour, and a dark one for its edges, its inner block and its
+// active tag.
+const palettes = {
+  blue: { name: "blue", main: "#2F7BF6", dark: "#1D5BD8" },
+  teal: { name: "teal", main: "#0E9384", dark: "#0A6E63" },
+  orange: { name: "orange", main: "#E0660F", dark: "#B34E08" },
+};
+const paletteOfKind = { table: palettes.teal, list: palettes.teal, button: palettes.orange, dropdown: palettes.orange };
 
-// `style`: technical, hatched, construction or blueprint; `fill` and `fade` from 0 to 1.
-let look = { style: "construction", fill: 0.06, fade: 0.58 };
+// `style`: technical, hatched, construction or blueprint; `fill` and `fade` from 0 to 1;
+// `colours`: byKind, or oneColour for all in blue.
+let look = { style: "construction", fill: 0.06, fade: 0.58, colours: "byKind" };
+
+// A kind's colours in the look now.
+export function paletteOf(kind) {
+  if (look.colours === "oneColour") return palettes.blue;
+  return paletteOfKind[kind] ?? palettes.blue;
+}
 
 function node(name, attributes = {}) {
   const element = document.createElementNS("http://www.w3.org/2000/svg", name);
@@ -22,10 +36,13 @@ function node(name, attributes = {}) {
 
 export const lookLayer = node("svg", { id: "tilde-look", "aria-hidden": "true" });
 lookLayer.style.cssText = "position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:3;overflow:visible";
-const hatch = node("pattern", { id: "tilde-hatch", width: 7, height: 7, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
-hatch.append(node("line", { x1: 0, y1: 0, x2: 0, y2: 7, stroke: blue, "stroke-width": 1.4 }));
+// Hatched's lines, in each colour: #tilde-hatch-blue, -teal and -orange.
 const definitions = node("defs");
-definitions.append(hatch);
+for (const { name, main } of Object.values(palettes)) {
+  const hatch = node("pattern", { id: `tilde-hatch-${name}`, width: 7, height: 7, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
+  hatch.append(node("line", { x1: 0, y1: 0, x2: 0, y2: 7, stroke: main, "stroke-width": 1.4 }));
+  definitions.append(hatch);
+}
 // The faded screen under every component, then every component over it.
 const unders = node("g");
 const tops = node("g");
@@ -88,7 +105,7 @@ let shown = [];
 // Draws the components that changed since the last time; Excalidraw calls it on every change.
 export function drawLook() {
   if (!api) return;
-  const lookKey = `${look.style} ${look.fill} ${look.fade}`;
+  const lookKey = `${look.style} ${look.fill} ${look.fade} ${look.colours}`;
   const components = live().filter((element) => element.customData?.tildeWireframe).map((element) => ({
     id: element.id, version: element.version, kind: element.customData.tildeWireframe, rect: element, data: element.customData,
     tag: tagText(element),
@@ -101,9 +118,10 @@ export function drawLook() {
 
   const next = components.map((component) => {
     const old = shown.find((entry) => entry.id === component.id);
+    const isNested = components.some((other) => contains(other.rect, component.rect));
     const tagKey = `${component.tag.text} ${component.tag.isActive} ${component.tag.isShown}`;
-    if (old?.version === component.version && old.lookKey === lookKey && old.tagKey === tagKey) return old;
-    return { id: component.id, version: component.version, lookKey, tagKey, ...componentNodes(component) };
+    if (old?.version === component.version && old.lookKey === lookKey && old.tagKey === tagKey && old.isNested === isNested) return old;
+    return { id: component.id, version: component.version, lookKey, tagKey, isNested, ...componentNodes(component, isNested) };
   });
   const isSameOrder = next.length === shown.length && next.every((entry, index) => entry.id === shown[index].id);
   if (isSameOrder) {
@@ -118,6 +136,12 @@ export function drawLook() {
   }
   shown = next;
   postUnder(components);
+}
+
+// Whether `outer` holds all of `inner` and is larger: `inner` is a part of it.
+function contains(outer, inner) {
+  const isLarger = outer.width * outer.height > inner.width * inner.height;
+  return isLarger && outer.x <= inner.x && outer.y <= inner.y && outer.x + outer.width >= inner.x + inner.width && outer.y + outer.height >= inner.y + inner.height;
 }
 
 // The shapes that Tilde blurs the screen under: each component with a fill, as
@@ -135,9 +159,11 @@ function postUnder(components) {
   post(`under:${text}`);
 }
 
-// A component's two parts: the faded screen under it, and its look.
-function componentNodes({ kind, rect: { x, y, width, height }, data, tag }) {
+// A component's two parts: the faded screen under it, and its look. A part of another
+// component has a white gap outside its border, so that the two borders do not run together.
+function componentNodes({ kind, rect: { x, y, width, height }, data, tag }, isNested) {
   const { style, fill, fade } = look;
+  const { name: colour, main, dark } = paletteOf(kind);
   const under = node("g");
   const top = node("g");
   const add = (name, attributes) => top.appendChild(node(name, attributes));
@@ -150,7 +176,7 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }) {
     if (isEllipse) return node("ellipse", { cx: x + width / 2, cy: y + height / 2, rx: width / 2, ry: height / 2, ...attributes });
     return node("rect", { x, y, width, height, ...attributes });
   };
-  const line = (x1, y1, x2, y2, lineWidth = 1) => add("line", { x1, y1, x2, y2, stroke: blue, "stroke-width": lineWidth, "stroke-dasharray": dash });
+  const line = (x1, y1, x2, y2, lineWidth = 1) => add("line", { x1, y1, x2, y2, stroke: main, "stroke-width": lineWidth, "stroke-dasharray": dash });
   // The block that stands for the content: a darker tint of the fill, a padding in.
   const pad = clamp(Math.min(width, height) * 0.2, 4, 12);
   const innerBox = (boxWidth) => {
@@ -162,15 +188,16 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }) {
   };
 
   if (isFilled) under.append(shape({ fill: "#FFFFFF", "fill-opacity": fade }));
+  if (isNested) drawGap({ x, y, width, height }, borders, isEllipse, { add, strokeWidth });
   if (style === "technical") {
     const edge = technicalEdge({ x, y, width, height }, borders, isEllipse);
     if (edge) add("path", { d: edge, fill: "none", stroke: dark, "stroke-width": 3 });
   }
   if (isFilled) {
-    top.append(shape({ fill: blue, "fill-opacity": style === "hatched" ? fill * 0.4 : fill }));
-    if (style === "hatched") top.append(shape({ fill: "url(#tilde-hatch)", "fill-opacity": Math.min(1, 0.35 + fill * 1.5) }));
+    top.append(shape({ fill: main, "fill-opacity": style === "hatched" ? fill * 0.4 : fill }));
+    if (style === "hatched") top.append(shape({ fill: `url(#tilde-hatch-${colour})`, "fill-opacity": Math.min(1, 0.35 + fill * 1.5) }));
   }
-  drawBorders({ x, y, width, height }, borders, isEllipse, { top, add, line, shape, style, strokeWidth, dash });
+  drawBorders({ x, y, width, height }, borders, isEllipse, { top, add, line, shape, style, strokeWidth, dash, main });
 
   if (kind === "table") {
     const { header, rows, columns } = rowsOf(kind, { width, height }, data);
@@ -189,7 +216,7 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }) {
     add("path", { d: `M${x + width - 22} ${y + height / 2 - 3}l6 6 6-6`, fill: "none", stroke: dark, "stroke-width": 1.5 });
     line(x + width - 34, y, x + width - 34, y + height);
   } else if (kind === "button") {
-    if (width > 12 && height > 12) add("rect", { x: x + 6, y: y + 6, width: width - 12, height: height - 12, fill: blue, "fill-opacity": Math.min(1, 0.25 + fill * 2) });
+    if (width > 12 && height > 12) add("rect", { x: x + 6, y: y + 6, width: width - 12, height: height - 12, fill: main, "fill-opacity": Math.min(1, 0.25 + fill * 2) });
   } else {
     innerBox(width - 2 * pad);
   }
@@ -197,7 +224,7 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }) {
   // While the label is typed, the field stands in for the tag.
   if (!data.isLabelling && tag.isShown) {
     const labelTop = tagTop({ y });
-    add("rect", { x, y: labelTop, width: tagWidth(tag.text), height: 15, fill: tag.isActive ? dark : blue });
+    add("rect", { x, y: labelTop, width: tagWidth(tag.text), height: 15, fill: tag.isActive ? dark : main });
     if (tag.text) {
       const color = tag.isPlaceholder ? "rgba(255,255,255,.7)" : "#FFFFFF";
       const text = add("text", { x: x + 5, y: labelTop + 11, "font-size": 11, fill: color, "font-family": "ui-monospace,Menlo,monospace" });
@@ -227,21 +254,45 @@ function technicalEdge({ x, y, width, height }, borders, isEllipse) {
   return "";
 }
 
+// A white line 2.5 pt wide just outside each border that is on, round an ellipse.
+function drawGap({ x, y, width, height }, borders, isEllipse, { add, strokeWidth }) {
+  if (!borders.length) return;
+  const gap = { fill: "none", stroke: "#FFFFFF", "stroke-width": 2.5 };
+  const out = strokeWidth / 2 + 1.25;
+  const left = x - out;
+  const top = y - out;
+  const right = x + width + out;
+  const bottom = y + height + out;
+  if (isEllipse) {
+    add("ellipse", { cx: x + width / 2, cy: y + height / 2, rx: width / 2 + out, ry: height / 2 + out, ...gap });
+  } else if (borders.length === 4) {
+    add("rect", { x: left, y: top, width: right - left, height: bottom - top, ...gap });
+  } else {
+    // Each side as long as the gap's corners, which it shares with the sides next to it.
+    const end = 1.25;
+    const sides = { top: [left - end, top, right + end, top], bottom: [left - end, bottom, right + end, bottom], left: [left, top - end, left, bottom + end], right: [right, top - end, right, bottom + end] };
+    for (const side of borders) {
+      const [x1, y1, x2, y2] = sides[side];
+      add("line", { x1, y1, x2, y2, ...gap });
+    }
+  }
+}
+
 // The borders that are on: Blueprint's lines run 7 pt past the corners, Construction's dashes
 // have ticks at the corners. An ellipse has no sides: any border outlines it.
-function drawBorders({ x, y, width, height }, borders, isEllipse, { top, add, line, shape, style, strokeWidth, dash }) {
+function drawBorders({ x, y, width, height }, borders, isEllipse, { top, add, line, shape, style, strokeWidth, dash, main }) {
   if (!borders.length) return;
   const right = x + width;
   const bottom = y + height;
   const over = style === "blueprint" ? 7 : 0;
   if (isEllipse) {
-    top.append(shape({ fill: "none", stroke: blue, "stroke-width": strokeWidth, "stroke-dasharray": dash }));
+    top.append(shape({ fill: "none", stroke: main, "stroke-width": strokeWidth, "stroke-dasharray": dash }));
     if (style === "blueprint") {
       line(x - over, y + height / 2, right + over, y + height / 2, strokeWidth);
       line(x + width / 2, y - over, x + width / 2, bottom + over, strokeWidth);
     }
   } else if (borders.length === 4 && style !== "blueprint") {
-    add("rect", { x, y, width, height, fill: "none", stroke: blue, "stroke-width": strokeWidth, "stroke-dasharray": dash });
+    add("rect", { x, y, width, height, fill: "none", stroke: main, "stroke-width": strokeWidth, "stroke-dasharray": dash });
   } else {
     const sides = { top: [x - over, y, right + over, y], bottom: [x - over, bottom, right + over, bottom], left: [x, y - over, x, bottom + over], right: [right, y - over, right, bottom + over] };
     for (const side of borders) line(...sides[side], strokeWidth);
@@ -251,6 +302,6 @@ function drawBorders({ x, y, width, height }, borders, isEllipse, { top, add, li
   for (const [cornerX, cornerY, signX, signY, sideY, sideX] of corners) {
     if (!isEllipse && !(borders.includes(sideY) && borders.includes(sideX))) continue;
     const d = `M${cornerX - 6 * signX} ${cornerY}H${cornerX + 10 * signX}M${cornerX} ${cornerY - 6 * signY}V${cornerY + 10 * signY}`;
-    add("path", { d, stroke: blue, "stroke-width": 1.5, fill: "none" });
+    add("path", { d, stroke: main, "stroke-width": 1.5, fill: "none" });
   }
 }

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "surface": "canvas",
+  "nested": true,
+  "look": {
+    "style": "hatched"
+  }
+}
