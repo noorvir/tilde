@@ -72,6 +72,12 @@ final class AnnotationController: ObservableObject {
     }
 
     @Published private(set) var session: SessionStore.Session?
+    /// Whether the session holds the keyboard, and so takes Esc system-wide (`HotKeys`): from
+    /// its start, after Esc or Done, and in every mode. Not after the user paused, which gives
+    /// the keyboard to the app in front, nor while another app in front pauses the session.
+    @Published private(set) var holdsKeyboard = false
+    /// The user paused, and the app in front has the keyboard until the session goes on.
+    private var gaveKeyboardBack = false
     @Published private(set) var drafts: [Draft] = [] {
         didSet {
             if let session, drafts.count != oldValue.count {
@@ -317,6 +323,10 @@ final class AnnotationController: ObservableObject {
                 run(effect)
             }
         }
+        if !pauses.contains(.user) {
+            gaveKeyboardBack = false
+        }
+        holdsKeyboard = session != nil && !gaveKeyboardBack && !pauses.contains(.otherApp)
     }
 
     private func run(_ effect: SessionFlow.Effect) {
@@ -375,12 +385,14 @@ final class AnnotationController: ObservableObject {
             // The canvas has had the keyboard: Esc and ⌘↩ belong to the overlay again.
             makeOverlayKey()
         case .keepKeyboard:
+            gaveKeyboardBack = false
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
             // A comment that is open, as after Done in Wireframe, keeps the keyboard.
             if !hud.isInBrowser, commentBox.composer == nil {
                 overlays.makeKey()
             }
         case .giveKeyboardBack:
+            gaveKeyboardBack = true
             // A key overlay would keep the keyboard; give it back to the user's app.
             NSWorkspace.shared.frontmostApplication?.activate()
         case .takeKeyboard: makeOverlayKey()
@@ -539,6 +551,8 @@ final class AnnotationController: ObservableObject {
         stopAnnotating()
         saver.stop()
         session = nil
+        gaveKeyboardBack = false
+        holdsKeyboard = false
         drafts = []
         scope.reset()
         browserOffer.reset()

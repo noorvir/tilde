@@ -3,8 +3,8 @@ import Carbon.HIToolbox
 import Combine
 
 /// System-wide shortcuts. Carbon hot keys need no Accessibility or Input Monitoring permission.
-/// They follow the `ShortcutStore` and are off while Settings records a new shortcut. While a
-/// session is open, Esc is one of them: no other app gets it, also one in full screen.
+/// They follow the `ShortcutStore` and are off while Settings records a new shortcut. While the
+/// session holds the keyboard, Esc is one of them: no other app gets it, also one in full screen.
 @MainActor
 final class HotKeys {
     private let actions: [UInt32: () -> Void]
@@ -12,7 +12,7 @@ final class HotKeys {
     private var references: [EventHotKeyRef] = []
     private var handler: EventHandlerRef?
     private var subscription: AnyCancellable?
-    private var isSessionOpen = false
+    private var holdsKeyboard = false
 
     init(controller: AnnotationController, shortcuts: ShortcutStore) {
         self.shortcuts = shortcuts
@@ -37,10 +37,10 @@ final class HotKeys {
             return noErr
         }, 1, &event, context, &handler)
 
-        subscription = shortcuts.$shortcuts.combineLatest(shortcuts.$isRecording, controller.$session.map { $0 != nil }.removeDuplicates())
+        subscription = shortcuts.$shortcuts.combineLatest(shortcuts.$isRecording, controller.$holdsKeyboard.removeDuplicates())
             .receive(on: RunLoop.main)
-            .sink { [weak self] _, _, isSessionOpen in
-                self?.isSessionOpen = isSessionOpen
+            .sink { [weak self] _, _, holdsKeyboard in
+                self?.holdsKeyboard = holdsKeyboard
                 self?.registerAll()
             }
     }
@@ -62,7 +62,7 @@ final class HotKeys {
             }
             register(keyCode: shortcut.keyCode, modifiers: shortcut.carbonModifiers, id: id)
         }
-        if isSessionOpen {
+        if holdsKeyboard {
             register(keyCode: UInt32(kVK_Escape), modifiers: 0, id: 3)
         }
     }

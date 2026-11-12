@@ -603,14 +603,35 @@ struct UXSpecs {
 
     /// Double Ctrl in another app, while the user types in its text field, opens the HUD with the
     /// keyboard: ↩, a letter and the HUD's shortcuts reach Tilde without a click, and Esc closes
-    /// it, also when it opens paused, as the last session ended. The text field gets none of
-    /// them. Then the same in an app in full screen, which stays in full screen.
+    /// it, also when it opens paused, as the last session ended, and after another app took the
+    /// keyboard. The text field gets none of them. Then the same in an app in full screen, which
+    /// stays in full screen.
     @Test func doubleControlInATextFieldGivesTheHUDTheKeys() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
             try await useHUDKeys(app, over: window, page: "typing", opensAs: "Annotating")
             #expect(window.keys == [])
+
+            // In annotation mode another app comes in front with the keyboard: Esc still steps
+            // back, to a pause, and closes the HUD.
+            try await app.doubleTap("control")
+            try await app.waitToSee("Paused")
+            try await app.key(.a)
+            try await app.waitToSee("Annotating", timeout: 5)
+            let other = try ChangingWindow()
+            defer { other.close() }
+            try other.show("typing")
+            for _ in 0..<60 where try await app.focus().app != other.pid {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try #require(try await app.focus().app == other.pid)
+            try await app.key(.escape)
+            try await app.waitToSee("Paused", timeout: 5)
+            try await app.key(.escape)
+            try await app.waitNotToSee("Paused", timeout: 5)
+            #expect(other.keys == [])
+            other.close()
 
             try window.show("fullscreen typing")
             for _ in 0..<60 where window.fullScreen?.isOn != true {

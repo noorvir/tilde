@@ -699,6 +699,9 @@ final class ChangingWindow {
     }
 
     func close() {
+        guard process.isRunning else {
+            return
+        }
         process.terminate()
         waitForExit(process)
     }

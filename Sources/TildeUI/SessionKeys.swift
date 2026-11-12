@@ -212,9 +212,10 @@ extension AnnotationController {
         return key.allSatisfy { $0.isLetter || $0.isNumber } ? .ignored : nil
     }
 
-    /// Esc while a session is open, from its system-wide hot key: the app in front never gets it.
-    /// It goes on to the window of Tilde that has the keyboard as a key typed there, so a text
-    /// field, the canvas or a question takes it first, as before. With none, the session takes it.
+    /// Esc while the session holds the keyboard, from its system-wide hot key: the app in front
+    /// never gets it. It goes on to the window of Tilde that has the keyboard as a key typed
+    /// there, so a text field, the canvas or a question takes it first, as before. With none,
+    /// the session takes it.
     func globalEscapePressed() {
         guard let window = NSApp.keyWindow else {
             escapePressed()
