@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "surface": "canvas",
+  "look": {
+    "fill": 0,
+    "blur": 0,
+    "fade": 0
+  }
+}

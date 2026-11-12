@@ -28,7 +28,22 @@ enum Surfaces {
             return try await hosted(InstallToastView(state: toast), size: size)
 
         case .settings:
+            // Settings reads the look from the defaults, as the app does.
+            let look = state.look?.value ?? WireframeLook()
+            let defaults = UserDefaults.standard
+            defaults.set(look.style.rawValue, forKey: WireframeLook.Key.style)
+            defaults.set(look.fill, forKey: WireframeLook.Key.fill)
+            defaults.set(look.blur, forKey: WireframeLook.Key.blur)
+            defaults.set(look.fade, forKey: WireframeLook.Key.fade)
+            defer {
+                for key in [WireframeLook.Key.style, WireframeLook.Key.fill, WireframeLook.Key.blur, WireframeLook.Key.fade] {
+                    defaults.removeObject(forKey: key)
+                }
+            }
             return try await hosted(SettingsView(model: try settings(state.settings!)), size: size)
+
+        case .canvas:
+            return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook())
 
         case .restorePrompt:
             let restore = RestoreToastState()

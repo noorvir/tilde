@@ -6,7 +6,7 @@ import TildeInstaller
 /// A key or a value that it does not know is an error, so a typo cannot record another picture.
 struct UIState: Decodable {
     enum Surface: String, Decodable {
-        case toast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, comment, preview, overlay
+        case toast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, comment, preview, overlay, canvas
     }
     enum Appearance: String, Decodable {
         case light, dark
@@ -60,6 +60,19 @@ struct UIState: Decodable {
         var isWorking: Bool?
         var agents: [Harness]?
         var agentsOff: [Harness]?
+    }
+
+    /// The look of wireframe components; what is missing is the default.
+    struct Look: Decodable {
+        var style: WireframeLook.Style?
+        var fill: Double?
+        var blur: Double?
+        var fade: Double?
+
+        var value: WireframeLook {
+            let defaults = WireframeLook()
+            return WireframeLook(style: style ?? defaults.style, fill: fill ?? defaults.fill, blur: blur ?? defaults.blur, fade: fade ?? defaults.fade)
+        }
     }
 
     struct Settings: Decodable {
@@ -137,6 +150,7 @@ struct UIState: Decodable {
     var pageNotes: Bool?
     var toast: Toast?
     var settings: Settings?
+    var look: Look?
 
     init(file: URL) throws {
         let data = try Data(contentsOf: file)
@@ -181,3 +195,4 @@ struct UIState: Decodable {
 extension Notice: Decodable {}
 extension NodeSetup.Dot: Decodable {}
 extension Harness: Decodable {}
+extension WireframeLook.Style: Decodable {}
