@@ -256,11 +256,13 @@ enum Fixtures {
     }
 
     /// Settings with fixed agent apps, default shortcuts and a fixed version.
-    static func settingsModel(page: SettingsWindow.Page, history: HistoryModel? = nil, wireframePreviews: WireframePreviews? = nil) throws -> SettingsModel {
+    static func settingsModel(
+        page: SettingsWindow.Page, history: HistoryModel? = nil, wireframePreviews: WireframePreviews? = nil, updates: Updates? = nil
+    ) throws -> SettingsModel {
         let defaults = UserDefaults(suiteName: "tilde-tests-\(UUID().uuidString)")!
         let model = SettingsModel(
             setup: try agentSetup(), shortcuts: ShortcutStore(defaults: defaults), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
-            server: ServerState(port: 7311), version: "0.1.0 (42)",
+            server: ServerState(port: 7311), updates: updates ?? Updates(engine: FakeUpdateEngine()), version: "0.1.0 (42)",
             browserProfiles: { [] }, permissions: { (true, false) }, wireframePreviews: wireframePreviews
         )
         model.page = page
@@ -273,5 +275,43 @@ enum Fixtures {
             InstallResult.App(name: name, icon: appIcon, failed: index >= names.count - failed, changed: true)
         }
         return InstallResult(action: action, apps: apps)
+    }
+}
+
+/// An update engine that does what a test tells it: it reports the statuses the test sends,
+/// and records what the user asked for.
+@MainActor
+final class FakeUpdateEngine: UpdateEngine {
+    var isAutomatic = true
+    private(set) var calls: [String] = []
+    /// What it reports when it starts.
+    private let initial: UpdateStatus?
+    private var report: (UpdateStatus) -> Void = { _ in }
+
+    init(status: UpdateStatus? = nil) {
+        initial = status
+    }
+
+    func start(reporting: @escaping (UpdateStatus) -> Void) {
+        report = reporting
+        if let initial {
+            reporting(initial)
+        }
+    }
+
+    func send(_ status: UpdateStatus) {
+        report(status)
+    }
+
+    func check() {
+        calls.append("check")
+    }
+
+    func install() {
+        calls.append("install")
+    }
+
+    func restart() {
+        calls.append("restart")
     }
 }

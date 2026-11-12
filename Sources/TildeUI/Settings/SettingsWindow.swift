@@ -123,6 +123,7 @@ final class SettingsModel: ObservableObject {
     let server: ServerState
     /// The wireframe pictures of the Appearance page.
     let wireframePreviews: WireframePreviews
+    let updates: Updates
     let version: String
     let onResult: (InstallResult) -> Void
     let onResetHUD: () -> Void
@@ -132,7 +133,7 @@ final class SettingsModel: ObservableObject {
     let permissions: () -> (screenRecording: Bool, accessibility: Bool)
 
     init(
-        setup: AgentSetup, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, version: String,
+        setup: AgentSetup, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, updates: Updates, version: String,
         onResult: @escaping (InstallResult) -> Void = { _ in }, onResetHUD: @escaping () -> Void = {},
         browserProfiles: @escaping () -> [ChromiumProfile] = { BrowserCookies.profiles() },
         permissions: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (ScreenCapture.isAllowed, AXIsProcessTrusted()) },
@@ -143,6 +144,7 @@ final class SettingsModel: ObservableObject {
         self.browser = browser
         self.history = history
         self.server = server
+        self.updates = updates
         self.version = version
         self.onResult = onResult
         self.onResetHUD = onResetHUD

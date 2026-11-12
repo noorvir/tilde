@@ -35,6 +35,12 @@ enum Surfaces {
             toast.isShown = true
             return try await hosted(InstallToastView(state: toast), size: size)
 
+        case .updateToast:
+            let toast = UpdateToastState()
+            toast.version = "0.3.0"
+            toast.isShown = true
+            return try await hosted(UpdateToastView(state: toast), size: size)
+
         case .settings:
             return try await hosted(SettingsView(model: try await settings(state.settings!, look: look)), size: size)
 
@@ -282,7 +288,7 @@ enum Surfaces {
         if page == .appearance {
             try await previews.draw(look)
         }
-        let model = try Fixtures.settingsModel(page: page, history: history, wireframePreviews: previews)
+        let model = try Fixtures.settingsModel(page: page, history: history, wireframePreviews: previews, updates: updates(state.update))
         model.expandedAgents = Set(state.expandedAgents ?? [])
         if let host = state.machine, let node = state.nodes?.first(where: { $0.host == host }) {
             let machine = AgentSetup(installer: model.setup.installer, placeholderIcon: Fixtures.appIcon, nodes: model.setup.nodes, isRemote: true)
@@ -302,6 +308,22 @@ enum Surfaces {
             model.recordingShortcut = .togglePause
         }
         return model
+    }
+
+    private static func updates(_ state: UIState.Update?) -> Updates {
+        let status: UpdateStatus = switch state?.status ?? .idle {
+        case .idle: .idle
+        case .checking: .checking
+        case .upToDate: .upToDate
+        case .available: .available(version: "0.3.0")
+        case .downloading: .downloading(version: "0.3.0", progress: 0.4)
+        case .ready: .ready(version: "0.3.0")
+        case .failed: .failed(reason: "Could not reach the update feed")
+        }
+        let updates = Updates(engine: FakeUpdateEngine(status: status))
+        updates.start()
+        updates.isSessionActive = state?.session ?? false
+        return updates
     }
 
     private static func result(of toast: UIState.Toast) -> InstallResult {

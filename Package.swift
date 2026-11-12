@@ -10,6 +10,10 @@ let strict: [SwiftSetting] = Context.environment["TILDE_STRICT"] == "1" ? [.unsa
 let package = Package(
     name: "Tilde",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        // Updates: finds, checks (EdDSA) and installs newer versions; see Sources/TildeUI/Update.
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
+    ],
     targets: [
         // The `tilde` skill text: the installer writes it, and the MCP server sends it as instructions.
         .target(name: "TildeSkill", swiftSettings: strict),
@@ -18,11 +22,15 @@ let package = Package(
         .target(name: "TildeInstaller", dependencies: ["TildeSkill"], swiftSettings: strict),
         .target(
             name: "TildeUI",
-            dependencies: ["TildeCore", "TildeInstaller"],
+            dependencies: ["TildeCore", "TildeInstaller", .product(name: "Sparkle", package: "Sparkle")],
             exclude: ["DrawingWeb"],
             swiftSettings: strict + [.unsafeFlags(["-enable-testing"], .when(configuration: .debug))]
         ),
-        .executableTarget(name: "Tilde", dependencies: ["TildeUI"], swiftSettings: strict),
+        // The app bundle has Sparkle.framework in Contents/Frameworks.
+        .executableTarget(
+            name: "Tilde", dependencies: ["TildeUI"], swiftSettings: strict,
+            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
+        ),
         .executableTarget(name: "tilde-mcp", dependencies: ["TildeInstaller"], swiftSettings: strict),
         // Writes the app icon from TildeMark; see scripts/build-app.sh.
         .executableTarget(name: "tilde-icon", dependencies: ["TildeUI"], swiftSettings: strict),

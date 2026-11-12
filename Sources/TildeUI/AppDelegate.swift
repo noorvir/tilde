@@ -29,6 +29,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindow?
     private var toast: InstallToast?
     private var restoreToast: RestoreToast?
+    private var updates: Updates?
+    private var updateToast: UpdateToast?
+    private var updateSession: AnyCancellable?
     private var historyRestore: AnyCancellable?
     private var hotKeys: HotKeys?
     private var browserEvents: Any?
@@ -110,8 +113,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { flow in flow.mode == .idle || flow.accepts(.restore, controller.facts) }
             .removeDuplicates()
             .sink { [weak history] takes in history?.takesRestore = takes }
+        let updates = Updates(engine: SparkleUpdates())
+        let updateToast = UpdateToast { [updates] in updates.restart() }
+        updates.onReady = { updateToast.show(version: $0) }
+        updateSession = controller.$flow
+            .map { $0.mode != .idle }
+            .removeDuplicates()
+            .sink { [weak updates] isActive in updates?.isSessionActive = isActive }
+        self.updates = updates
+        self.updateToast = updateToast
         let model = SettingsModel(
-            setup: setup, shortcuts: shortcuts, browser: browser, history: history, server: serverState, version: version,
+            setup: setup, shortcuts: shortcuts, browser: browser, history: history, server: serverState, updates: updates, version: version,
             onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.hud.resetPosition() }
         )
         let settings = SettingsWindow(model: model)
@@ -132,6 +144,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         startServer()
         setup.nodes.startLinks()
+        updates.start()
         offerUnfinishedSession()
 
         if ScreenCapture.isAllowed {

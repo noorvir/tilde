@@ -70,6 +70,8 @@ struct GeneralSettings: View {
                     Button("Reset", action: model.onResetHUD)
                 }
             }
+
+            UpdateSettings(updates: model.updates, version: model.version)
         }
     }
 
