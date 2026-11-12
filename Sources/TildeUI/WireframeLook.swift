@@ -20,13 +20,13 @@ struct WireframeLook: Equatable {
         }
     }
 
-    var style = Style.technical
+    var style = Style.construction
     /// The opacity of the blue fill.
-    var fill = 0.22
+    var fill = 0.06
     /// The blur of the screen under each component, in points.
-    var blur = 3.0
+    var blur = 2.5
     /// The opacity of the white over the screen under each component.
-    var fade = 0.45
+    var fade = 0.58
 
     static let fillRange = 0.0...0.6
     static let blurRange = 0.0...8.0

@@ -12,7 +12,7 @@ const blue = "#2F7BF6";
 const dark = "#1D5BD8";
 
 // `style`: technical, hatched, construction or blueprint; `fill` and `fade` from 0 to 1.
-let look = { style: "technical", fill: 0.22, fade: 0.45 };
+let look = { style: "construction", fill: 0.06, fade: 0.58 };
 
 function node(name, attributes = {}) {
   const element = document.createElementNS("http://www.w3.org/2000/svg", name);

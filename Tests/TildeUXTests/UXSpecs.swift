@@ -627,7 +627,7 @@ struct UXSpecs {
 
             // B chooses the button. Its bottom edge, drawn 1 pt below the top of the window's
             // fourth row, snaps to it, and a guide runs across the screen there. Under the edge
-            // is the 3 pt offset edge of the Technical style, and then the window.
+            // is the window.
             let frame = ChangingWindow.frame
             let row = frame.minY + 140
             let start = CGPoint(x: frame.minX + 100, y: frame.minY + 100)
@@ -787,8 +787,8 @@ struct UXSpecs {
 
     /// The look of the components comes from the style tiles of Settings' Appearance page, and a
     /// change shows at once on the components drawn. Blueprint's lines run past the corners and
-    /// it has no offset edge; Technical, the default, has a hard offset edge under the bottom and
-    /// no lines past the corners.
+    /// it has no offset edge; Technical has a hard offset edge under the bottom and no lines past
+    /// the corners.
     @Test func aStyleChosenInSettingsShowsOnTheWireframe() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -828,8 +828,9 @@ struct UXSpecs {
         }
     }
 
-    /// The wireframe bar's Style button opens Tilde's own menu: a style tile changes the look of
-    /// the components drawn at once, and Esc closes the menu.
+    /// The wireframe bar's Style button opens Tilde's own menu: a style's name changes the look
+    /// of the components drawn at once, and Esc closes the menu. Construction, the default, has
+    /// ticks past the corners and no offset edge; Technical has an offset edge and no ticks.
     @Test func theStyleMenuChangesTheLookAtOnce() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -847,17 +848,18 @@ struct UXSpecs {
             try await app.hold("command", down: true)
             try await app.slowDrag(from: button.origin, to: CGPoint(x: button.maxX, y: button.maxY))
             try await app.hold("command", down: false)
-            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
-            step("technical drawn")
-
-            try await app.press("Style")
-            try await app.press("Blueprint")
             try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atLeast: 2)
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atMost: 0)
-            step("blueprint chosen")
+            step("construction drawn")
+
+            try await app.press("Style")
+            try await app.press("Technical")
+            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
+            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
+            step("technical chosen")
 
             try await app.key(.escape)
-            try await app.waitNotToSee("Blueprint")
+            try await app.waitNotToSee("Technical")
             #expect(try await app.seen().contains { $0.name == "Done, ⌘↩" })
             step("menu closed")
         }

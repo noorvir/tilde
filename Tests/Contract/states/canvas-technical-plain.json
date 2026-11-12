@@ -2,6 +2,7 @@
   "version": 1,
   "surface": "canvas",
   "look": {
+    "style": "technical",
     "fill": 0,
     "blur": 0,
     "fade": 0

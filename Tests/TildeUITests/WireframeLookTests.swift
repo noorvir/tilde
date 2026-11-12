@@ -14,7 +14,7 @@ struct WireframeLookTests {
         try await page.load()
     }
 
-    private func setLook(_ style: String, fill: Double = 0.22, fade: Double = 0.45) async throws {
+    private func setLook(_ style: String, fill: Double = 0.06, fade: Double = 0.58) async throws {
         try await page.draw("setWireframeLook({style: '\(style)', fill: \(fill), fade: \(fade)})")
     }
 
@@ -34,8 +34,8 @@ struct WireframeLookTests {
     }
 
     /// A style change redraws the components already drawn, at once, with the marks of the
-    /// style: Technical's offset edge, Hatched's lines, Construction's dashes and ticks,
-    /// Blueprint's lines past the corners.
+    /// style: Construction's dashes and ticks (the default), Technical's offset edge, Hatched's
+    /// lines, Blueprint's lines past the corners.
     @Test func eachStyleRedrawsTheComponentsAtOnce() async throws {
         try await page.draw("setWireframe({tool: 'card', icons: {}})")
         try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
@@ -45,25 +45,26 @@ struct WireframeLookTests {
         // The top and the bottom border, 7 pt longer at each end.
         let pastTheCorners = ##"line[x1="193"][x2="447"]"##
 
+        // Construction, the default.
+        #expect(try await count(dashes) == 1)
+        #expect(try await count(##"path[stroke-width="1.5"]"##) == 4)
+        #expect(try await count(offsetEdge) == 0)
+
+        try await setLook("technical")
         #expect(try await count(offsetEdge) == 1)
         #expect(try await count(##"rect[fill="none"][stroke-width="2"]"##) == 1)
-        #expect(try await count(hatching) == 0)
+        #expect(try await count(dashes) == 0)
 
         try await setLook("hatched")
         #expect(try await count(hatching) == 1)
         #expect(try await count(offsetEdge) == 0)
 
-        try await setLook("construction")
-        #expect(try await count(dashes) == 1)
-        #expect(try await count(##"path[stroke-width="1.5"]"##) == 4)
-        #expect(try await count(hatching) == 0)
-
         try await setLook("blueprint")
         #expect(try await count(pastTheCorners) == 2)
-        #expect(try await count(dashes) == 0)
+        #expect(try await count(hatching) == 0)
 
-        try await setLook("technical")
-        #expect(try await count(offsetEdge) == 1)
+        try await setLook("construction")
+        #expect(try await count(dashes) == 1)
         #expect(try await count(pastTheCorners) == 0)
     }
 
@@ -71,8 +72,8 @@ struct WireframeLookTests {
     /// the white over the screen under each one.
     @Test func fillAndFadeSetTheBlueAndTheWhite() async throws {
         try await restore("[{type: 'card', rect: [100, 100, 200, 80]}, {type: 'button', rect: [400, 100, 100, 40]}]")
-        #expect(try await count(##"rect[fill="#2F7BF6"][fill-opacity="0.22"]"##) == 2)
-        #expect(try await count(##"rect[fill="#FFFFFF"][fill-opacity="0.45"]"##) == 2)
+        #expect(try await count(##"rect[fill="#2F7BF6"][fill-opacity="0.06"]"##) == 2)
+        #expect(try await count(##"rect[fill="#FFFFFF"][fill-opacity="0.58"]"##) == 2)
 
         try await setLook("technical", fill: 0.4, fade: 0)
         #expect(try await count(##"rect[fill="#2F7BF6"][fill-opacity="0.4"]"##) == 2)
@@ -122,7 +123,8 @@ struct WireframeLookTests {
         // The lines between its rows, and no content.
         #expect(try await count(##"line[stroke="#2F7BF6"]"##) >= 2)
         #expect(try await count(##"rect[height="6"]"##) == 0)
-        #expect(try await count(##"path[stroke="#1D5BD8"][stroke-width="3"]"##) == 1)
+        // Construction's dashed border, the default.
+        #expect(try await count(##"rect[fill="none"][stroke-dasharray="5 4"]"##) == 1)
 
         try await page.run("fire('pointerup', 300, 270, {target: window.pressed}); 0")
         try await page.settle()
@@ -140,7 +142,7 @@ struct WireframeLookTests {
                 + "{type: 'ellipse', rect: [700, 100, 100, 80], filled: true}, {type: 'rectangle', rect: [850, 100, 100, 80], filled: false}, "
                 + "{type: 'table', rect: [100, 300, 240, 120]}, {type: 'list', rect: [400, 300, 100, 120]}, {type: 'button', rect: [550, 300, 80, 30]}]"
         )
-        let block = ##"[fill="#1D5BD8"][fill-opacity="0.132"]"##
+        let block = ##"[fill="#1D5BD8"][fill-opacity="0.036"]"##
         #expect(try await count(block) == 4)
         #expect(try await count(##"rect[x="112"][y="112"][width="216"][height="96"]"## + block) == 1)
         // 30 high: a padding of 6.
