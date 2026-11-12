@@ -52,21 +52,34 @@ mark.isHidden = true
 window.contentView?.addSubview(mark)
 window.orderFrontRegardless()
 
-// "glide": the window moves right at 120 pt a second for 1.5 s, frame by frame, as a window
-// dragged by hand does. Its place follows the clock, and the app takes no nap in the
-// background, which would slow its timers.
+// "glide": the window moves right at 120 pt a second for 1.5 s, once for each frame of the
+// display, as a window dragged by hand does. Its place follows the clock, and the app takes no
+// nap in the background, which would slow it. A timer would move it less often: each move waits
+// for the display.
 let awake = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Moves its window smoothly")
-var glide: Timer?
-func startGlide() {
-    let start = Date()
-    let origin = window.frame.origin
-    glide = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
+
+final class Glide: NSObject {
+    private let start = Date()
+    private let origin = window.frame.origin
+    private var link: CADisplayLink?
+
+    func begin() {
+        link = content.displayLink(target: self, selector: #selector(step))
+        link?.add(to: .main, forMode: .common)
+    }
+
+    @objc private func step(_ link: CADisplayLink) {
         let elapsed = min(Date().timeIntervalSince(start), 1.5)
         window.setFrameOrigin(NSPoint(x: origin.x + (120 * elapsed).rounded(), y: origin.y))
         if elapsed == 1.5 {
-            timer.invalidate()
+            link.invalidate()
         }
     }
+}
+var glide: Glide?
+func startGlide() {
+    glide = Glide()
+    glide?.begin()
 }
 
 var lastToggle = Date.distantPast
