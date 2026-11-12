@@ -7,7 +7,6 @@
   ],
   "toast": {
     "failed": 0,
-    "action": "installed",
     "oneApp": false
   }
 }

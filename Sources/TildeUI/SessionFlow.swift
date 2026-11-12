@@ -405,7 +405,7 @@ struct SessionFlow: Equatable {
             let effects: [Effect]
             if case .picking(let isPickerOpen) = open.activity {
                 effects = handlePicking(event, isPickerOpen: isPickerOpen, &open)
-            } else if let question = open.question, !Self.isAnswer(event, to: question) {
+            } else if open.question != nil, !Self.isAnswer(event) {
                 // A question waits for its answer; nothing else acts under it.
                 effects = []
             } else {
@@ -462,7 +462,7 @@ struct SessionFlow: Equatable {
 
     /// The events a question takes: its answers, Esc, the session's end, and results and
     /// changes from outside that no one asked for, such as the hold key or a clip saved.
-    private static func isAnswer(_ event: Event, to question: Question) -> Bool {
+    private static func isAnswer(_ event: Event) -> Bool {
         switch event {
         case .confirm, .dismissConfirmation, .escape, .ended, .holdEnded, .otherAppInFront, .scopeAppInFront,
              .clipStarted, .clipStartFailed, .clipFinished, .clipFailed, .captureStopped, .windowClosed:

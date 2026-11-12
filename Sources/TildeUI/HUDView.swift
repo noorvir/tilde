@@ -3,7 +3,6 @@ import SwiftUI
 import TildeCore
 
 struct HUDView: View {
-    @Environment(\.isHUDEmbedded) private var isHUDEmbedded
     /// The width of the pill in every mode. The widest title and a two-digit note count fit in
     /// it (the HUD reserves their space with hidden labels), so changing the mode or adding
     /// notes never moves a button; `everyModeFitsThePillWidth` checks it.

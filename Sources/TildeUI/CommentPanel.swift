@@ -30,7 +30,7 @@ final class CommentPanel {
         let origin = Self.origin(size: size, near: marker, below: target)
         // At the top of the window: when the window has grown and the content not yet, the
         // content stays where it is. Centred, it would jump up for one frame.
-        let hosting = FittingHostingView(rootView: view.frame(maxHeight: .infinity, alignment: .top))
+        let hosting = NSHostingView(rootView: view.frame(maxHeight: .infinity, alignment: .top))
 
         window.setFrame(NSRect(origin: origin, size: size), display: false)
         window.makeKeyAndOrderFront(nil)

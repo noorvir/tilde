@@ -219,10 +219,6 @@ final class DrawingPanel {
         }
     }
 
-    func clear() {
-        canvases.forEach { $0.run("clear()") }
-    }
-
     private func canvas(for frame: CGRect) -> DrawingCanvas {
         if let canvas = canvases.first(where: { $0.frame == frame }) {
             return canvas

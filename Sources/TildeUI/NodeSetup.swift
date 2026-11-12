@@ -143,7 +143,8 @@ final class NodeSetup: ObservableObject {
     private let log = Logger(subsystem: "dev.tilde.app", category: "nodes")
     private let store: NodeStore
     private let nodePort: UInt16
-    private let remotePort: UInt16
+    /// Not Tilde's own port: the node may run a Tilde of its own.
+    private let remotePort: UInt16 = 7319
     /// Serves the nodes' sockets; links start once it is set.
     var mcp: MCPServer?
     private var links: [String: Process] = [:]
@@ -159,16 +160,13 @@ final class NodeSetup: ObservableObject {
     /// whether it stays on the port; it returns whether the machine's type has `tproxy`.
     private let makeInstaller: @Sendable (String, String, String, Bool) throws -> (Installer, Bool)
 
-    /// `remotePort` is not Tilde's own port: the node may run a Tilde of its own.
     init(
         store: NodeStore = NodeStore(),
         nodePort: UInt16,
-        remotePort: UInt16 = 7319,
         makeInstaller: @escaping @Sendable (String, String, String, Bool) throws -> (Installer, Bool) = { try NodeSetup.installer($0, url: $1, token: $2, onPort: $3) }
     ) {
         self.store = store
         self.nodePort = nodePort
-        self.remotePort = remotePort
         self.makeInstaller = makeInstaller
     }
 

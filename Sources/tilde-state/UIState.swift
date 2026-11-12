@@ -44,12 +44,7 @@ struct UIState: Decodable {
         var isLocal: Bool?
     }
     struct Toast: Decodable {
-        enum Action: String, Decodable {
-            case installed, removed
-        }
-
         let failed: Int
-        let action: Action
         let oneApp: Bool
     }
     struct NodeState: Decodable {

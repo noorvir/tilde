@@ -266,12 +266,12 @@ enum Fixtures {
         return model
     }
 
-    static func installResult(failed: Int, action: InstallResult.Action = .installed) -> InstallResult {
+    static func installResult(failed: Int) -> InstallResult {
         let names = ["Claude", "Codex", "Cursor", "VS Code", "Windsurf (Devin)", "Gemini CLI"]
         let apps = names.enumerated().map { index, name in
             InstallResult.App(name: name, icon: appIcon, failed: index >= names.count - failed, changed: true)
         }
-        return InstallResult(action: action, apps: apps)
+        return InstallResult(action: .installed, apps: apps)
     }
 }
 

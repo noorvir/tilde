@@ -46,11 +46,8 @@ enum Key: Int {
     case enter = 36
     case w = 13
     case a = 0
-    case z = 6
     case v = 9
-    case delete = 51
     case leftBracket = 33
-    case rightBracket = 30
     case r = 15
     case space = 49
     case b = 11
@@ -99,10 +96,6 @@ struct Picture {
 
     var size: CGSize {
         CGSize(width: Double(bitmap.pixelsWide) / scale, height: Double(bitmap.pixelsHigh) / scale)
-    }
-
-    func color(at point: CGPoint) -> Color? {
-        pixel(x: Int((point.x - origin.x) * scale), y: Int((point.y - origin.y) * scale))
     }
 
     private func pixel(x: Int, y: Int) -> Color? {
@@ -289,12 +282,6 @@ final class TildeApp {
             throw UXFailure(description: "no picture from \(path)")
         }
         return data
-    }
-
-    /// Presses a control of another app by its accessibility name, such as Device Hub's zoom.
-    func press(_ name: String, inApp appName: String) async throws {
-        let app = try #require(NSWorkspace.shared.runningApplications.first { $0.localizedName == appName })
-        _ = try await drive("press", ["pid": app.processIdentifier, "name": name])
     }
 
     /// Tilde's list of remote machines, as if they were installed.

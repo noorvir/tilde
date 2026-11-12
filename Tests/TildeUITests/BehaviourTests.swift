@@ -701,6 +701,24 @@ struct BehaviourTests {
 
     // MARK: - Shortcuts
 
+    /// The tests' defaults keep every kind of value to themselves: nothing reaches the
+    /// standard domain of the process that runs the tests.
+    @Test func theTestsDefaultsChangeNoDomainOfTheMac() {
+        let defaults = MemoryDefaults()
+        let key = "tilde-memory-\(UUID().uuidString)"
+        defaults.set(true, forKey: key)
+        #expect(defaults.bool(forKey: key))
+        defaults.set(2.5, forKey: key)
+        #expect(defaults.double(forKey: key) == 2.5)
+        defaults.set("text", forKey: key)
+        #expect(defaults.string(forKey: key) == "text")
+        defaults.set(Data([1]), forKey: key)
+        #expect(defaults.data(forKey: key) == Data([1]))
+        #expect(UserDefaults.standard.object(forKey: key) == nil)
+        defaults.removeObject(forKey: key)
+        #expect(defaults.object(forKey: key) == nil)
+    }
+
     @Test func shortcutsAreSavedClearedResetAndNeverShared() {
         let defaults = MemoryDefaults()
         let store = ShortcutStore(defaults: defaults)
