@@ -35,7 +35,7 @@ enum Surfaces {
                 WireframeLook.Key.style: look.style.rawValue, WireframeLook.Key.fill: look.fill,
                 WireframeLook.Key.blur: look.blur, WireframeLook.Key.fade: look.fade,
             ])
-            return try await hosted(SettingsView(model: try settings(state.settings!)), size: size)
+            return try await hosted(SettingsView(model: try await settings(state.settings!, look: look)), size: size)
 
         case .canvas:
             return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip)
@@ -256,7 +256,7 @@ enum Surfaces {
         }
     }
 
-    private static func settings(_ state: UIState.Settings) throws -> SettingsModel {
+    private static func settings(_ state: UIState.Settings, look: WireframeLook) async throws -> SettingsModel {
         var history: HistoryModel?
         if state.savedSessions == true {
             let archive = Fixtures.archive()
@@ -272,8 +272,14 @@ enum Surfaces {
         case .shortcuts: .shortcuts
         case .history: .history
         case .general: .configuration
+        case .appearance: .appearance
         }
-        let model = try Fixtures.settingsModel(page: page, history: history)
+        // The Appearance page's pictures, drawn before the page shows, as the page draws them.
+        let previews = WireframePreviews(html: { try? CanvasSurface.html() })
+        if page == .appearance {
+            try await previews.draw(look)
+        }
+        let model = try Fixtures.settingsModel(page: page, history: history, wireframePreviews: previews)
         model.expandedAgents = Set(state.expandedAgents ?? [])
         if let host = state.machine, let node = state.nodes?.first(where: { $0.host == host }) {
             let machine = AgentSetup(installer: model.setup.installer, placeholderIcon: Fixtures.appIcon, nodes: model.setup.nodes, isRemote: true)

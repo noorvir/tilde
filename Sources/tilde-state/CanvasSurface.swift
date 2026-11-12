@@ -1,7 +1,6 @@
 @testable import TildeUI
 import AppKit
 import SwiftUI
-import WebKit
 
 /// The drawing canvas with a wireframe over an app, as the screen shows it: the real page draws
 /// the components in a look, over the app that `UnderBlurView` blurs under them.
@@ -22,121 +21,18 @@ enum CanvasSurface {
 
     static func image(look: WireframeLook, chip: UIState.Chip?) async throws -> CGImage {
         let app = try await Renderer.render(NSHostingView(rootView: MockApp()), size: size, appearance: .aqua)
-        let page = try await Page.load(size: size)
-        try await page.run("window.tildeDraw.setWireframeLook(\(look.pageJSON))")
-        try await page.run("window.tildeDraw.restoreWireframe(\(DrawingPanel.json(["shapes": shapes, "origin": [0, 0]])))")
-        let under = try await page.under()
-        if let chip {
-            try await page.showChip(isBordersOpen: chip == .borders)
-        }
-
-        // The app as the screen would show it under the canvas: blurred inside the shapes.
-        let scale = CGFloat(Renderer.scale)
-        let context = Renderer.bitmapContext(width: Int(size.width * scale), height: Int(size.height * scale))!
-        context.draw(app, in: CGRect(x: 0, y: 0, width: context.width, height: context.height))
-        if look.blur > 0, let picture = UnderBlurView.picture(of: app, size: size), let blurred = UnderBlurView.blurred(picture, radius: look.blur) {
-            context.scaleBy(x: scale, y: scale)
-            context.addPath(UnderBlurView.path(of: under, height: size.height))
-            context.clip()
-            context.draw(blurred, in: CGRect(origin: .zero, size: size))
-        }
-        let screen = NSBitmapImageRep(cgImage: context.makeImage()!).representation(using: .png, properties: [:])!
-        try await page.run("document.documentElement.style.background = 'url(data:image/png;base64,\(screen.base64EncodedString())) 0 0 / \(Int(size.width))px \(Int(size.height))px no-repeat'")
-        return try await page.snapshot()
+        let page = try await WireframePicturePage.load(html: html())
+        let state = chip == .borders ? "borders" : "normal"
+        return try await page.picture(of: shapes, look: look, state: state, over: app, size: size)
     }
 
-    /// The canvas's page from the sources, in a window that is not on the screen.
-    @MainActor
-    private final class Page: NSObject, WKScriptMessageHandler {
-        struct Failed: Error {
-            let reason: String
+    /// The canvas's page from the sources.
+    static func html() throws -> String {
+        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../TildeUI/DrawingWeb")
+        guard let html = DrawingCanvas.page(in: folder) else {
+            throw WireframePicturePage.Failed(reason: "no page in \(folder.path)")
         }
-
-        private let webView: WKWebView
-        private let window: NSWindow
-        private let size: CGSize
-        private var messages: [String] = []
-
-        /// The page is as large as a screen, as Excalidraw shows its own tools on a small one;
-        /// the picture is its top left, `size`.
-        private init(size: CGSize) {
-            self.size = size
-            let configuration = WKWebViewConfiguration()
-            let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
-            webView = WKWebView(frame: screen, configuration: configuration)
-            window = NSWindow(contentRect: screen, styleMask: [.borderless], backing: .buffered, defer: false)
-            super.init()
-            configuration.userContentController.add(self, name: "tilde")
-            window.contentView = webView
-        }
-
-        static func load(size: CGSize) async throws -> Page {
-            let page = Page(size: size)
-            let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../TildeUI/DrawingWeb")
-            guard let html = DrawingCanvas.page(in: folder) else {
-                throw Failed(reason: "no page in \(folder.path)")
-            }
-            page.webView.loadHTMLString(html, baseURL: URL(string: "https://drawing.tilde.invalid/"))
-            try await page.wait { $0.contains("ready") }
-            return page
-        }
-
-        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            if let body = message.body as? String {
-                messages.append(body)
-            }
-        }
-
-        func run(_ script: String) async throws {
-            _ = try await webView.evaluateJavaScript("\(script); 0")
-        }
-
-        /// The first component's chip, as the pointer over it shows it, and its borders menu.
-        func showChip(isBordersOpen: Bool) async throws {
-            let point = "clientX: 126, clientY: 150"
-            try await run("window.tildeDraw.setWireframe({tool: '', icons: {}})")
-            try await run("document.elementFromPoint(126, 150).dispatchEvent(new PointerEvent('pointermove', {bubbles: true, composed: true, \(point), pointerId: 1, pointerType: 'mouse', isPrimary: true}))")
-            if isBordersOpen {
-                for type in ["pointerdown", "pointerup"] {
-                    try await run("document.querySelector('#tilde-chip [data-menu=borders]').dispatchEvent(new PointerEvent('\(type)', {bubbles: true, composed: true, \(point), pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0}))")
-                }
-            }
-        }
-
-        /// The shapes that the page posted last to blur under.
-        func under() async throws -> [UnderBlurView.Shape] {
-            try await wait { $0.contains { $0.hasPrefix("under:") && $0 != "under:[]" } }
-            let last = messages.last { $0.hasPrefix("under:") } ?? "under:[]"
-            let values = (try JSONSerialization.jsonObject(with: Data(last.dropFirst("under:".count).utf8)) as? [[Double]]) ?? []
-            return values.map { UnderBlurView.Shape(rect: CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]), isEllipse: $0[4] == 1) }
-        }
-
-        func snapshot() async throws -> CGImage {
-            // Lets the page draw its background and fonts.
-            try await Task.sleep(for: .milliseconds(300))
-            let configuration = WKSnapshotConfiguration()
-            configuration.rect = CGRect(origin: .zero, size: size)
-            configuration.afterScreenUpdates = true
-            let image = try await webView.takeSnapshot(configuration: configuration)
-            let scale = CGFloat(Renderer.scale)
-            let context = Renderer.bitmapContext(width: Int(size.width * scale), height: Int(size.height * scale))!
-            let graphics = NSGraphicsContext(cgContext: context, flipped: false)
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current = graphics
-            image.draw(in: CGRect(x: 0, y: 0, width: CGFloat(context.width), height: CGFloat(context.height)))
-            NSGraphicsContext.restoreGraphicsState()
-            return context.makeImage()!
-        }
-
-        private func wait(until condition: ([String]) -> Bool) async throws {
-            for _ in 0..<500 {
-                if condition(messages) {
-                    return
-                }
-                try await Task.sleep(for: .milliseconds(10))
-            }
-            throw Failed(reason: "the page did not answer: \(messages)")
-        }
+        return html
     }
 }
 

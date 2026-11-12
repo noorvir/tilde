@@ -103,6 +103,25 @@ final class UnderBlurView: NSView {
         return context.createCGImage(blurred, from: image.extent)
     }
 
+    /// `app`, `size` points large, as the screen shows it under the canvas: blurred inside
+    /// `shapes`. For pictures of the canvas that are not on the screen.
+    static func screen(_ app: CGImage, blurredUnder shapes: [Shape], radius: Double, size: CGSize) -> CGImage {
+        guard let context = CGContext(
+            data: nil, width: app.width, height: app.height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return app
+        }
+        context.draw(app, in: CGRect(x: 0, y: 0, width: app.width, height: app.height))
+        if radius > 0, !shapes.isEmpty, let picture = picture(of: app, size: size), let blurred = blurred(picture, radius: radius) {
+            context.scaleBy(x: CGFloat(app.width) / size.width, y: CGFloat(app.height) / size.height)
+            context.addPath(path(of: shapes, height: size.height))
+            context.clip()
+            context.draw(blurred, in: CGRect(origin: .zero, size: size))
+        }
+        return context.makeImage() ?? app
+    }
+
     /// The outline of all `shapes` in a space of this height with its origin at the bottom left,
     /// as a layer's or a bitmap's.
     static func path(of shapes: [Shape], height: CGFloat) -> CGPath {

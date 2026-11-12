@@ -5,9 +5,9 @@
     920,
     805
   ],
-  "appearance": "light",
+  "appearance": "dark",
   "settings": {
-    "page": "general"
+    "page": "appearance"
   },
   "look": {
     "style": "blueprint",

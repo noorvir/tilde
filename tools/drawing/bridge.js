@@ -7,6 +7,7 @@ import { api, taken, post, live, changeElements, describe, withGroups, isTextFie
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
 import { setWireframeLook } from "./wireframe/look.js";
+import { showPreview } from "./wireframe/preview.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
 import { snapAgain } from "./wireframe/pointer.js";
 import { setSnapTargets } from "./wireframe/snap.js";
@@ -54,7 +55,7 @@ function setSnapTargetsHere(targets) {
 window.tildeDraw = {
   setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect, setSnapFrame,
   shapesOf, clear, newShapes, takeNewShapes, remove,
-  setWireframe, setWireframeLook, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
+  setWireframe, setWireframeLook, showPreview, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 
 // Tilde takes its own keys before the page; it must know when a text field here has the

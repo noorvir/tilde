@@ -29,9 +29,9 @@ struct UIState: Decodable {
     enum SentStatus: String, Decodable {
         case done, failed
     }
-    /// The chip of the first component on the canvas: shown, or with its borders menu open.
+    /// The first component on the canvas, selected with its chip and its borders menu open.
     enum Chip: String, Decodable {
-        case shown, borders
+        case borders
     }
     enum Enlarged: String, Decodable {
         case closeUp, context
@@ -81,7 +81,7 @@ struct UIState: Decodable {
 
     struct Settings: Decodable {
         enum Page: String, Decodable {
-            case agents, general, shortcuts, history
+            case agents, general, shortcuts, history, appearance
         }
 
         let page: Page

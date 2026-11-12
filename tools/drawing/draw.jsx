@@ -9,6 +9,7 @@
 //   wireframe/mode.js        wireframe mode on and off, a note's components shown again, its keys
 //   wireframe/components.js  what a component is: its kinds and its data
 //   wireframe/look.js        what a component looks like, in the style of Tilde's settings
+//   wireframe/preview.js     still pictures of components in each state, for Tilde's Settings
 //   wireframe/pointer.js     drawing, moving, resizing and copying with the pointer
 //   wireframe/chip.js        a component's handles: the chip, its kinds and borders, the resize square
 //   wireframe/labels.js      a label typed in place

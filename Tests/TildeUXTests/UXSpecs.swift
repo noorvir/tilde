@@ -743,9 +743,10 @@ struct UXSpecs {
         }
     }
 
-    /// The look of the components comes from Settings, and a change shows at once on the
-    /// components drawn. Blueprint's lines run past the corners and it has no offset edge; Technical, the
-    /// default, has a hard offset edge under the bottom and no lines past the corners.
+    /// The look of the components comes from the style tiles of Settings' Appearance page, and a
+    /// change shows at once on the components drawn. Blueprint's lines run past the corners and
+    /// it has no offset edge; Technical, the default, has a hard offset edge under the bottom and
+    /// no lines past the corners.
     @Test func aStyleChosenInSettingsShowsOnTheWireframe() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -757,9 +758,9 @@ struct UXSpecs {
         try await withApp { app in
             // The fixture's window can be in front of Settings, which stays open meanwhile.
             try await app.menu("Settings")
-            try await app.accessibilityPress("Configuration")
+            try await app.accessibilityPress("Appearance")
+            try await app.waitToSee("Dragged, snapping")
             try await app.accessibilityPress("Blueprint")
-            try await app.waitToSee("Hairlines that run past the corners")
             step("blueprint chosen")
 
             // ⌘ draws without snapping, at the very place of the drag.
@@ -779,7 +780,6 @@ struct UXSpecs {
 
             // Settings, under the canvas, change the style: the button shows it at once.
             try await app.accessibilityPress("Technical")
-            try await app.waitToSee("A firm border with a hard offset edge")
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
             try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
             step("technical shown")

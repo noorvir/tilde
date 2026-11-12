@@ -47,8 +47,6 @@ struct GeneralSettings: View {
                 }
             }
 
-            WireframeSettings()
-
             SettingsSection("Connection") {
                 SettingsRow(title: "MCP server", subtitle: statusText, subtitleCode: address) {
                     Button("Copy") {
