@@ -602,31 +602,31 @@ struct UXSpecs {
     }
 
     /// Double Ctrl in another app, while the user types in its text field, opens the HUD with the
-    /// keyboard: ↩, a letter and the HUD's shortcuts reach Tilde without a click, and Esc
-    /// pauses, then closes it. The text field gets none of them. Then the same in an app in full
-    /// screen, which stays in full screen.
+    /// keyboard: ↩, a letter and the HUD's shortcuts reach Tilde without a click, and Esc closes
+    /// it, also when it opens paused, as the last session ended. The text field gets none of
+    /// them. Then the same in an app in full screen, which stays in full screen.
     @Test func doubleControlInATextFieldGivesTheHUDTheKeys() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
-            try await useHUDKeys(app, over: window, page: "typing")
+            try await useHUDKeys(app, over: window, page: "typing", opensAs: "Annotating")
             #expect(window.keys == [])
 
             try window.show("fullscreen typing")
             for _ in 0..<60 where window.fullScreen?.isOn != true {
                 try await Task.sleep(for: .milliseconds(100))
             }
-            try await useHUDKeys(app, over: window, page: "fullscreen typing")
+            try await useHUDKeys(app, over: window, page: "fullscreen typing", opensAs: "Paused")
             #expect(window.keys == [])
             #expect(window.fullScreen?.isOn == true)
             #expect(window.fullScreen?.exits == 0)
         }
     }
 
-    /// With the keyboard in the window's text field, double Ctrl opens the HUD; ↩, B, D (Draw)
-    /// and ⌘↩ (Done, which pauses) work in Tilde, and Esc closes the HUD. Opened again, paused
-    /// as it ended, Esc closes it.
-    private func useHUDKeys(_ app: TildeApp, over window: ChangingWindow, page: String) async throws {
+    /// With the keyboard in the window's text field, double Ctrl opens the HUD, as `opensAs`
+    /// says; ↩, B, D (Draw) and ⌘↩ (Done, which pauses) work in Tilde, and Esc closes the HUD.
+    /// Opened again, paused as it ended, Esc closes it at once.
+    private func useHUDKeys(_ app: TildeApp, over window: ChangingWindow, page: String, opensAs title: String) async throws {
         try window.show(page)
         for _ in 0..<60 where try await app.focus().app != window.pid {
             try await Task.sleep(for: .milliseconds(100))
@@ -636,7 +636,7 @@ struct UXSpecs {
         #expect(typing.role == "AXTextField")
 
         try await app.doubleTap("control")
-        try await app.waitToSee("Annotating")
+        try await app.waitToSee(title)
         try await app.key(.enter)
         try await app.key(.b)
         try await app.key(.d)
@@ -646,7 +646,6 @@ struct UXSpecs {
         try await app.key(.escape)
         try await app.waitNotToSee("Paused", timeout: 5)
 
-        // The next session starts as the last one ended: paused, with no mode.
         try await app.doubleTap("control")
         try await app.waitToSee("Paused")
         try await app.key(.escape)

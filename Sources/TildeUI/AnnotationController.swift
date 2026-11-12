@@ -525,6 +525,11 @@ final class AnnotationController: ObservableObject {
         }
         if let event = startMode.event {
             dispatch(event)
+        } else if !isInBrowser {
+            // With no mode the apps below take the clicks, but the keyboard is Tilde's, as after
+            // Esc or Done: Esc, ↩ and the HUD's keys reach it without a click on the HUD, also
+            // when another app was in front. A click in another app gives that app the keyboard.
+            overlays.makeKey()
         }
     }
 
