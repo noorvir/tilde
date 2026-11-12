@@ -113,7 +113,9 @@ final class CanvasPage {
     };
     window.press = (key, options = {}) => {
       const target = document.activeElement ?? document.body;
-      target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, composed: true, metaKey: Boolean(options.meta), shiftKey: Boolean(options.shift) }));
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, composed: true, metaKey: Boolean(options.meta), shiftKey: Boolean(options.shift) });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
     };
     0
     """
@@ -207,9 +209,18 @@ final class CanvasPage {
     }
 
     /// A key to the element that has the keyboard, such as "Escape", "Backspace" or "z".
-    func press(_ key: String, meta: Bool = false, shift: Bool = false) async throws {
-        try await run("press('\(key)', {meta: \(meta), shift: \(shift)}); 0")
+    /// Returns whether the page marked it as used: one that it does not, WebKit gives back to
+    /// macOS, which plays the alert sound when no window takes it.
+    @discardableResult
+    func press(_ key: String, meta: Bool = false, shift: Bool = false) async throws -> Bool {
+        let isUsed = try await run("press('\(key)', {meta: \(meta), shift: \(shift)})") as? Bool == true
         try await settle()
+        return isUsed
+    }
+
+    /// Whether a press at a point is for the page, as Tilde asks it with no tool.
+    func takesPointer(_ point: CGPoint) async throws -> Bool {
+        try await run("window.tildeDraw.takesPointer(\(point.x), \(point.y))") as? Bool == true
     }
 
     /// Types into the label field that is open on a component.

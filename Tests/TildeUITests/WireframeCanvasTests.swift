@@ -88,7 +88,7 @@ struct WireframeCanvasTests {
         #expect(try await page.shows("#tilde-label"))
 
         try await page.typeLabel("Plan")
-        try await page.press("Enter")
+        #expect(try await page.press("Enter"))
         #expect(try await !page.shows("#tilde-label"))
         let labelled = try await page.shapes()
         #expect(labelled.map(\.label) == ["Plan"])
@@ -108,7 +108,7 @@ struct WireframeCanvasTests {
         try await page.click(inside)
         try await page.click(inside)
         try await page.typeLabel("Cancel")
-        try await page.press("Escape")
+        #expect(try await page.press("Escape"))
         #expect(try await page.shapes().map(\.label) == ["Save"])
         // Esc in the field is the field's: Tilde does not get it.
         #expect(!page.messages.contains("escape"))
@@ -164,6 +164,40 @@ struct WireframeCanvasTests {
 
         try await drawComponent("card", from: CGPoint(x: 700, y: 500), to: CGPoint(x: 900, y: 650))
         #expect(try await page.shapes().map(\.type) == ["section", "card"])
+    }
+
+    /// With no tool, the page takes a press only on a component and its handles, and
+    /// anywhere while a label is typed; Tilde lets every other press through to the app
+    /// behind. A press that went through ends the selection. With a tool, it takes every press.
+    @Test func withNoToolOnlyComponentsTakeThePointer() async throws {
+        let empty = CGPoint(x: 800, y: 600)
+        try await drawComponent("card")
+        #expect(page.messages.last { $0 == "tool" || $0 == "noTool" } == "tool")
+        #expect(try await page.takesPointer(empty))
+
+        try await start(tool: "")
+        #expect(page.messages.last { $0 == "tool" || $0 == "noTool" } == "noTool")
+        #expect(try await page.takesPointer(inside))
+        #expect(try await !page.takesPointer(empty))
+        // The chip is above the component's top edge.
+        let chip = CGPoint(x: corner.x + 20, y: corner.y - 8)
+        #expect(try await !page.takesPointer(chip))
+        try await page.click(inside)
+        #expect(try await page.shows(Self.chip))
+        #expect(try await page.takesPointer(chip))
+
+        try await page.draw("pointerWentThrough(true)")
+        #expect(try await !page.shows(Self.chip))
+        #expect(try await !page.takesPointer(chip))
+
+        // Two clicks apart from the one before are a double-click.
+        try await Task.sleep(for: .milliseconds(450))
+        try await page.click(inside)
+        try await page.click(inside)
+        #expect(try await page.shows("#tilde-label"))
+        #expect(try await page.takesPointer(empty))
+        try await page.press("Enter")
+        #expect(try await !page.takesPointer(empty))
     }
 
     // MARK: - Move, resize and copy
@@ -460,14 +494,14 @@ struct WireframeCanvasTests {
         try await page.click(on: Self.chip)
         #expect(try await page.shows("[data-kind=\"card\"]"))
 
-        try await page.press("Escape")
+        #expect(try await page.press("Escape"))
         #expect(try await !page.shows("[data-kind=\"card\"]"))
         #expect(!page.messages.contains("escape"))
 
-        try await page.press("Escape")
+        #expect(try await page.press("Escape"))
         #expect(!page.messages.contains("escape"))
 
-        try await page.press("Escape")
+        #expect(try await page.press("Escape"))
         #expect(page.messages.filter { $0 == "escape" }.count == 1)
         #expect(try await page.shapes().count == 1)
     }
@@ -561,6 +595,8 @@ struct WireframeCanvasTests {
         try await page.draw("endEditing()")
 
         try await page.draw("setNoTool()")
+        #expect(page.messages.last == "noTool")
+        #expect(try await !page.takesPointer(CGPoint(x: 600, y: 400)))
         try await page.drag(from: CGPoint(x: 600, y: 400), to: CGPoint(x: 800, y: 600))
         #expect(try await page.shapes().isEmpty)
         #expect(page.messages.filter { $0 == "shape" }.count == 1)

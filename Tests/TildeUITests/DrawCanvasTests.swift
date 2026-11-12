@@ -62,11 +62,11 @@ struct DrawCanvasTests {
         #expect(try await page.rawShapes().first?["type"] as? String == "arrow")
         #expect(shapeMessages() == 0)
 
-        try await page.press("Escape")
+        #expect(try await page.press("Escape"))
         #expect(!page.messages.contains("escape"))
         #expect(try await page.rawShapes().isEmpty)
 
-        try await page.press("Escape")
+        #expect(try await page.press("Escape"))
         #expect(page.messages.filter { $0 == "escape" }.count == 1)
     }
 
