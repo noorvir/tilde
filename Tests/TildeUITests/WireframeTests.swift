@@ -152,13 +152,16 @@ struct WireframeTests {
     // MARK: - Esc
 
     /// Esc in wireframe mode puts the tool down: no tool is on, the mode stays and nothing
-    /// pauses, so the components can still be selected and changed. A tool draws again.
+    /// pauses, so the components can still be selected and changed, and the pointer goes
+    /// through to the apps behind elsewhere. A tool draws again.
     @Test func escPutsTheWireframeToolDown() throws {
         open(Open(canvas: .wireframe))
         controller.setWireframeTool("table")
+        #expect(!controller.isToolDown)
 
         controller.escapePressed()
         #expect(controller.wireframe.tool == nil)
+        #expect(controller.isToolDown)
         #expect(controller.isWireframe)
         #expect(controller.pauses.isEmpty)
         // Esc again changes nothing: it never ends the mode or the session.
@@ -169,6 +172,7 @@ struct WireframeTests {
 
         #expect(controller.handleKey(try key("b"), in: .canvas))
         #expect(controller.wireframe.tool == "button")
+        #expect(!controller.isToolDown)
     }
 
     /// Esc in Draw puts Draw's tool down, and its tool is kept for the next time; a tool's
@@ -180,6 +184,7 @@ struct WireframeTests {
 
         controller.escapePressed()
         #expect(controller.drawing.isToolDown)
+        #expect(controller.isToolDown)
         #expect(controller.drawing.tool == "ellipse")
         #expect(controller.isDrawing)
         #expect(controller.pauses.isEmpty)
@@ -187,6 +192,7 @@ struct WireframeTests {
 
         controller.setDrawingTool("arrow")
         #expect(!controller.drawing.isToolDown)
+        #expect(!controller.isToolDown)
         #expect(controller.drawing.tool == "arrow")
     }
 
