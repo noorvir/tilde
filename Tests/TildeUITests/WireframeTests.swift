@@ -175,6 +175,43 @@ struct WireframeTests {
         #expect(!controller.isToolDown)
     }
 
+    /// The session holds the keyboard, and with it Esc system-wide, in every mode and after Esc
+    /// paused it. A pause by the user gives the keyboard to the app in front until the session
+    /// goes on; another app in front that pauses the session keeps it too.
+    @Test func theSessionHoldsTheKeyboardUntilTheUserPauses() {
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: nil)
+        controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
+        controller.dispatch(.toggleAnnotating)
+        #expect(controller.holdsKeyboard)
+
+        controller.dispatch(.togglePause)
+        #expect(!controller.holdsKeyboard)
+        controller.dispatch(.togglePause)
+        #expect(controller.holdsKeyboard)
+
+        controller.escapePressed()
+        #expect(controller.pauses == [.user])
+        #expect(controller.holdsKeyboard)
+
+        // The canvas's window is not opened here.
+        controller.dispatch(.startDrawing, with: [.showCanvas: {}])
+        #expect(controller.holdsKeyboard)
+        controller.dispatch(.togglePause)
+        #expect(!controller.holdsKeyboard)
+        controller.dispatch(.togglePause)
+        controller.dispatch(.toggleAnnotating)
+        #expect(controller.holdsKeyboard)
+
+        controller.dispatch(.otherAppInFront)
+        #expect(!controller.holdsKeyboard)
+        controller.dispatch(.scopeAppInFront)
+        #expect(controller.holdsKeyboard)
+
+        controller.dispatch(.requestCancel)
+        #expect(controller.session == nil)
+        #expect(!controller.holdsKeyboard)
+    }
+
     /// Esc in Draw puts Draw's tool down, and its tool is kept for the next time; a tool's
     /// button or key takes a tool up again.
     @Test func escPutsDrawsToolDown() {

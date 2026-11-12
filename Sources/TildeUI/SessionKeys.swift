@@ -212,6 +212,26 @@ extension AnnotationController {
         return key.allSatisfy { $0.isLetter || $0.isNumber } ? .ignored : nil
     }
 
+    /// Esc while the session holds the keyboard, from its system-wide hot key: the app in front
+    /// never gets it. It goes on to the window of Tilde that has the keyboard as a key typed
+    /// there, so a text field, the canvas or a question takes it first, as before. With none,
+    /// the session takes it.
+    func globalEscapePressed() {
+        guard let window = NSApp.keyWindow else {
+            escapePressed()
+            return
+        }
+        for type in [NSEvent.EventType.keyDown, .keyUp] {
+            let event = NSEvent.keyEvent(
+                with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: UInt16(kVK_Escape)
+            )
+            if let event {
+                NSApp.postEvent(event, atStart: false)
+            }
+        }
+    }
+
     /// Returns whether the key answered the question on screen: Esc, or ↩ alone, typed in one of
     /// the session's windows (its panels or Tilde's browser), never in Settings. ⌘↩ is Send and
     /// never answers.

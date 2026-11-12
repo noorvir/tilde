@@ -16,12 +16,22 @@ window.level = .floating
 window.backgroundColor = .white
 
 /// The window's content, which knows when a press reached it, also the first press while
-/// another app is in front.
+/// another app is in front. "<file>.pointer" is there once the pointer moved over it.
 final class PressedView: NSView {
     private(set) var isPressed = false
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        FileManager.default.createFile(atPath: file + ".pointer", contents: nil)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -82,6 +92,24 @@ func startGlide() {
     glide?.begin()
 }
 
+// "typing", also with "fullscreen": the app comes in front with the keyboard in a text field, as when the user types in
+// another app. "<file>.keys" lists the key code of each key the app gets, in order, and
+// "<file>.field" where the field is: "x y" of a point on it, in screen points from the top left.
+let field = NSTextField(frame: NSRect(x: 24, y: 370, width: 440, height: 24))
+field.isHidden = true
+content.addSubview(field)
+let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+    let line = "\(event.keyCode)\n"
+    if let handle = FileHandle(forWritingAtPath: file + ".keys") {
+        handle.seekToEndOfFile()
+        handle.write(Data(line.utf8))
+        try? handle.close()
+    } else {
+        try? line.write(toFile: file + ".keys", atomically: true, encoding: .utf8)
+    }
+    return event
+}
+
 var lastToggle = Date.distantPast
 var fullScreenExits = 0
 let exitObserver = NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { _ in
@@ -112,6 +140,17 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         app.activate(ignoringOtherApps: true)
         window.toggleFullScreen(nil)
     }
+    if page.contains("typing") {
+        let frame = window.convertToScreen(field.convert(field.bounds, to: nil))
+        let point = "\(Int(frame.minX + 60)) \(Int(NSScreen.screens[0].frame.height - frame.midY))"
+        try? point.write(toFile: file + ".field", atomically: true, encoding: .utf8)
+    }
+    if page.contains("typing"), field.isHidden {
+        field.isHidden = false
+        app.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(field)
+    }
     // The window moved, by a program or by the user.
     if page.hasPrefix("moved"), window.frame.minX < 400 {
         window.setFrameOrigin(NSPoint(x: window.frame.minX + 200, y: window.frame.minY))
@@ -120,6 +159,6 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         row.stringValue = text
     }
 }
-withExtendedLifetime((timer, awake, exitObserver)) {
+withExtendedLifetime((timer, awake, exitObserver, keyMonitor)) {
     app.run()
 }

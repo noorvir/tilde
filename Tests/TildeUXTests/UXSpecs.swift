@@ -580,8 +580,7 @@ struct UXSpecs {
             let mark = CGRect(x: frame.minX + 1, y: frame.minY + 50, width: 4, height: 300)
             try await waitFor(app, at: mark, Picture.isMark, atMost: 0)
             let beside = CGPoint(x: frame.minX + 480, y: frame.minY + 330)
-            try await app.hover(over: beside)
-            try await Task.sleep(for: .milliseconds(50))
+            try await move(app, to: beside, reaching: window)
             try await app.click(at: beside)
             try await waitFor(app, at: mark, Picture.isMark, atLeast: 200)
 
@@ -599,6 +598,101 @@ struct UXSpecs {
             #expect(window.fullScreen?.isOn == true)
             #expect(window.fullScreen?.exits == 0)
         }
+    }
+
+    /// Double Ctrl in another app, while the user types in its text field, opens the HUD with the
+    /// keyboard: ↩, a letter and the HUD's shortcuts reach Tilde without a click, and Esc closes
+    /// it, also when it opens paused, as the last session ended, and after another app took the
+    /// keyboard. The text field gets none of them. Then the same in an app in full screen, which
+    /// stays in full screen.
+    @Test func doubleControlInATextFieldGivesTheHUDTheKeys() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await useHUDKeys(app, over: window, page: "typing", opensAs: "Annotating")
+            #expect(window.keys == [])
+
+            // In annotation mode another app comes in front with the keyboard: Esc still steps
+            // back, to a pause, and closes the HUD.
+            try await app.doubleTap("control")
+            try await app.waitToSee("Paused")
+            try await app.key(.a)
+            try await app.waitToSee("Annotating", timeout: 5)
+            let other = try ChangingWindow()
+            defer { other.close() }
+            try other.show("typing")
+            for _ in 0..<60 where try await app.focus().app != other.pid {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try #require(try await app.focus().app == other.pid)
+            try await app.key(.escape)
+            try await app.waitToSee("Paused", timeout: 5)
+            try await app.key(.escape)
+            try await app.waitNotToSee("Paused", timeout: 5)
+            #expect(other.keys == [])
+            other.close()
+
+            try window.show("fullscreen typing")
+            for _ in 0..<60 where window.fullScreen?.isOn != true {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try await useHUDKeys(app, over: window, page: "fullscreen typing", opensAs: "Paused")
+            #expect(window.keys == [])
+            #expect(window.fullScreen?.isOn == true)
+            #expect(window.fullScreen?.exits == 0)
+        }
+    }
+
+    /// With the keyboard in the window's text field, double Ctrl opens the HUD, as `opensAs`
+    /// says; ↩, B, D (Draw) and ⌘↩ (Done, which pauses) work in Tilde, and Esc closes the HUD.
+    /// Opened again, paused as it ended, Esc closes it at once. Opened once more, Esc still
+    /// closes it after a click in the text field gave the app the keyboard back.
+    private func useHUDKeys(_ app: TildeApp, over window: ChangingWindow, page: String, opensAs title: String) async throws {
+        try window.show(page)
+        for _ in 0..<60 where try await app.focus().app != window.pid {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        let typing = try await app.focus()
+        try #require(typing.app == window.pid)
+        #expect(typing.role == "AXTextField")
+
+        try await app.doubleTap("control")
+        try await app.waitToSee(title)
+        try await app.key(.enter)
+        try await app.key(.b)
+        try await app.key(.d)
+        try await app.waitToSee("Done, ⌘↩", timeout: 5)
+        try await app.key(.enter, command: true)
+        try await app.waitToSee("Paused", timeout: 5)
+        try await app.key(.escape)
+        try await app.waitNotToSee("Paused", timeout: 5)
+
+        try await app.doubleTap("control")
+        try await app.waitToSee("Paused")
+        try await app.key(.escape)
+        try await app.waitNotToSee("Paused", timeout: 5)
+
+        try await app.doubleTap("control")
+        try await app.waitToSee("Paused")
+        let field = try #require(window.field)
+        try await app.click(at: field)
+        for _ in 0..<40 where try await app.focus().app != window.pid {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(try await app.focus().app == window.pid)
+        try await app.key(.escape)
+        try await app.waitNotToSee("Paused", timeout: 5)
+    }
+
+    /// Moves the pointer to `point`, a little at a time as a hand does, until the window behind
+    /// the canvas gets it: the canvas lets it through once the page checked the place.
+    private func move(_ app: TildeApp, to point: CGPoint, reaching window: ChangingWindow, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        window.forgetPointer()
+        for step in 0..<40 where !window.hasPointer {
+            try await app.hover(over: CGPoint(x: point.x + Double(step % 2), y: point.y))
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(window.hasPointer, "the pointer does not reach the window behind", sourceLocation: sourceLocation)
     }
 
     // MARK: - Wireframe
@@ -654,8 +748,7 @@ struct UXSpecs {
             let pressMark = CGRect(x: frame.minX + 1, y: frame.minY + 50, width: 4, height: 300)
             try await waitFor(app, at: pressMark, Picture.isMark, atMost: 0)
             let empty = CGRect(x: frame.minX + 350, y: frame.minY + 250, width: 80, height: 80)
-            try await app.hover(over: CGPoint(x: empty.maxX + 50, y: empty.minY))
-            try await Task.sleep(for: .milliseconds(50))
+            try await move(app, to: CGPoint(x: empty.maxX + 50, y: empty.minY), reaching: window)
             try await app.drag(from: CGPoint(x: empty.maxX + 50, y: empty.minY), to: CGPoint(x: empty.minX, y: empty.maxY))
             try await waitFor(app, at: pressMark, Picture.isMark, atLeast: 200)
             try await Task.sleep(for: .milliseconds(300))

@@ -694,11 +694,39 @@ final class ChangingWindow {
         return (state.contains("fullscreen=true"), exits)
     }
 
+    /// The process's id: the app whose text field has the keyboard on the page "typing".
+    var pid: Int { Int(process.processIdentifier) }
+
+    /// On the page "typing": the key code of each key the app got, in order.
+    var keys: [Int] {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: file.path + ".keys"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").compactMap { Int($0) }
+    }
+
+    /// On the page "typing": a point on the text field, in screen points from the top left.
+    var field: CGPoint? {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: file.path + ".field"), encoding: .utf8)) ?? ""
+        let numbers = text.split(separator: " ").compactMap { Double($0) }
+        return numbers.count == 2 ? CGPoint(x: numbers[0], y: numbers[1]) : nil
+    }
+
+    /// Whether the pointer moved over the window since `forgetPointer()`.
+    var hasPointer: Bool {
+        FileManager.default.fileExists(atPath: file.path + ".pointer")
+    }
+
+    func forgetPointer() {
+        try? FileManager.default.removeItem(atPath: file.path + ".pointer")
+    }
+
     func show(_ page: String) throws {
         try page.write(to: file, atomically: true, encoding: .utf8)
     }
 
     func close() {
+        guard process.isRunning else {
+            return
+        }
         process.terminate()
         waitForExit(process)
     }
