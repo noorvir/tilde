@@ -380,6 +380,39 @@ struct WireframeCanvasTests {
         #expect(try await rects() == [[200, 150, 200, 150]])
     }
 
+    /// A drag starts where it was pressed, also when new lines to snap to come before its first
+    /// move. The page last saw the pointer far away, before it went to the app behind; the
+    /// pointer comes back on a component and presses it at once; the lines for that place come
+    /// next. The component must not jump towards the old place.
+    @Test func linesThatComeAtThePressDoNotMoveAComponentToAnOldPlace() async throws {
+        try await drawComponent("card")
+        try await start(tool: "")
+        try await page.hover(CGPoint(x: 900, y: 600))
+        try await page.draw("pointerWentThrough(false)")
+        try await page.run("window.pressed = fire('pointerdown', 320, 210); 0")
+        try await page.draw("setSnapTargets({rects: [], containers: [], window: null, screen: null})")
+        #expect(try await rects() == [[200, 150, 240, 120]])
+
+        try await page.run("fire('pointermove', 330, 220, {isPressed: true, target: window.pressed}); fire('pointerup', 330, 220, {target: window.pressed}); 0")
+        try await page.settle()
+        #expect(try await rects() == [[210, 160, 240, 120]])
+    }
+
+    /// A component being drawn grows from its press, also when new lines come before its first
+    /// move: the page last saw the pointer far away, over Tilde's bar, before the press.
+    @Test func linesThatComeAtThePressDoNotDrawTowardsAnOldPlace() async throws {
+        try await start(tool: "card")
+        try await page.hover(CGPoint(x: 900, y: 40))
+        try await page.run("window.pressed = fire('pointerdown', 300, 300); 0")
+        try await page.draw("setSnapTargets({rects: [], containers: [], window: null, screen: null})")
+        #expect(try await rects().allSatisfy { $0[0] == 300 && $0[1] == 300 })
+        try await page.run("fire('pointermove', 360, 350, {isPressed: true, target: window.pressed}); 0")
+        try await page.settle()
+        try await page.run("fire('pointermove', 400, 380, {isPressed: true, target: window.pressed}); fire('pointerup', 400, 380, {target: window.pressed}); 0")
+        try await page.settle()
+        #expect(try await rects() == [[300, 300, 100, 80]])
+    }
+
     /// The page posts the pointer's place at most 20 times a second, and always the place
     /// where it stopped, so Tilde looks for lines there.
     @Test func theLastPlaceOfAQuickMoveIsPosted() async throws {

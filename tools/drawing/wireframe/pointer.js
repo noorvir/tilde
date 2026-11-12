@@ -38,6 +38,8 @@ export function takesPointer(x, y) {
 export function pointerWentThrough(isPress) {
   if (!wireframe) return;
   isOverComponent = false;
+  // Where the pointer is now, the page does not know.
+  lastPointer = null;
   if (isPress) selection.selected = null;
   hideHandles();
 }
@@ -268,30 +270,31 @@ function resend(event, point) {
   event.target.dispatchEvent(copy);
 }
 
-// The pointer's last move on the page, sent again by `snapAgain`.
-let lastMove = null;
+// The pointer's place and buttons from its last event on the page, a press and a release too,
+// sent again by `snapAgain` as a move. None while the pointer is over the app behind.
+let lastPointer = null;
 
-// New lines to snap to apply to the pointer where it is, also when it rests: its last move is
-// sent again, to the element that had it.
+// New lines to snap to apply to the pointer where it is, also when it rests: a move to where
+// it is goes to the element that had its last event. Tilde finds the lines after the pointer got
+// there, so they can come after a press: the move is then to the press, and a drag that started
+// there stays there until the pointer moves.
 export function snapAgain() {
-  if (!wireframe || !lastMove?.target.isConnected) return;
-  lastMove.target.dispatchEvent(new PointerEvent("pointermove", lastMove.init));
+  if (!wireframe || !lastPointer?.target.isConnected) return;
+  lastPointer.target.dispatchEvent(new PointerEvent("pointermove", lastPointer.init));
 }
 
 export function snapPointer(event) {
   if (!wireframe || retargeted.has(event)) return;
-  if (event.type === "pointermove") {
-    lastMove = {
-      target: event.target,
-      init: {
-        bubbles: true, cancelable: true, composed: true, view: window,
-        clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
-        pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, button: event.button, buttons: event.buttons,
-        pressure: event.pressure, width: event.width, height: event.height,
-        shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
-      },
-    };
-  }
+  lastPointer = {
+    target: event.target,
+    init: {
+      bubbles: true, cancelable: true, composed: true, view: window,
+      clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+      pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, button: event.button, buttons: event.buttons,
+      pressure: event.pressure, width: event.width, height: event.height,
+      shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
+    },
+  };
   if (editWireframe(event)) return;
   if (isSelectMode) {
     // No tool: a press on empty space draws nothing, and deselects.
