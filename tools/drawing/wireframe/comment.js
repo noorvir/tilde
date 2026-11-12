@@ -30,7 +30,10 @@ export function openComment(frame, closed) {
   onClose = closed;
   commentField.value = frame.customData.comment ?? "";
   commentBox.style.display = "flex";
-  commentField.focus();
+  // After the press that opened it: the press itself moves the focus when it ends.
+  setTimeout(() => {
+    if (commented) commentField.focus();
+  }, 0);
 }
 
 export function closeComment(isKept) {

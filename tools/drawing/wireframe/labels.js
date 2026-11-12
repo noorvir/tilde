@@ -34,8 +34,12 @@ export function editLabel(component) {
   Object.assign(labelField.style, { left: `${component.x}px`, top: `${tagTop(component)}px`, display: "block" });
   labelField.value = data.label ?? "";
   sizeLabelField();
-  labelField.focus();
-  labelField.select();
+  // After the press that opened it: the press itself moves the focus when it ends.
+  setTimeout(() => {
+    if (!labelled) return;
+    labelField.focus();
+    labelField.select();
+  }, 0);
 }
 
 export function endLabel(isKept) {

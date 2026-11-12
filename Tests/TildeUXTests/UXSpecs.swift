@@ -669,20 +669,23 @@ struct UXSpecs {
             #expect(abs(after.button - before.button) <= 1)
             step("button kept to the window in \(moving.count) frames: \(moving.map { String(format: "%.0f", $0.button - before.button) }.joined(separator: " "))")
 
-            // Done opens the comment box, and typing goes in with no click.
-            try await app.key(.enter, command: true)
-            try await app.waitToSee("add")
+            // The comment is the button's own: its chip's Comment button opens a box for it,
+            // and ⌘↩ keeps it. Done then makes the note at once, with no comment box.
+            try await app.press("Comment")
+            try await app.waitToSee("⌘↩ keeps it · Esc closes")
             try await app.type("A button here")
-            try await app.waitToSee("A button here", timeout: 3)
-            try await app.key(.enter)
-            try await app.waitNotToSee("add")
+            try await app.key(.enter, command: true)
+            try await app.waitNotToSee("⌘↩ keeps it · Esc closes")
+            try await app.key(.enter, command: true)
+            try await app.waitNotToSee("Done, ⌘↩")
             try await app.waitToSeeText(containing: "1 note")
+            #expect(try await !app.seen().contains { $0.name == "add" })
             step("comment")
 
             // Edit Wireframe draws the button again where it was; moved and Done, it replaces
             // the note.
             try await app.press("Show notes")
-            try await app.press("A button here")
+            try await app.press("No comment")
             try await app.waitToSee("1 of 1")
             try await app.press("Edit Wireframe")
             try await app.waitToSee("Done, ⌘↩")
@@ -783,6 +786,41 @@ struct UXSpecs {
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
             try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
             step("technical shown")
+        }
+    }
+
+    /// The wireframe bar's Style button opens Tilde's own menu: a style tile changes the look of
+    /// the components drawn at once, and Esc closes the menu.
+    @Test func theStyleMenuChangesTheLookAtOnce() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        let frame = ChangingWindow.frame
+        let button = CGRect(x: frame.minX + 12, y: frame.minY + 100, width: 84, height: 40)
+        let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
+        let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
+        try await withApp { app in
+            try await app.menu("Start Annotation")
+            try await app.waitToSee("Annotating")
+            try await app.key(.w)
+            try await app.waitToSee("Done, ⌘↩")
+            try await app.waitToSee("Drawing canvas", timeout: 15)
+            try await app.key(.b)
+            try await app.hold("command", down: true)
+            try await app.slowDrag(from: button.origin, to: CGPoint(x: button.maxX, y: button.maxY))
+            try await app.hold("command", down: false)
+            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
+            step("technical drawn")
+
+            try await app.press("Style")
+            try await app.press("Blueprint")
+            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atLeast: 2)
+            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atMost: 0)
+            step("blueprint chosen")
+
+            try await app.key(.escape)
+            try await app.waitNotToSee("Blueprint")
+            #expect(try await app.seen().contains { $0.name == "Done, ⌘↩" })
+            step("menu closed")
         }
     }
 
