@@ -41,6 +41,14 @@ final class PreviewCard: ObservableObject {
         panel.close()
     }
 
+    /// The open card takes the keyboard back, for Esc and the arrows.
+    func focus() {
+        guard id != nil else {
+            return
+        }
+        panel.window.makeKey()
+    }
+
     /// Whether an AppKit screen point is over the card.
     func contains(_ point: NSPoint) -> Bool {
         id != nil && panel.window.isVisible && panel.window.frame.contains(point)

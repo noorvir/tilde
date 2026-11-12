@@ -163,6 +163,7 @@ final class AnnotationController: ObservableObject {
     /// The app that was in front when an agent's session opened Tilde's browser. The session
     /// ends with the browser closed and this app in front again, so the user is back in the chat.
     private var returnApp: NSRunningApplication?
+    private var spaceObserver: NSObjectProtocol?
     /// The next session that starts from Tilde is limited to the browser window.
     private var scopesNextLocalSessionToBrowser = false
 
@@ -188,6 +189,11 @@ final class AnnotationController: ObservableObject {
             .sink { [weak self] _ in self?.syncWithStore() }
         browser.controller = self
         joinParts()
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.activeSpaceChanged() }
+        }
     }
 
     /// Gives each part what it asks of the session, and takes what it reports.
@@ -819,6 +825,23 @@ final class AnnotationController: ObservableObject {
         }
         drawing.panel.focus()
         return true
+    }
+
+    /// A change of Space, such as to an app in full screen, makes the front app of the new
+    /// Space key. Tilde's panels are on every Space: while the session takes the keyboard, the
+    /// one that had it takes it back, so Esc and Tilde's keys never reach that app, as on the
+    /// Space before.
+    private func activeSpaceChanged() {
+        guard overlayTakesInput else {
+            return
+        }
+        if commentBox.composer != nil {
+            commentBox.focus()
+        } else if previewCard.id != nil {
+            previewCard.focus()
+        } else {
+            makeOverlayKey()
+        }
     }
 
     // MARK: - Source and scope
