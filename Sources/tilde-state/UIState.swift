@@ -127,7 +127,6 @@ struct UIState: Decodable {
     var list: Bool?
     var hudInBrowser: Bool?
     var hover: Bool?
-    var editing: Bool?
     var drawing: Bool?
     /// Wireframe mode, in place of Draw mode.
     var wireframe: Bool?

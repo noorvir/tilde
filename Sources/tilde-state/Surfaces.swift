@@ -83,13 +83,8 @@ enum Surfaces {
 
         case .comment:
             let controller = try await controller(state)
-            let isEditing = state.editing ?? false
             controller.commentBox.text = state.commentText ?? ""
-            if isEditing, let draft = controller.drafts.first {
-                apply(state, drafts: controller.drafts, composer: .edit(draft.id), to: controller)
-                controller.commentBox.text = draft.annotation.comment
-            }
-            return try await hosted(CommentView(controller: controller, chip: "span", isEditing: isEditing), size: size)
+            return try await hosted(CommentView(controller: controller, chip: "span"), size: size)
 
         case .preview:
             let controller = try await controller(state)
@@ -162,7 +157,7 @@ enum Surfaces {
         return [try Fixtures.clip(in: video)] + drafts.dropFirst()
     }
 
-    private static func apply(_ state: UIState, drafts: [Draft], composer: Composer? = nil, to controller: AnnotationController) {
+    private static func apply(_ state: UIState, drafts: [Draft], to controller: AnnotationController) {
         let notice: PauseNotice? = switch state.pauseNotice {
         case .escape: .escape
         case .otherApp: .otherApp
@@ -183,8 +178,6 @@ enum Surfaces {
         open.question = state.confirmation
         if state.preview != nil {
             open.panel = .preview
-        } else if composer != nil {
-            open.panel = .comment
         }
         let clip: SessionFlow.Clip? = switch state.recording {
         case .ready: .ready
@@ -218,7 +211,6 @@ enum Surfaces {
             drafts: drafts,
             mode: mode,
             hover: state.hover == true ? Fixtures.hover() : nil,
-            composer: composer,
             previewID: state.preview.map { drafts[$0].id },
             source: source,
             isHUDInBrowser: state.hudInBrowser ?? false,

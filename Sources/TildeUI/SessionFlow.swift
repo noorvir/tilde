@@ -168,7 +168,7 @@ struct SessionFlow: Equatable {
         /// A note deleted, or its comment changed, from the list, the preview or the browser.
         case deleteNote, editNote
         case holdBegan, holdEnded, otherAppInFront, scopeAppInFront
-        case openComment, clickAway, submitComment, closeComment, openPreview, closePreview, toggleList
+        case openComment, clickAway, submitComment, openPreview, closePreview, toggleList
         /// `finishDrawing` is Done, in Draw mode and in Wireframe mode.
         case startDrawing, finishDrawing, undoDrawing, redoDrawing, shapeFinished
         /// Wireframe mode on, also from Draw mode; and Done has taken its components for their note.
@@ -649,13 +649,6 @@ struct SessionFlow: Equatable {
         case .submitComment:
             return submitComment(&open)
 
-        case .closeComment:
-            guard open.panel == .comment else {
-                return []
-            }
-            open.panel = nil
-            return [.closeComposer]
-
         case .openPreview:
             guard open.panel != .comment else {
                 return []
@@ -1011,7 +1004,7 @@ struct SessionFlow: Equatable {
         }
         var effects: [Effect] = []
         if open.panel == .comment {
-            // The comment becomes a note, or edits one.
+            // The comment becomes a note.
             effects = submitComment(&open)
             facts.notes = max(facts.notes, 1)
         }

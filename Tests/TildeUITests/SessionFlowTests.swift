@@ -73,7 +73,7 @@ struct SessionFlowTests {
     static let events: [SessionFlow.Event] = [
         .begin, .ended, .escape, .togglePause, .toggleAnnotating, .resume, .startShortcut,
         .requestClearAll, .requestCancel, .confirm, .dismissConfirmation, .restore, .openBrowser, .deleteNote, .editNote, .holdBegan, .holdEnded, .otherAppInFront,
-        .scopeAppInFront, .openComment, .clickAway, .submitComment, .closeComment, .openPreview, .closePreview, .toggleList,
+        .scopeAppInFront, .openComment, .clickAway, .submitComment, .openPreview, .closePreview, .toggleList,
         .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .startWireframe, .wireframeTaken,
         .toggleRecordingMode, .record, .stop,
         .clipStarted(3), .clipStarted(2), .clipStartFailed(3), .clipStartFailed(2), .clipFinished(3), .clipFinished(2),

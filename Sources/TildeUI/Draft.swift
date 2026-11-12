@@ -38,12 +38,6 @@ struct Captures: Sendable {
     let contextImage: Data?
 }
 
-/// The comment box that is open: for a new target, or to edit an existing draft.
-enum Composer {
-    case new(Pending)
-    case edit(Draft.ID)
-}
-
 struct Pending {
     var target: Target
     var frame: CGRect

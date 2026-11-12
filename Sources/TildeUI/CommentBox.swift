@@ -4,10 +4,10 @@ import AppKit
 /// target. The session's flow says when it opens and closes.
 @MainActor
 final class CommentBox: ObservableObject {
-    /// What the box is open on; nil while it is closed.
-    @Published private(set) var composer: Composer? {
+    /// The new target that the box is open on, which is not yet a note; nil while it is closed.
+    @Published private(set) var pending: Pending? {
         didSet {
-            let isOpen = composer != nil
+            let isOpen = pending != nil
             if isOpen != (oldValue != nil) {
                 onChange(isOpen)
             }
@@ -35,31 +35,16 @@ final class CommentBox: ObservableObject {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// The target of the open comment that is not yet a note.
-    var pending: Pending? {
-        if case .new(let pending) = composer {
-            return pending
-        }
-        return nil
-    }
-
     /// Opens the box, empty, on a new target.
     func open(_ pending: Pending) {
-        composer = .new(pending)
+        self.pending = pending
         text = ""
-        panel.show(chip: pending.chip, isEditing: false, near: pending.marker, below: pending.frame)
-    }
-
-    /// Opens the box on a note, with its comment.
-    func open(editing draft: Draft) {
-        composer = .edit(draft.id)
-        text = draft.annotation.comment
-        panel.show(chip: draft.chip, isEditing: true, near: draft.marker, below: draft.annotation.frame)
+        panel.show(chip: pending.chip, near: pending.marker, below: pending.frame)
     }
 
     /// The new target is somewhere else, as when its shape changed: the box goes along.
     func follow(_ pending: Pending) {
-        composer = .new(pending)
+        self.pending = pending
         panel.follow(near: pending.marker, below: pending.frame)
     }
 
@@ -68,24 +53,24 @@ final class CommentBox: ObservableObject {
     }
 
     func close() {
-        guard composer != nil else {
+        guard pending != nil else {
             return
         }
-        composer = nil
+        pending = nil
         panel.close()
     }
 
     /// Whether an AppKit screen point is over the box.
     func contains(_ point: NSPoint) -> Bool {
-        composer != nil && panel.window.isVisible && panel.window.frame.contains(point)
+        pending != nil && panel.window.isVisible && panel.window.frame.contains(point)
     }
 }
 
 #if DEBUG
 extension CommentBox {
     /// Sets what the box is open on without opening its panel.
-    func setStateForTesting(composer: Composer?) {
-        self.composer = composer
+    func setStateForTesting(pending: Pending?) {
+        self.pending = pending
     }
 }
 #endif

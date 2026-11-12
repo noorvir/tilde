@@ -148,7 +148,7 @@ final class AnnotationController: ObservableObject {
 
     // The session's windows show the session: a part that has one makes it with the
     // controller, the first time it shows.
-    /// The comment box next to a new note or one that is edited, while `flow` has it open.
+    /// The comment box next to a new note, while `flow` has it open.
     private(set) lazy var commentBox = CommentBox { [unowned self] in CommentPanel(controller: self) }
     /// The preview card on a note, while `flow` has it open.
     private(set) lazy var previewCard = PreviewCard { [unowned self] in PreviewPanel(controller: self, defaults: defaults) }
@@ -236,7 +236,7 @@ final class AnnotationController: ObservableObject {
             guard let self else {
                 return false
             }
-            return commentBox.composer == nil && !isPickingWindow
+            return commentBox.pending == nil && !isPickingWindow
         }
         hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
 
@@ -256,7 +256,7 @@ final class AnnotationController: ObservableObject {
         canvas.onClickAway = { [weak self] in
             self?.dispatch(.clickAway)
             // The click gave the canvas the keyboard; a question in the comment box needs it.
-            if self?.commentBox.composer != nil {
+            if self?.commentBox.pending != nil {
                 self?.commentBox.focus()
             }
         }
@@ -373,7 +373,7 @@ final class AnnotationController: ObservableObject {
             drawing.panel.stopDrawing()
             drawing.panel.setSnapFrame(nil)
             hover = nil
-            if commentBox.composer == nil {
+            if commentBox.pending == nil {
                 drawing.panel.hide()
             }
             // The drawing tools showed in the floating panel.
@@ -386,7 +386,7 @@ final class AnnotationController: ObservableObject {
             gaveKeyboardBack = false
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
             // A comment that is open, as after Done in Wireframe, keeps the keyboard.
-            if !hud.isInBrowser, commentBox.composer == nil {
+            if !hud.isInBrowser, commentBox.pending == nil {
                 overlays.makeKey()
             }
         case .giveKeyboardBack:
@@ -794,7 +794,7 @@ final class AnnotationController: ObservableObject {
         if isDrawing {
             drawing.setPaused(!pauses.isEmpty)
             // The canvas takes the keyboard when it resumes; an open comment keeps it.
-            if pauses.isEmpty, commentBox.composer != nil {
+            if pauses.isEmpty, commentBox.pending != nil {
                 commentBox.focus()
             }
         }
@@ -828,7 +828,7 @@ final class AnnotationController: ObservableObject {
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
     /// or the preview has it or annotating is paused.
     func makeOverlayKey() {
-        guard overlayTakesInput, commentBox.composer == nil, previewCard.id == nil else {
+        guard overlayTakesInput, commentBox.pending == nil, previewCard.id == nil else {
             return
         }
         if !focusCanvas() {
@@ -856,7 +856,7 @@ final class AnnotationController: ObservableObject {
         guard overlayTakesInput else {
             return
         }
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             commentBox.focus()
         } else if previewCard.id != nil {
             previewCard.focus()
@@ -993,14 +993,14 @@ final class AnnotationController: ObservableObject {
     func setDrawingTool(_ tool: String) {
         drawing.setTool(tool)
         updateOverlayInput()
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             commentBox.focus()
         }
     }
 
     func setDrawingColor(_ color: String) {
         drawing.setColor(color)
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             commentBox.focus()
         }
     }
@@ -1126,41 +1126,14 @@ final class AnnotationController: ObservableObject {
         commentBox.open(pending)
     }
 
-    func edit(_ id: Draft.ID) {
-        guard let draft = drafts.first(where: { $0.id == id }) else {
-            return
-        }
-        // The comment being written stays, also when another note is opened.
-        if commentBox.composer != nil {
-            dispatch(.clickAway)
-            if commentBox.composer != nil {
-                return
-            }
-        }
-        dispatch(.openComment, with: [.showComment: { [self] in
-            hover = nil
-            commentBox.open(editing: draft)
-        }])
-    }
-
-    /// Puts the open comment in the list: a new note, or the edited one.
+    /// Puts the open comment in the list, as a new note.
     private func saveComment() {
-        guard let composer = commentBox.composer else {
+        guard let pending = commentBox.pending else {
             return
         }
         let comment = commentBox.text.trimmingCharacters(in: .whitespacesAndNewlines)
         log.notice("comment submitted (\(comment.count) characters)")
-
-        switch composer {
-        case .edit(let id):
-            if let index = drafts.firstIndex(where: { $0.id == id }) {
-                drafts[index].annotation.comment = comment
-            }
-
-        case .new(let pending):
-            add(pending, comment: comment)
-        }
-
+        add(pending, comment: comment)
         hideComposer()
     }
 
@@ -1196,9 +1169,6 @@ final class AnnotationController: ObservableObject {
             }
             drafts.filter { $0.id == id }.forEach(ClipRecorder.deleteVideo)
             drafts.removeAll { $0.id == id }
-            if case .edit(id) = commentBox.composer {
-                dispatch(.closeComment)
-            }
         }])
     }
 
@@ -1252,9 +1222,9 @@ final class AnnotationController: ObservableObject {
         guard drafts.contains(where: { $0.id == id }) else {
             return
         }
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             dispatch(.clickAway)
-            if commentBox.composer != nil {
+            if commentBox.pending != nil {
                 return
             }
         }
@@ -1279,7 +1249,7 @@ extension AnnotationController {
         drafts: [Draft] = [],
         mode: SessionFlow.Mode = .open(SessionFlow.Open()),
         hover: Picked? = nil,
-        composer: Composer? = nil,
+        pending: Pending? = nil,
         previewID: Draft.ID? = nil,
         source: RecordingSource? = nil,
         isHUDInBrowser: Bool = false,
@@ -1297,7 +1267,7 @@ extension AnnotationController {
         flow = SessionFlow(mode: mode)
         flow.choosesInPicker = choosesInPicker
         self.hover = hover
-        commentBox.setStateForTesting(composer: composer)
+        commentBox.setStateForTesting(pending: pending)
         previewCard.setStateForTesting(id: previewID)
         scope.setStateForTesting(source: source)
         hud.setStateForTesting(isInBrowser: isHUDInBrowser)

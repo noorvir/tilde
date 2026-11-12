@@ -21,9 +21,9 @@ final class CommentPanel {
 
     /// Shows the box to the right of `marker`, or below `target` when there is no room on the
     /// right, kept inside the screen. Both are in Quartz coordinates.
-    func show(chip: String, isEditing: Bool, near marker: CGPoint, below target: CGRect) {
+    func show(chip: String, near marker: CGPoint, below target: CGRect) {
         // A fresh hosting view resets focus and local state for each comment.
-        let view = CommentView(controller: controller, chip: chip, isEditing: isEditing) { [weak self] change in
+        let view = CommentView(controller: controller, chip: chip) { [weak self] change in
             self?.grow(by: change)
         }
         let size = NSHostingView(rootView: view).fittingSize
@@ -244,17 +244,15 @@ struct CommentView: View {
     @ObservedObject var controller: AnnotationController
     @ObservedObject private var commentBox: CommentBox
     let chip: String
-    let isEditing: Bool
     /// Called with the change in height just before the box changes size.
     let onHeightChange: (CGFloat) -> Void
     @State private var editorHeight: CGFloat
     @State private var isEmpty: Bool
 
-    init(controller: AnnotationController, chip: String, isEditing: Bool, onHeightChange: @escaping (CGFloat) -> Void = { _ in }) {
+    init(controller: AnnotationController, chip: String, onHeightChange: @escaping (CGFloat) -> Void = { _ in }) {
         self.controller = controller
         commentBox = controller.commentBox
         self.chip = chip
-        self.isEditing = isEditing
         self.onHeightChange = onHeightChange
         // The right size from the start, so that nothing has to correct it after the first layout.
         _editorHeight = State(initialValue: CommentEditor.height(of: controller.commentBox.text))
@@ -271,18 +269,6 @@ struct CommentView: View {
                     .padding(.vertical, 2)
                     .background(Capsule().fill(Color.white.opacity(0.08)))
                 Spacer()
-                if isEditing, case .edit(let id) = commentBox.composer {
-                    Button {
-                        controller.deleteDraft(id)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!controller.canEditNotes)
-                    .help("Delete note")
-                }
             }
 
             HStack(alignment: .bottom, spacing: 8) {

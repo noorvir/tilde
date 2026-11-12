@@ -128,7 +128,7 @@ struct BehaviourTests {
             capture: Task { Captures(image: nil, contextImage: nil) }
         )
         controller.setStateForTesting(
-            session: Fixtures.session(), mode: .open(SessionFlow.Open(panel: .comment)), composer: .new(pending)
+            session: Fixtures.session(), mode: .open(SessionFlow.Open(panel: .comment)), pending: pending
         )
         controller.dispatch(.submitComment)
         #expect(controller.drafts.count == 1)

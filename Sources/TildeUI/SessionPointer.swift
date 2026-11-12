@@ -21,7 +21,7 @@ extension AnnotationController {
 
     func mouseMoved(to point: CGPoint) {
         // In wireframe mode nothing behind the components is highlighted.
-        guard commentBox.composer == nil, previewCard.id == nil, !isWireframe else {
+        guard commentBox.pending == nil, previewCard.id == nil, !isWireframe else {
             return
         }
         hoverPicker.pointerMoved(isOverPanel: isOverPanel(point))
@@ -83,7 +83,7 @@ extension AnnotationController {
         guard allows(point) else {
             return
         }
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             dispatch(.clickAway)
             return
         }
@@ -111,7 +111,7 @@ extension AnnotationController {
         guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
             return
         }
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             dispatch(.clickAway)
             return
         }
