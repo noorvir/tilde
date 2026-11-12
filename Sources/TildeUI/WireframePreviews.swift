@@ -28,7 +28,7 @@ final class WireframePreviews: ObservableObject {
     @Published private(set) var states: [State: NSImage] = [:]
 
     static let tileSize = CGSize(width: 240, height: 150)
-    static let stateSize = CGSize(width: 160, height: 120)
+    static let stateSize = CGSize(width: 176, height: 120)
 
     private let html: () -> String?
     private var page: WireframePicturePage?

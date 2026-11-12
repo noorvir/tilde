@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "surface": "hud",
+  "size": [
+    600,
+    400
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "wireframe": true,
+  "styleMenu": true,
+  "look": {
+    "style": "hatched"
+  }
+}
