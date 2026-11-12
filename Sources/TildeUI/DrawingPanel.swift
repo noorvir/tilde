@@ -31,6 +31,8 @@ final class DrawingPanel {
     var onPointer: (CGPoint) -> Void = { _ in }
     /// A key press on the canvas, outside its text fields. True: it was taken.
     var onKey: (NSEvent) -> Bool = { _ in false }
+    /// Whether a note's label, which a press opens, is at a Quartz point.
+    var isOnLabel: (CGPoint) -> Bool = { _ in false }
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
     var windowNumbers: [Int] {
@@ -56,6 +58,7 @@ final class DrawingPanel {
         canvas.onPress = { [weak self] in self?.onPress($0) ?? false }
         canvas.onPointer = { [weak self] in self?.onPointer($0) }
         canvas.onKey = { [weak self] in self?.onKey($0) ?? false }
+        canvas.isOnLabel = { [weak self] in self?.isOnLabel($0) ?? false }
         canvas.startDrawing(tool: tool, color: color)
     }
 
@@ -235,6 +238,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private var isPreparing = false
     private var pendingTool = "arrow"
     private var pendingColor: String?
+    private let passThrough = CanvasPassThrough()
     var wireframe = "null" {
         didSet {
             run("setWireframe(\(wireframe))")
@@ -256,9 +260,17 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     var onPress: (CGPoint) -> Bool = { _ in false }
     var onPointer: (CGPoint) -> Void = { _ in }
     var onKey: (NSEvent) -> Bool = { _ in false }
+    var isOnLabel: (CGPoint) -> Bool = { _ in false }
 
     init(frame: CGRect) {
         self.frame = frame
+        super.init()
+        passThrough.takesPointer = { [weak self] point in
+            await self?.takesPointer(at: point) ?? false
+        }
+        passThrough.onWentThrough = { [weak self] isPress in
+            self?.run("pointerWentThrough(\(isPress))")
+        }
     }
 
     var windowNumber: Int? {
@@ -292,7 +304,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         if !isLoaded, let page = Self.page() {
             load(page)
         }
-        panel?.ignoresMouseEvents = false
+        passThrough.isActive = true
         panel?.orderFrontRegardless()
         panel?.makeKey()
         if isReady {
@@ -302,11 +314,11 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     }
 
     func stopDrawing() {
-        panel?.ignoresMouseEvents = true
+        passThrough.isActive = false
     }
 
     func hide() {
-        panel?.ignoresMouseEvents = true
+        passThrough.isActive = false
         panel?.orderOut(nil)
     }
 
@@ -315,7 +327,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     }
 
     func resumeDrawing() {
-        panel?.ignoresMouseEvents = false
+        passThrough.isActive = true
         panel?.makeKey()
     }
 
@@ -341,11 +353,13 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 
     func reset() {
         panel?.orderOut(nil)
-        panel?.ignoresMouseEvents = true
+        passThrough.isActive = false
         run("clear()")
     }
 
     func close() {
+        passThrough.isActive = false
+        passThrough.hasNoTool = false
         panel?.orderOut(nil)
         panel = nil
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
@@ -412,6 +426,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             onClickAway()
         case "typing", "notTyping":
             (panel as? CanvasPanel)?.isTyping = text == "typing"
+        case "noTool", "tool":
+            passThrough.hasNoTool = text == "noTool"
         case _ where text.hasPrefix("pointer:"):
             let values = text.dropFirst(8).split(separator: ",").compactMap { Double($0) }
             if values.count == 2 {
@@ -423,6 +439,20 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         default:
             break
         }
+    }
+
+    /// Whether a press at a Quartz point is for the canvas: on a note's label, or on what the
+    /// page takes a press on.
+    private func takesPointer(at point: CGPoint) async -> Bool {
+        if isOnLabel(point) {
+            return true
+        }
+        guard let webView else {
+            return false
+        }
+        let origin = frame.flipped.origin
+        let call = "window.tildeDraw ? window.tildeDraw.takesPointer(\(point.x - origin.x), \(point.y - origin.y)) : true"
+        return (try? await webView.evaluateJavaScript(call) as? Bool) ?? true
     }
 
     private func load(_ page: String) {
@@ -455,6 +485,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         panel.isReleasedWhenClosed = false
         panel.ignoresMouseEvents = true
         panel.setFrame(frame, display: false)
+        passThrough.window = panel
         panel.onPress = { [weak self] in self?.onPress($0) ?? false }
         panel.onKey = { [weak self] in self?.onKey($0) ?? false }
 
@@ -479,6 +510,15 @@ private final class CanvasPanel: FloatingPanel {
     var isTyping = false
     private var heldEvents: [NSEvent]?
     private var isPressTaken = false
+
+    /// A key that neither Tilde nor the page uses ends here, after the page gave it back: it
+    /// does nothing, without the alert sound of a key that no window takes.
+    override func noResponder(for eventSelector: Selector) {
+        if eventSelector == #selector(NSResponder.keyDown(with:)) {
+            return
+        }
+        super.noResponder(for: eventSelector)
+    }
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, !isTyping, onKey(event) {

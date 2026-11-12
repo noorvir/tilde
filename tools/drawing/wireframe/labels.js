@@ -66,10 +66,12 @@ export function isDoubleClick(group) {
   return isDouble;
 }
 
+// Enter and Esc are the field's: marked as used, they go no further, to Tilde or to macOS.
 labelField.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") endLabel(true);
-  if (event.key === "Escape") endLabel(false);
   event.stopPropagation();
+  if (event.key !== "Enter" && event.key !== "Escape") return;
+  event.preventDefault();
+  endLabel(event.key === "Enter");
 });
 labelField.addEventListener("blur", () => {
   if (labelled) endLabel(true);

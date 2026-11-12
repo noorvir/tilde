@@ -50,6 +50,14 @@ final class AnnotationController: ObservableObject {
     /// Draw mode or Wireframe mode: the canvas is open.
     var isDrawing: Bool { flow.session?.isDrawing ?? false }
     var isWireframe: Bool { flow.isWireframe }
+    /// Draw or Wireframe with no tool, after Esc: nothing draws, and the pointer goes through to
+    /// the apps behind, except where the canvas has something to take.
+    var isToolDown: Bool {
+        guard isDrawing else {
+            return false
+        }
+        return isWireframe ? wireframe.tool == nil : drawing.isToolDown
+    }
     /// Draw or Wireframe paused: what was drawn stays on screen, and the tools wait.
     var isDrawingPaused: Bool { isDrawing && !pauses.isEmpty }
     /// Whether the overlay takes the pointer (hover, picks, clicks, the crosshair) and the
@@ -231,6 +239,7 @@ final class AnnotationController: ObservableObject {
         wireframe.scope = { [weak self] in self?.scope.window }
         drawing.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         let canvas = drawing.panel
+        canvas.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         canvas.onEscape = { [weak self] in self?.escapePressed() }
         canvas.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
         canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
@@ -324,6 +333,7 @@ final class AnnotationController: ObservableObject {
             } else {
                 drawing.putToolDown()
             }
+            updateOverlayInput()
         // A wireframe keeps its own undo history, of every change; Draw undoes a shape's note.
         case .undoShape:
             if isWireframe {
@@ -733,11 +743,13 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Puts the overlays in step with `overlayTakesInput`; without input, nothing is hovered
-    /// and a pick in progress is dropped.
+    /// Puts the overlays in step with `overlayTakesInput`, and lets the pointer through them
+    /// while the tool is down; without input, nothing is hovered and a pick in progress is
+    /// dropped.
     private func updateOverlayInput() {
-        overlays.takesInput = overlayTakesInput
-        if !overlayTakesInput {
+        let takesInput = overlayTakesInput && !isToolDown
+        overlays.takesInput = takesInput
+        if !takesInput {
             hoverPicker.stop()
         }
     }
@@ -928,10 +940,12 @@ final class AnnotationController: ObservableObject {
             hud.showPanel()
         }
         drawing.start()
+        updateOverlayInput()
     }
 
     func setDrawingTool(_ tool: String) {
         drawing.setTool(tool)
+        updateOverlayInput()
         if commentBox.composer != nil {
             commentBox.focus()
         }
@@ -995,11 +1009,13 @@ final class AnnotationController: ObservableObject {
     private func showWireframe() {
         hover = nil
         wireframe.start()
+        updateOverlayInput()
         focusCanvas()
     }
 
     func setWireframeTool(_ tool: String) {
         wireframe.setTool(tool)
+        updateOverlayInput()
         focusCanvas()
     }
 

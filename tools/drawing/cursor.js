@@ -2,6 +2,7 @@
 // in place of Excalidraw's, and the state with no tool.
 
 import { ringStyle } from "./rings.js";
+import { post } from "./scene.js";
 import { hideGuides } from "./wireframe/snap.js";
 
 // The hand over a note's label, which a press opens.
@@ -13,11 +14,13 @@ export const moveCursor = document.createElement("style");
 export const cursorRing = document.createElement("div");
 cursorRing.style.cssText = ringStyle;
 
-// No tool, after Esc: nothing draws; in wireframe mode components still change.
+// No tool, after Esc: nothing draws; in wireframe mode components still change. Tilde must
+// know: with no tool, it lets the pointer through to the app behind where the page takes none.
 export let isSelectMode = false;
 
 export function setSelectMode(isOn) {
   isSelectMode = isOn;
+  post(isOn ? "noTool" : "tool");
   if (!isOn) {
     moveCursor.textContent = "";
     return;

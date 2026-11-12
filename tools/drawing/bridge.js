@@ -1,13 +1,13 @@
 // The bridge to Tilde: the functions that Tilde calls, and the keys and the focus that Tilde
 // must know of.
 
-import { setOverLabel } from "./cursor.js";
+import { isSelectMode, setOverLabel } from "./cursor.js";
 import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame } from "./draw-mode.js";
 import { api, taken, post, live, changeElements, describe, isPart, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
-import { snapAgain } from "./wireframe/pointer.js";
+import { snapAgain, takesPointer as wireframeTakesPointer, pointerWentThrough } from "./wireframe/pointer.js";
 import { setSnapTargets } from "./wireframe/snap.js";
 import { setWireframeWindow } from "./wireframe/window.js";
 
@@ -50,9 +50,17 @@ function setSnapTargetsHere(targets) {
   snapAgain();
 }
 
+// Whether a press at this point, in points from the top left of the canvas, is for the page.
+// With a tool, every press is; with none, Draw takes no press, and wireframe mode only those on
+// its components.
+function takesPointer(x, y) {
+  if (!isSelectMode) return true;
+  return Boolean(wireframe) && wireframeTakesPointer(x, y);
+}
+
 window.tildeDraw = {
   setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect, setSnapFrame,
-  shapesOf, clear, newShapes, takeNewShapes, remove,
+  shapesOf, clear, newShapes, takeNewShapes, remove, takesPointer, pointerWentThrough,
   setWireframe, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 
@@ -71,13 +79,15 @@ export function swallowToolKey(event) {
   }
 }
 
-// Esc reaches Tilde only when the page has nothing of its own to step back from.
+// Esc reaches Tilde only when the page has nothing of its own to step back from. Either way
+// the page used it: marked so, it goes no further, to macOS, which would play the alert sound.
 export function escapePressed(event) {
   if (event.key !== "Escape") return;
   // Excalidraw ends the text being typed.
   if (wireframe && isTextField(event.target)) return;
+  event.preventDefault();
   // In wireframe mode Esc steps back one level: the kind menu, then the selection; with
-  // nothing selected it reaches Tilde, which pauses.
+  // nothing selected it reaches Tilde, which puts the tool down.
   if (wireframe && (selection.isMenuOpen || selection.selected)) {
     event.stopPropagation();
     if (selection.isMenuOpen) {

@@ -22,6 +22,22 @@ export function stopAdjusting() {
   adjusting = null;
 }
 
+// With no tool, whether a press at this point is for the page: on a component or its handles,
+// or anywhere while a label is typed or a component moves. Tilde lets every other press
+// through to the app behind.
+export function takesPointer(x, y) {
+  return Boolean(labelled || adjusting || componentAt(x, y) || isHandle(document.elementFromPoint(x, y)));
+}
+
+// The pointer went through to the app behind, which gets its moves meanwhile: as over empty
+// space here, no component is under it, and a press there ends the selection.
+export function pointerWentThrough(isPress) {
+  if (!wireframe) return;
+  isOverMovable = false;
+  if (isPress) selection.selected = null;
+  hideHandles();
+}
+
 // After Excalidraw has finished the rectangle of a drag: it becomes the component of the tool.
 // A click instead labels the component under it.
 export function finishWireframeShape() {
