@@ -55,6 +55,7 @@ enum Key: Int {
     case space = 49
     case b = 11
     case d = 2
+    case c = 8
 }
 
 /// A picture of the screen, or an image of the app's, read in points.
@@ -140,9 +141,10 @@ struct Picture {
         color.blue > 0.8 && color.red < 0.35 && color.green > 0.25 && color.green < 0.65
     }
 
-    /// The bluish grey of a wireframe component, unlike the neutral grey of text.
+    /// A blue of a wireframe component: its fill, lines, bars and edges, unlike the greys of a
+    /// window and its text.
     static func isWireframe(_ color: Color) -> Bool {
-        color.red > 0.78 && color.red < 0.92 && color.blue - color.red > 0.012 && color.blue - color.red < 0.05
+        color.blue > 0.8 && color.blue - color.red > 0.1
     }
 
     /// The fixture's red mark.
