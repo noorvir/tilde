@@ -641,7 +641,8 @@ struct UXSpecs {
             let guide = CGRect(x: 1000, y: row - 2, width: 600, height: 3)
             try await waitFor(app, at: guide, every: 1, Picture.isTildeBlue, atLeast: 150)
             try await app.mouseUp(at: end)
-            try await waitFor(app, at: CGRect(x: start.x + 20, y: row - 6, width: 120, height: 4), Picture.isWireframe, atLeast: 40)
+            // The button's inside, which ends 6 pt above the edge: the fill alone is too pale.
+            try await waitFor(app, at: CGRect(x: start.x + 20, y: row - 12, width: 120, height: 4), Picture.isWireframe, atLeast: 40)
             try await waitFor(app, at: CGRect(x: start.x + 20, y: row + 7, width: 120, height: 4), Picture.isWireframe, atMost: 0)
             step("button snapped")
 
