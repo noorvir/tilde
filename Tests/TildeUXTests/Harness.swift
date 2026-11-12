@@ -658,6 +658,17 @@ final class ChangingWindow {
         return list.contains { $0[kCGWindowOwnerPID as String] as? Int32 == pid }
     }
 
+    /// On the page "fullscreen": whether the window is in full screen, and how many times it
+    /// left it.
+    var fullScreen: (isOn: Bool, exits: Int)? {
+        guard let state = try? String(contentsOf: URL(fileURLWithPath: file.path + ".state"), encoding: .utf8),
+              let exits = state.components(separatedBy: "exits=").last.flatMap({ Int($0) })
+        else {
+            return nil
+        }
+        return (state.contains("fullscreen=true"), exits)
+    }
+
     func show(_ page: String) throws {
         try page.write(to: file, atomically: true, encoding: .utf8)
     }

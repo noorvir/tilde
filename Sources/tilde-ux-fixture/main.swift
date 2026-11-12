@@ -69,6 +69,11 @@ func startGlide() {
     }
 }
 
+var lastToggle = Date.distantPast
+var fullScreenExits = 0
+let exitObserver = NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { _ in
+    MainActor.assumeIsolated { fullScreenExits += 1 }
+}
 let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     let page = (try? String(contentsOfFile: file, encoding: .utf8)) ?? "a"
     mark.isHidden = !content.isPressed && !page.hasPrefix("marked") && !page.hasPrefix("glide")
@@ -80,6 +85,20 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     if page.hasPrefix("almost") {
         words[9] = "The final match ends in a win after all"
     }
+    // "fullscreen": the window goes to full screen, in a Space of its own, as a user's app can,
+    // and again after it left. "<file>.state" says whether it is, and how many times it left.
+    if page.hasPrefix("fullscreen") {
+        let state = "fullscreen=\(window.styleMask.contains(.fullScreen)) exits=\(fullScreenExits)"
+        try? state.write(toFile: file + ".state", atomically: true, encoding: .utf8)
+    }
+    if page.hasPrefix("fullscreen"), !window.styleMask.contains(.fullScreen), Date().timeIntervalSince(lastToggle) > 3 {
+        lastToggle = Date()
+        window.level = .normal
+        window.styleMask.insert(.resizable)
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        app.activate(ignoringOtherApps: true)
+        window.toggleFullScreen(nil)
+    }
     // The window moved, by a program or by the user.
     if page.hasPrefix("moved"), window.frame.minX < 400 {
         window.setFrameOrigin(NSPoint(x: window.frame.minX + 200, y: window.frame.minY))
@@ -88,6 +107,6 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         row.stringValue = text
     }
 }
-withExtendedLifetime((timer, awake)) {
+withExtendedLifetime((timer, awake, exitObserver)) {
     app.run()
 }

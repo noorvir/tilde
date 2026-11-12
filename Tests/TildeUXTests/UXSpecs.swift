@@ -541,7 +541,9 @@ struct UXSpecs {
 
     /// In Draw, Esc on a shape's comment with text asks first, and Esc again keeps the comment
     /// with the keyboard in it, so typing goes on in the box. With the comment saved, Esc puts
-    /// the tool down, and a click goes through the canvas to the window behind.
+    /// the tool down, and a click goes through the canvas to the window behind. When that
+    /// window's app goes to full screen, in a Space of its own, Tilde keeps the keyboard: Esc
+    /// does not take the app out of full screen, and ⌘↩ ends Draw.
     @Test func escTwiceOnAShapesCommentKeepsTypingInTheBox() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -582,6 +584,18 @@ struct UXSpecs {
             try await Task.sleep(for: .milliseconds(50))
             try await app.click(at: beside)
             try await waitFor(app, at: mark, Picture.isMark, atLeast: 200)
+
+            try window.show("fullscreen")
+            for _ in 0..<60 where window.fullScreen?.isOn != true {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            // The new Space slides in.
+            try await Task.sleep(for: .milliseconds(1000))
+            try await app.key(.escape)
+            try await app.key(.enter, command: true)
+            try await app.waitNotToSee("Done, ⌘↩")
+            #expect(window.fullScreen?.isOn == true)
+            #expect(window.fullScreen?.exits == 0)
         }
     }
 
