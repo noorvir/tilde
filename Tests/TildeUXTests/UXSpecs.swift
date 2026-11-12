@@ -743,8 +743,8 @@ struct UXSpecs {
         }
     }
 
-    /// The look of the components comes from Settings, and a change reaches the components
-    /// drawn. Blueprint's lines run past the corners and it has no offset edge; Technical, the
+    /// The look of the components comes from Settings, and a change shows at once on the
+    /// components drawn. Blueprint's lines run past the corners and it has no offset edge; Technical, the
     /// default, has a hard offset edge under the bottom and no lines past the corners.
     @Test func aStyleChosenInSettingsShowsOnTheWireframe() async throws {
         let window = try ChangingWindow()
@@ -755,16 +755,16 @@ struct UXSpecs {
         let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
         let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
         try await withApp { app in
+            // The fixture's window can be in front of Settings, which stays open meanwhile.
             try await app.menu("Settings")
-            try await app.press("Configuration")
-            try await app.press("Blueprint")
+            try await app.accessibilityPress("Configuration")
+            try await app.accessibilityPress("Blueprint")
             try await app.waitToSee("Hairlines that run past the corners")
-            try await app.key(.w, command: true)
-            try await app.waitNotToSee("Hairlines that run past the corners")
             step("blueprint chosen")
 
             // ⌘ draws without snapping, at the very place of the drag.
-            try await annotate(app)
+            try await app.menu("Start Annotation")
+            try await app.waitToSee("Annotating")
             try await app.key(.w)
             try await app.waitToSee("Done, ⌘↩")
             try await app.waitToSee("Drawing canvas", timeout: 15)
@@ -777,18 +777,9 @@ struct UXSpecs {
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atMost: 0)
             step("blueprint drawn")
 
-            // Paused, Settings change the style; the button shows it when the session goes on.
-            try await app.key(.escape)
-            try await app.key(.escape)
-            try await app.waitToSee("Paused")
-            try await app.menu("Settings")
-            try await app.press("Configuration")
-            try await app.press("Technical")
+            // Settings, under the canvas, change the style: the button shows it at once.
+            try await app.accessibilityPress("Technical")
             try await app.waitToSee("A firm border with a hard offset edge")
-            try await app.key(.w, command: true)
-            try await app.waitNotToSee("A firm border with a hard offset edge")
-            try await app.doubleTap("control")
-            try await app.waitToSee("Annotating")
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
             try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
             step("technical shown")

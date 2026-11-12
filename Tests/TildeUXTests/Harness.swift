@@ -311,6 +311,13 @@ final class TildeApp {
         throw UXFailure(description: "\(name) is not on screen in \(appName)")
     }
 
+    /// Presses the control with this name through Accessibility, as VoiceOver does: also when
+    /// another app's window is in front of it.
+    func accessibilityPress(_ name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        try await waitToSee(name, sourceLocation: sourceLocation)
+        _ = try await drive("press", ["pid": pid, "name": name])
+    }
+
     /// Clicks the control with this name with the mouse, as a user does: unlike an
     /// accessibility press, this also makes the app active.
     func press(_ name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
