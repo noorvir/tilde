@@ -29,6 +29,10 @@ struct UIState: Decodable {
     enum SentStatus: String, Decodable {
         case done, failed
     }
+    /// The chip of the first component on the canvas: shown, or with its borders menu open.
+    enum Chip: String, Decodable {
+        case shown, borders
+    }
     enum Enlarged: String, Decodable {
         case closeUp, context
     }
@@ -151,6 +155,7 @@ struct UIState: Decodable {
     var toast: Toast?
     var settings: Settings?
     var look: Look?
+    var chip: Chip?
 
     init(file: URL) throws {
         let data = try Data(contentsOf: file)

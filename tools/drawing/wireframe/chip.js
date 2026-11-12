@@ -110,11 +110,12 @@ function borderItems(borders) {
       action: `border:${side}`, name: `${side[0].toUpperCase()}${side.slice(1)}`, isOn: borders.includes(side), icon: bordersIcon([side], 14),
     })),
   ];
-  return rows.map(({ action, name, isOn, icon }, index) => {
-    const divider = index === 1 ? "margin-top:3px;border-top:1px solid rgba(255,255,255,.12);padding-top:8px;" : "";
+  const items = rows.map(({ action, name, isOn, icon }) => {
     const check = `<span aria-hidden="true" style="width:12px;margin-left:auto;text-align:right">${isOn ? "✓" : ""}</span>`;
-    return `<span data-action="${action}" role="menuitemcheckbox" aria-checked="${isOn}" style="${divider}display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;min-width:116px">${icon}${name}${check}</span>`;
-  }).join("");
+    return `<span data-action="${action}" role="menuitemcheckbox" aria-checked="${isOn}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;min-width:116px">${icon}${name}${check}</span>`;
+  });
+  const separator = `<span role="separator" style="height:1px;margin:3px 6px;background:rgba(255,255,255,.14)"></span>`;
+  return [items[0], separator, ...items.slice(1)].join("");
 }
 
 const deleteButton = `<span data-action="delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="12" height="12"><path d="M3 3L9 9M9 3L3 9" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;

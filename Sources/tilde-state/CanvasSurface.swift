@@ -20,12 +20,15 @@ enum CanvasSurface {
     ]
     private static let allBorders = ["top", "right", "bottom", "left"]
 
-    static func image(look: WireframeLook) async throws -> CGImage {
+    static func image(look: WireframeLook, chip: UIState.Chip?) async throws -> CGImage {
         let app = try await Renderer.render(NSHostingView(rootView: MockApp()), size: size, appearance: .aqua)
         let page = try await Page.load(size: size)
         try await page.run("window.tildeDraw.setWireframeLook(\(look.pageJSON))")
         try await page.run("window.tildeDraw.restoreWireframe(\(DrawingPanel.json(["shapes": shapes, "origin": [0, 0]])))")
         let under = try await page.under()
+        if let chip {
+            try await page.showChip(isBordersOpen: chip == .borders)
+        }
 
         // The app as the screen would show it under the canvas: blurred inside the shapes.
         let scale = CGFloat(Renderer.scale)
@@ -86,6 +89,18 @@ enum CanvasSurface {
 
         func run(_ script: String) async throws {
             _ = try await webView.evaluateJavaScript("\(script); 0")
+        }
+
+        /// The first component's chip, as the pointer over it shows it, and its borders menu.
+        func showChip(isBordersOpen: Bool) async throws {
+            let point = "clientX: 126, clientY: 150"
+            try await run("window.tildeDraw.setWireframe({tool: '', icons: {}})")
+            try await run("document.elementFromPoint(126, 150).dispatchEvent(new PointerEvent('pointermove', {bubbles: true, composed: true, \(point), pointerId: 1, pointerType: 'mouse', isPrimary: true}))")
+            if isBordersOpen {
+                for type in ["pointerdown", "pointerup"] {
+                    try await run("document.querySelector('#tilde-chip [data-menu=borders]').dispatchEvent(new PointerEvent('\(type)', {bubbles: true, composed: true, \(point), pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0}))")
+                }
+            }
         }
 
         /// The shapes that the page posted last to blur under.
