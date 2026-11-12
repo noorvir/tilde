@@ -19,7 +19,7 @@ function node(name, attributes = {}) {
   return element;
 }
 
-export const lookLayer = node("svg", { "aria-hidden": "true" });
+export const lookLayer = node("svg", { id: "tilde-look", "aria-hidden": "true" });
 lookLayer.style.cssText = "position:fixed;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:3;overflow:visible";
 const hatch = node("pattern", { id: "tilde-hatch", width: 7, height: 7, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" });
 hatch.append(node("line", { x1: 0, y1: 0, x2: 0, y2: 7, stroke: blue, "stroke-width": 1.4 }));
