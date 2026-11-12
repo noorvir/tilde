@@ -472,10 +472,13 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 
     // MARK: - The look and the blur under the components
 
+    /// A new radius blurs the same picture again; a blur that was off needs a picture.
     private func applyLook() {
         run("setWireframeLook(\(look.pageJSON))")
         underBlur?.radius = look.blur
-        captureUnder()
+        if underBlur?.picture == nil {
+            captureUnder()
+        }
     }
 
     /// The page's components moved, came or went: the blur follows their shapes. The first
