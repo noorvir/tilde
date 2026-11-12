@@ -40,6 +40,10 @@ export function tagTop({ y }) {
   return y >= 17 ? y - 17 : y + 2;
 }
 
+export function tagWidth(label) {
+  return label.length * 7 + 10;
+}
+
 // What each component looks like now, by element id: the version and look it was drawn for.
 let shown = [];
 
@@ -164,7 +168,7 @@ function componentNodes({ kind, rect: { x, y, width, height }, data }) {
 
   if (data.label) {
     const labelTop = tagTop({ y });
-    add("rect", { x, y: labelTop, width: data.label.length * 7 + 10, height: 15, fill: blue });
+    add("rect", { x, y: labelTop, width: tagWidth(data.label), height: 15, fill: blue });
     const text = add("text", { x: x + 5, y: labelTop + 11, "font-size": 11, fill: "#FFFFFF", "font-family": "ui-monospace,Menlo,monospace" });
     text.textContent = data.label;
   }

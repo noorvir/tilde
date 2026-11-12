@@ -77,12 +77,12 @@ export function escapePressed(event) {
   if (event.key !== "Escape") return;
   // Excalidraw ends the text being typed.
   if (wireframe && isTextField(event.target)) return;
-  // In wireframe mode Esc steps back one level: the kind menu, then the selection; with
+  // In wireframe mode Esc steps back one level: the chip's menu, then the selection; with
   // nothing selected it reaches Tilde, which pauses.
-  if (wireframe && (selection.isMenuOpen || selection.selected)) {
+  if (wireframe && (selection.menu || selection.selected)) {
     event.stopPropagation();
-    if (selection.isMenuOpen) {
-      selection.isMenuOpen = false;
+    if (selection.menu) {
+      selection.menu = null;
       showHandles();
     } else {
       selectGroup(null);

@@ -10,7 +10,7 @@
 //   wireframe/components.js  what a component is: its kinds and its data
 //   wireframe/look.js        what a component looks like, in the style of Tilde's settings
 //   wireframe/pointer.js     drawing, moving, resizing and copying with the pointer
-//   wireframe/chip.js        a component's handles: the chip, the kinds, the resize square
+//   wireframe/chip.js        a component's handles: the chip, its kinds and borders, the resize square
 //   wireframe/labels.js      a label typed in place
 //   wireframe/snap.js        the lines to snap to, and the guides
 //   wireframe/history.js     undo and redo
@@ -26,7 +26,7 @@ import { post, setAPI } from "./scene.js";
 import { escapePressed, focusChanged, swallowToolKey } from "./bridge.js";
 import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
 import { blockPressWithNoTool, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
-import { chip, handleOutline, resizer, selectionOutline, typeMenu } from "./wireframe/chip.js";
+import { bordersMenu, chip, chipStyle, handleOutline, resizer, selectionOutline, typeMenu } from "./wireframe/chip.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
 import { drawLook, lookLayer } from "./wireframe/look.js";
 import { keyPressed } from "./wireframe/mode.js";
@@ -37,7 +37,7 @@ import { windowOutline } from "./wireframe/window.js";
 document.addEventListener("DOMContentLoaded", () => {
   document.head.appendChild(labelCursor);
   document.body.append(
-    lookLayer, labelField, labelStyle, handleOutline, selectionOutline, chip, resizer, typeMenu, moveCursor, windowOutline,
+    lookLayer, labelField, labelStyle, chipStyle, handleOutline, selectionOutline, chip, resizer, typeMenu, bordersMenu, moveCursor, windowOutline,
     guideX, guideY, guideLabel, snapRing, ring, cursorRing,
   );
 });

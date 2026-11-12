@@ -5,7 +5,7 @@ import { api } from "../scene.js";
 import { hideHandles } from "./chip.js";
 import { frameOf, rebuild } from "./components.js";
 import { record } from "./history.js";
-import { tagTop } from "./look.js";
+import { tagTop, tagWidth } from "./look.js";
 
 export const labelField = document.createElement("input");
 labelField.id = "tilde-label";
@@ -19,7 +19,7 @@ let labelBefore = null;
 
 // As wide as the tag of the same text.
 function sizeLabelField() {
-  labelField.style.width = `${(labelField.value || labelField.placeholder).length * 7 + 10}px`;
+  labelField.style.width = `${tagWidth(labelField.value || labelField.placeholder)}px`;
 }
 labelField.addEventListener("input", sizeLabelField);
 

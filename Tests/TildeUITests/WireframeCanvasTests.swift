@@ -187,7 +187,7 @@ struct WireframeCanvasTests {
         #expect(shapes.map(\.rect) == [[100, 100, 600, 400], [150, 150, 200, 100]])
 
         try await page.hover(CGPoint(x: 600, y: 450))
-        try await page.drag(from: CGPoint(x: 110, y: 90), to: CGPoint(x: 140, y: 130), on: Self.chip)
+        try await page.drag(from: CGPoint(x: 110, y: 515), to: CGPoint(x: 140, y: 555), on: Self.chip)
         shapes = try await page.shapes()
         #expect(shapes.map(\.rect) == [[130, 140, 600, 400], [150, 150, 200, 100]])
     }
@@ -422,6 +422,7 @@ struct WireframeCanvasTests {
     @Test func theChipSetsBordersRowsAndFill() async throws {
         try await drawComponent("table")
         try await page.hover(inside)
+        try await page.click(on: Self.bordersButton)
         try await page.click(on: "[data-action=\"border:top\"]")
         #expect(try await page.shapes().map(\.borders) == [["right", "bottom", "left"]])
         try await page.click(on: "[data-action=\"border:left\"]")
@@ -430,6 +431,7 @@ struct WireframeCanvasTests {
         #expect(try await page.shapes().map(\.borders) == [allBorders])
         try await page.click(on: "[data-action=\"border:all\"]")
         #expect(try await page.shapes().map(\.borders) == [[]])
+        try await page.click(on: Self.bordersButton)
 
         // A table of 240 × 120 has 3 rows and 2 columns until they are set.
         try await page.click(on: "[data-action=\"rows:1\"]")
@@ -571,8 +573,120 @@ struct WireframeCanvasTests {
         #expect(try await page.rawShapes().first?["type"] as? String == "ellipse")
     }
 
-    /// The handles of a component, which have no ids: the chip at its top left, and the square
-    /// at its bottom right.
+    /// The chip goes just below the component, at its left edge, clear of the label's tag. The
+    /// pointer gets from the component to the chip without the chip going.
+    @Test func theChipIsBelowTheComponent() async throws {
+        try await restore("[{type: 'card', rect: [200, 150, 240, 120], label: 'Plan'}]")
+        try await page.hover(inside)
+        #expect(try await chipBox() == [200, 276, chipWidth()])
+
+        try await page.hover(CGPoint(x: 210, y: 273))
+        #expect(try await page.shows("#tilde-chip"))
+        try await page.hover(CGPoint(x: 210, y: 287))
+        #expect(try await page.shows("#tilde-chip"))
+    }
+
+    /// At the bottom of the screen the chip goes just above the component, after its label's
+    /// tag; without a label, at its left edge.
+    @Test func atTheBottomTheChipIsAboveTheComponentAfterTheTag() async throws {
+        try await restore("[{type: 'card', rect: [300, 720, 200, 60], label: 'Plan'}, {type: 'card', rect: [700, 720, 200, 60]}]")
+        try await page.hover(CGPoint(x: 400, y: 750))
+        // The tag "Plan" is 38 wide; the chip is 22 high and 2 above the component.
+        #expect(try await chipBox() == [342, 696, chipWidth()])
+
+        try await page.hover(CGPoint(x: 800, y: 750))
+        #expect(try await chipBox() == [700, 696, chipWidth()])
+        try await page.hover(CGPoint(x: 710, y: 719))
+        #expect(try await page.shows("#tilde-chip"))
+    }
+
+    /// The chip stays on the screen at its left and right edges, and is wider than a narrow
+    /// component.
+    @Test func theChipStaysOnTheScreen() async throws {
+        try await restore("[{type: 'card', rect: [-60, 100, 200, 80]}, {type: 'table', rect: [1100, 300, 90, 80]}, {type: 'button', rect: [600, 500, 20, 40]}]")
+        try await page.hover(CGPoint(x: 50, y: 140))
+        #expect(try await chipBox() == [0, 186, chipWidth()])
+
+        try await page.hover(CGPoint(x: 1150, y: 340))
+        let width = try await chipWidth()
+        let right = try await chipBox()
+        #expect(right == [CanvasPage.size.width - width, 386, width], "\(right), \(width)")
+
+        try await page.hover(CGPoint(x: 610, y: 520))
+        #expect(try await chipBox() == [600, 546, chipWidth()])
+        #expect(try await chipWidth() > 20)
+    }
+
+    /// The Borders button shows the borders that are on, and opens a menu of all borders and
+    /// each side, with what is on checked. It stays open while borders change, and closes on a
+    /// second click on the button, on Esc and on a click elsewhere. Near the screen's corner it
+    /// stays on the screen.
+    @Test func theBordersMenuSetsEachSide() async throws {
+        try await drawComponent("card")
+        try await page.hover(inside)
+        #expect(try await page.run("document.querySelectorAll('\(Self.bordersButton) path[stroke-width=\"2.5\"]').length") as? Int == 4)
+        #expect(try await !page.shows("#tilde-borders"))
+
+        try await page.click(on: Self.bordersButton)
+        #expect(try await page.shows("#tilde-borders"))
+        #expect(try await checked() == ["All borders": true, "Top": true, "Right": true, "Bottom": true, "Left": true])
+        try await page.click(on: "#tilde-borders [data-action=\"border:top\"]")
+        #expect(try await page.shapes().map(\.borders) == [["right", "bottom", "left"]])
+        #expect(try await checked() == ["All borders": false, "Top": false, "Right": true, "Bottom": true, "Left": true])
+        #expect(try await page.run("document.querySelectorAll('\(Self.bordersButton) path[stroke-width=\"2.5\"]').length") as? Int == 3)
+        try await page.click(on: "#tilde-borders [data-action=\"border:all\"]")
+        #expect(try await page.shapes().map(\.borders) == [allBorders])
+        #expect(try await page.shows("#tilde-borders"))
+
+        try await page.click(on: Self.bordersButton)
+        #expect(try await !page.shows("#tilde-borders"))
+        try await page.click(on: Self.bordersButton)
+        try await page.press("Escape")
+        #expect(try await !page.shows("#tilde-borders"))
+        #expect(!page.messages.contains("escape"))
+        try await page.click(on: Self.bordersButton)
+        try await page.click(CGPoint(x: 900, y: 100))
+        #expect(try await !page.shows("#tilde-borders"))
+
+        try await restore("[{type: 'card', rect: [1080, 740, 110, 50]}]")
+        try await page.hover(CGPoint(x: 1130, y: 760))
+        try await page.click(on: Self.bordersButton)
+        let menu = try await box(of: "#tilde-borders")
+        #expect(menu[0] >= 0 && menu[0] + menu[2] <= CanvasPage.size.width)
+        #expect(menu[1] >= 0 && menu[1] + menu[3] <= CanvasPage.size.height)
+    }
+
+    private func restore(_ shapes: String) async throws {
+        try await start(tool: "card")
+        try await page.draw("restoreWireframe({shapes: \(shapes), origin: [0, 0]})")
+    }
+
+    /// x, y, width and height of an element of the page.
+    private func box(of selector: String) async throws -> [Double] {
+        let script = "(() => { const box = document.querySelector('\(selector)').getBoundingClientRect(); return [box.left, box.top, box.width, box.height]; })()"
+        return (try await page.run(script) as? [NSNumber] ?? []).map(\.doubleValue)
+    }
+
+    /// The chip's left, top and width.
+    private func chipBox() async throws -> [Double] {
+        let box = try await box(of: "#tilde-chip")
+        #expect(box.count == 4 && box[3] == 22)
+        return Array(box.prefix(3))
+    }
+
+    private func chipWidth() async throws -> Double {
+        try await box(of: "#tilde-chip")[2]
+    }
+
+    /// Each row of the borders menu, and whether it is checked.
+    private func checked() async throws -> [String: Bool] {
+        let script = "JSON.stringify(Object.fromEntries([...document.querySelectorAll('#tilde-borders [role=menuitemcheckbox]')].map((row) => [row.textContent.replace('✓', ''), row.getAttribute('aria-checked') === 'true'])))"
+        let text = try await page.run(script) as? String ?? "{}"
+        return (try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Bool]) ?? [:]
+    }
+
+    /// The handles of a component: the chip just below it, and the square at its bottom right.
     private static let chip = "[data-wireframe-handle][style*=\"cursor: move\"]"
+    private static let bordersButton = "#tilde-chip [data-menu=\"borders\"]"
     private static let resizer = "[data-wireframe-handle][style*=\"nwse-resize\"]"
 }

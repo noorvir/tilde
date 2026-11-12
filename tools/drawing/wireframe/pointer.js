@@ -4,7 +4,7 @@
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
 import { api, postPointer, live } from "../scene.js";
-import { resizer, typeMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles } from "./chip.js";
+import { resizer, typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles, toggleMenu } from "./chip.js";
 import { newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { record } from "./history.js";
 import { labelField, labelled, editLabel, endLabel, isDoubleClick } from "./labels.js";
@@ -49,10 +49,11 @@ export function finishWireframeShape() {
 
 function startAdjusting(event, frame, mode, from) {
   selection.hovered = frame.groupIds[0];
-  selection.isMenuOpen = false;
+  const menuBefore = selection.menu;
+  selection.menu = null;
   const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
   adjusting = {
-    mode, from, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false,
+    mode, from, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false, menuBefore,
     before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && event.altKey,
   };
   event.target.setPointerCapture?.(event.pointerId);
@@ -118,7 +119,7 @@ function editWireframe(event) {
     event.preventDefault();
     if (event.type === "pointermove") adjust(event);
     if (event.type === "pointerup") {
-      const { from, moved } = adjusting;
+      const { from, moved, menuBefore } = adjusting;
       const frame = frameOf(adjusting.group);
       adjusting = null;
       hideGuides();
@@ -126,7 +127,8 @@ function editWireframe(event) {
         selectGroup(frame.groupIds[0]);
         if (isDoubleClick(frame.groupIds[0])) editLabel(frame);
       }
-      if (!moved && from === "chip") selection.isMenuOpen = !selection.isMenuOpen;
+      // A click on the chip's name opens the kinds, or closes them.
+      if (!moved && from === "chip") selection.menu = menuBefore === "kinds" ? null : "kinds";
       showHandles();
     }
     return true;
@@ -145,7 +147,7 @@ function editWireframe(event) {
     }
     if (event.type === "pointermove" && !isPressed) {
       const group = componentAt(event.clientX, event.clientY)?.groupIds[0] ?? null;
-      if (group !== selection.hovered) selection.isMenuOpen = false;
+      if (group !== selection.hovered) selection.menu = null;
       selection.hovered = group;
       isOverMovable = Boolean(movableAt(event)) && !labelled;
       const cursor = isOverMovable ? (event.altKey ? "copy" : "move") : isSelectMode ? "default" : "";
@@ -161,6 +163,10 @@ function editWireframe(event) {
   const group = selection.hovered ?? selection.selected;
   const frame = group ? frameOf(group) : null;
   if (event.type !== "pointerdown" || !frame) return true;
+  if (event.target.closest("[data-menu=borders]")) {
+    toggleMenu("borders");
+    return true;
+  }
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (action === "delete") {
     deleteComponent(group);
@@ -176,11 +182,11 @@ function editWireframe(event) {
   if (kind) {
     record();
     rebuild(group, frame, changedKind(frame, kind));
-    selection.isMenuOpen = false;
+    selection.menu = null;
     showHandles();
     return true;
   }
-  if (typeMenu.contains(event.target)) return true;
+  if (typeMenu.contains(event.target) || bordersMenu.contains(event.target)) return true;
   startAdjusting(event, frame, resizer.contains(event.target) ? "resize" : "move", resizer.contains(event.target) ? "resizer" : "chip");
   return true;
 }
