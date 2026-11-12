@@ -1,55 +1,71 @@
 import SwiftUI
 
-/// The wireframe bar's Style menu: the four styles as small tiles, then the three strengths.
-/// The same settings as the Appearance page, so the two stay the same, and an open wireframe
-/// changes at once.
+/// The wireframe bar's Style menu: the four styles as a row of names, then the three
+/// strengths. The same settings as the Appearance page, so the two stay the same; the
+/// components on the canvas change at once, so the menu shows no pictures.
 struct WireframeStyleMenu: View {
-    @ObservedObject var previews: WireframePreviews
     @AppStorage(WireframeLook.Key.style) private var style = WireframeLook().style
-    @AppStorage(WireframeLook.Key.fill) private var fill = WireframeLook().fill
-    @AppStorage(WireframeLook.Key.blur) private var blur = WireframeLook().blur
-    @AppStorage(WireframeLook.Key.fade) private var fade = WireframeLook().fade
 
-    /// Four tiles and their gaps, and the padding.
-    private static let width: CGFloat = 4 * 104 + 3 * 10 + 24
-
-    private var look: WireframeLook {
-        WireframeLook(style: style, fill: fill, blur: blur, fade: fade)
-    }
+    /// Narrower than the wireframe bar.
+    private static let width: CGFloat = 360
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            tiles
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 2) {
+                ForEach(WireframeLook.Style.allCases) { item in
+                    StyleItem(title: item.title, isSelected: item == style) {
+                        style = item
+                    }
+                }
+            }
+            .padding(2)
+            .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.06)))
             ForEach(LookStrength.allCases) { strength in
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Text(strength.title)
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 74, alignment: .leading)
-                    LookSlider(strength)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .frame(width: 64, alignment: .leading)
+                    LookSlider(strength, isCompact: true)
                 }
             }
         }
-        .padding(12)
+        .padding(10)
         .frame(width: Self.width)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(white: 0.1).opacity(0.96)))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.12)))
+        .hudCard(cornerRadius: 12)
         .environment(\.colorScheme, .dark)
-        .task(id: look) {
-            previews.show(look)
+        .controlSize(.small)
+    }
+}
+
+/// A style's name in the row: a button in the menu's dark style, lighter while chosen.
+private struct StyleItem: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+                .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
+                .frame(maxWidth: .infinity)
+                .frame(height: 22)
+                .background(RoundedRectangle(cornerRadius: 6).fill(background))
+                .contentShape(Rectangle())
         }
-        .onDisappear {
-            previews.stop()
-        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var tiles: some View {
-        HStack(alignment: .top, spacing: 10) {
-            ForEach(WireframeLook.Style.allCases) { tile in
-                StyleTile(title: tile.title, image: previews.tiles[tile], size: WireframePreviews.tileSize, isSelected: tile == style) {
-                    style = tile
-                }
-                .frame(width: 104)
-            }
+    private var background: Color {
+        if isSelected {
+            return .white.opacity(0.2)
         }
+        return isHovered ? .white.opacity(0.1) : .clear
     }
 }

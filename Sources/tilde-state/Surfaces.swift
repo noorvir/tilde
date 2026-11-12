@@ -78,12 +78,7 @@ enum Surfaces {
 
         case .hud:
             let controller = try await controller(state)
-            if state.styleMenu == true {
-                // Its tiles drawn before it shows, as it draws them.
-                controller.wireframe.previews = WireframePreviews(html: { try? CanvasSurface.html() })
-                try await controller.wireframe.previews.draw(look)
-                controller.wireframe.isStyleMenuOpen = true
-            }
+            controller.wireframe.isStyleMenuOpen = state.styleMenu == true
             return try await hosted(HUDView(controller: controller), size: size)
 
         case .comment:

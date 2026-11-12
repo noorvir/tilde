@@ -16,8 +16,6 @@ final class WireframeMode: ObservableObject {
     private(set) var isTaking = false
     /// The bar's Style menu is open.
     @Published var isStyleMenuOpen = false
-    /// The pictures of the Style menu's tiles.
-    var previews = WireframePreviews()
 
     private let canvas: DrawingPanel
     private let picker: ElementPicker

@@ -176,13 +176,16 @@ enum LookStrength: String, CaseIterable, Identifiable {
 }
 
 /// A strength's slider with its value as text after it, bound to the setting. It moves
-/// smoothly, without tick marks, and keeps its value to whole steps.
+/// smoothly, without tick marks, and keeps its value to whole steps. Compact: smaller text, for
+/// the wireframe bar's Style menu.
 struct LookSlider: View {
     let strength: LookStrength
+    let isCompact: Bool
     @AppStorage private var value: Double
 
-    init(_ strength: LookStrength) {
+    init(_ strength: LookStrength, isCompact: Bool = false) {
         self.strength = strength
+        self.isCompact = isCompact
         _value = AppStorage(wrappedValue: strength.standard, strength.key)
     }
 
@@ -194,10 +197,10 @@ struct LookSlider: View {
             .labelsHidden()
             .accessibilityValue(strength.text(value))
             Text(strength.text(value))
-                .font(.system(size: 13))
+                .font(.system(size: isCompact ? 11 : 13))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
+                .frame(width: isCompact ? 38 : 44, alignment: .trailing)
         }
     }
 

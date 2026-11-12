@@ -385,7 +385,7 @@ struct HUDView: View {
                     .transition(.opacity)
             }
             if hud.isShown, controller.isWireframe, wireframe.isStyleMenuOpen {
-                WireframeStyleMenu(previews: wireframe.previews)
+                WireframeStyleMenu()
                     .transition(Self.zoom)
             }
             if hud.isShown, controller.showsBrowserAccessory {
