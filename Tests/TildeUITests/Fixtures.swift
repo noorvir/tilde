@@ -305,13 +305,15 @@ final class FakeUpdateEngine: UpdateEngine {
     /// What it reports when it starts.
     private let initial: UpdateStatus?
     private var report: (UpdateStatus) -> Void = { _ in }
+    private var mayRelaunch: () -> Bool = { true }
 
     init(status: UpdateStatus? = nil) {
         initial = status
     }
 
-    func start(reporting: @escaping (UpdateStatus) -> Void) {
+    func start(reporting: @escaping (UpdateStatus) -> Void, mayRelaunch: @escaping () -> Bool) {
         report = reporting
+        self.mayRelaunch = mayRelaunch
         if let initial {
             reporting(initial)
         }
@@ -319,6 +321,11 @@ final class FakeUpdateEngine: UpdateEngine {
 
     func send(_ status: UpdateStatus) {
         report(status)
+    }
+
+    /// Asks as Sparkle does just before it quits Tilde to install.
+    func asksToRelaunch() -> Bool {
+        mayRelaunch()
     }
 
     func check() {

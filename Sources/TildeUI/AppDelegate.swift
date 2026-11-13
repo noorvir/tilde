@@ -32,6 +32,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updates: Updates?
     private var updateToast: UpdateToast?
     private var updateSession: AnyCancellable?
+    private var updateUse: Any?
     private var historyRestore: AnyCancellable?
     private var permissionRequest: AnyCancellable?
     private var hotKeys: HotKeys?
@@ -75,14 +76,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // The read decodes every saved session, after the prune: away from the main thread,
         // which has the menu to show. A session that started meanwhile is not left over.
+        // After a silent update the user was not here: the toast waits for the next launch.
         let archive = controller.archive
+        let silentRelaunch = updates?.isSilentRelaunch == true
         Task {
             let saved = await Task.detached { archive.all() }.value
             let unfinished = saved.filter { $0.state == .active && $0.id != controller.session?.id }
             for empty in unfinished where empty.notes.isEmpty {
                 controller.saver.discard(empty)
             }
-            if let newest = unfinished.first(where: { !$0.notes.isEmpty }) {
+            if !silentRelaunch, let newest = unfinished.first(where: { !$0.notes.isEmpty }) {
                 toast.show(newest)
             }
         }
@@ -119,9 +122,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { flow in flow.mode == .idle || flow.accepts(.restore, controller.facts) }
             .removeDuplicates()
             .sink { [weak history] takes in history?.takesRestore = takes }
-        // The UX specs point the app at a local feed.
+        // The UX specs point the app at a local feed, and wait less for idleness.
         let feed = UserDefaults.standard.string(forKey: "updateFeedURL") ?? SparkleUpdates.feedURL
-        let updates = Updates(engine: SparkleUpdates(feed: feed))
+        let idleTime = UserDefaults.standard.double(forKey: "updateIdleSeconds")
+        let updates = Updates(engine: SparkleUpdates(feed: feed), idleTime: idleTime > 0 ? idleTime : 300)
+        updates.showsWindow = { NSApp.windows.contains { $0.isVisible && $0.className != "NSStatusBarWindow" } }
+        updateUse = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .scrollWheel]) { [updates] event in
+            updates.noteUse()
+            return event
+        }
         let updateToast = UpdateToast { [updates] in updates.restart() }
         updates.onReady = { updateToast.show(version: $0) }
         updateSession = controller.$flow

@@ -10,7 +10,8 @@
     "page": "general",
     "update": {
       "status": "ready",
-      "session": true
+      "session": true,
+      "automatic": false
     }
   }
 }

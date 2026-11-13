@@ -13,7 +13,7 @@ struct UpdateSettings: View {
                 action
             }
             SettingsDivider()
-            SettingsRow(title: "Update automatically", subtitle: "Downloads in the background and installs when you quit Tilde") {
+            SettingsRow(title: "Update automatically", subtitle: "Installs updates and reopens Tilde when you are not using it") {
                 Toggle("Update automatically", isOn: $updates.isAutomatic)
                     .toggleStyle(.switch)
                     .controlSize(.mini)
@@ -40,9 +40,19 @@ struct UpdateSettings: View {
         case .available: "You have \(version)"
         case .downloading(_, let progress?): "\(Int(progress * 100))% downloaded"
         case .downloading(_, nil): "Starting the download"
-        case .ready: updates.isSessionActive ? "Installs when you quit Tilde, or restart after this session" : "Installs when you quit Tilde"
+        case .ready: readySubtitle
         case .failed(let reason): reason
         }
+    }
+
+    private var readySubtitle: String {
+        if updates.isAutomatic {
+            return "Installs when you are not using Tilde"
+        }
+        if updates.isSessionActive {
+            return "Installs when you quit Tilde, or restart after this session"
+        }
+        return "Installs when you quit Tilde"
     }
 
     private var isFailed: Bool {
