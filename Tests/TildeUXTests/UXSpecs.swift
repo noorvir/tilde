@@ -537,7 +537,7 @@ struct UXSpecs {
         }
     }
 
-    // MARK: - Draw
+    // MARK: - Draw and the keyboard
 
     /// In Draw, Esc on a shape's comment with text asks first, and Esc again keeps the comment
     /// with the keyboard in it, so typing goes on in the box. With the comment saved, Esc puts

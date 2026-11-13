@@ -148,10 +148,10 @@ final class AnnotationController: ObservableObject {
 
     // The session's windows show the session: a part that has one makes it with the
     // controller, the first time it shows.
-    /// The comment box next to a new note or one that is edited, while `flow` has it open.
+    /// The comment box next to a new note, while `flow` has it open.
     private(set) lazy var commentBox = CommentBox { [unowned self] in CommentPanel(controller: self) }
     /// The preview card on a note, while `flow` has it open.
-    private(set) lazy var previewCard = PreviewCard { [unowned self] in PreviewPanel(controller: self) }
+    private(set) lazy var previewCard = PreviewCard { [unowned self] in PreviewPanel(controller: self, defaults: defaults) }
     /// Where the HUD is: floating, or in the toolbar of Tilde's browser.
     private(set) lazy var hud = HUDPlacement(browser: browser) { [unowned self] in HUDPanel(controller: self) }
     private lazy var overlays = OverlayStack(browser: browser) { [unowned self] frame, level, isWindowSized in
@@ -161,9 +161,9 @@ final class AnnotationController: ObservableObject {
     private let store: SessionStore
     let browser: BrowserController
     let shortcuts: ShortcutStore
-    /// Keeps how the user last chose a window, and the mode that was on last, across launches;
-    /// nil keeps them only in memory.
-    private let defaults: UserDefaults?
+    /// Keeps how the user last chose a window, the mode that was on last and the preview's
+    /// size across launches.
+    private let defaults: UserDefaults
     private let log = Logger(subsystem: "dev.tilde.app", category: "annotate")
     private var subscription: AnyCancellable?
     /// The app that was in front when an agent's session opened Tilde's browser. The session
@@ -173,14 +173,13 @@ final class AnnotationController: ObservableObject {
     /// The next session that starts from Tilde is limited to the browser window.
     private var scopesNextLocalSessionToBrowser = false
 
-    init(store: SessionStore, browser: BrowserController, shortcuts: ShortcutStore? = nil, archive: SessionArchive = SessionArchive(), defaults: UserDefaults? = .standard) {
+    init(store: SessionStore, browser: BrowserController, archive: SessionArchive, defaults: UserDefaults) {
         self.store = store
         self.browser = browser
         self.archive = archive
         saver = SessionSaver(archive: archive)
         self.defaults = defaults
-        let shortcuts = shortcuts ?? ShortcutStore()
-        self.shortcuts = shortcuts
+        shortcuts = ShortcutStore(defaults: defaults)
         keyMonitors = KeyMonitors(shortcuts: shortcuts)
         picker = ElementPicker(browser: browser)
         hoverPicker = HoverPicker(picker: picker)
@@ -188,7 +187,7 @@ final class AnnotationController: ObservableObject {
         drawing = DrawingNotes(picker: picker)
         wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
-        flow.choosesInPicker = defaults?.bool(forKey: "ChoosesInPicker") ?? false
+        flow.choosesInPicker = defaults.bool(forKey: "ChoosesInPicker")
 
         subscription = store.$sessions
             .receive(on: RunLoop.main)
@@ -237,7 +236,7 @@ final class AnnotationController: ObservableObject {
             guard let self else {
                 return false
             }
-            return commentBox.composer == nil && !isPickingWindow
+            return commentBox.pending == nil && !isPickingWindow
         }
         hoverPicker.onScrollEnded = { [weak self] in self?.refreshHover() }
 
@@ -249,7 +248,6 @@ final class AnnotationController: ObservableObject {
 
         drawing.scope = { [weak self] in self?.scope.window }
         wireframe.scope = { [weak self] in self?.scope.window }
-        drawing.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         let canvas = drawing.panel
         canvas.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         canvas.onEscape = { [weak self] in self?.escapePressed() }
@@ -258,7 +256,7 @@ final class AnnotationController: ObservableObject {
         canvas.onClickAway = { [weak self] in
             self?.dispatch(.clickAway)
             // The click gave the canvas the keyboard; a question in the comment box needs it.
-            if self?.commentBox.composer != nil {
+            if self?.commentBox.pending != nil {
                 self?.commentBox.focus()
             }
         }
@@ -307,10 +305,10 @@ final class AnnotationController: ObservableObject {
         let effects = next.handle(event, facts)
         let questionChanged = next.session?.question != flow.session?.question
         if next.choosesInPicker != flow.choosesInPicker {
-            defaults?.set(next.choosesInPicker, forKey: "ChoosesInPicker")
+            defaults.set(next.choosesInPicker, forKey: "ChoosesInPicker")
         }
         if let startMode = next.startMode, startMode != flow.startMode {
-            defaults?.set(startMode.rawValue, forKey: "LastMode")
+            defaults.set(startMode.rawValue, forKey: "LastMode")
         }
         flow = next
         if questionChanged {
@@ -375,7 +373,7 @@ final class AnnotationController: ObservableObject {
             drawing.panel.stopDrawing()
             drawing.panel.setSnapFrame(nil)
             hover = nil
-            if commentBox.composer == nil {
+            if commentBox.pending == nil {
                 drawing.panel.hide()
             }
             // The drawing tools showed in the floating panel.
@@ -388,7 +386,7 @@ final class AnnotationController: ObservableObject {
             gaveKeyboardBack = false
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
             // A comment that is open, as after Done in Wireframe, keeps the keyboard.
-            if !hud.isInBrowser, commentBox.composer == nil {
+            if !hud.isInBrowser, commentBox.pending == nil {
                 overlays.makeKey()
             }
         case .giveKeyboardBack:
@@ -450,7 +448,7 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Esc, and the picker's "‹ Back".
+    /// Esc, and the picker's "Select on screen" and "All apps".
     func escapePressed() {
         if wireframe.isStyleMenuOpen {
             wireframe.isStyleMenuOpen = false
@@ -525,7 +523,7 @@ final class AnnotationController: ObservableObject {
         // Annotate in the HUD (or the pause shortcut) starts annotating.
         let isInBrowser = session.url != nil || (session.isLocal && scopesNextLocalSessionToBrowser)
         scopesNextLocalSessionToBrowser = false
-        let startMode = SessionFlow.StartMode(saved: defaults?.string(forKey: "LastMode"), inBrowser: isInBrowser)
+        let startMode = SessionFlow.StartMode(saved: defaults.string(forKey: "LastMode"), inBrowser: isInBrowser)
         dispatch(.begin)
 
         layoutOverlays()
@@ -796,7 +794,7 @@ final class AnnotationController: ObservableObject {
         if isDrawing {
             drawing.setPaused(!pauses.isEmpty)
             // The canvas takes the keyboard when it resumes; an open comment keeps it.
-            if pauses.isEmpty, commentBox.composer != nil {
+            if pauses.isEmpty, commentBox.pending != nil {
                 commentBox.focus()
             }
         }
@@ -830,7 +828,7 @@ final class AnnotationController: ObservableObject {
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
     /// or the preview has it or annotating is paused.
     func makeOverlayKey() {
-        guard overlayTakesInput, commentBox.composer == nil, previewCard.id == nil else {
+        guard overlayTakesInput, commentBox.pending == nil, previewCard.id == nil else {
             return
         }
         if !focusCanvas() {
@@ -858,7 +856,7 @@ final class AnnotationController: ObservableObject {
         guard overlayTakesInput else {
             return
         }
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             commentBox.focus()
         } else if previewCard.id != nil {
             previewCard.focus()
@@ -995,14 +993,14 @@ final class AnnotationController: ObservableObject {
     func setDrawingTool(_ tool: String) {
         drawing.setTool(tool)
         updateOverlayInput()
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             commentBox.focus()
         }
     }
 
     func setDrawingColor(_ color: String) {
         drawing.setColor(color)
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             commentBox.focus()
         }
     }
@@ -1128,41 +1126,14 @@ final class AnnotationController: ObservableObject {
         commentBox.open(pending)
     }
 
-    func edit(_ id: Draft.ID) {
-        guard let draft = drafts.first(where: { $0.id == id }) else {
-            return
-        }
-        // The comment being written stays, also when another note is opened.
-        if commentBox.composer != nil {
-            dispatch(.clickAway)
-            if commentBox.composer != nil {
-                return
-            }
-        }
-        dispatch(.openComment, with: [.showComment: { [self] in
-            hover = nil
-            commentBox.open(editing: draft)
-        }])
-    }
-
-    /// Puts the open comment in the list: a new note, or the edited one.
+    /// Puts the open comment in the list, as a new note.
     private func saveComment() {
-        guard let composer = commentBox.composer else {
+        guard let pending = commentBox.pending else {
             return
         }
         let comment = commentBox.text.trimmingCharacters(in: .whitespacesAndNewlines)
         log.notice("comment submitted (\(comment.count) characters)")
-
-        switch composer {
-        case .edit(let id):
-            if let index = drafts.firstIndex(where: { $0.id == id }) {
-                drafts[index].annotation.comment = comment
-            }
-
-        case .new(let pending):
-            add(pending, comment: comment)
-        }
-
+        add(pending, comment: comment)
         hideComposer()
     }
 
@@ -1198,9 +1169,6 @@ final class AnnotationController: ObservableObject {
             }
             drafts.filter { $0.id == id }.forEach(ClipRecorder.deleteVideo)
             drafts.removeAll { $0.id == id }
-            if case .edit(id) = commentBox.composer {
-                dispatch(.closeComment)
-            }
         }])
     }
 
@@ -1254,9 +1222,9 @@ final class AnnotationController: ObservableObject {
         guard drafts.contains(where: { $0.id == id }) else {
             return
         }
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             dispatch(.clickAway)
-            if commentBox.composer != nil {
+            if commentBox.pending != nil {
                 return
             }
         }
@@ -1274,14 +1242,14 @@ final class AnnotationController: ObservableObject {
 
 #if DEBUG
 extension AnnotationController {
-    /// Puts the controller in a given state without opening any window, for snapshot and
-    /// behaviour tests. Debug builds only.
+    /// Puts the controller in a given state without opening any window, for the contract's
+    /// pictures and the behaviour tests. Debug builds only.
     func setStateForTesting(
         session: SessionStore.Session?,
         drafts: [Draft] = [],
         mode: SessionFlow.Mode = .open(SessionFlow.Open()),
         hover: Picked? = nil,
-        composer: Composer? = nil,
+        pending: Pending? = nil,
         previewID: Draft.ID? = nil,
         source: RecordingSource? = nil,
         isHUDInBrowser: Bool = false,
@@ -1299,7 +1267,7 @@ extension AnnotationController {
         flow = SessionFlow(mode: mode)
         flow.choosesInPicker = choosesInPicker
         self.hover = hover
-        commentBox.setStateForTesting(composer: composer)
+        commentBox.setStateForTesting(pending: pending)
         previewCard.setStateForTesting(id: previewID)
         scope.setStateForTesting(source: source)
         hud.setStateForTesting(isInBrowser: isHUDInBrowser)

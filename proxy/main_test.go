@@ -326,7 +326,6 @@ func TestANewSocketAtThePathIsADrop(t *testing.T) {
 	}
 }
 
-// A socket that is gone is a drop too.
 func TestAMissingSocketIsADrop(t *testing.T) {
 	set(t, &watchEvery, 50*time.Millisecond)
 	socket := shortSocket(t)

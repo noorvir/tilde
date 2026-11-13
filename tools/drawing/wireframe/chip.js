@@ -1,12 +1,11 @@
-// Editing a component after it is drawn. Over one, it shows as selected: a drag anywhere on it
-// moves it (a section only by its chip: a drag on a section draws in it), ⌥ and a drag moves a
-// copy, and a double-click edits its label. A chip just below it moves it too: a click on its
-// name changes the kind, its Borders button opens the borders, its Comment button its comment,
-// its other controls set the rows and columns of a table or list or the fill of a rectangle or
-// ellipse, and × deletes it. A
-// handle at each corner resizes it, and its opposite corner stays; a grip at the middle of its
-// top edge moves it. Moves and resizes snap. Only components not sent yet can change; each
-// change can be undone.
+// Editing a component after it is drawn. Over one, it shows as selected: with no tool a drag
+// anywhere on it moves it (with a tool a drag draws in it, and its chip or grip moves it), ⌥ and
+// a drag moves a copy, and a double-click edits its label. A chip just below it moves it too:
+// a click on its name changes the kind, its Borders button opens the borders, its Comment
+// button its comment, its other controls set the rows and columns of a table or list or the
+// fill of a rectangle or ellipse, and × deletes it. A handle at each corner resizes it, and
+// its opposite corner stays; a grip at the middle of its top edge moves it. Moves and resizes
+// snap. Only components not sent yet can change; each change can be undone.
 
 import { editing } from "../draw-mode.js";
 import { commentBox } from "./comment.js";

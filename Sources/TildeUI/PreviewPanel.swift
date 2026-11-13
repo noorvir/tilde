@@ -26,7 +26,7 @@ final class PreviewPanel {
     /// The frame when a drag of the corner grip began.
     private var resizeStart: NSRect?
 
-    init(controller: AnnotationController, defaults: UserDefaults = .standard) {
+    init(controller: AnnotationController, defaults: UserDefaults) {
         self.defaults = defaults
         let panel = KeyPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: true)
         panel.onKey = { [unowned panel] event in

@@ -4,7 +4,7 @@
 #   scripts/ui-check.sh [--record] [name filter]
 set -eu
 cd "$(dirname "$0")/.."
-# The owner's builds make warnings errors; see Package.swift.
+# Warnings are errors in this build; see Package.swift.
 export TILDE_STRICT=1
 swift build --product tilde-state >/dev/null
 # The checker compares every pixel; a debug build of it takes most of the time.

@@ -930,5 +930,4 @@ struct WireframeCanvasTests {
     private static let chip = "#tilde-chip"
     private static let bordersButton = "#tilde-chip [data-menu=\"borders\"]"
     private static let resizer = "[data-corner=\"se\"]"
-    private static let grip = "#tilde-grip"
 }

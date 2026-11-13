@@ -21,7 +21,7 @@ extension AnnotationController {
 
     func mouseMoved(to point: CGPoint) {
         // In wireframe mode nothing behind the components is highlighted.
-        guard commentBox.composer == nil, previewCard.id == nil, !isWireframe else {
+        guard commentBox.pending == nil, previewCard.id == nil, !isWireframe else {
             return
         }
         hoverPicker.pointerMoved(isOverPanel: isOverPanel(point))
@@ -83,7 +83,7 @@ extension AnnotationController {
         guard allows(point) else {
             return
         }
-        if commentBox.composer != nil {
+        if commentBox.pending != nil {
             dispatch(.clickAway)
             return
         }
@@ -96,6 +96,31 @@ extension AnnotationController {
             if let picked {
                 openComposer(NewNote(picked, at: point))
             }
+        }
+    }
+
+    func dragEnded(with rect: CGRect) {
+        if previewCard.id != nil {
+            dispatch(.closePreview)
+            return
+        }
+        // While choosing, only a click chooses.
+        if isPickingWindow {
+            return
+        }
+        guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
+            return
+        }
+        if commentBox.pending != nil {
+            dispatch(.clickAway)
+            return
+        }
+        let marker = CGPoint(x: rect.maxX, y: rect.minY)
+        let window = scope.window ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
+        let isOverBrowser = window?.number == browser.windowNumber
+        Task {
+            let anchor = isOverBrowser ? await browser.regionAnchor(for: rect) : nil
+            openComposer(NewNote(target: .region, frame: rect, marker: marker, chip: "Region", window: window, anchor: anchor))
         }
     }
 
@@ -132,30 +157,5 @@ extension AnnotationController {
         }
         preview(id)
         return true
-    }
-
-    func dragEnded(with rect: CGRect) {
-        if previewCard.id != nil {
-            dispatch(.closePreview)
-            return
-        }
-        // While choosing, only a click chooses.
-        if isPickingWindow {
-            return
-        }
-        guard let rect = SessionScope.clamped(rect, scope: scope.window?.frame) else {
-            return
-        }
-        if commentBox.composer != nil {
-            dispatch(.clickAway)
-            return
-        }
-        let marker = CGPoint(x: rect.maxX, y: rect.minY)
-        let window = scope.window ?? picker.window(at: CGPoint(x: rect.midX, y: rect.midY))
-        let isOverBrowser = window?.number == browser.windowNumber
-        Task {
-            let anchor = isOverBrowser ? await browser.regionAnchor(for: rect) : nil
-            openComposer(NewNote(target: .region, frame: rect, marker: marker, chip: "Region", window: window, anchor: anchor))
-        }
     }
 }

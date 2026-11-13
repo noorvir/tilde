@@ -291,10 +291,7 @@ struct WireframeLookTests {
 
     /// The look is the default until Settings change it; a value out of its range is kept to it.
     @Test func theSavedLookStaysInItsRanges() throws {
-        let name = "WireframeLookTests"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        defaults.removePersistentDomain(forName: name)
-        defer { defaults.removePersistentDomain(forName: name) }
+        let defaults = MemoryDefaults()
         #expect(WireframeLook.saved(in: defaults) == WireframeLook())
 
         defaults.set("hatched", forKey: WireframeLook.Key.style)

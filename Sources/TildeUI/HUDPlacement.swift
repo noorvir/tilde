@@ -75,7 +75,6 @@ final class HUDPlacement: ObservableObject {
         }
     }
 
-    /// The HUD goes from the screen.
     func hide() {
         isInBrowser = false
         panel.hide()

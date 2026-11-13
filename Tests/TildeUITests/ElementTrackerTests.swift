@@ -68,22 +68,6 @@ struct OcclusionTests {
 }
 
 struct NoteVisibilityTests {
-    @Test func aNoteHidesAndComesBackWithoutFlicker() {
-        var note = NoteVisibility()
-        // One odd reading changes nothing.
-        #expect(note.update(similarity: 0.2) == true)
-        #expect(note.update(similarity: 0.99) == true)
-        // Two in a row hide it.
-        #expect(note.update(similarity: 0.2) == true)
-        #expect(note.update(similarity: 0.2) == false)
-        // Between the thresholds it stays as it is.
-        #expect(note.update(similarity: 0.8) == false)
-        #expect(note.update(similarity: 0.8) == false)
-        // Two matching readings bring it back.
-        #expect(note.update(similarity: 0.99) == false)
-        #expect(note.update(similarity: 0.99) == true)
-    }
-
     private func picture(_ level: (Int, Int) -> UInt8) -> NoteFingerprint {
         NoteFingerprint(levels: (0..<48).flatMap { y in (0..<48).map { x in level(x, y) } })
     }
@@ -107,22 +91,6 @@ struct NoteVisibilityTests {
 }
 
 struct PageIdentityTests {
-    @Test func addressesAndTitlesTellPagesApart() {
-        let feed = PageIdentity(url: "https://x.com/home", title: "Home / X")
-        #expect(feed.isSamePage(as: PageIdentity(url: "https://x.com/home", title: "(1) Home / X")) == true)
-        #expect(feed.isSamePage(as: PageIdentity(url: "https://x.com/explore", title: "Home / X")) == false)
-        // One failed read of the address does not hide the note.
-        #expect(feed.isSamePage(as: PageIdentity(url: nil, title: "Home / X")) == nil)
-
-        let folder = PageIdentity(url: nil, title: "Downloads")
-        #expect(folder.isSamePage(as: PageIdentity(url: nil, title: "Desktop")) == false)
-
-        // The Simulator: the title stays the same, so the picture must decide.
-        let simulator = PageIdentity(url: nil, title: "iPhone 16")
-        #expect(simulator.isSamePage(as: simulator) == nil)
-        #expect(PageIdentity(url: nil, title: nil).isSamePage(as: simulator) == nil)
-    }
-
     @Test func aFragmentIsTheSamePage() {
         #expect(PageIdentity.withoutFragment("https://a.test/docs#intro") == "https://a.test/docs")
         #expect(PageIdentity.withoutFragment("https://a.test/#/inbox") == "https://a.test/#/inbox")

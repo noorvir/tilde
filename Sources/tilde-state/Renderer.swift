@@ -34,7 +34,7 @@ enum Renderer {
         context.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
 
         if let layer = view.layer {
-            // Layers draw with a top-left origin here, like the e2e renderer.
+            // Layers draw with a top-left origin here.
             context.translateBy(x: 0, y: size.height)
             context.scaleBy(x: 1, y: -1)
             layer.render(in: context)

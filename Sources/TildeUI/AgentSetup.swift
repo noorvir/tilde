@@ -113,7 +113,7 @@ final class AgentSetup: ObservableObject {
     }
 
     /// The icon of the agent that the HUD and History name as the client, such as "Codex":
-    /// the same as its row on the Agents page (Codex shows the ChatGPT app's icon).
+    /// the same as its row on the Home page of Settings (Codex shows the ChatGPT app's icon).
     func icon(forClient name: String) -> NSImage? {
         let harnesses: [String: Harness] = [
             "Claude": .claudeCode, "Claude Code": .claudeCode, "Codex": .codex, "Cursor": .cursor,

@@ -51,11 +51,11 @@ struct PageIdentity: Equatable, Sendable, Codable {
         if askedApps.withLock({ $0.insert(pid).inserted }) {
             AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         }
-        let windows: [AXUIElement] = attribute(app, kAXWindowsAttribute) ?? []
-        guard let window = windows.first(where: { frame(of: $0).map { $0.insetBy(dx: -2, dy: -2).contains(windowFrame.insetBy(dx: 2, dy: 2)) } ?? false }) else {
+        let windows: [AXUIElement] = app.attribute(kAXWindowsAttribute) ?? []
+        guard let window = windows.first(where: { $0.frame.map { $0.insetBy(dx: -2, dy: -2).contains(windowFrame.insetBy(dx: 2, dy: 2)) } ?? false }) else {
             return nil
         }
-        let title: String? = attribute(window, kAXTitleAttribute)
+        let title: String? = window.attribute(kAXTitleAttribute)
         return PageIdentity(url: webAddress(in: window), title: title)
     }
 
@@ -66,16 +66,16 @@ struct PageIdentity: Equatable, Sendable, Codable {
         while !queue.isEmpty, visited < 600 {
             let element = queue.removeFirst()
             visited += 1
-            let role: String? = attribute(element, kAXRoleAttribute)
+            let role: String? = element.attribute(kAXRoleAttribute)
             if role == "AXWebArea" {
-                if let url: URL = attribute(element, "AXURL") {
+                if let url: URL = element.attribute("AXURL") {
                     return withoutFragment(url.absoluteString)
                 }
-                if let text: String = attribute(element, "AXURL") {
+                if let text: String = element.attribute("AXURL") {
                     return withoutFragment(text)
                 }
             }
-            let children: [AXUIElement] = attribute(element, kAXChildrenAttribute) ?? []
+            let children: [AXUIElement] = element.attribute(kAXChildrenAttribute) ?? []
             queue.append(contentsOf: children)
         }
         return nil
@@ -88,29 +88,5 @@ struct PageIdentity: Equatable, Sendable, Codable {
         }
         let fragment = address[address.index(after: hash)...]
         return fragment.hasPrefix("/") || fragment.hasPrefix("!") ? address : String(address[..<hash])
-    }
-
-    private static func frame(of element: AXUIElement) -> CGRect? {
-        guard let position: AXValue = attribute(element, kAXPositionAttribute),
-              let size: AXValue = attribute(element, kAXSizeAttribute)
-        else {
-            return nil
-        }
-        var point = CGPoint.zero
-        var extent = CGSize.zero
-        AXValueGetValue(position, .cgPoint, &point)
-        AXValueGetValue(size, .cgSize, &extent)
-        return CGRect(origin: point, size: extent)
-    }
-
-    private static func attribute<T>(_ element: AXUIElement, _ name: String) -> T? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success, let value else {
-            return nil
-        }
-        if T.self == AXValue.self, CFGetTypeID(value) == AXValueGetTypeID() {
-            return (value as! T)
-        }
-        return value as? T
     }
 }

@@ -4,7 +4,7 @@ import Foundation
 import TildeInstaller
 import Testing
 
-/// "Copy setup" on the Agents page.
+/// "Copy setup" on the Home page of Settings.
 @MainActor
 struct AgentSetupTests {
     /// The copied setups work: the HTTP ones hold the token that the local listener asks for,

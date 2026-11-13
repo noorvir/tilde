@@ -198,20 +198,20 @@ final class ElementPicker {
         // Chromium and WebKit answer with the whole page at first and find the element
         // meanwhile. A click must get the element; a moving pointer asks again anyway.
         for _ in 0..<(isMoving ? 0 : 4) {
-            guard let found = hit, let role: String = attribute(found, kAXRoleAttribute), ["AXScrollArea", "AXWebArea"].contains(role) else {
+            guard let found = hit, let role: String = found.attribute(kAXRoleAttribute), ["AXScrollArea", "AXWebArea"].contains(role) else {
                 break
             }
             Thread.sleep(forTimeInterval: 0.06)
             AXUIElementCopyElementAtPosition(app, Float(point.x), Float(point.y), &hit)
         }
         guard let element = hit,
-              let frame = frame(of: element),
+              let frame = element.frame,
               frame.width >= 1, frame.height >= 1
         else {
             return nil
         }
 
-        let role: String = attribute(element, kAXRoleAttribute) ?? "AXUnknown"
+        let role: String = element.attribute(kAXRoleAttribute) ?? "AXUnknown"
         let roleDescription = text(element, kAXRoleDescriptionAttribute)
         let title = text(element, kAXTitleAttribute)
         let label = text(element, kAXDescriptionAttribute)
@@ -244,16 +244,8 @@ final class ElementPicker {
         return Picked(frame: frame, element: .native(native), chip: chip, details: details, tracked: tracked)
     }
 
-    nonisolated private static func attribute<T>(_ element: AXUIElement, _ name: String) -> T? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else {
-            return nil
-        }
-        return value as? T
-    }
-
     nonisolated private static func text(_ element: AXUIElement, _ name: String) -> String? {
-        clipped(attribute(element, name), to: 200)
+        clipped(element.attribute(name), to: 200)
     }
 
     /// Trimmed text, cut to `limit` characters with an ellipsis; nil when empty.
@@ -271,34 +263,9 @@ final class ElementPicker {
         NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
     }
 
-    nonisolated private static func frame(of element: AXUIElement) -> CGRect? {
-        guard let position: AXValue = axValue(element, kAXPositionAttribute),
-              let size: AXValue = axValue(element, kAXSizeAttribute)
-        else {
-            return nil
-        }
-
-        var origin = CGPoint.zero
-        var extent = CGSize.zero
-        guard AXValueGetValue(position, .cgPoint, &origin), AXValueGetValue(size, .cgSize, &extent) else {
-            return nil
-        }
-        return CGRect(origin: origin, size: extent)
-    }
-
-    nonisolated private static func axValue(_ element: AXUIElement, _ name: String) -> AXValue? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXValueGetTypeID()
-        else {
-            return nil
-        }
-        return (value as! AXValue)
-    }
-
     /// Browsers expose the DOM id and classes of web content as Accessibility attributes.
     nonisolated private static func domIdentifier(_ element: AXUIElement) -> String? {
-        selector(id: text(element, "AXDOMIdentifier"), classes: attribute(element, "AXDOMClassList") ?? [])
+        selector(id: text(element, "AXDOMIdentifier"), classes: element.attribute("AXDOMClassList") ?? [])
     }
 
     nonisolated private static func selector(id: String?, classes: [String]) -> String? {

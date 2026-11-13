@@ -260,37 +260,6 @@ struct SetupItemRow: View {
     }
 }
 
-/// A path on one line in grey: truncated in the middle, in full as a tooltip. A click shows the
-/// file in Finder; under the pointer the path gets an underline and a hand.
-struct PathText: View {
-    let path: String
-    let url: URL
-    @State private var isHovered = false
-
-    var body: some View {
-        Button {
-            revealInFinder(url)
-        } label: {
-            Text(path)
-                .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
-                .underline(isHovered)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .buttonStyle(.plain)
-        .help("\(path)\nClick to show in Finder")
-        .onHover { hovering in
-            isHovered = hovering
-            if hovering {
-                NSCursor.pointingHand.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
-    }
-}
-
 /// Green: installed. Red: error. Grey: not installed.
 struct StatusDot: View {
     let status: InstallStatus
@@ -323,8 +292,8 @@ extension InstallStatus {
 }
 
 /// A path with the home folder as `~`.
-func tildePath(_ url: URL, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String {
-    let home = home.path
+func tildePath(_ url: URL) -> String {
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
     let path = url.path
     return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
 }

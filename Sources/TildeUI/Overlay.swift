@@ -288,7 +288,7 @@ final class OverlayView: NSView {
         drawnHighlight = highlightRegion
 
         // Page notes show their comment already.
-        if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.commentBox.composer == nil,
+        if let id = hoveredMarker, let draft = controller.drafts.first(where: { $0.id == id }), controller.commentBox.pending == nil,
            !controller.tracker.pageNotes.contains(where: { $0.draft.id == id })
         {
             if let marker = controller.tracker.marker(of: draft) {

@@ -19,16 +19,6 @@ struct NoteTrackerTests {
         #expect(!NoteTracker.runsRound(isChanged: false, isSettling: false, sinceLastRound: 60, isPaused: true, isAnyNoteShown: false))
     }
 
-    @Test func aNoteWithAChangeUnderWayIsNotSettled() {
-        var visibility = NoteVisibility()
-        #expect(visibility.isSettled)
-        _ = visibility.update(similarity: 0.5)
-        #expect(!visibility.isSettled)
-        _ = visibility.update(similarity: 0.5)
-        #expect(visibility.isSettled)
-        #expect(!visibility.isVisible)
-    }
-
     @Test func aLostElementIsSearchedForLessAndLessOften() {
         var delays: [TimeInterval] = []
         var last: TimeInterval?

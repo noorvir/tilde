@@ -42,14 +42,6 @@ enum Shortcut: Codable, Equatable {
         caps.joined()
     }
 
-    /// "⌃⌥A" or "⌃ twice", for tight spaces.
-    var shortTitle: String {
-        switch self {
-        case .keys(let combo): combo.title
-        case .doubleTap(let key): "\(key.symbol) twice"
-        }
-    }
-
     private enum CodingKeys: String, CodingKey {
         case doubleTap
     }
@@ -292,9 +284,10 @@ final class ShortcutStore: ObservableObject {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults) {
         self.defaults = defaults
-        holdKey = DoubleTapKey(rawValue: defaults.string(forKey: "Shortcut.holdKey") ?? DoubleTapKey.option.rawValue)
+        // Not through `holdKey`, whose observer would save the key at each launch.
+        _holdKey = Published(initialValue: DoubleTapKey(rawValue: defaults.string(forKey: "Shortcut.holdKey") ?? DoubleTapKey.option.rawValue))
         for action in Action.allCases {
             shortcuts[action] = Self.load(action, from: defaults)
         }

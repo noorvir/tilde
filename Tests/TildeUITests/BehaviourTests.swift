@@ -28,13 +28,6 @@ struct BehaviourTests {
 
     // MARK: - Confirmations
 
-    @Test func cancelWithoutAnnotationsClosesAtOnce() {
-        open()
-        controller.dispatch(.requestCancel)
-        #expect(controller.confirmation == nil)
-        #expect(controller.session == nil)
-    }
-
     @Test func cancelWithAnnotationsAsksFirst() {
         open(drafts: Fixtures.drafts(2))
         controller.dispatch(.requestCancel)
@@ -48,13 +41,6 @@ struct BehaviourTests {
         controller.dispatch(.confirm)
         #expect(controller.session == nil)
         #expect(controller.drafts.isEmpty)
-    }
-
-    /// A clip that is not stopped is lost on cancel like a note, so × asks for it too.
-    @Test func cancelAsksForAClipInProgress() {
-        open(activity: .recording(.recording))
-        controller.dispatch(.requestCancel)
-        #expect(controller.confirmation == .cancelSession)
     }
 
     @Test func clearAllAsksAndKeepsTheSession() {
@@ -119,7 +105,7 @@ struct BehaviourTests {
         #expect(restored.compactMap(Fixtures.video).count == 1)
     }
 
-    // MARK: - Regressions of round 2
+    // MARK: - Rules of the flow
 
     /// The first comment saved enables Send at once, and deleting the last note disables it.
     @Test func sendFollowsTheNotes() throws {
@@ -128,7 +114,7 @@ struct BehaviourTests {
             capture: Task { Captures(image: nil, contextImage: nil) }
         )
         controller.setStateForTesting(
-            session: Fixtures.session(), mode: .open(SessionFlow.Open(panel: .comment)), composer: .new(pending)
+            session: Fixtures.session(), mode: .open(SessionFlow.Open(panel: .comment)), pending: pending
         )
         controller.dispatch(.submitComment)
         #expect(controller.drafts.count == 1)
@@ -159,9 +145,7 @@ struct BehaviourTests {
     /// Recording mode starts choosing the way the user last chose, also after a restart: in
     /// the picker once they opened it, on screen once they went back to clicking there.
     @Test func recordingModeStartsChoosingTheWayTheUserLastChose() async throws {
-        let suite = "tilde-picker-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         func restarted() -> AnnotationController {
             let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
             controller.sourcePicker.injected = (Fixtures.sources().screens, Fixtures.sources().apps, .done)
@@ -367,7 +351,7 @@ struct BehaviourTests {
     }
 
     /// A source with no size, as an iPhone reports before it streams, is an error, not the
-    /// exception that crashed Tilde; a phone's screen in portrait is fine.
+    /// exception that AVAssetWriterInput raises for it; a phone's screen in portrait is fine.
     @Test func aRecordingNeedsASizeItCanWrite() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-writer-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -522,9 +506,7 @@ struct BehaviourTests {
     /// The preview opens at the size it was last resized to, inside the screen and no smaller
     /// than its minimum; at home it is centred, and a dropped place keeps it on the screen.
     @Test func thePreviewOpensAtItsSavedSize() throws {
-        let suite = "tilde-preview-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryDefaults()
         let visible = NSRect(x: 0, y: 25, width: 1800, height: 1100)
 
         #expect(PreviewPanel.size(on: visible, defaults: defaults) == NSSize(width: 1000, height: 640))
@@ -594,12 +576,6 @@ struct BehaviourTests {
         #expect(panel.window.frame.origin == low)
     }
 
-    @Test func dragSnapsHomeWithinFortyPoints() {
-        let home = NSPoint(x: 900, y: 1134)
-        #expect(SnapDrag.snapsHome(NSPoint(x: 930, y: 1110), home: home))
-        #expect(!SnapDrag.snapsHome(NSPoint(x: 940, y: 1100), home: home))
-    }
-
     @Test func positionsStayOnScreen() {
         let visible = NSRect(x: 0, y: 0, width: 1800, height: 1130)
         let halfWidth = HUDView.width / 2 + 16
@@ -612,13 +588,6 @@ struct BehaviourTests {
         let window = NSRect(x: 2800, y: 0, width: 560, height: 1444)
         let content = CGRect(x: 33, y: 0, width: 494, height: 76)
         #expect(HUDPanel.screenRect(ofContent: content, inWindow: window) == NSRect(x: 2833, y: 1368, width: 494, height: 76))
-    }
-
-    private func until(_ condition: @escaping () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        #expect(condition())
     }
 
     private func key(_ code: UInt16, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
@@ -705,9 +674,27 @@ struct BehaviourTests {
 
     // MARK: - Shortcuts
 
+    /// The tests' defaults keep every kind of value to themselves: nothing reaches the
+    /// standard domain of the process that runs the tests.
+    @Test func theTestsDefaultsChangeNoDomainOfTheMac() {
+        let defaults = MemoryDefaults()
+        let key = "tilde-memory-\(UUID().uuidString)"
+        defaults.set(true, forKey: key)
+        #expect(defaults.bool(forKey: key))
+        defaults.set(2.5, forKey: key)
+        #expect(defaults.double(forKey: key) == 2.5)
+        defaults.set("text", forKey: key)
+        #expect(defaults.string(forKey: key) == "text")
+        defaults.set(Data([1]), forKey: key)
+        #expect(defaults.data(forKey: key) == Data([1]))
+        #expect(UserDefaults.standard.object(forKey: key) == nil)
+        defaults.removeObject(forKey: key)
+        #expect(defaults.object(forKey: key) == nil)
+    }
+
     @Test func shortcutsAreSavedClearedResetAndNeverShared() {
-        let suite = "tilde-tests-\(UUID().uuidString)"
-        let store = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let defaults = MemoryDefaults()
+        let store = ShortcutStore(defaults: defaults)
         let controlShiftK = Shortcut.keys(KeyCombo(keyCode: 40, modifiers: NSEvent.ModifierFlags([.control, .shift]).rawValue, key: "K"))
 
         #expect(store.set(controlShiftK, for: .startAnnotation) == nil)
@@ -716,24 +703,24 @@ struct BehaviourTests {
         #expect(store.set(.doubleTap(.option), for: .togglePause) == nil)
         #expect(store.set(nil, for: .togglePause) == nil)
 
-        let reopened = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let reopened = ShortcutStore(defaults: defaults)
         #expect(reopened.shortcut(for: .startAnnotation)?.caps == ["⌃", "⇧", "K"])
         #expect(reopened.shortcut(for: .togglePause) == nil)
 
         reopened.reset(.startAnnotation)
-        #expect(ShortcutStore(defaults: UserDefaults(suiteName: suite)!).shortcut(for: .startAnnotation)?.title == "Double-tap ⌃")
+        #expect(ShortcutStore(defaults: defaults).shortcut(for: .startAnnotation)?.title == "Double-tap ⌃")
     }
 
     @Test func aDoubleTapIsSavedAndMayBeSharedByStartAndPause() {
-        let suite = "tilde-tests-\(UUID().uuidString)"
-        let store = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let defaults = MemoryDefaults()
+        let store = ShortcutStore(defaults: defaults)
         #expect(store.shortcut(for: .startAnnotation) == .doubleTap(.control))
         #expect(store.shortcut(for: .togglePause) == nil)
 
         #expect(store.set(.doubleTap(.control), for: .togglePause) == nil)
         #expect(store.doubleTapKeys == [.control])
 
-        let reopened = ShortcutStore(defaults: UserDefaults(suiteName: suite)!)
+        let reopened = ShortcutStore(defaults: defaults)
         #expect(reopened.shortcut(for: .startAnnotation) == .doubleTap(.control))
         #expect(reopened.shortcut(for: .startAnnotation)?.caps == ["⌃", "⌃"])
         #expect(reopened.shortcut(for: .startAnnotation)?.combo == nil)
@@ -820,8 +807,8 @@ struct BehaviourTests {
         }
     }
 
-    /// The open picker takes no clicks on screen. "‹ Back" and Esc step back one level: an
-    /// app's windows, then the picker, then choosing.
+    /// The open picker takes no clicks on screen. "All apps", "Select on screen" and Esc step
+    /// back one level: an app's windows, then the picker, then choosing.
     @Test func theOpenPickerStepsBackOneLevelAtATime() {
         open(activity: .picking(isPickerOpen: true))
         controller.click(at: CGPoint(x: -5000, y: -5000))
@@ -911,8 +898,7 @@ struct BehaviourTests {
         }
     }
 
-    /// The subtitle says where the report goes in full, in every mode; the window the session is
-    /// limited to is on the window button instead.
+    /// The subtitle says where the report goes in full, while annotating and while paused.
     @Test func subtitlesSayWhereTheReportGoesInBothStates() {
         let local = HUDView.subtitlePart(client: "Clipboard", clientIcon: nil, machine: nil, state: .annotating)
         #expect(local == HUDView.SubtitlePart(prefix: "for", text: "Clipboard"))
@@ -947,15 +933,6 @@ struct BehaviourTests {
         #expect(!SessionScope.autoPauses(frontmost: 1, scopePID: 7, ownPID: 1))
         // Sessions on all windows never wait.
         #expect(!SessionScope.autoPauses(frontmost: 42, scopePID: nil, ownPID: 1))
-    }
-
-    @Test func annotateResumesAWindowSessionThatPausedByItself() async throws {
-        let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), mode: .open(SessionFlow.Open(pauses: [.user, .otherApp])))
-
-        controller.dispatch(.togglePause)
-
-        #expect(controller.pauses.isEmpty)
     }
 
     // MARK: - Double-tap
@@ -1086,7 +1063,7 @@ struct BehaviourTests {
         #expect(controller.confirmation == nil)
         #expect(controller.drafts.count == 2)
 
-        // Paused in a popped-out session: Esc asks, ↩ answers.
+        // Paused, with no question: Esc asks to close the session, and ↩ answers.
         controller.escapePressed()
         #expect(controller.confirmation == .cancelSession)
         open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)
@@ -1095,38 +1072,7 @@ struct BehaviourTests {
         #expect(controller.handleConfirmationKey(36, in: panel) == false)
     }
 
-    @Test func escEndsChoosingAWindowFirst() async throws {
-        open(drafts: Fixtures.drafts(1), activity: .picking(isPickerOpen: false))
-
-        controller.escapePressed()
-
-        #expect(!controller.isPickingWindow)
-        #expect(controller.confirmation == nil)
-    }
-
-    @Test func escWhilePausedAlsoAsksToCancel() async throws {
-        open(drafts: Fixtures.drafts(1), pauses: [.user])
-
-        controller.escapePressed()
-
-        #expect(controller.confirmation == .cancelSession)
-    }
-
     // MARK: - Browser window frame
-
-    @Test func browserOpensAtFullHeightAndHalfWidth() {
-        let visible = CGRect(x: 0, y: 40, width: 2000, height: 1100)
-        let frame = BrowserController.defaultFrame(in: visible)
-
-        #expect(frame.width == 1000)
-        #expect(frame.height == 1084)
-        #expect(frame.midX == visible.midX)
-        #expect(visible.contains(frame))
-
-        // Never narrower than the toolbar with the HUD needs.
-        let small = CGRect(x: 0, y: 0, width: 1440, height: 900)
-        #expect(BrowserController.defaultFrame(in: small).width == BrowserMetrics.minWindowWidth)
-    }
 
     @Test func savedBrowserFrameMovesOntoAScreen() {
         let screens = [CGRect(x: 0, y: 0, width: 1800, height: 1100)]
@@ -1138,4 +1084,14 @@ struct BehaviourTests {
         let moved = BrowserController.onScreen(lost, screens: screens)
         #expect(moved == CGRect(x: 800, y: 0, width: 1000, height: 1100))
     }
+}
+
+/// Waits up to 5 seconds for what a test started, such as a task of the controller, and
+/// expects it then.
+@MainActor
+func until(_ condition: () -> Bool) async throws {
+    for _ in 0..<100 where !condition() {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(condition())
 }

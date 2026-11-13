@@ -6,7 +6,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-# The owner's builds make warnings errors; see Package.swift.
+# Warnings are errors in this build; see Package.swift.
 export TILDE_STRICT=1
 sessions="$HOME/Library/Application Support/Tilde/Sessions"
 filter="${1:-TildeUXTests}"

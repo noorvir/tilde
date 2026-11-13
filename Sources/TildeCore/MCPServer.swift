@@ -493,10 +493,9 @@ public final class MCPServer {
         return Client(name: caller.userAgent.flatMap(Self.knownName(forClient:)) ?? "Agent", node: caller.node)
     }
 
-    /// The app name for an MCP `clientInfo.name`. The HUD shows it with that app's icon, so
-    /// the names match the agent apps that Tilde installs into.
-    /// The harness's display name for an MCP clientInfo name, such as "Codex" for
-    /// "codex-mcp-client" or "rmcp" (the Rust MCP library that Codex uses).
+    /// The harness's display name for an MCP `clientInfo.name`, such as "Codex" for
+    /// "codex-mcp-client" or "rmcp" (the Rust MCP library that Codex uses). The HUD shows it
+    /// with that app's icon, so the names match the agent apps that Tilde installs into.
     nonisolated static func displayName(forClient name: String) -> String {
         knownName(forClient: name) ?? name
     }

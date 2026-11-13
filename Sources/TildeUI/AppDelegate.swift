@@ -3,7 +3,7 @@ import TildeInstaller
 import AppKit
 import Combine
 
-/// Status of the local MCP endpoint, shown in the menu.
+/// Status of the local MCP endpoint, shown in Settings.
 @MainActor
 final class ServerState {
     let port: UInt16
@@ -18,7 +18,7 @@ final class ServerState {
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = SessionStore()
     private let browser = BrowserController()
-    private lazy var controller = AnnotationController(store: store, browser: browser)
+    private lazy var controller = AnnotationController(store: store, browser: browser, archive: SessionArchive(), defaults: .standard)
 
     private var mcp: MCPServer?
     private var server: HTTPServer?
@@ -136,11 +136,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = MainMenu.make(browser: browser, settings: settings)
         browserEvents = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .keyDown]) { [browser] event in
             browser.handle(event) ? nil : event
-        }
-        if let folder = UserDefaults.standard.string(forKey: "captureSettings") {
-            Task {
-                await SettingsCapture.run(settings, model: model, browser: self.browser, to: URL(fileURLWithPath: (folder as NSString).expandingTildeInPath))
-            }
         }
         startServer()
         setup.nodes.startLinks()

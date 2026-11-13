@@ -20,7 +20,7 @@ final class WindowObserver {
         if let own {
             return own.frame.flipped
         }
-        return element.flatMap(Self.frame(of:))
+        return element?.frame
     }
 
     init?(window: ElementPicker.WindowInfo, onChange: @escaping (CGRect?) -> Void) {
@@ -53,7 +53,7 @@ final class WindowObserver {
             }
             let observer = Unmanaged<WindowObserver>.fromOpaque(context).takeUnretainedValue()
             let moved = [kAXMovedNotification, kAXResizedNotification].contains(notification as String)
-            let frame = moved ? WindowObserver.frame(of: element) : nil
+            let frame = moved ? element.frame : nil
             MainActor.assumeIsolated { observer.onChange(frame) }
         }
         guard AXObserverCreate(window.pid, callback, &observer) == .success, let observer else {
@@ -91,22 +91,7 @@ final class WindowObserver {
             return nil
         }
         return windows.first { candidate in
-            frame(of: candidate).map { abs($0.minX - window.frame.minX) < 2 && abs($0.minY - window.frame.minY) < 2 && abs($0.width - window.frame.width) < 2 } ?? false
+            candidate.frame.map { abs($0.minX - window.frame.minX) < 2 && abs($0.minY - window.frame.minY) < 2 && abs($0.width - window.frame.width) < 2 } ?? false
         }
-    }
-
-    nonisolated private static func frame(of element: AXUIElement) -> CGRect? {
-        var position: CFTypeRef?
-        var size: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
-              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success
-        else {
-            return nil
-        }
-        var point = CGPoint.zero
-        var extent = CGSize.zero
-        AXValueGetValue(position as! AXValue, .cgPoint, &point)
-        AXValueGetValue(size as! AXValue, .cgSize, &extent)
-        return CGRect(origin: point, size: extent)
     }
 }
