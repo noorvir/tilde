@@ -302,6 +302,26 @@ struct WireframeTests {
         #expect(defaults.string(forKey: "LastMode") == "annotating")
     }
 
+    /// The sessions in a row that used neither Draw nor Wireframe are counted, for the choice
+    /// to load the canvas ahead; a session that used one starts the count again.
+    @Test func sessionsWithoutACanvasAreCounted() throws {
+        let defaults = MemoryDefaults()
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
+        for count in 1...2 {
+            controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
+            controller.dispatch(.requestCancel)
+            #expect(controller.session == nil)
+            #expect(defaults.integer(forKey: "SessionsWithoutCanvas") == count)
+        }
+
+        controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
+        // The canvas's window is not opened here.
+        controller.dispatch(.startDrawing, with: [.showCanvas: {}])
+        controller.dispatch(.requestCancel)
+        #expect(controller.session == nil)
+        #expect(defaults.integer(forKey: "SessionsWithoutCanvas") == 0)
+    }
+
     /// The tool chosen last stays: after Esc put it down and the mode started again, and in
     /// the next session, from the defaults.
     @Test func wireframeModeStartsWithTheToolChosenLast() throws {
