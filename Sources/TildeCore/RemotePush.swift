@@ -134,7 +134,9 @@ public enum RemotePush {
         }
     }
 
-    private static func run(_ tool: String, _ arguments: [String], input: String? = nil) throws -> String {
+    /// Runs a tool to its end with `input` as its standard input, and returns what it printed.
+    /// Throws its error text when it fails.
+    static func run(_ tool: String, _ arguments: [String], input: String? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
@@ -148,8 +150,13 @@ public enum RemotePush {
         process.standardInput = input == nil ? FileHandle.nullDevice : inputPipe
         try process.run()
         if let input {
-            inputPipe.fileHandleForWriting.write(Data(input.utf8))
-            try inputPipe.fileHandleForWriting.close()
+            // A tool that ends before it has read all of its input, such as ssh when the
+            // connection drops, closes the pipe. The write then fails with an error, not with
+            // the signal that would end Tilde; the tool's exit status tells what went wrong.
+            let writer = inputPipe.fileHandleForWriting
+            _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
+            try? writer.write(contentsOf: Data(input.utf8))
+            try? writer.close()
         }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()

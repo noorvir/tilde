@@ -14,6 +14,16 @@ struct RemoteReportTests {
         #expect(!text.contains("/Users/a"))
     }
 
+    /// A tool that ends before it has read its input, as ssh does when the connection drops
+    /// while a config goes to a machine, gives its result: the write to it ends no process.
+    @Test func aToolThatReadsNoInputEndsWithItsResult() throws {
+        let input = String(repeating: "x", count: 1 << 20)
+        #expect(try RemotePush.run("/usr/bin/true", [], input: input) == "")
+        #expect(throws: RemotePush.Failure.self) {
+            try RemotePush.run("/usr/bin/false", [], input: input)
+        }
+    }
+
     @Test func aFolderOutsideTheHomeHasNoHomeRelativePath() {
         #expect(homeRelativePath(URL(fileURLWithPath: "/tmp/x"), home: URL(fileURLWithPath: "/Users/a")) == nil)
     }
