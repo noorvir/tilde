@@ -499,7 +499,9 @@ final class AnnotationController: ObservableObject {
         hud.showsList = false
         scope.reset()
         PageIdentity.askAppsToDescribeWebContent()
-        drawing.panel.prepare()
+        if usesCanvas {
+            drawing.panel.prepare()
+        }
         log.notice("session \(session.id, privacy: .public) started for \(session.client, privacy: .public)")
 
         var created = Date()
@@ -985,7 +987,19 @@ final class AnnotationController: ObservableObject {
 
     // MARK: - Drawing
 
+    /// Whether the user drew or made a wireframe in the last 30 days. Only then is the
+    /// canvas loaded ahead when a session starts: its page takes a moment to load, and a
+    /// few hundred megabytes for as long as it stays, which a session with no drawing
+    /// must not cost.
+    private var usesCanvas: Bool {
+        guard let used = defaults.object(forKey: "CanvasUsed") as? Date else {
+            return false
+        }
+        return Date().timeIntervalSince(used) < 30 * 24 * 3600
+    }
+
     private func showCanvas() {
+        defaults.set(Date(), forKey: "CanvasUsed")
         hover = nil
         // Over Tilde's browser, the canvas would cover tools on its toolbar.
         if hud.isInBrowser {
