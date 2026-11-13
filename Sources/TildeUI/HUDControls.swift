@@ -21,8 +21,6 @@ struct HUDButton: View {
     var bounce = 0
     /// Off while the tooltip would cover what the button opened under it.
     var showsTooltip = true
-    /// It opens a menu or a popover under it: a chevron after the title.
-    var opensBelow = false
     /// The keys that press it while Tilde has the keyboard, after the help in its tooltip.
     var keys: [String] = []
     let help: String
@@ -30,7 +28,7 @@ struct HUDButton: View {
 
     var body: some View {
         Button(action: action) {
-            HUDButtonLabel(image: image, title: title, badge: badge, opensBelow: opensBelow, bounce: bounce)
+            HUDButtonLabel(image: image, title: title, badge: badge, bounce: bounce)
                 .modifier(HUDButtonChrome(size: size, isOn: isOn, isActive: isActive, isDestructive: isDestructive, tint: tint, padding: padding))
         }
         .buttonStyle(.plain)
@@ -105,6 +103,7 @@ struct HUDButtonLabel: View {
     let image: Image?
     var title: String?
     var badge: Int?
+    /// It opens a menu or a popover under it: a chevron after the title.
     var opensBelow = false
     var bounce = 0
     @Environment(\.pillSize) private var pillSize
