@@ -6,7 +6,7 @@ import TildeInstaller
 /// A key or a value that it does not know is an error, so a typo cannot record another picture.
 struct UIState: Decodable {
     enum Surface: String, Decodable {
-        case toast, updateToast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, comment, preview, overlay, canvas
+        case toast, updateToast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, wireframeAdjust, comment, preview, overlay, canvas
     }
     enum Appearance: String, Decodable {
         case light, dark
@@ -166,8 +166,9 @@ struct UIState: Decodable {
     var toast: Toast?
     var settings: Settings?
     var look: Look?
-    /// The wireframe bar's Style menu is open.
-    var styleMenu: Bool?
+    /// The wireframe bar's style mode, and its Adjust popover; the popover itself is drawn
+    /// by the `wireframeAdjust` surface.
+    var wireframeBar: WireframeBar?
     var chip: Chip?
     /// The canvas has its components inside a section, and a button inside a card.
     var nested: Bool?
@@ -217,3 +218,4 @@ extension NodeSetup.Dot: Decodable {}
 extension Harness: Decodable {}
 extension WireframeLook.Style: Decodable {}
 extension WireframeLook.Colours: Decodable {}
+extension LookStrength: Decodable {}

@@ -62,6 +62,41 @@ enum Transitions {
         var visibleFrame: [CGFloat]?
         var previewSize: [CGFloat]?
         var room: [CGFloat]?
+        /// The wireframe bar, and what happens to it.
+        var bar: WireframeBar?
+        var barEvent: WireframeBar.Event?
+        /// The look before a change from the wireframe bar; what is missing is the default.
+        var look: UIState.Look?
+        var change: LookChange?
+    }
+
+    /// A change of the look: one of `style`, `colours`, or `strength` with its `value`.
+    struct LookChange: Decodable {
+        var style: WireframeLook.Style?
+        var colours: WireframeLook.Colours?
+        var strength: LookStrength?
+        var value: Double?
+
+        var change: WireframeLook.Change? {
+            if let style {
+                return .style(style)
+            }
+            if let colours {
+                return .colours(colours)
+            }
+            if let strength, let value {
+                return .strength(strength, value)
+            }
+            return nil
+        }
+    }
+
+    struct LookResult: Encodable {
+        let style: String
+        let colours: String
+        let fill: Double
+        let blur: Double
+        let fade: Double
     }
 
     /// A modifier going down or up (`down` is every modifier held after it), or, with `other`,
@@ -106,6 +141,10 @@ enum Transitions {
         var snapsHome: Bool?
         var browserFrame: [CGFloat]?
         var previewSize: [CGFloat]?
+        var bar: WireframeBar?
+        /// The bar took the event, which then does nothing more.
+        var taken: Bool?
+        var look: LookResult?
     }
 
     private static func name(_ key: WireframeKey) -> String {
@@ -225,6 +264,15 @@ enum Transitions {
             if let size = row.previewSize, let room = row.room {
                 let fit = fitted(CGSize(width: size[0], height: size[1]), min: PreviewPanel.minSize, max: CGSize(width: room[0], height: room[1]))
                 result.previewSize = [fit.width, fit.height]
+            }
+            if var bar = row.bar, let event = row.barEvent {
+                result.taken = bar.handle(event)
+                result.bar = bar
+            }
+            if let change = row.change?.change {
+                var look = row.look?.value ?? WireframeLook()
+                look.apply(change)
+                result.look = LookResult(style: look.style.rawValue, colours: look.colours.rawValue, fill: look.fill, blur: look.blur, fade: look.fade)
             }
             if var note = row.note, let similarity = row.similarity {
                 _ = note.update(similarity: similarity)

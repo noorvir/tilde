@@ -929,17 +929,21 @@ struct UXSpecs {
         }
     }
 
-    /// The wireframe bar's Style button opens Tilde's own menu: a style's or a colour's name
-    /// changes the look of the components drawn at once, and Esc closes the menu. Construction,
-    /// the default, has ticks past the corners and no offset edge; Technical has an offset edge
-    /// and no ticks. A button is orange by kind, the default, and blue in One colour.
-    @Test func theStyleMenuChangesTheLookAtOnce() async throws {
+    /// The wireframe bar's palette button shows the controls of the look in the place of the
+    /// tools, and a second press shows the tools again; the bar keeps its width, so the palette
+    /// button and Done stay put. The style and colours menus change the components drawn at
+    /// once, Esc closes an open menu and then the Adjust popover first, and the Fill slider
+    /// in the popover changes them as it moves. Construction, the default, has ticks past the
+    /// corners and no offset edge; Technical has an offset edge and no ticks. A button is
+    /// orange by kind, the default, and blue in One colour.
+    @Test func theStyleControlsInTheBarChangeTheLookAtOnce() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         let frame = ChangingWindow.frame
         let button = CGRect(x: frame.minX + 12, y: frame.minY + 100, width: 84, height: 40)
         let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
         let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
+        let inside = button.insetBy(dx: 10, dy: 10)
         try await withApp { app in
             try await app.menu("Start Annotation")
             try await app.waitToSee("Annotating")
@@ -954,23 +958,62 @@ struct UXSpecs {
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atMost: 0)
             step("construction drawn")
 
+            func place(of name: String) async throws -> CGRect {
+                try #require(try await app.seen().first { $0.name == name }).frame
+            }
+            let palette = try await place(of: "Style")
+            let done = try await place(of: "Done, ⌘↩")
             try await app.press("Style")
+            try await app.waitToSee("Wireframe style")
+            try await app.waitNotToSee("Card")
+            #expect(try await place(of: "Style") == palette)
+            #expect(try await place(of: "Done, ⌘↩") == done)
+            step("style mode")
+
+            try await app.press("Wireframe style")
             try await app.press("Technical")
             try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
             try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
             step("technical chosen")
 
-            let inside = button.insetBy(dx: 10, dy: 10)
             try await waitFor(app, at: inside, Picture.isWireframeOrange, atLeast: 200)
+            try await app.press("Colours")
             try await app.press("One colour")
             try await waitFor(app, at: inside, Picture.isWireframeBlue, atLeast: 200)
             try await waitFor(app, at: inside, Picture.isWireframeOrange, atMost: 0)
             step("one colour chosen")
 
+            // Esc closes the open menu, and the bar stays in style mode.
+            #expect(try await !app.seen().contains { $0.name == "Blueprint" })
+            try await app.press("Wireframe style")
+            try await app.waitToSee("Blueprint")
+            // The menu takes the keys once it has opened.
+            try await Task.sleep(for: .milliseconds(300))
             try await app.key(.escape)
-            try await app.waitNotToSee("Technical")
-            #expect(try await app.seen().contains { $0.name == "Done, ⌘↩" })
+            try await app.waitNotToSee("Blueprint")
+            try await app.waitToSee("Wireframe style")
             step("menu closed")
+
+            // The Fill slider at its end fills the button with strong blue.
+            let isStrongBlue = { (color: Picture.Color) in color.blue - color.red > 0.4 }
+            try await waitFor(app, at: inside, isStrongBlue, atMost: 20)
+            try await app.press("Adjust")
+            try await app.waitToSee("Fade under")
+            let fill = try #require(try await app.seen().first { $0.role == "AXSlider" && $0.name == "Fill" })
+            try await app.click(at: CGPoint(x: fill.frame.maxX - 2, y: fill.frame.midY))
+            try await waitFor(app, at: inside, isStrongBlue, atLeast: 200)
+            step("fill changed")
+
+            // Esc closes the popover, then shows the tools again; the bar has kept its width.
+            try await app.key(.escape)
+            try await app.waitNotToSee("Fade under")
+            try await app.waitToSee("Wireframe style")
+            try await app.key(.escape)
+            try await app.waitToSee("Card")
+            try await app.waitNotToSee("Wireframe style")
+            #expect(try await place(of: "Style") == palette)
+            #expect(try await place(of: "Done, ⌘↩") == done)
+            step("tools again")
         }
     }
 

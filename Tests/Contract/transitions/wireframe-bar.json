@@ -1,0 +1,21 @@
+[
+{"name": "The palette button shows the controls of the look in the place of the tools", "bar": {"isStyling": false, "isAdjusting": false}, "barEvent": "palette", "expect": {"bar": {"isStyling": true, "isAdjusting": false}, "taken": true}},
+{"name": "A second press on the palette button shows the tools again", "bar": {"isStyling": true, "isAdjusting": false}, "barEvent": "palette", "expect": {"bar": {"isStyling": false, "isAdjusting": false}, "taken": true}},
+{"name": "The palette button with the Adjust popover open closes it with the controls", "bar": {"isStyling": true, "isAdjusting": true}, "barEvent": "palette", "expect": {"bar": {"isStyling": false, "isAdjusting": false}, "taken": true}},
+{"name": "Adjust opens its popover", "bar": {"isStyling": true, "isAdjusting": false}, "barEvent": "adjust", "expect": {"bar": {"isStyling": true, "isAdjusting": true}, "taken": true}},
+{"name": "A second press on Adjust closes its popover", "bar": {"isStyling": true, "isAdjusting": true}, "barEvent": "adjust", "expect": {"bar": {"isStyling": true, "isAdjusting": false}, "taken": true}},
+{"name": "Esc with the Adjust popover open closes it, and the controls of the look stay", "bar": {"isStyling": true, "isAdjusting": true}, "barEvent": "escape", "expect": {"bar": {"isStyling": true, "isAdjusting": false}, "taken": true}},
+{"name": "The next Esc shows the tools again, and does nothing more", "bar": {"isStyling": true, "isAdjusting": false}, "barEvent": "escape", "expect": {"bar": {"isStyling": false, "isAdjusting": false}, "taken": true}},
+{"name": "Esc with the tools shown is the canvas's, as before: the tool goes down", "bar": {"isStyling": false, "isAdjusting": false}, "barEvent": "escape", "expect": {"bar": {"isStyling": false, "isAdjusting": false}, "taken": false}},
+{"name": "A press on the canvas closes the Adjust popover first, and draws nothing", "bar": {"isStyling": true, "isAdjusting": true}, "barEvent": "canvasPress", "expect": {"bar": {"isStyling": true, "isAdjusting": false}, "taken": true}},
+{"name": "A press on the canvas in style mode shows the tools again, and draws nothing", "bar": {"isStyling": true, "isAdjusting": false}, "barEvent": "canvasPress", "expect": {"bar": {"isStyling": false, "isAdjusting": false}, "taken": true}},
+{"name": "A press on the canvas with the tools shown draws", "bar": {"isStyling": false, "isAdjusting": false}, "barEvent": "canvasPress", "expect": {"bar": {"isStyling": false, "isAdjusting": false}, "taken": false}},
+{"name": "The end of wireframe mode, such as after Done in style mode, leaves the tools for the next start", "bar": {"isStyling": true, "isAdjusting": true}, "barEvent": "modeEnded", "expect": {"bar": {"isStyling": false, "isAdjusting": false}, "taken": false}},
+{"name": "Choosing Blueprint in the style menu changes only the style", "look": {"style": "construction"}, "change": {"style": "blueprint"}, "expect": {"look": {"style": "blueprint", "colours": "byKind", "fill": 0.06, "blur": 2.5, "fade": 0.58}}},
+{"name": "Choosing One colour in the colours menu changes only the colours", "look": {"style": "hatched"}, "change": {"colours": "oneColour"}, "expect": {"look": {"style": "hatched", "colours": "oneColour", "fill": 0.06, "blur": 2.5, "fade": 0.58}}},
+{"name": "The Fill slider sets the fill in whole percent", "change": {"strength": "fill", "value": 0.2504}, "expect": {"look": {"fill": 0.25, "blur": 2.5, "fade": 0.58}}},
+{"name": "The Fill slider stops at no fill", "change": {"strength": "fill", "value": -0.1}, "expect": {"look": {"fill": 0}}},
+{"name": "The Blur slider sets the blur in half points", "change": {"strength": "blur", "value": 3.3}, "expect": {"look": {"fill": 0.06, "blur": 3.5, "fade": 0.58}}},
+{"name": "The Blur slider stops at 8 pt", "change": {"strength": "blur", "value": 9}, "expect": {"look": {"blur": 8}}},
+{"name": "The Fade slider sets the fade in whole percent", "change": {"strength": "fade", "value": 0.2496}, "expect": {"look": {"fill": 0.06, "blur": 2.5, "fade": 0.25}}}
+]

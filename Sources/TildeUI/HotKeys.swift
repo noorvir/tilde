@@ -5,6 +5,8 @@ import Combine
 /// System-wide shortcuts. Carbon hot keys need no Accessibility or Input Monitoring permission.
 /// They follow the `ShortcutStore` and are off while Settings records a new shortcut. While the
 /// session holds the keyboard, Esc is one of them: no other app gets it, also one in full screen.
+/// It is not one while a menu of Tilde is open, such as the wireframe bar's style menu, so that
+/// the menu gets it and closes.
 @MainActor
 final class HotKeys {
     private let actions: [UInt32: () -> Void]
@@ -13,6 +15,9 @@ final class HotKeys {
     private var handler: EventHandlerRef?
     private var subscription: AnyCancellable?
     private var holdsKeyboard = false
+    /// Menus of Tilde that are open: a submenu opens inside its menu.
+    private var openMenus = 0
+    private var menuObservers: [NSObjectProtocol] = []
 
     init(controller: AnnotationController, shortcuts: ShortcutStore) {
         self.shortcuts = shortcuts
@@ -43,6 +48,18 @@ final class HotKeys {
                 self?.holdsKeyboard = holdsKeyboard
                 self?.registerAll()
             }
+        // Posted on the main thread when a menu starts and stops tracking.
+        menuObservers = [(NSMenu.didBeginTrackingNotification, 1), (NSMenu.didEndTrackingNotification, -1)].map { name, change in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else {
+                        return
+                    }
+                    self.openMenus = max(self.openMenus + change, 0)
+                    self.registerAll()
+                }
+            }
+        }
     }
 
     private func registerAll() {
@@ -62,7 +79,7 @@ final class HotKeys {
             }
             register(keyCode: shortcut.keyCode, modifiers: shortcut.carbonModifiers, id: id)
         }
-        if holdsKeyboard {
+        if holdsKeyboard, openMenus == 0 {
             register(keyCode: UInt32(kVK_Escape), modifiers: 0, id: 3)
         }
     }

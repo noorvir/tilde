@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct HUDButton: View {
-    /// An SF Symbol, or an image such as an app icon.
-    let image: Image
+    /// An SF Symbol, or an image such as an app icon; nil for a title alone.
+    let image: Image?
     /// A label after the icon, such as "Use window picker", which is its accessible name.
     var title: String?
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
@@ -26,10 +26,51 @@ struct HUDButton: View {
     let help: String
     let action: () -> Void
 
+    var body: some View {
+        Button(action: action) {
+            HUDButtonLabel(image: image, title: title, badge: badge, bounce: bounce)
+                .modifier(HUDButtonChrome(size: size, isOn: isOn, isActive: isActive, isDestructive: isDestructive, tint: tint, padding: padding))
+        }
+        .buttonStyle(.plain)
+        .tildeTooltip(showsTooltip ? help : nil, keys: keys)
+        .accessibilityLabel(title ?? help)
+        .accessibilityHint(title == nil ? "" : help)
+    }
+
+    private var padding: CGFloat {
+        if title != nil {
+            return 10
+        }
+        return badge == nil ? 0 : 9
+    }
+}
+
+/// The look of the HUD's buttons around their label, in a plain button: also for the label of
+/// a native menu (`Menu` in the button menu style), so that a dropdown looks like the buttons
+/// beside it.
+struct HUDButtonChrome: ViewModifier {
+    /// The smallest width and the height; nil for the surface's button size.
+    var size: CGFloat?
+    var isOn = false
+    var isActive = false
+    var isDestructive = false
+    var tint: Color?
+    /// At the ends of the label, in the regular pill's points: none for an icon alone.
+    var padding: CGFloat = 0
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
     @Environment(\.pillSize) private var pillSize
     @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(foreground)
+            .padding(.horizontal, pillSize.scaled(padding))
+            .frame(minWidth: size ?? pillSize.buttonSize, minHeight: size ?? pillSize.buttonSize)
+            .background(RoundedRectangle(cornerRadius: pillSize.scaled(isHUDEmbedded ? 8 : 9)).fill(background))
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+    }
 
     private var foreground: Color {
         if isDestructive {
@@ -53,40 +94,36 @@ struct HUDButton: View {
         }
         return .white.opacity(isOn ? 0.16 : (isHovered && isEnabled ? 0.09 : 0))
     }
+}
+
+/// A HUD button's content: the icon, the title, a chevron for what opens under it, then a
+/// slot two digits wide for the count, empty at zero, so the icon stays put as the count
+/// changes.
+struct HUDButtonLabel: View {
+    let image: Image?
+    var title: String?
+    var badge: Int?
+    /// It opens a menu or a popover under it: a chevron after the title.
+    var opensBelow = false
+    var bounce = 0
+    @Environment(\.pillSize) private var pillSize
 
     var body: some View {
-        Button(action: action) {
-            label
-            .foregroundStyle(foreground)
-            .padding(.horizontal, pillSize.scaled(horizontalPadding))
-            .frame(minWidth: size ?? pillSize.buttonSize, minHeight: size ?? pillSize.buttonSize)
-            .background(RoundedRectangle(cornerRadius: pillSize.scaled(isHUDEmbedded ? 8 : 9)).fill(background))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .tildeTooltip(showsTooltip ? help : nil, keys: keys)
-        .accessibilityLabel(title ?? help)
-        .accessibilityHint(title == nil ? "" : help)
-    }
-
-    private var horizontalPadding: CGFloat {
-        if title != nil {
-            return 10
-        }
-        return badge == nil ? 0 : 9
-    }
-
-    /// The icon, then a slot two digits wide for the count, empty at zero, so the icon stays
-    /// put as the count changes.
-    private var label: some View {
         HStack(spacing: pillSize.scaled(4)) {
-            image
-                .font(.system(size: pillSize.font(12), weight: .semibold))
-                .symbolEffect(.bounce, value: bounce)
+            if let image {
+                image
+                    .font(.system(size: pillSize.font(12), weight: .semibold))
+                    .symbolEffect(.bounce, value: bounce)
+            }
             if let title {
                 Text(title)
                     .font(.system(size: pillSize.font(12.5), weight: .medium))
+                    .lineLimit(1)
+            }
+            if opensBelow {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: pillSize.font(9.5), weight: .semibold))
+                    .opacity(0.75)
             }
             if let badge {
                 ZStack(alignment: .leading) {

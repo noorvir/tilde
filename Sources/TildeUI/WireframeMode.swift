@@ -14,8 +14,8 @@ final class WireframeMode: ObservableObject {
     var scope: () -> ElementPicker.WindowInfo? = { nil }
     /// Done's pictures are being made.
     private(set) var isTaking = false
-    /// The bar's Style menu is open.
-    @Published var isStyleMenuOpen = false
+    /// The wireframe bar: its tools, or the controls of the look in their place.
+    @Published var bar = WireframeBar()
 
     private let canvas: DrawingPanel
     private let picker: ElementPicker
@@ -84,7 +84,7 @@ final class WireframeMode: ObservableObject {
     /// The canvas leaves wireframe mode: the components that Done did not take go.
     func end() {
         reset()
-        isStyleMenuOpen = false
+        _ = bar.handle(.modeEnded)
         canvas.setWireframe("null")
     }
 
@@ -105,6 +105,21 @@ final class WireframeMode: ObservableObject {
 
     func redo() {
         canvas.redoWireframe()
+    }
+
+    /// Applies a change from the bar to the look at once: the canvas and Settings follow the
+    /// defaults.
+    func change(_ change: WireframeLook.Change) {
+        var look = WireframeLook.saved(in: defaults)
+        look.apply(change)
+        switch change {
+        case .style:
+            defaults.set(look.style.rawValue, forKey: WireframeLook.Key.style)
+        case .colours:
+            defaults.set(look.colours.rawValue, forKey: WireframeLook.Key.colours)
+        case .strength(let strength, _):
+            defaults.set(look[strength], forKey: strength.key)
+        }
     }
 
     private func reset() {
@@ -314,6 +329,54 @@ final class WireframeMode: ObservableObject {
         canvas.restoreWireframe(shapes: saved.shapes, origin: window?.frame.origin ?? saved.origin)
         if let window {
             follow(window)
+        }
+    }
+}
+
+/// The wireframe bar's two groups, which take the same place: the tools, or the controls of
+/// the look (the style and colours menus and the Adjust popover). The palette button switches
+/// them; Done stays.
+struct WireframeBar: Equatable, Codable {
+    /// The controls of the look are in the place of the tools.
+    var isStyling = false
+    /// The Adjust popover is open, under its button.
+    var isAdjusting = false
+
+    enum Event: String, Codable {
+        case palette
+        /// The Adjust button.
+        case adjust
+        case escape
+        /// A press on the canvas.
+        case canvasPress
+        /// Wireframe mode ended, such as after Done: the next start shows the tools.
+        case modeEnded
+    }
+
+    /// True when the bar took the event, which then does nothing more: Esc and a press on
+    /// the canvas close the popover first, then the controls of the look.
+    mutating func handle(_ event: Event) -> Bool {
+        switch event {
+        case .palette:
+            isStyling.toggle()
+            isAdjusting = false
+            return true
+        case .adjust:
+            isAdjusting = isStyling && !isAdjusting
+            return true
+        case .escape, .canvasPress:
+            if isAdjusting {
+                isAdjusting = false
+                return true
+            }
+            if isStyling {
+                isStyling = false
+                return true
+            }
+            return false
+        case .modeEnded:
+            self = WireframeBar()
+            return false
         }
     }
 }
