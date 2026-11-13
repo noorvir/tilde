@@ -70,10 +70,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         model.recordingShortcut = nil
-        let others = NSApp.windows.contains { $0 !== window && $0.isVisible && $0.styleMask.contains(.titled) }
-        if !others {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        NSApp.titledWindowWillClose(window)
     }
 
     private func makeWindow() -> NSWindow {

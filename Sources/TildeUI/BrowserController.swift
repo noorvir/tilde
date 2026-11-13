@@ -480,7 +480,7 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.titledWindowWillClose(window)
         // The window is kept for its frame, but not its page: nothing plays or runs on.
         webView.pauseAllMediaPlayback()
         webView.stopLoading()
