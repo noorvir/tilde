@@ -38,6 +38,32 @@ struct MCPServerTests {
         #expect(content[4]["data"] as? String == Data([0x89, 0x50, 0x4E, 0x47, 0x0D]).base64EncodedString())
     }
 
+    /// The store keeps a sent report without the pictures that are in its folder, and an
+    /// agent that asks after the send still gets them, from the folder.
+    @Test func aReportSavedInAFolderKeepsItsPicturesThereOnly() async throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        _ = try await call("start_annotation", ["wait_seconds": 0])
+        let id = try #require(store.active?.id)
+        let feedback = try sampleFeedback()
+        let folder = try saveToInbox(feedback, sessionID: id, root: inbox)
+
+        store.finish(id, with: .sent(feedback, folder: folder))
+
+        guard case .sent(let kept, _) = store.session(id)?.state else {
+            Issue.record("The session is not sent")
+            return
+        }
+        #expect(kept.annotations.map(\.comment) == ["the badge is misaligned"])
+        #expect(kept.annotations.allSatisfy { $0.image == nil && $0.contextImage == nil })
+
+        let result = try await call("wait_for_annotation", ["session_id": id, "wait_seconds": 30])
+        let content = try #require(result["content"] as? [[String: Any]])
+        #expect(content.count == 5)
+        #expect(content[2]["data"] as? String == Data([0x89, 0x50, 0x4E, 0x47]).base64EncodedString())
+        #expect(content[4]["data"] as? String == Data([0x89, 0x50, 0x4E, 0x47, 0x0D]).base64EncodedString())
+    }
+
     @Test func contextNoneTurnsOffContextScreenshots() async throws {
         _ = try await call("start_annotation", ["wait_seconds": 0, "context": "none"])
         #expect(store.active?.capturesContext == false)

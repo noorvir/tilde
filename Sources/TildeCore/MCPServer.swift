@@ -474,8 +474,27 @@ public final class MCPServer {
         case .cancelled:
             return text("The user cancelled the annotation session \(sessionID) without sending feedback.")
         case .sent(let feedback, let folder):
-            return ["content": feedbackContent(feedback, folder: folder)]
+            return ["content": feedbackContent(withSavedImages(feedback, in: folder), folder: folder)]
         }
+    }
+
+    /// A report with its pictures. The store keeps a finished session's report without those
+    /// that are in its folder, so for an agent that asks again they come from there.
+    private func withSavedImages(_ feedback: Feedback, in folder: URL?) -> Feedback {
+        guard let folder else {
+            return feedback
+        }
+        func saved(_ name: String) -> Data? {
+            try? Data(contentsOf: folder.appendingPathComponent(name))
+        }
+        var feedback = feedback
+        feedback.annotations = feedback.annotations.enumerated().map { index, annotation in
+            Annotation(
+                id: annotation.id, comment: annotation.comment, target: annotation.target, frame: annotation.frame,
+                image: annotation.image ?? saved(imageName(index + 1)), contextImage: annotation.contextImage ?? saved(contextImageName(index + 1))
+            )
+        }
+        return feedback
     }
 
     // MARK: - Helpers

@@ -23,8 +23,22 @@ public final class SessionStore: ObservableObject {
     public enum State: Sendable {
         case queued
         case annotating
+        /// `folder`: where the report is saved, with its pictures.
         case sent(Feedback, folder: URL?)
         case cancelled
+
+        /// The state that the store keeps for an agent that asks again. The pictures of a
+        /// report saved in a folder stay there only: else the pictures of every finished
+        /// session that the store remembers would stay in memory.
+        fileprivate var kept: State {
+            guard case .sent(var feedback, let folder?) = self else {
+                return self
+            }
+            feedback.annotations = feedback.annotations.map { annotation in
+                Annotation(id: annotation.id, comment: annotation.comment, target: annotation.target, frame: annotation.frame, image: nil, contextImage: nil)
+            }
+            return .sent(feedback, folder: folder)
+        }
 
         public var isFinished: Bool {
             switch self {
@@ -127,7 +141,7 @@ public final class SessionStore: ObservableObject {
             return
         }
 
-        sessions[index].state = state
+        sessions[index].state = state.kept
         for waiter in (waiters.removeValue(forKey: id) ?? [:]).values {
             waiter.resume(returning: state)
         }
