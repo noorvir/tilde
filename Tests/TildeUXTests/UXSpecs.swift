@@ -7,8 +7,8 @@ import Testing
 /// What a user sees and does, one story per spec.
 @Suite(.serialized, .enabled(if: uxEnabled))
 struct UXSpecs {
-    private func withApp(_ body: (TildeApp) async throws -> Void) async throws {
-        let app = try await TildeApp.launched()
+    private func withApp(defaults: [String: String] = [:], _ body: (TildeApp) async throws -> Void) async throws {
+        let app = try await TildeApp.launched(defaults: defaults)
         defer { app.quit() }
         try await body(app)
     }
@@ -148,6 +148,10 @@ struct UXSpecs {
             try await Task.sleep(for: .seconds(1))
             let apps = try await app.waitToSee("Apps on this Mac")
             try await app.scroll(at: CGPoint(x: apps.frame.midX, y: apps.frame.maxY + 200), by: -10)
+            // Remote machines are a beta, off on a new Mac: the list shows once it is on.
+            let beta = try await app.waitToSee("Remote machines (beta)", role: "AXCheckBox")
+            #expect(try await !app.seen().contains { $0.name == host })
+            try await app.click(at: CGPoint(x: beta.frame.midX, y: beta.frame.midY))
             try await app.waitToSee(host, timeout: 15)
             try await app.press(host)
             try await app.waitToSee("Install \(host)", timeout: 20)
@@ -251,7 +255,7 @@ struct UXSpecs {
     @Test func aCopiedReportGoesToTheRemoteMachineWithItsImages() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
-        try await withApp { app in
+        try await withApp(defaults: ["remoteMachines": "true"]) { app in
             // This machine's own ssh is the remote machine; the setup of the VM has its key.
             try app.setNodes(["localhost"])
             try await app.doubleTap("control")

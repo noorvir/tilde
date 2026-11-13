@@ -697,9 +697,9 @@ final class AnnotationController: ObservableObject {
         store.finish(session.id, with: .sent(report.feedback, folder: report.folder))
         end()
 
-        // A copy's images go to the remote machines in the background; a machine they do not
-        // reach gets its own short warning.
-        guard session.isLocal else {
+        // A copy's images go to the remote machines in the background, while they are on; a
+        // machine they do not reach gets its own short warning.
+        guard session.isLocal, defaults.bool(forKey: NodeSetup.enabledKey) else {
             return
         }
         Task {

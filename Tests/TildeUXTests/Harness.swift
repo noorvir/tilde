@@ -451,12 +451,12 @@ final class TildeApp {
 
     // MARK: - Expectations
 
-    /// Waits until an element with this name is on screen.
+    /// Waits until an element with this name, and this role when one is given, is on screen.
     @discardableResult
-    func waitToSee(_ name: String, timeout: Double = 10, sourceLocation: SourceLocation = #_sourceLocation) async throws -> Seen {
+    func waitToSee(_ name: String, role: String? = nil, timeout: Double = 10, sourceLocation: SourceLocation = #_sourceLocation) async throws -> Seen {
         let end = Date().addingTimeInterval(timeout)
         while Date() < end {
-            if let found = try await seen().first(where: { $0.name == name }) {
+            if let found = try await seen().first(where: { $0.name == name && (role == nil || $0.role == role) }) {
                 return found
             }
             try await Task.sleep(for: .milliseconds(20))
