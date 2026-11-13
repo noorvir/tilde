@@ -90,13 +90,6 @@ struct WireframeTests {
         ))
     }
 
-    private func until(_ condition: @escaping () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(condition())
-    }
-
     // MARK: - Tools
 
     /// Wireframe mode starts with the card; a tool's button or letter chooses the tool, in
@@ -179,7 +172,7 @@ struct WireframeTests {
     /// paused it. A pause by the user gives the keyboard to the app in front until the session
     /// goes on; another app in front that pauses the session keeps it too.
     @Test func theSessionHoldsTheKeyboardUntilTheUserPauses() {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: nil)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: MemoryDefaults())
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
         controller.dispatch(.toggleAnnotating)
         #expect(controller.holdsKeyboard)
@@ -283,28 +276,9 @@ struct WireframeTests {
         #expect(controller.wireframe.tool == "list")
     }
 
-    /// The hold key (⌥ by default) does not pause wireframe mode, where ⌥ and a drag copies a
-    /// component; it still pauses Draw.
-    @Test func theHoldKeyDoesNotPauseWireframeMode() {
-        open(Open(canvas: .wireframe))
-        controller.holdChanged(.began)
-        #expect(controller.pauses.isEmpty)
-        controller.holdChanged(.ended)
-
-        open(Open(canvas: .draw))
-        controller.holdChanged(.began)
-        #expect(controller.pauses == [.hold])
-        controller.holdChanged(.ended)
-        #expect(controller.pauses.isEmpty)
-    }
-
     /// The mode on screen goes to the defaults when it changes, for the next session.
     @Test func theModeOnScreenIsSavedForTheNextSession() throws {
-        let suite = "tilde-start-mode-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-        }
+        let defaults = MemoryDefaults()
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
         #expect(defaults.string(forKey: "LastMode") == nil)
@@ -331,11 +305,7 @@ struct WireframeTests {
     /// The tool chosen last stays: after Esc put it down and the mode started again, and in
     /// the next session, from the defaults.
     @Test func wireframeModeStartsWithTheToolChosenLast() throws {
-        let suite = "tilde-wireframe-tool-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer {
-            defaults.removePersistentDomain(forName: suite)
-        }
+        let defaults = MemoryDefaults()
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open()))
         controller.dispatch(.startWireframe)

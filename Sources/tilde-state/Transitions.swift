@@ -141,7 +141,7 @@ enum Transitions {
                 result.effects = wireframeKey.event.map { state.flow.handle($0, state.facts) } ?? []
                 result.state = state
             } else if var state = row.state, let key = row.key {
-                let shortcuts = ShortcutStore(defaults: UserDefaults(suiteName: "tilde-state-keys") ?? .standard)
+                let shortcuts = ShortcutStore(defaults: MemoryDefaults())
                 let code = ShortcutStore.Action.allCases.lazy.compactMap { $0.defaultShortcut?.combo }.first { $0.key == key }?.keyCode
                 let action = code.flatMap { shortcuts.inAppAction(keyCode: UInt16($0), modifiers: [], isDrawing: state.flow.session?.isDrawing ?? false) }
                 result.keyAction = action?.rawValue

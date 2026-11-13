@@ -46,11 +46,8 @@ enum Key: Int {
     case enter = 36
     case w = 13
     case a = 0
-    case z = 6
     case v = 9
-    case delete = 51
     case leftBracket = 33
-    case rightBracket = 30
     case r = 15
     case space = 49
     case b = 11
@@ -99,10 +96,6 @@ struct Picture {
 
     var size: CGSize {
         CGSize(width: Double(bitmap.pixelsWide) / scale, height: Double(bitmap.pixelsHigh) / scale)
-    }
-
-    func color(at point: CGPoint) -> Color? {
-        pixel(x: Int((point.x - origin.x) * scale), y: Int((point.y - origin.y) * scale))
     }
 
     private func pixel(x: Int, y: Int) -> Color? {
@@ -228,9 +221,16 @@ final class TildeApp {
         waitForExit(task)
     }
 
-    /// Fresh settings and sessions, as on a new Mac.
-    static func launched() async throws -> TildeApp {
+    /// Fresh settings and sessions, as on a new Mac, with `defaults` set.
+    static func launched(defaults: [String: String] = [:]) async throws -> TildeApp {
         resetSettings()
+        for (key, value) in defaults {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            task.arguments = ["write", "dev.tilde.ux", key, value]
+            try task.run()
+            waitForExit(task)
+        }
         let app = try TildeApp()
         try await app.waitForServer()
         return app
@@ -289,12 +289,6 @@ final class TildeApp {
             throw UXFailure(description: "no picture from \(path)")
         }
         return data
-    }
-
-    /// Presses a control of another app by its accessibility name, such as Device Hub's zoom.
-    func press(_ name: String, inApp appName: String) async throws {
-        let app = try #require(NSWorkspace.shared.runningApplications.first { $0.localizedName == appName })
-        _ = try await drive("press", ["pid": app.processIdentifier, "name": name])
     }
 
     /// Tilde's list of remote machines, as if they were installed.
@@ -643,7 +637,6 @@ final class MCPAgent {
     }
 }
 
-/// A window of another app whose whole content changes, like a page change in the Simulator.
 /// Prints the time since the last step of a flow, for the log of a run.
 func step(_ name: String) {
     let now = Date()
@@ -653,6 +646,7 @@ func step(_ name: String) {
 
 private let lastStep = OSAllocatedUnfairLock(initialState: Date())
 
+/// A window of another app whose whole content changes, like a page change in the Simulator.
 final class ChangingWindow {
     /// The window on screen, in screen points from the top left.
     static let frame = CGRect(x: 300, y: 200, width: 500, height: 400)

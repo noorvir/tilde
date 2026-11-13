@@ -6,7 +6,7 @@ import TildeInstaller
 /// A key or a value that it does not know is an error, so a typo cannot record another picture.
 struct UIState: Decodable {
     enum Surface: String, Decodable {
-        case toast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, comment, preview, overlay, canvas
+        case toast, updateToast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, comment, preview, overlay, canvas
     }
     enum Appearance: String, Decodable {
         case light, dark
@@ -29,7 +29,6 @@ struct UIState: Decodable {
     enum SentStatus: String, Decodable {
         case done, failed
     }
-    /// The first component on the canvas, selected with its chip and its borders menu open.
     /// The first component's handles: with its borders menu open, with the pointer over it,
     /// or selected with the pointer away.
     enum Chip: String, Decodable {
@@ -44,12 +43,7 @@ struct UIState: Decodable {
         var isLocal: Bool?
     }
     struct Toast: Decodable {
-        enum Action: String, Decodable {
-            case installed, removed
-        }
-
         let failed: Int
-        let action: Action
         let oneApp: Bool
     }
     struct NodeState: Decodable {
@@ -85,6 +79,17 @@ struct UIState: Decodable {
         }
     }
 
+    /// The Updates card of the Configuration page, with Tilde 0.3.0 as the newer version.
+    struct Update: Decodable {
+        enum Status: String, Decodable {
+            case idle, checking, upToDate, available, downloading, ready, failed
+        }
+
+        let status: Status
+        /// A session is on screen, so Restart waits.
+        var session: Bool?
+    }
+
     struct Settings: Decodable {
         enum Page: String, Decodable {
             case agents, general, shortcuts, history, appearance
@@ -97,6 +102,7 @@ struct UIState: Decodable {
         var nodes: [NodeState]?
         /// The machine whose page is open.
         var machine: String?
+        var update: Update?
     }
 
     let version: Int
@@ -109,7 +115,7 @@ struct UIState: Decodable {
     var sent: String?
     /// Send was pressed and the report is being made.
     var sending: Bool?
-    /// A short note in the HUD's subtitle, such as "Could not start recording".
+    /// A short note in the HUD's subtitle, such as "Recording failed".
     var notice: Notice?
     /// The first note is a stopped recording of the Safari window, 12 s long.
     var clip: Bool?
@@ -133,7 +139,6 @@ struct UIState: Decodable {
     var list: Bool?
     var hudInBrowser: Bool?
     var hover: Bool?
-    var editing: Bool?
     var drawing: Bool?
     /// Wireframe mode, in place of Draw mode.
     var wireframe: Bool?

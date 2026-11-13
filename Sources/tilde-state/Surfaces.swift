@@ -35,6 +35,12 @@ enum Surfaces {
             toast.isShown = true
             return try await hosted(InstallToastView(state: toast), size: size)
 
+        case .updateToast:
+            let toast = UpdateToastState()
+            toast.version = "0.3.0"
+            toast.isShown = true
+            return try await hosted(UpdateToastView(state: toast), size: size)
+
         case .settings:
             return try await hosted(SettingsView(model: try await settings(state.settings!, look: look)), size: size)
 
@@ -70,7 +76,7 @@ enum Surfaces {
 
         case .toolbar:
             let browser = BrowserController()
-            let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive(), defaults: nil)
+            let controller = AnnotationController(store: SessionStore(), browser: browser, archive: Fixtures.archive(), defaults: MemoryDefaults())
             try await Task.sleep(for: .milliseconds(20))
             apply(state, drafts: try drafts(state), to: controller)
             let toolbar = BrowserToolbar(browser: browser, controller: controller).background(Color(white: 0.1))
@@ -83,13 +89,8 @@ enum Surfaces {
 
         case .comment:
             let controller = try await controller(state)
-            let isEditing = state.editing ?? false
             controller.commentBox.text = state.commentText ?? ""
-            if isEditing, let draft = controller.drafts.first {
-                apply(state, drafts: controller.drafts, composer: .edit(draft.id), to: controller)
-                controller.commentBox.text = draft.annotation.comment
-            }
-            return try await hosted(CommentView(controller: controller, chip: "span", isEditing: isEditing), size: size)
+            return try await hosted(CommentView(controller: controller, chip: "span"), size: size)
 
         case .preview:
             let controller = try await controller(state)
@@ -162,7 +163,7 @@ enum Surfaces {
         return [try Fixtures.clip(in: video)] + drafts.dropFirst()
     }
 
-    private static func apply(_ state: UIState, drafts: [Draft], composer: Composer? = nil, to controller: AnnotationController) {
+    private static func apply(_ state: UIState, drafts: [Draft], to controller: AnnotationController) {
         let notice: PauseNotice? = switch state.pauseNotice {
         case .escape: .escape
         case .otherApp: .otherApp
@@ -183,8 +184,6 @@ enum Surfaces {
         open.question = state.confirmation
         if state.preview != nil {
             open.panel = .preview
-        } else if composer != nil {
-            open.panel = .comment
         }
         let clip: SessionFlow.Clip? = switch state.recording {
         case .ready: .ready
@@ -218,7 +217,6 @@ enum Surfaces {
             drafts: drafts,
             mode: mode,
             hover: state.hover == true ? Fixtures.hover() : nil,
-            composer: composer,
             previewID: state.preview.map { drafts[$0].id },
             source: source,
             isHUDInBrowser: state.hudInBrowser ?? false,
@@ -282,7 +280,7 @@ enum Surfaces {
         if page == .appearance {
             try await previews.draw(look)
         }
-        let model = try Fixtures.settingsModel(page: page, history: history, wireframePreviews: previews)
+        let model = try Fixtures.settingsModel(page: page, history: history, wireframePreviews: previews, updates: updates(state.update))
         model.expandedAgents = Set(state.expandedAgents ?? [])
         if let host = state.machine, let node = state.nodes?.first(where: { $0.host == host }) {
             let machine = AgentSetup(installer: model.setup.installer, placeholderIcon: Fixtures.appIcon, nodes: model.setup.nodes, isRemote: true)
@@ -302,6 +300,22 @@ enum Surfaces {
             model.recordingShortcut = .togglePause
         }
         return model
+    }
+
+    private static func updates(_ state: UIState.Update?) -> Updates {
+        let status: UpdateStatus = switch state?.status ?? .idle {
+        case .idle: .idle
+        case .checking: .checking
+        case .upToDate: .upToDate
+        case .available: .available(version: "0.3.0")
+        case .downloading: .downloading(version: "0.3.0", progress: 0.4)
+        case .ready: .ready(version: "0.3.0")
+        case .failed: .failed(reason: "Could not reach the update feed")
+        }
+        let updates = Updates(engine: FakeUpdateEngine(status: status))
+        updates.start()
+        updates.isSessionActive = state?.session ?? false
+        return updates
     }
 
     private static func result(of toast: UIState.Toast) -> InstallResult {

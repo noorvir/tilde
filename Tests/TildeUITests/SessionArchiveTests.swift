@@ -55,11 +55,11 @@ struct SessionArchiveTests {
 
         history.reload()
         #expect(!history.hasRead)
-        try await waitUntil { history.records == [kept, deleted] }
+        try await until { history.records == [kept, deleted] }
         #expect(history.hasRead)
 
         history.delete(deleted)
-        try await waitUntil { history.records == [kept] }
+        try await until { history.records == [kept] }
     }
 
     @Test func restoredNotesHaveTheirSavedImages() async throws {
@@ -114,7 +114,7 @@ struct SessionArchiveTests {
 
     @Test func aSessionIsSavedSoonAfterAChange() async throws {
         let archive = Fixtures.archive()
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         let session = Fixtures.session()
         controller.setStateForTesting(session: session, drafts: Fixtures.drafts(2))
@@ -137,12 +137,12 @@ struct SessionArchiveTests {
         archive.flush()
 
         // Tilde starts again: the session is still marked active, so it is unfinished.
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         #expect(archive.all().filter { $0.state == .active }.map(\.id) == [record.id])
 
         controller.restore(record)
-        try await waitUntil { controller.drafts.count == 3 }
+        try await until { controller.drafts.count == 3 }
 
         #expect(controller.drafts.map(\.annotation.comment) == record.notes.map(\.comment))
         #expect(controller.session?.isLocal == true)
@@ -155,12 +155,12 @@ struct SessionArchiveTests {
         let record = Fixtures.record(state: .sent, notes: 2, pageURL: nil)
         archive.save(record)
         archive.flush()
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         #expect(HistoryModel(archive: archive).canRestore(record))
 
         controller.restore(record)
-        try await waitUntil { controller.drafts.count == 2 }
+        try await until { controller.drafts.count == 2 }
 
         archive.flush()
         #expect(archive.record(record.id)?.state == .sent)
@@ -171,7 +171,7 @@ struct SessionArchiveTests {
         let record = Fixtures.record(state: .cancelled, notes: 3, pageURL: nil)
         archive.save(record)
         archive.flush()
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         try await Task.sleep(for: .milliseconds(20))
         controller.setStateForTesting(session: Fixtures.session(), drafts: Array(Fixtures.drafts(1)))
 
@@ -193,7 +193,7 @@ struct SessionArchiveTests {
         archive.flush()
 
         let store = SessionStore()
-        let controller = AnnotationController(store: store, browser: BrowserController(), archive: archive)
+        let controller = AnnotationController(store: store, browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         store.reattach = { id, node in controller.reattach(id, node: node) }
         try await Task.sleep(for: .milliseconds(20))
 
@@ -204,7 +204,7 @@ struct SessionArchiveTests {
         #expect(state != nil)
         #expect(store.session(record.id)?.client == "Codex")
         #expect(store.session(record.id)?.isLocal == false)
-        try await waitUntil { controller.drafts.count == 2 }
+        try await until { controller.drafts.count == 2 }
         #expect(controller.session?.id == record.id)
 
         // Unknown ids, and ids that are not Tilde's, find nothing.
@@ -373,19 +373,12 @@ struct SessionArchiveTests {
         #expect(folder[.posixPermissions] as? Int == 0o700)
         #expect(file[.posixPermissions] as? Int == 0o600)
     }
-
-    private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(condition())
-    }
 }
 
 @MainActor
 struct CommentTypingTests {
     @Test func typingDoesNotRedrawTheHUDOrTheOverlay() {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController())
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: MemoryDefaults())
         var changes = 0
         let subscription = controller.objectWillChange.sink { changes += 1 }
         controller.commentBox.text = "typed"
@@ -397,7 +390,7 @@ struct CommentTypingTests {
     /// A view observes the controller for the flow, the session and the notes, and each part it
     /// shows: a change of a part redraws only the views that observe that part.
     @Test func aPartDoesNotRedrawTheViewsOfTheOtherParts() {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: nil)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: MemoryDefaults())
         var changes = 0
         let subscription = controller.objectWillChange.sink { changes += 1 }
         controller.previewCard.expandedImage = .context

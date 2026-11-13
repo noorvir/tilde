@@ -20,7 +20,7 @@ final class WireframeMode: ObservableObject {
     private let canvas: DrawingPanel
     private let picker: ElementPicker
     /// Where the tool chosen last is kept, for the next start of the mode.
-    private let defaults: UserDefaults?
+    private let defaults: UserDefaults
     private let browser: BrowserController
     /// The window of the first press: the components keep their place on it when it moves.
     private var window: ElementPicker.WindowInfo?
@@ -56,7 +56,7 @@ final class WireframeMode: ObservableObject {
     /// The chip of a wireframe's note.
     nonisolated static let chip = "Wireframe"
 
-    init(canvas: DrawingPanel, picker: ElementPicker, browser: BrowserController, defaults: UserDefaults? = nil) {
+    init(canvas: DrawingPanel, picker: ElementPicker, browser: BrowserController, defaults: UserDefaults) {
         self.canvas = canvas
         self.picker = picker
         self.browser = browser
@@ -70,7 +70,7 @@ final class WireframeMode: ObservableObject {
 
     /// The tool chosen last, in this session or an earlier one.
     private var lastTool: String {
-        defaults?.string(forKey: "WireframeTool").flatMap { saved in Self.tools.first { $0.tool == saved }?.tool } ?? Self.firstTool
+        defaults.string(forKey: "WireframeTool").flatMap { saved in Self.tools.first { $0.tool == saved }?.tool } ?? Self.firstTool
     }
 
     /// The canvas goes to wireframe mode, with the tool chosen last and no window.
@@ -90,7 +90,7 @@ final class WireframeMode: ObservableObject {
 
     func setTool(_ tool: String) {
         self.tool = tool
-        defaults?.set(tool, forKey: "WireframeTool")
+        defaults.set(tool, forKey: "WireframeTool")
         sendTool()
     }
 

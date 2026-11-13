@@ -173,7 +173,7 @@ extension SessionFlow.Event: Codable {
             "startShortcut": .startShortcut, "requestClearAll": .requestClearAll, "requestCancel": .requestCancel, "restore": .restore, "openBrowser": .openBrowser, "deleteNote": .deleteNote, "editNote": .editNote,
             "confirm": .confirm, "dismissConfirmation": .dismissConfirmation, "holdBegan": .holdBegan, "holdEnded": .holdEnded,
             "otherAppInFront": .otherAppInFront, "scopeAppInFront": .scopeAppInFront, "openComment": .openComment, "clickAway": .clickAway,
-            "submitComment": .submitComment, "closeComment": .closeComment, "openPreview": .openPreview, "closePreview": .closePreview,
+            "submitComment": .submitComment, "openPreview": .openPreview, "closePreview": .closePreview,
             "toggleList": .toggleList, "startDrawing": .startDrawing, "finishDrawing": .finishDrawing, "undoDrawing": .undoDrawing,
             "redoDrawing": .redoDrawing, "shapeFinished": .shapeFinished, "startWireframe": .startWireframe, "wireframeTaken": .wireframeTaken, "toggleRecordingMode": .toggleRecordingMode, "record": .record,
             "stop": .stop, "clipStarted": .clipStarted(operation), "clipStartFailed": .clipStartFailed(operation),

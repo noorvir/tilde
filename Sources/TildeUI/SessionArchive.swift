@@ -1,5 +1,6 @@
 import Foundation
 import TildeCore
+import os
 
 /// A session as saved on disk: who asked, where, its notes and how it ended.
 struct SessionRecord: Codable, Equatable, Identifiable {
@@ -78,7 +79,7 @@ final class SessionArchive: @unchecked Sendable {
         self.root = root
     }
 
-    /// Application Support, or the folder in `TILDE_SESSIONS` (tests and the e2e use their own).
+    /// Application Support, or the folder in `TILDE_SESSIONS` (the UX specs use their own).
     static let defaultRoot: URL = {
         if let path = ProcessInfo.processInfo.environment["TILDE_SESSIONS"], !path.isEmpty {
             return URL(fileURLWithPath: path, isDirectory: true)
@@ -270,7 +271,7 @@ final class SessionArchive: @unchecked Sendable {
             try writePrivate(encoder.encode(record), to: folder.appendingPathComponent("session.json"))
             return true
         } catch {
-            NSLog("Tilde could not save session \(record.id): \(error.localizedDescription)")
+            Logger(subsystem: "dev.tilde.app", category: "archive").error("could not save session \(record.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

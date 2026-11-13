@@ -77,8 +77,7 @@ func toolSDK() -> String {
     process.waitUntilExit()
     return text.split(separator: "\n").first { $0.contains("sdk") }?.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "  ", with: "") ?? "sdk unknown"
 }
-let version = ProcessInfo.processInfo.operatingSystemVersion
-let setup = "macOS \(version.majorVersion).\(version.minorVersion).\(version.patchVersion), \(toolSDK())\n"
+let setup = "macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion), \(toolSDK())\n"
 let setupFile = pictures.appendingPathComponent("recorded-on.txt")
 let recorded = try? String(contentsOf: setupFile, encoding: .utf8)
 let isExact = recorded == setup

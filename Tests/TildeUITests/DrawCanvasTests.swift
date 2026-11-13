@@ -70,7 +70,6 @@ struct DrawCanvasTests {
         #expect(page.messages.filter { $0 == "escape" }.count == 1)
     }
 
-    /// A click with the rectangle tool draws nothing.
     @Test func aClickWithTheRectangleToolDrawsNothing() async throws {
         try await page.draw("setTool('rectangle')")
         try await page.click(CGPoint(x: 200, y: 150))

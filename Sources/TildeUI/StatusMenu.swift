@@ -281,7 +281,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         controller.annotateInBrowser()
     }
 
-    /// Chooses a window or screen, as the HUD's window button does.
+    /// Chooses what to record, as a click on the source's name in the HUD does.
     @objc private func chooseWindow() {
         controller.dispatch(.windowButton)
     }

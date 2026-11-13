@@ -7,8 +7,6 @@ import AppKit
 /// every run and every Mac.
 @MainActor
 enum Fixtures {
-    /// A controller with an empty store. Waits for the store's first update, which arrives
-    /// on the next run loop pass and would otherwise reset the state a test sets.
     /// An empty archive in a temporary folder.
     static func archive() -> SessionArchive {
         SessionArchive(root: FileManager.default.temporaryDirectory.appendingPathComponent("tilde-sessions-\(UUID().uuidString)", isDirectory: true))
@@ -31,9 +29,11 @@ enum Fixtures {
         )
     }
 
-    /// A controller whose reports and copies never reach the user's inbox or clipboard.
+    /// A controller with an empty store, whose reports and copies never reach the user's inbox
+    /// or clipboard. Waits for the store's first update, which arrives on the next run loop
+    /// pass and would otherwise reset the state a test sets.
     static func controller() async throws -> AnnotationController {
-        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive(), defaults: nil)
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive(), defaults: MemoryDefaults())
         controller.sender.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
         controller.sender.pasteboard = NSPasteboard(name: NSPasteboard.Name("tilde-tests-\(UUID().uuidString)"))
         try await Task.sleep(for: .milliseconds(20))
@@ -77,7 +77,6 @@ enum Fixtures {
         }
     }
 
-    /// The hover highlight on the first draft's web element.
     /// A stopped clip of the Safari window, 12 s long, with its video file at `video`.
     static func clip(in video: URL) throws -> Draft {
         try Data([0, 0, 0, 0x18]).write(to: video)
@@ -111,6 +110,7 @@ enum Fixtures {
         return nil
     }
 
+    /// The hover highlight on the first draft's web element.
     static func hover() -> Picked {
         let draft = drafts(1)[0]
         guard case .element(let element) = draft.annotation.target else {
@@ -256,22 +256,80 @@ enum Fixtures {
     }
 
     /// Settings with fixed agent apps, default shortcuts and a fixed version.
-    static func settingsModel(page: SettingsWindow.Page, history: HistoryModel? = nil, wireframePreviews: WireframePreviews? = nil) throws -> SettingsModel {
-        let defaults = UserDefaults(suiteName: "tilde-tests-\(UUID().uuidString)")!
+    static func settingsModel(
+        page: SettingsWindow.Page, history: HistoryModel? = nil, wireframePreviews: WireframePreviews? = nil, updates: Updates? = nil
+    ) throws -> SettingsModel {
         let model = SettingsModel(
-            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: defaults), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
-            server: ServerState(port: 7311), version: "0.1.0 (42)",
+            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: MemoryDefaults()), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
+            server: ServerState(port: 7311), updates: updates ?? Updates(engine: FakeUpdateEngine()), version: "0.1.0 (42)",
             browserProfiles: { [] }, permissions: { (true, false) }, wireframePreviews: wireframePreviews
         )
         model.page = page
         return model
     }
 
-    static func installResult(failed: Int, action: InstallResult.Action = .installed) -> InstallResult {
+    static func installResult(failed: Int) -> InstallResult {
         let names = ["Claude", "Codex", "Cursor", "VS Code", "Windsurf (Devin)", "Gemini CLI"]
         let apps = names.enumerated().map { index, name in
             InstallResult.App(name: name, icon: appIcon, failed: index >= names.count - failed, changed: true)
         }
-        return InstallResult(action: action, apps: apps)
+        return InstallResult(action: .installed, apps: apps)
+    }
+}
+
+/// User defaults in memory, for what Tilde keeps across launches: a test changes no domain of
+/// this Mac and leaves no file in ~/Library/Preferences. A suite leaves an empty file there,
+/// also after its domain is removed.
+final class MemoryDefaults: UserDefaults {
+    private var values: [String: Any] = [:]
+
+    override func object(forKey key: String) -> Any? {
+        values[key]
+    }
+
+    override func set(_ value: Any?, forKey key: String) {
+        values[key] = value
+    }
+
+    override func removeObject(forKey key: String) {
+        values[key] = nil
+    }
+}
+
+/// An update engine that does what a test tells it: it reports the statuses the test sends,
+/// and records what the user asked for.
+@MainActor
+final class FakeUpdateEngine: UpdateEngine {
+    var isAutomatic = true
+    private(set) var calls: [String] = []
+    /// What it reports when it starts.
+    private let initial: UpdateStatus?
+    private var report: (UpdateStatus) -> Void = { _ in }
+
+    init(status: UpdateStatus? = nil) {
+        initial = status
+    }
+
+    func start(reporting: @escaping (UpdateStatus) -> Void) {
+        report = reporting
+        if let initial {
+            reporting(initial)
+        }
+    }
+
+    func send(_ status: UpdateStatus) {
+        report(status)
+    }
+
+    func check() {
+        calls.append("check")
+    }
+
+    func install() {
+        calls.append("install")
+    }
+
+    func restart() {
+        calls.append("restart")
     }
 }

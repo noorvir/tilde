@@ -13,8 +13,6 @@ final class DrawingNotes: ObservableObject {
     @Published private(set) var isToolDown = false
     /// The window that the session is limited to.
     var scope: () -> ElementPicker.WindowInfo? = { nil }
-    /// Whether a note's label is at a Quartz point.
-    var isOnLabel: (CGPoint) -> Bool = { _ in false }
 
     private let picker: ElementPicker
     /// Notes of drawings that Undo took out, for Redo.
@@ -163,7 +161,7 @@ final class DrawingNotes: ObservableObject {
         Task {
             let picked = await picker.pick(at: point, isMoving: true, in: scope())
             isFindingSnapFrame = false
-            guard !isOnLabel(point) else {
+            guard !panel.isOnLabel(point) else {
                 return
             }
 

@@ -33,12 +33,13 @@ public func saveToInbox(_ feedback: Feedback, sessionID: String, node: String? =
     return folder
 }
 
-/// Deletes reports older than `keptDays`, except the newest `keptCount`, as History keeps
-/// sessions. Folder names start with the time, so they sort newest last.
-public func pruneInbox(root: URL = inboxRoot, now: Date = Date(), keptDays: Int = 30, keptCount: Int = 100) {
-    let limit = now.addingTimeInterval(-Double(keptDays) * 86_400)
+/// Deletes reports older than 30 days, except the newest 100, as History keeps sessions.
+/// Folder names start with the time, so they sort newest last.
+public func pruneInbox(root: URL = inboxRoot) {
+    let now = Date()
+    let limit = now.addingTimeInterval(-30 * 86_400)
     let folders = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-    for folder in folders.filter({ isReportID($0.lastPathComponent) }).sorted(by: { $0.lastPathComponent > $1.lastPathComponent }).dropFirst(keptCount) {
+    for folder in folders.filter({ isReportID($0.lastPathComponent) }).sorted(by: { $0.lastPathComponent > $1.lastPathComponent }).dropFirst(100) {
         let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? now
         if modified < limit {
             try? FileManager.default.removeItem(at: folder)
@@ -102,18 +103,13 @@ public func writePrivate(_ data: Data, to file: URL) throws {
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
 }
 
-/// `~/.tilde/inbox`, or the folder in `TILDE_INBOX` (the e2e harness uses its own).
+/// `~/.tilde/inbox`, or the folder in `TILDE_INBOX` (the UX specs use their own).
 public let inboxRoot: URL = {
     if let path = ProcessInfo.processInfo.environment["TILDE_INBOX"], !path.isEmpty {
         return URL(fileURLWithPath: path, isDirectory: true)
     }
     return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".tilde/inbox", isDirectory: true)
 }()
-
-/// The newest batch folder in the inbox, or nil when nothing was sent yet.
-public func latestInboxFolder(root: URL = inboxRoot) -> URL? {
-    recentInboxFolders(root: root, limit: 1).first
-}
 
 /// Sent batch folders, newest first.
 public func recentInboxFolders(root: URL = inboxRoot, limit: Int) -> [URL] {

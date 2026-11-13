@@ -11,8 +11,6 @@ public protocol InstallFiles: Sendable {
     /// written by an older Tilde that already has the right text.
     func makePrivate(_ file: URL) throws
     func remove(_ file: URL) throws
-    /// The names in a folder; none if it is not there.
-    func names(in folder: URL) -> [String]
     func removeFolderIfEmpty(_ folder: URL)
 }
 
@@ -47,10 +45,6 @@ public struct LocalFiles: InstallFiles {
 
     public func remove(_ file: URL) throws {
         try FileManager.default.removeItem(at: file.resolvingSymlinksInPath())
-    }
-
-    public func names(in folder: URL) -> [String] {
-        (try? FileManager.default.contentsOfDirectory(atPath: folder.resolvingSymlinksInPath().path)) ?? []
     }
 
     public func removeFolderIfEmpty(_ folder: URL) {
@@ -99,11 +93,6 @@ public struct ShellFiles: InstallFiles {
 
     public func remove(_ file: URL) throws {
         _ = try run("rm \(quoted(file))", nil)
-    }
-
-    public func names(in folder: URL) -> [String] {
-        let list = (try? run("ls -A \(quoted(folder))", nil)) ?? ""
-        return list.split(whereSeparator: \.isNewline).map(String.init)
     }
 
     public func removeFolderIfEmpty(_ folder: URL) {

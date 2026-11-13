@@ -6,7 +6,7 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-# The owner's builds make warnings errors; see Package.swift.
+# Warnings are errors in this build; see Package.swift.
 export TILDE_STRICT=1
 sessions="$HOME/Library/Application Support/Tilde/Sessions"
 filter="${1:-TildeUXTests}"
@@ -43,6 +43,8 @@ scripts/build-driver.sh >/dev/null
 rm -rf build/TildeUX.app
 cp -R build/Tilde.app build/TildeUX.app
 plutil -replace CFBundleIdentifier -string dev.tilde.ux build/TildeUX.app/Contents/Info.plist
+# No update check at launch: the update spec checks its own local feed.
+plutil -replace SUEnableAutomaticChecks -bool false build/TildeUX.app/Contents/Info.plist
 codesign --force --sign - --identifier dev.tilde.ux -r='designated => identifier "dev.tilde.ux"' build/TildeUX.app 2>/dev/null
 
 pkill -f TildeDriver.app/Contents/MacOS/TildeDriver 2>/dev/null || true

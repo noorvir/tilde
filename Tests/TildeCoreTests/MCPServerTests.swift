@@ -323,7 +323,6 @@ struct MCPServerTests {
         #expect(try await read("../inbox", as: nil) == false)
     }
 
-    /// A machine waits only for its own agents' sessions.
     @Test func aMachineWaitsOnlyForItsOwnSessions() async throws {
         let mine = store.start(client: "Codex", node: "box", url: nil)
         #expect(await store.wait(for: mine.id, node: "box", seconds: 0) != nil)
