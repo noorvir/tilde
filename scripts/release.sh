@@ -1,7 +1,8 @@
 #!/bin/sh
 # Makes a release of Tilde in build/release/<version>/: the app for Apple silicon and Intel,
-# notarized, zipped and signed for Sparkle, and the appcast that installed copies read. It
-# commits the new version number, and publishes nothing: at the end it prints the commands that do.
+# notarized, as a disk image for the first install and as a zip signed for Sparkle, and the
+# appcast that installed copies read. It commits the new version number, and publishes nothing:
+# at the end it prints the commands that do.
 #   TILDE_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" TILDE_NOTARY_PROFILE=tilde \
 #   scripts/release.sh 0.3.0
 # TILDE_SIGN_IDENTITY: the code signing identity (security find-identity -v -p codesigning).
@@ -74,18 +75,31 @@ build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$app/Contents/Info.
 out="build/release/$version"
 rm -rf "$out"
 mkdir -p "$out"
-zip="$out/Tilde-$version.zip"
+# The download for a first install: a disk image with the app and a link to Applications, so the
+# user drags it there and does not open it from Downloads.
+dmg="$out/Tilde-$version.dmg"
+mkdir "$out/dmg"
+ditto "$app" "$out/dmg/Tilde.app"
+ln -s /Applications "$out/dmg/Applications"
+hdiutil create -quiet -volname Tilde -srcfolder "$out/dmg" -fs HFS+ -format UDZO "$dmg"
+rm -rf "$out/dmg"
+case "$TILDE_SIGN_IDENTITY" in
+    -) ;;
+    "Developer ID Application"*) codesign --sign "$TILDE_SIGN_IDENTITY" --timestamp "$dmg" ;;
+    *) codesign --sign "$TILDE_SIGN_IDENTITY" "$dmg" ;;
+esac
 if [ -n "${TILDE_NOTARY_PROFILE:-}" ]; then
-    # Apple checks the app and returns a ticket. The ticket is stapled to the app, so that a
-    # first open without a network connection also passes Gatekeeper; the zip is made again
-    # after that, as the one that users download.
-    ditto -c -k --sequesterRsrc --keepParent "$app" "$out/notarize.zip"
-    xcrun notarytool submit "$out/notarize.zip" --keychain-profile "$TILDE_NOTARY_PROFILE" --wait --timeout 30m
-    rm "$out/notarize.zip"
+    # Apple checks the disk image and the app in it, and returns a ticket for both. Stapled, the
+    # ticket lets a first open without a network connection pass Gatekeeper too; the app gets it
+    # before it is zipped for updates.
+    xcrun notarytool submit "$dmg" --keychain-profile "$TILDE_NOTARY_PROFILE" --wait --timeout 30m
+    xcrun stapler staple "$dmg"
     xcrun stapler staple "$app"
-    xcrun stapler validate "$app"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
     spctl --assess --type execute --verbose=2 "$app"
 fi
+# The update that Sparkle downloads.
+zip="$out/Tilde-$version.zip"
 ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
 if [ -n "${TILDE_UPDATE_PRIVATE_KEY:-}" ]; then
     signature=$(printf '%s' "$TILDE_UPDATE_PRIVATE_KEY" | "$sparkle_bin/sign_update" --ed-key-file - "$zip")
@@ -101,5 +115,5 @@ Tilde $version ($build) is in $out, signed by "$TILDE_SIGN_IDENTITY"${TILDE_NOTA
 Nothing is published. To publish it, push the release commit, then make the GitHub release; the
 newest release's appcast.xml is the feed:
   git push origin HEAD
-  gh release create v$version "$zip" "$out/appcast.xml" --repo $repo --target "$(git rev-parse HEAD)" --title "Tilde $version" --notes "Tilde $version"
+  gh release create v$version "$dmg" "$zip" "$out/appcast.xml" --repo $repo --target "$(git rev-parse HEAD)" --title "Tilde $version" --notes "Tilde $version"
 DONE
