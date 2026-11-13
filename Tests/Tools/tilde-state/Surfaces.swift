@@ -289,6 +289,7 @@ enum Surfaces {
         }
         let model = try Fixtures.settingsModel(page: page, history: history, wireframePreviews: previews, updates: updates(state.update))
         model.expandedAgents = Set(state.expandedAgents ?? [])
+        model.setup.nodes.setEnabledForTesting(state.remoteMachines ?? false)
         if let host = state.machine, let node = state.nodes?.first(where: { $0.host == host }) {
             let machine = AgentSetup(installer: model.setup.installer, placeholderIcon: Fixtures.appIcon, nodes: model.setup.nodes, isRemote: true)
             var statuses: [Harness: InstallStatus] = [:]
