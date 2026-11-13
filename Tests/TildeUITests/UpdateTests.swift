@@ -44,8 +44,9 @@ struct UpdateRuleTests {
         #expect(engine.calls == ["check"])
     }
 
-    @Test func aReadyUpdateIsAnnouncedOnceAndRestartsOnRequest() {
+    @Test func withoutAutomaticUpdatesAReadyUpdateIsAnnouncedOnceAndRestartsOnRequest() {
         let engine = FakeUpdateEngine()
+        engine.isAutomatic = false
         let updates = Updates(engine: engine)
         var announced: [String] = []
         updates.onReady = { announced.append($0) }
@@ -61,6 +62,7 @@ struct UpdateRuleTests {
 
     @Test func anUpdateNeverInstallsInTheMiddleOfASession() {
         let engine = FakeUpdateEngine()
+        engine.isAutomatic = false
         let updates = Updates(engine: engine)
         var announced: [String] = []
         updates.onReady = { announced.append($0) }
@@ -89,6 +91,180 @@ struct UpdateRuleTests {
         updates.isAutomatic = false
 
         #expect(engine.isAutomatic == false)
+    }
+}
+
+/// With "Update automatically" on, a ready update installs by itself when Tilde is not in use.
+@MainActor
+struct SilentUpdateTests {
+    @Test func aReadyUpdateInstallsWhenTildeHasHadNoInputForTheIdleTime() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        var announced: [String] = []
+        updates.onReady = { announced.append($0) }
+        updates.start()
+
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(299)
+        #expect(engine.calls.isEmpty)
+        clock.passes(1)
+
+        #expect(engine.calls == ["restart"])
+        #expect(announced.isEmpty)
+    }
+
+    @Test func anUpdateThatIsReadyAfterALongIdleTimeInstallsAtOnce() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        updates.start()
+
+        clock.passes(1000)
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(0)
+
+        #expect(engine.calls == ["restart"])
+    }
+
+    @Test func inputToTildeMakesTheInstallWait() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        updates.start()
+
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(200)
+        updates.noteUse()
+        clock.passes(299)
+        #expect(engine.calls.isEmpty)
+        clock.passes(1)
+
+        #expect(engine.calls == ["restart"])
+    }
+
+    @Test func aSessionMakesTheInstallWaitUntilTheIdleTimeAfterItEnds() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        updates.start()
+        updates.isSessionActive = true
+
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(1000)
+        #expect(engine.calls.isEmpty)
+        updates.isSessionActive = false
+        clock.passes(299)
+        #expect(engine.calls.isEmpty)
+        clock.passes(301)
+
+        #expect(engine.calls == ["restart"])
+    }
+
+    @Test func anOpenWindowMakesTheInstallWait() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        var showsWindow = true
+        updates.showsWindow = { showsWindow }
+        updates.start()
+
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(1000)
+        #expect(engine.calls.isEmpty)
+        showsWindow = false
+        clock.passes(300)
+
+        #expect(engine.calls == ["restart"])
+    }
+
+    @Test func aSessionThatStartsAsTheInstallBeginsMakesItWait() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        updates.start()
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(300)
+        #expect(engine.calls == ["restart"])
+
+        updates.isSessionActive = true
+        #expect(!engine.asksToRelaunch())
+        clock.passes(1000)
+        #expect(engine.calls == ["restart"])
+
+        updates.isSessionActive = false
+        clock.passes(600)
+        #expect(engine.calls == ["restart", "restart"])
+        #expect(engine.asksToRelaunch())
+    }
+
+    @Test func withTheSettingOffNothingInstallsByItself() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        engine.isAutomatic = false
+        let updates = clock.updates(engine)
+        var announced: [String] = []
+        updates.onReady = { announced.append($0) }
+        updates.start()
+
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(10000)
+
+        #expect(engine.calls.isEmpty)
+        #expect(announced == ["0.3.0"])
+    }
+
+    @Test func theNewVersionKnowsThatASilentInstallOpenedIt() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        updates.start()
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(300)
+        #expect(engine.asksToRelaunch())
+        clock.passes(5)
+
+        #expect(clock.updates(FakeUpdateEngine()).isSilentRelaunch)
+        #expect(!clock.updates(FakeUpdateEngine()).isSilentRelaunch)
+    }
+
+    @Test func theUsersOwnRestartIsNotSilent() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        updates.start()
+        engine.send(.ready(version: "0.3.0"))
+        updates.noteUse()
+        updates.restart()
+
+        #expect(engine.asksToRelaunch())
+        #expect(!clock.updates(FakeUpdateEngine()).isSilentRelaunch)
+    }
+}
+
+/// Time that a test moves on by hand, and what is due to run in it.
+@MainActor
+final class IdleClock {
+    private var now = Date(timeIntervalSince1970: 0)
+    private var due: [(at: Date, run: @MainActor () -> Void)] = []
+    private let defaults = MemoryDefaults()
+
+    /// Updates on this clock, with an idle time of 300 s.
+    func updates(_ engine: FakeUpdateEngine) -> Updates {
+        Updates(engine: engine, idleTime: 300, defaults: defaults, now: { [unowned self] in now }) { [unowned self] delay, run in
+            due.append((now.addingTimeInterval(delay), run))
+        }
+    }
+
+    /// Moves time on, and runs what is due on the way, in order.
+    func passes(_ seconds: TimeInterval) {
+        let end = now.addingTimeInterval(seconds)
+        while let next = due.enumerated().filter({ $0.element.at <= end }).min(by: { $0.element.at < $1.element.at }) {
+            due.remove(at: next.offset)
+            now = max(now, next.element.at)
+            next.element.run()
+        }
+        now = end
     }
 }
 

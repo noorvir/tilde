@@ -14,11 +14,14 @@ final class SparkleUpdates: NSObject, UpdateEngine {
     private let feed: String
     private var updater: SPUUpdater!
     private var report: (UpdateStatus) -> Void = { _ in }
+    private var mayRelaunch: () -> Bool = { true }
     private var version = ""
     /// Sparkle's question about the update found or ready, until the user answers it.
     private var reply: ((SPUUserUpdateChoice) -> Void)?
     /// Installs an update that was downloaded in the background, and opens the new version.
     private var installNow: (() -> Void)?
+    /// Quits Tilde for an install that waited, and opens the new version.
+    private var relaunch: (() -> Void)?
     /// The feed of the current check has loaded: a download error after it is the update's.
     private var feedLoaded = false
     private var expectedLength: UInt64 = 0
@@ -36,8 +39,9 @@ final class SparkleUpdates: NSObject, UpdateEngine {
         set { updater.automaticallyDownloadsUpdates = newValue }
     }
 
-    func start(reporting: @escaping (UpdateStatus) -> Void) {
+    func start(reporting: @escaping (UpdateStatus) -> Void, mayRelaunch: @escaping () -> Bool) {
         report = reporting
+        self.mayRelaunch = mayRelaunch
         do {
             try updater.start()
         } catch {
@@ -56,6 +60,9 @@ final class SparkleUpdates: NSObject, UpdateEngine {
     func restart() {
         if reply != nil {
             answer(.install)
+        } else if let relaunch {
+            self.relaunch = nil
+            relaunch()
         } else {
             installNow?()
         }
@@ -120,6 +127,14 @@ extension SparkleUpdates: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem, immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
         installNow = immediateInstallHandler
         report(.ready(version: item.displayVersionString))
+        return true
+    }
+
+    func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem, untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+        guard !mayRelaunch() else {
+            return false
+        }
+        relaunch = installHandler
         return true
     }
 
