@@ -6,6 +6,7 @@ import os
 /// The machines that Tilde can be installed on, and a link to each machine that has it: an ssh
 /// tunnel from the node's socket, which its agents reach through `tproxy`, to this Mac's
 /// socket for that node. A node type with no `tproxy` file is linked by a port instead.
+/// All of it is a beta, off by default: while it is off, no link runs and the node port is closed.
 @MainActor
 final class NodeSetup: ObservableObject {
     /// The machine's link. A change under way leaves it as it is: see `Row.isWorking`.
@@ -133,6 +134,8 @@ final class NodeSetup: ObservableObject {
         var id: String { host }
     }
 
+    /// The beta switch: agents on a linked machine can open Tilde on this screen.
+    @Published private(set) var isEnabled: Bool
     @Published private(set) var rows: [Row] = []
     /// Each machine's apps, once its page has read them.
     @Published private(set) var setups: [String: AgentSetup] = [:]
@@ -142,7 +145,12 @@ final class NodeSetup: ObservableObject {
     private var pendingTokens: [String: String] = [:]
     private let log = Logger(subsystem: "dev.tilde.app", category: "nodes")
     private let store: NodeStore
+    private let defaults: UserDefaults
+    /// The tunnels' ssh.
+    private let ssh: URL
     private let nodePort: UInt16
+    /// The door for tunnels from node types with no tproxy, open while the links run.
+    private var nodeServer: HTTPServer?
     /// Not Tilde's own port: the node may run a Tilde of its own.
     private let remotePort: UInt16 = 7319
     /// Serves the nodes' sockets; links start once it is set.
@@ -163,11 +171,44 @@ final class NodeSetup: ObservableObject {
     init(
         store: NodeStore = NodeStore(),
         nodePort: UInt16,
+        defaults: UserDefaults = .standard,
+        ssh: URL = URL(fileURLWithPath: "/usr/bin/ssh"),
         makeInstaller: @escaping @Sendable (String, String, String, Bool) throws -> (Installer, Bool) = { try NodeSetup.installer($0, url: $1, token: $2, onPort: $3) }
     ) {
         self.store = store
         self.nodePort = nodePort
+        self.defaults = defaults
+        self.ssh = ssh
         self.makeInstaller = makeInstaller
+        isEnabled = defaults.bool(forKey: Self.enabledKey)
+    }
+
+    nonisolated static let enabledKey = "remoteMachines"
+
+    /// Sets the switch on the first launch that has it: on when a machine is already linked, so
+    /// that the setup keeps working; off on a new install. Later launches keep the user's choice.
+    nonisolated static func migrate(defaults: UserDefaults, store: NodeStore) {
+        guard defaults.object(forKey: enabledKey) == nil else {
+            return
+        }
+        defaults.set(!store.load().isEmpty, forKey: enabledKey)
+    }
+
+    /// Turns remote machines on or off: off stops every link and closes the node port at once,
+    /// on starts them again.
+    func setEnabled(_ isOn: Bool) {
+        defaults.set(isOn, forKey: Self.enabledKey)
+        isEnabled = isOn
+        if isOn {
+            startLinks()
+        } else {
+            stopLinks()
+        }
+    }
+
+    /// For the contract: the switch, without links.
+    func setEnabledForTesting(_ isOn: Bool) {
+        isEnabled = isOn
     }
 
     /// For the contract: rows with no machines behind them.
@@ -176,18 +217,44 @@ final class NodeSetup: ObservableObject {
         isFixed = true
     }
 
-    /// Links the installed nodes, for as long as Tilde runs.
+    /// Opens the node port and links the installed nodes, while remote machines are on.
     func startLinks() {
+        guard isEnabled, !isLinking else {
+            return
+        }
+
         isLinking = true
+        startNodeServer()
         store.load().forEach { link($0.host) }
     }
 
     func stopLinks() {
         isLinking = false
+        nodeServer?.stop()
+        nodeServer = nil
         links.values.forEach { $0.terminate() }
         links = [:]
         sockets.values.forEach { $0.stop() }
         sockets = [:]
+    }
+
+    /// Every request needs the token of a node on the port, and one node's long polls cannot
+    /// take every connection.
+    private func startNodeServer() {
+        guard nodeServer == nil, let mcp else {
+            return
+        }
+
+        let store = store
+        do {
+            let server = try HTTPServer(port: nodePort, maxRequestsPerCaller: 8) { request in
+                await mcp.handleFromNode(request, store: store)
+            }
+            server.start { _ in }
+            nodeServer = server
+        } catch {
+            log.error("node port \(self.nodePort, privacy: .public) not open: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// Reads the candidates again: installed nodes, running ssh connections and the ssh config.
@@ -515,7 +582,7 @@ final class NodeSetup: ObservableObject {
     /// One tunnel, started again whenever it ends: sleep and network changes end it. A node
     /// with a socket gets its `tproxy` checked first, and its tunnel joins the two sockets.
     private func link(_ host: String, attempt: Int = 0) {
-        guard links[host] == nil, !preparing.contains(host), RemotePush.isValid(host: host), let mcp,
+        guard isLinking, links[host] == nil, !preparing.contains(host), RemotePush.isValid(host: host), let mcp,
               let node = store.load().first(where: { $0.host == host }) else {
             return
         }
@@ -527,6 +594,9 @@ final class NodeSetup: ObservableObject {
         preparing.insert(host)
         Task {
             defer { preparing.remove(host) }
+            guard isLinking else {
+                return
+            }
             do {
                 let local = try sockets[host] ?? NodeSocket(node: host, mcp: mcp)
                 if sockets[host] == nil {
@@ -548,7 +618,7 @@ final class NodeSetup: ObservableObject {
 
     private func startTunnel(_ host: String, forward: String, attempt: Int) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        process.executableURL = ssh
         process.arguments = [
             "-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2",
             "-o", "ExitOnForwardFailure=yes", "-R", forward, host,

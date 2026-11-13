@@ -1,7 +1,7 @@
 import AppKit
 
 /// Tilde's mark: a bold tilde inside the corners of a selection, drawn in code so the menu
-/// bar icon and the app icon stay sharp at every size and come from the same paths.
+/// bar icon stays sharp at every size.
 public enum TildeMark {
     /// The menu bar icon, 18 pt. A template image, so macOS colours it for light and dark
     /// menu bars and the status item can tint it while annotating.
@@ -23,40 +23,6 @@ public enum TildeMark {
         image.isTemplate = true
         image.accessibilityDescription = "Tilde"
         return image
-    }
-
-    /// The app icon at `size` pixels: a white selection frame with a small white tilde on a
-    /// blue rounded square with the standard macOS icon margin.
-    public static func appIconImage(size: CGFloat) -> NSImage {
-        NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in
-            let scale = size / 1024
-            let tile = NSRect(x: 100 * scale, y: 100 * scale, width: 824 * scale, height: 824 * scale)
-            let shape = NSBezierPath(roundedRect: tile, xRadius: 185 * scale, yRadius: 185 * scale)
-
-            NSGraphicsContext.saveGraphicsState()
-            let shadow = NSShadow()
-            shadow.shadowBlurRadius = 24 * scale
-            shadow.shadowOffset = NSSize(width: 0, height: -10 * scale)
-            shadow.shadowColor = .black.withAlphaComponent(0.35)
-            shadow.set()
-            let top = NSColor(srgbRed: 0.32, green: 0.6, blue: 1, alpha: 1)
-            let bottom = NSColor(srgbRed: 0.1, green: 0.36, blue: 0.92, alpha: 1)
-            NSGradient(starting: top, ending: bottom)?.draw(in: shape, angle: -90)
-            NSGraphicsContext.restoreGraphicsState()
-
-            // The frame is a 584 px square, 71% of the tile, centred on it; the tilde is about
-            // half the frame's width.
-            let frame = tile.insetBy(dx: 120 * scale, dy: 120 * scale)
-            NSColor.white.setStroke()
-            let corners = cornersPath(in: frame, length: 140 * scale)
-            corners.lineWidth = 36 * scale
-            corners.stroke()
-
-            let tilde = tildePath(in: frame.insetBy(dx: 90 * scale, dy: 90 * scale))
-            tilde.lineWidth = 64 * scale
-            tilde.stroke()
-            return true
-        }
     }
 
     /// The tilde wave across a square, designed on an 18 × 18 grid with the origin at the

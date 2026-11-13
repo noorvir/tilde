@@ -103,6 +103,8 @@ struct UIState: Decodable {
         var expandedAgents: [String]?
         var recording: Bool?
         var savedSessions: Bool?
+        /// The beta switch for remote machines; off when absent, as on a new install.
+        var remoteMachines: Bool?
         var nodes: [NodeState]?
         /// The machine whose page is open.
         var machine: String?

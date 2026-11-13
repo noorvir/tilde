@@ -22,7 +22,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var mcp: MCPServer?
     private var server: HTTPServer?
-    private var nodeServer: HTTPServer?
     private var nodes: NodeSetup?
     private var serverState = ServerState(port: 7311)
     private var menu: StatusMenu?
@@ -99,6 +98,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         serverState = ServerState(port: port)
         let bridge = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/tilde-mcp").path
         let home = FileManager.default.homeDirectoryForCurrentUser
+        NodeSetup.migrate(defaults: .standard, store: NodeStore())
         let setup = AgentSetup(
             // Without the token the listener does not start, so entries without it change nothing.
             installer: Installer(environment: (try? .local(home: home, port: String(port), bridgePath: bridge)) ?? .standard(home: home, port: String(port), bridgePath: bridge)),
@@ -207,15 +207,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             self.server = server
-
-            // The door for tunnels from node types with no tproxy: every request needs the
-            // token of such a node, and one node's long polls cannot take every connection.
-            let store = NodeStore()
-            let nodeServer = try HTTPServer(port: state.port + 1, maxRequestsPerCaller: 8) { request in
-                await mcp.handleFromNode(request, store: store)
-            }
-            nodeServer.start { _ in }
-            self.nodeServer = nodeServer
         } catch {
             state.status = .failed((error as? LocalToken.Failure)?.description ?? error.localizedDescription)
         }

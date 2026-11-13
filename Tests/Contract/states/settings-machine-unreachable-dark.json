@@ -8,6 +8,7 @@
   "appearance": "dark",
   "settings": {
     "page": "agents",
+    "remoteMachines": true,
     "nodes": [
       {
         "host": "mac-mini",

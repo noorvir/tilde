@@ -1,1 +1,0 @@
-../../Tests/TildeUITests/Fixtures.swift
