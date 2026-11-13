@@ -219,7 +219,7 @@ public struct Installer: Sendable {
         let paths = target.detect.paths.map { environment.home.appendingPathComponent($0) } + target.detect.files
         let apps = environment.applications.flatMap { folder in target.detect.apps.map { folder.appendingPathComponent($0) } }
         let tools = environment.binaries.flatMap { folder in target.detect.binaries.map { folder.appendingPathComponent($0) } }
-        return (paths + apps + tools).contains { files.exists($0) }
+        return (paths + apps + tools).contains { (try? files.exists($0)) == true }
     }
 
     /// The MCP config file that Tilde writes for the app.
@@ -255,8 +255,12 @@ public struct Installer: Sendable {
     public func uninstall(_ harness: Harness) -> InstallReport {
         let target = target(for: harness)
         var report = InstallReport(harness: harness, dryRun: dryRun)
-        if files.exists(target.config) {
-            report.changes.append(edit(target.config) { try target.format.removing(from: $0) })
+        do {
+            if try files.exists(target.config) {
+                report.changes.append(edit(target.config) { try target.format.removing(from: $0) })
+            }
+        } catch {
+            report.changes.append(FileChange(file: target.config, action: .failed(String(describing: error))))
         }
         // A skill folder can be shared by several apps; it goes when the last of them is uninstalled.
         let sharing = Harness.allCases.filter { $0 != harness && self.target(for: $0).skills == target.skills && status(of: $0) == .installed }
@@ -271,9 +275,10 @@ public struct Installer: Sendable {
     /// Rewrites `file` with `change`, which gets the current text ("" for a missing file).
     /// Writes through symbolic links, such as a skills folder that links into a dotfiles repository.
     private func edit(_ file: URL, _ change: (String) throws -> String) -> FileChange {
-        let exists = files.exists(file)
-
         do {
+            // A file that cannot be asked about is not a missing one: its text must not be
+            // replaced with only Tilde's entry.
+            let exists = try files.exists(file)
             let old = exists ? try files.read(file) : ""
             let new = try change(old)
             guard new != old || !exists else {

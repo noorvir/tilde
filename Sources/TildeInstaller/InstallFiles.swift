@@ -2,7 +2,9 @@ import Foundation
 
 /// The file operations of an install: on this Mac, or on another machine through a shell.
 public protocol InstallFiles: Sendable {
-    func exists(_ file: URL) -> Bool
+    /// Throws when the files cannot be asked, such as on a machine that does not answer: that
+    /// is not "no file".
+    func exists(_ file: URL) throws -> Bool
     func read(_ file: URL) throws -> String
     /// Writes through symbolic links, creating the folders on the way. A file it replaces is
     /// for its owner only (0600): agents' configs hold tokens, such as Tilde's on a machine.
@@ -70,8 +72,11 @@ public struct ShellFiles: InstallFiles {
         "'" + file.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    public func exists(_ file: URL) -> Bool {
-        (try? run("test -e \(quoted(file))", nil)) != nil
+    /// The command succeeds for a file that is not there too: only then does a failed
+    /// command, such as a dropped connection, never read as "no file".
+    public func exists(_ file: URL) throws -> Bool {
+        let answer = try run("if [ -e \(quoted(file)) ]; then echo yes; else echo no; fi", nil)
+        return answer.trimmingCharacters(in: .whitespacesAndNewlines) == "yes"
     }
 
     public func read(_ file: URL) throws -> String {

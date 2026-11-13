@@ -85,6 +85,27 @@ struct RemoteInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/tilde").path))
     }
 
+    /// A machine that does not answer the question "is the file there?", such as when its
+    /// connection drops for that one command, keeps its config: a command that fails is not
+    /// "no file", which would put a config with only Tilde's entry in place of the user's.
+    @Test func aCommandThatFailsDoesNotReadAsNoFile() throws {
+        let home = try home()
+        let config = #"{ "other": 1 }"#
+        try config.write(to: home.appendingPathComponent(".claude.json"), atomically: true, encoding: .utf8)
+        let shell = run(home: home)
+        let installer = try Installer.remote(mcpURL: "http://127.0.0.1:7319/mcp", authorization: "Bearer secret") { command, input in
+            if command.contains(".claude.json"), command.contains("-e ") {
+                throw InstallerError.noHome
+            }
+            return try shell(command, input)
+        }
+
+        let report = installer.install(.claudeCode)
+
+        #expect(report.changes.first?.action == .failed(String(describing: InstallerError.noHome)))
+        #expect(try text(home, ".claude.json") == config)
+    }
+
     /// On a machine linked by its socket, each app starts `tproxy` with the socket as a
     /// stdio server, in its own words, and a reinstall replaces an older URL entry.
     @Test func aProxiedMachineGetsStdioEntriesThatReplaceTheURL() throws {
