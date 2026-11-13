@@ -17,6 +17,14 @@ struct AppearanceSettings: View {
         WireframeLook(style: style, fill: fill, blur: blur, fade: fade, colours: colours)
     }
 
+    private func value(of strength: LookStrength) -> Binding<Double> {
+        switch strength {
+        case .fill: $fill
+        case .blur: $blur
+        case .fade: $fade
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             SettingsSection("Wireframe style") {
@@ -66,7 +74,7 @@ struct AppearanceSettings: View {
                 ForEach(LookStrength.allCases) { strength in
                     SettingsDivider()
                     SettingsRow(title: strength.title, subtitle: strength.subtitle) {
-                        LookSlider(strength)
+                        LookSlider(strength: strength, value: value(of: strength))
                             .frame(width: 234)
                     }
                 }
@@ -164,77 +172,13 @@ struct Preview: View {
     }
 }
 
-/// One of the look's three strengths, as its slider sets it.
-enum LookStrength: String, CaseIterable, Identifiable {
-    case fill, blur, fade
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .fill: "Fill"
-        case .blur: "Blur under"
-        case .fade: "Fade under"
-        }
-    }
-
-    var subtitle: String {
-        switch self {
-        case .fill: "The colour in each component"
-        case .blur: "Blurs the app under each component"
-        case .fade: "Lightens the app under each component"
-        }
-    }
-
-    fileprivate var key: String {
-        switch self {
-        case .fill: WireframeLook.Key.fill
-        case .blur: WireframeLook.Key.blur
-        case .fade: WireframeLook.Key.fade
-        }
-    }
-
-    fileprivate var range: ClosedRange<Double> {
-        switch self {
-        case .fill: WireframeLook.fillRange
-        case .blur: WireframeLook.blurRange
-        case .fade: WireframeLook.fadeRange
-        }
-    }
-
-    fileprivate var step: Double {
-        self == .blur ? 0.5 : 0.01
-    }
-
-    fileprivate var standard: Double {
-        switch self {
-        case .fill: WireframeLook().fill
-        case .blur: WireframeLook().blur
-        case .fade: WireframeLook().fade
-        }
-    }
-
-    fileprivate func text(_ value: Double) -> String {
-        if self == .blur {
-            return "\(value.formatted(.number.precision(.fractionLength(0...1)))) pt"
-        }
-        return value.formatted(.percent.precision(.fractionLength(0)))
-    }
-}
-
-/// A strength's slider with its value as text after it, bound to the setting. It moves
-/// smoothly, without tick marks, and keeps its value to whole steps. Compact: smaller text, for
-/// the wireframe bar's Style menu.
+/// A strength's slider with its value as text after it. It moves smoothly, without tick
+/// marks, and keeps its value to whole steps. Compact: smaller text, for the wireframe bar's
+/// Adjust popover.
 struct LookSlider: View {
     let strength: LookStrength
-    let isCompact: Bool
-    @AppStorage private var value: Double
-
-    init(_ strength: LookStrength, isCompact: Bool = false) {
-        self.strength = strength
-        self.isCompact = isCompact
-        _value = AppStorage(wrappedValue: strength.standard, strength.key)
-    }
+    @Binding var value: Double
+    var isCompact = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -252,6 +196,6 @@ struct LookSlider: View {
     }
 
     private var stepped: Binding<Double> {
-        Binding(get: { value }, set: { value = ($0 / strength.step).rounded() * strength.step })
+        Binding(get: { value }, set: { value = strength.stepped($0) })
     }
 }

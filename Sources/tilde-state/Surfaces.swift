@@ -84,8 +84,15 @@ enum Surfaces {
 
         case .hud:
             let controller = try await controller(state)
-            controller.wireframe.isStyleMenuOpen = state.styleMenu == true
+            controller.wireframe.bar = state.wireframeBar ?? WireframeBar()
             return try await hosted(HUDView(controller: controller), size: size)
+
+        case .wireframeAdjust:
+            // The content of the native popover, whose frame, arrow and material AppKit draws;
+            // here on the window colour.
+            let controller = try await controller(state)
+            let content = WireframeAdjust(wireframe: controller.wireframe).frame(width: size.width, height: size.height)
+            return try await hosted(content.background(Color(nsColor: .windowBackgroundColor)), size: size)
 
         case .comment:
             let controller = try await controller(state)

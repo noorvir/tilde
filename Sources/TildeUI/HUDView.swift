@@ -26,6 +26,7 @@ struct HUDView: View {
     /// Reports the frame of the visible content in the window, top-left origin.
     let onContentFrame: (CGRect) -> Void
     @State private var isPillHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// How often recording mode began, which bounces the record button.
     @State private var recordModeEntries = 0
 
@@ -67,10 +68,6 @@ struct HUDView: View {
                     .fixedSize()
                     .transition(.opacity)
             }
-            if hud.isShown, controller.isWireframe, wireframe.isStyleMenuOpen {
-                WireframeStyleMenu()
-                    .transition(Self.zoom)
-            }
             if hud.isShown, controller.showsBrowserAccessory {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: browserOffer.dismiss)
                     .transition(Self.zoom)
@@ -98,7 +95,6 @@ struct HUDView: View {
         .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: hud.showsList)
-        .animation(.spring(duration: 0.28), value: wireframe.isStyleMenuOpen)
         .animation(.spring(duration: 0.28), value: controller.isPickingWindow)
         .animation(.spring(duration: 0.3, bounce: 0), value: controller.isSourcePickerOpen)
         .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
@@ -179,25 +175,70 @@ struct HUDView: View {
         }
     }
 
-    /// The bar under the pill in Draw and Wireframe: the mode's tools, Undo and Redo, then
-    /// Done. While paused the tools wait; Done still finishes.
+    /// Draw's bar under the pill: its tools, Undo and Redo, then Done. While paused the tools
+    /// wait; Done still finishes.
     @ViewBuilder
-    private func canvasBarContent(
-        undoKeys: [String] = [], redoKeys: [String] = [], @ViewBuilder tools: () -> some View, @ViewBuilder afterRedo: () -> some View = { EmptyView() }
-    ) -> some View {
+    private func canvasBarContent(@ViewBuilder tools: () -> some View) -> some View {
         Group {
             tools()
             barDivider
-            HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: undoKeys, help: "Undo") {
-                controller.dispatch(.undoDrawing)
-            }
-            HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: redoKeys, help: "Redo") {
-                controller.dispatch(.redoDrawing)
-            }
-            afterRedo()
+            undoRedo()
         }
         .disabled(controller.isDrawingPaused)
         Spacer(minLength: 0)
+        doneButton
+    }
+
+    /// Wireframe's bar under the pill: the tools, Undo and Redo, or in their place the
+    /// controls of the look; then the palette button, which switches the two, and Done. The
+    /// tools give the place its width and the controls of the look take the same place, so the
+    /// bar, the palette button and Done never move; the two groups crossfade.
+    @ViewBuilder
+    private var wireframeBarContent: some View {
+        let isStyling = wireframe.bar.isStyling
+        Group {
+            HStack(spacing: HUDAccessory.size.scaled(4)) {
+                wireframeTools
+                barDivider
+                undoRedo(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"])
+            }
+            .opacity(isStyling ? 0 : 1)
+            .allowsHitTesting(!isStyling)
+            .accessibilityHidden(isStyling)
+            .overlay(alignment: .leading) {
+                WireframeStyleControls(wireframe: wireframe)
+                    .opacity(isStyling ? 1 : 0)
+                    .allowsHitTesting(isStyling)
+                    .accessibilityHidden(!isStyling)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(reduceMotion ? .linear(duration: 0.1) : .easeInOut(duration: 0.2), value: isStyling)
+            barDivider
+            HUDButton(image: Image(systemName: "paintpalette"), isOn: isStyling, help: "Style") {
+                _ = wireframe.bar.handle(.palette)
+            }
+        }
+        .disabled(controller.isDrawingPaused)
+        .onChange(of: wireframe.bar.isAdjusting) { _, isAdjusting in
+            // The popover can take the keyboard; the canvas gets it back after.
+            if !isAdjusting, controller.isWireframe {
+                controller.takeKeyboard()
+            }
+        }
+        doneButton
+    }
+
+    @ViewBuilder
+    private func undoRedo(undoKeys: [String] = [], redoKeys: [String] = []) -> some View {
+        HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: undoKeys, help: "Undo") {
+            controller.dispatch(.undoDrawing)
+        }
+        HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: redoKeys, help: "Redo") {
+            controller.dispatch(.redoDrawing)
+        }
+    }
+
+    private var doneButton: some View {
         PillTextButton(title: "Done", key: "⌘↩", isDestructive: false) {
             controller.dispatch(.finishDrawing)
         }
@@ -289,14 +330,7 @@ struct HUDView: View {
         let size = HUDAccessory.size
         return capsule(HStack(spacing: size.scaled(4)) {
             if controller.isWireframe {
-                canvasBarContent(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"]) {
-                    wireframeTools
-                } afterRedo: {
-                    barDivider
-                    HUDButton(image: Image(systemName: "paintpalette"), isOn: wireframe.isStyleMenuOpen, help: "Style") {
-                        wireframe.isStyleMenuOpen.toggle()
-                    }
-                }
+                wireframeBarContent
             } else {
                 canvasBarContent { drawingTools }
             }

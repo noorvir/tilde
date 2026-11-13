@@ -450,8 +450,7 @@ final class AnnotationController: ObservableObject {
 
     /// Esc, and the picker's "Select on screen" and "All apps".
     func escapePressed() {
-        if wireframe.isStyleMenuOpen {
-            wireframe.isStyleMenuOpen = false
+        if wireframe.bar.handle(.escape) {
             return
         }
         // In the picker, Esc first goes from an app's windows back to the apps.

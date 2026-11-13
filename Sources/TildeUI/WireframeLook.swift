@@ -85,4 +85,106 @@ struct WireframeLook: Equatable {
     var pageJSON: String {
         DrawingPanel.json(pageValues)
     }
+
+    /// A change from the wireframe bar.
+    enum Change: Equatable {
+        case style(Style)
+        case colours(Colours)
+        case strength(LookStrength, Double)
+    }
+
+    /// The look with `change`; a strength stays in its range, at a whole step.
+    mutating func apply(_ change: Change) {
+        switch change {
+        case .style(let style):
+            self.style = style
+        case .colours(let colours):
+            self.colours = colours
+        case .strength(let strength, let value):
+            self[strength] = strength.stepped(value)
+        }
+    }
+
+    subscript(strength: LookStrength) -> Double {
+        get {
+            switch strength {
+            case .fill: fill
+            case .blur: blur
+            case .fade: fade
+            }
+        }
+        set {
+            switch strength {
+            case .fill: fill = newValue
+            case .blur: blur = newValue
+            case .fade: fade = newValue
+            }
+        }
+    }
+}
+
+/// One of the look's three strengths, as its slider sets it.
+enum LookStrength: String, CaseIterable, Identifiable {
+    case fill, blur, fade
+
+    var id: String { rawValue }
+
+    /// Its name in Settings.
+    var title: String {
+        switch self {
+        case .fill: "Fill"
+        case .blur: "Blur under"
+        case .fade: "Fade under"
+        }
+    }
+
+    /// Its name in the wireframe bar's Adjust popover, where the rows are short.
+    var shortTitle: String {
+        switch self {
+        case .fill: "Fill"
+        case .blur: "Blur"
+        case .fade: "Fade"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .fill: "The colour in each component"
+        case .blur: "Blurs the app under each component"
+        case .fade: "Lightens the app under each component"
+        }
+    }
+
+    var key: String {
+        switch self {
+        case .fill: WireframeLook.Key.fill
+        case .blur: WireframeLook.Key.blur
+        case .fade: WireframeLook.Key.fade
+        }
+    }
+
+    var range: ClosedRange<Double> {
+        switch self {
+        case .fill: WireframeLook.fillRange
+        case .blur: WireframeLook.blurRange
+        case .fade: WireframeLook.fadeRange
+        }
+    }
+
+    private var step: Double {
+        self == .blur ? 0.5 : 0.01
+    }
+
+    /// `value` in the range, at the nearest whole step.
+    func stepped(_ value: Double) -> Double {
+        let clamped = min(max(value, range.lowerBound), range.upperBound)
+        return (clamped / step).rounded() * step
+    }
+
+    func text(_ value: Double) -> String {
+        if self == .blur {
+            return "\(value.formatted(.number.precision(.fractionLength(0...1)))) pt"
+        }
+        return value.formatted(.percent.precision(.fractionLength(0)))
+    }
 }

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "surface": "wireframeAdjust",
+  "size": [
+    330,
+    120
+  ],
+  "session": {
+    "client": "Codex"
+  },
+  "appearance": "light"
+}

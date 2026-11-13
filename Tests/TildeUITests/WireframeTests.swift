@@ -321,29 +321,50 @@ struct WireframeTests {
         #expect(next.wireframe.tool == "table")
     }
 
-    /// The Style menu closes first: on Esc, and on a press on the canvas, which does nothing
-    /// more; the tool stays.
-    @Test func escAndAPressCloseTheStyleMenuFirst() {
+    /// The bar's Adjust popover closes first, then its style mode: on Esc, and on a press on
+    /// the canvas, which does nothing more; the tool stays.
+    @Test func escAndAPressCloseTheStyleControlsFirst() {
         open(Open(canvas: .wireframe))
-        controller.wireframe.isStyleMenuOpen = true
+        controller.wireframe.bar = WireframeBar(isStyling: true, isAdjusting: true)
         controller.escapePressed()
-        #expect(!controller.wireframe.isStyleMenuOpen)
+        #expect(controller.wireframe.bar == WireframeBar(isStyling: true, isAdjusting: false))
+        controller.escapePressed()
+        #expect(controller.wireframe.bar == WireframeBar())
         #expect(controller.wireframe.tool == "card")
 
-        controller.wireframe.isStyleMenuOpen = true
+        controller.wireframe.bar = WireframeBar(isStyling: true)
         #expect(controller.canvasPressed(at: CGPoint(x: 400, y: 300)))
-        #expect(!controller.wireframe.isStyleMenuOpen)
+        #expect(controller.wireframe.bar == WireframeBar())
         #expect(controller.isWireframe)
     }
 
     /// A session that ends in wireframe mode, such as by Cancel, ends the mode too: the canvas
-    /// stays for the next session, which starts with the Style menu closed.
+    /// stays for the next session, whose bar shows the tools.
     @Test func aSessionThatEndsInWireframeModeEndsTheMode() {
         open(Open(canvas: .wireframe))
-        controller.wireframe.isStyleMenuOpen = true
+        controller.wireframe.bar = WireframeBar(isStyling: true, isAdjusting: true)
         controller.dispatch(.requestCancel)
         #expect(controller.session == nil)
-        #expect(!controller.wireframe.isStyleMenuOpen)
+        #expect(controller.wireframe.bar == WireframeBar())
+    }
+
+    /// A change from the bar goes to the defaults, which the canvas and Settings follow; a
+    /// strength keeps to its range and steps.
+    @Test func aChangeFromTheBarIsSaved() {
+        let defaults = MemoryDefaults()
+        let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
+        controller.wireframe.change(.style(.blueprint))
+        controller.wireframe.change(.colours(.oneColour))
+        controller.wireframe.change(.strength(.blur, 3.3))
+        controller.wireframe.change(.strength(.fade, 2))
+
+        let look = WireframeLook.saved(in: defaults)
+        #expect(look.style == .blueprint)
+        #expect(look.colours == .oneColour)
+        #expect(look.blur == 3.5)
+        #expect(look.fade == WireframeLook.fadeRange.upperBound)
+        #expect(look.fill == WireframeLook().fill)
+        #expect(defaults.object(forKey: WireframeLook.Key.fill) == nil)
     }
 
     // MARK: - The note and the report

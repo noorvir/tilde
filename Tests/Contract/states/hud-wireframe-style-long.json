@@ -3,14 +3,18 @@
   "surface": "hud",
   "size": [
     600,
-    400
+    130
   ],
   "session": {
     "client": "Codex"
   },
   "wireframe": true,
-  "styleMenu": true,
+  "wireframeBar": {
+    "isStyling": true,
+    "isAdjusting": false
+  },
   "look": {
-    "style": "hatched"
+    "style": "construction",
+    "colours": "oneColour"
   }
 }
