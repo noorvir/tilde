@@ -92,7 +92,7 @@ final class SparkleUpdates: NSObject, UpdateEngine {
             return "Could not read the update feed"
         }
         if !codes.isDisjoint(with: [SUError.runningTranslocated, .runningFromDiskImageError].map(\.rawValue)) {
-            return "Move Tilde to Applications first"
+            return "Move Tilde to Applications to get updates"
         }
         if !codes.isDisjoint(with: [SUError.downloadError, .temporaryDirectoryError].map(\.rawValue)) {
             return feedLoaded ? "Could not download the update" : "Could not reach the update feed"

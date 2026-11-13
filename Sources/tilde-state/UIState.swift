@@ -90,6 +90,8 @@ struct UIState: Decodable {
         var session: Bool?
         /// "Update automatically"; on when not given.
         var automatic: Bool?
+        /// Why the update failed; "Could not reach the update feed" when not given.
+        var reason: String?
     }
 
     struct Settings: Decodable {
