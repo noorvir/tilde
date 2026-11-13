@@ -72,12 +72,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         restoreToast = toast
 
-        let unfinished = controller.archive.all().filter { $0.state == .active }
-        for empty in unfinished where empty.notes.isEmpty {
-            controller.saver.discard(empty)
-        }
-        if let newest = unfinished.first(where: { !$0.notes.isEmpty }) {
-            toast.show(newest)
+        // The read decodes every saved session, after the prune: away from the main thread,
+        // which has the menu to show. A session that started meanwhile is not left over.
+        let archive = controller.archive
+        Task {
+            let saved = await Task.detached { archive.all() }.value
+            let unfinished = saved.filter { $0.state == .active && $0.id != controller.session?.id }
+            for empty in unfinished where empty.notes.isEmpty {
+                controller.saver.discard(empty)
+            }
+            if let newest = unfinished.first(where: { !$0.notes.isEmpty }) {
+                toast.show(newest)
+            }
         }
     }
 
