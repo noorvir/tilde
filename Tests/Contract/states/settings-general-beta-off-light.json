@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    920,
+    1200
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "general"
+  }
+}

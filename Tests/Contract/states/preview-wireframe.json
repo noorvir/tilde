@@ -1,6 +1,7 @@
 {
   "version": 1,
   "surface": "preview",
+  "wireframes": true,
   "size": [
     1000,
     640
