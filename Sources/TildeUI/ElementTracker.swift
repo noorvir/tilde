@@ -41,7 +41,7 @@ enum ElementTracker {
         if findsAgain || (searches && !isAlive(tracked.element)), let found = refind(tracked, near: lastFrame) {
             tracked = TrackedElement(element: found, pid: tracked.pid, identity: tracked.identity)
         }
-        guard isAlive(tracked.element), let frame = frame(of: tracked.element) else {
+        guard isAlive(tracked.element), let frame = tracked.element.frame else {
             return (nil, tracked, true)
         }
         // Lists reuse their rows: the same element with other text is other content.
@@ -93,14 +93,14 @@ enum ElementTracker {
     // MARK: - Accessibility
 
     static func identity(of element: AXUIElement) -> Identity {
-        let role: String = attribute(element, kAXRoleAttribute) ?? "AXUnknown"
+        let role: String = element.attribute(kAXRoleAttribute) ?? "AXUnknown"
         let name = name(of: element)
         return Identity(role: role, name: name, text: name == nil ? firstText(in: element) : nil)
     }
 
     private static func name(of element: AXUIElement) -> String? {
         for key in [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute, "AXIdentifier"] {
-            if let text: String = attribute(element, key), !text.isEmpty {
+            if let text: String = element.attribute(key), !text.isEmpty {
                 return String(text.prefix(200))
             }
         }
@@ -113,11 +113,11 @@ enum ElementTracker {
         while !queue.isEmpty, visited < 12 {
             let current = queue.removeFirst()
             visited += 1
-            let role: String? = attribute(current, kAXRoleAttribute)
+            let role: String? = current.attribute(kAXRoleAttribute)
             if role == kAXStaticTextRole, let text = name(of: current) {
                 return text
             }
-            let children: [AXUIElement] = attribute(current, kAXChildrenAttribute) ?? []
+            let children: [AXUIElement] = current.attribute(kAXChildrenAttribute) ?? []
             queue.append(contentsOf: children)
         }
         return nil
@@ -136,10 +136,10 @@ enum ElementTracker {
     /// Whether the element is still in its window. An element of a page that left can go on
     /// answering for its role, with no size and no parent.
     private static func isAlive(_ element: AXUIElement) -> Bool {
-        guard let frame = frame(of: element), frame.width > 0, frame.height > 0 else {
+        guard let frame = element.frame, frame.width > 0, frame.height > 0 else {
             return false
         }
-        let parent: AXUIElement? = attribute(element, kAXParentAttribute)
+        let parent: AXUIElement? = element.attribute(kAXParentAttribute)
         return parent != nil
     }
 
@@ -148,11 +148,11 @@ enum ElementTracker {
         var clips: [CGRect] = []
         var current = element
         for _ in 0..<40 {
-            guard let parent: AXUIElement = attribute(current, kAXParentAttribute) else {
+            guard let parent: AXUIElement = current.attribute(kAXParentAttribute) else {
                 break
             }
-            let role: String? = attribute(parent, kAXRoleAttribute)
-            if role == kAXScrollAreaRole || role == kAXWindowRole, let frame = frame(of: parent) {
+            let role: String? = parent.attribute(kAXRoleAttribute)
+            if role == kAXScrollAreaRole || role == kAXWindowRole, let frame = parent.frame {
                 clips.append(frame)
             }
             if role == kAXWindowRole {
@@ -167,9 +167,9 @@ enum ElementTracker {
     private static func refind(_ tracked: TrackedElement, near last: CGRect) -> AXUIElement? {
         let app = AXUIElementCreateApplication(tracked.pid)
         AXUIElementSetMessagingTimeout(app, 0.2)
-        let windows: [AXUIElement] = attribute(app, kAXWindowsAttribute) ?? []
+        let windows: [AXUIElement] = app.attribute(kAXWindowsAttribute) ?? []
         var queue = windows.filter { window in
-            frame(of: window).map { $0.intersects(last) } ?? false
+            window.frame.map { $0.intersects(last) } ?? false
         }
         var elements: [AXUIElement] = []
         var candidates: [Candidate] = []
@@ -177,45 +177,14 @@ enum ElementTracker {
         while !queue.isEmpty, visited < 4000 {
             let element = queue.removeFirst()
             visited += 1
-            let role: String? = attribute(element, kAXRoleAttribute)
-            if role == tracked.identity.role, let frame = frame(of: element) {
+            let role: String? = element.attribute(kAXRoleAttribute)
+            if role == tracked.identity.role, let frame = element.frame {
                 elements.append(element)
                 candidates.append(Candidate(role: role ?? "", name: name(of: element), frame: frame))
             }
-            let children: [AXUIElement] = attribute(element, kAXChildrenAttribute) ?? []
+            let children: [AXUIElement] = element.attribute(kAXChildrenAttribute) ?? []
             queue.append(contentsOf: children)
         }
         return bestMatch(candidates, for: tracked.identity, near: last).map { elements[$0] }
-    }
-
-    private static func frame(of element: AXUIElement) -> CGRect? {
-        guard let position: AXValue = attribute(element, kAXPositionAttribute),
-              let size: AXValue = attribute(element, kAXSizeAttribute)
-        else {
-            return nil
-        }
-        var point = CGPoint.zero
-        var extent = CGSize.zero
-        AXValueGetValue(position, .cgPoint, &point)
-        AXValueGetValue(size, .cgSize, &extent)
-        return CGRect(origin: point, size: extent)
-    }
-
-    private static func attribute<T>(_ element: AXUIElement, _ name: String) -> T? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success, let value else {
-            return nil
-        }
-        // AXUIElement and AXValue are CF types: cast without a runtime check.
-        if T.self == AXUIElement.self, CFGetTypeID(value) == AXUIElementGetTypeID() {
-            return (value as! T)
-        }
-        if T.self == AXValue.self, CFGetTypeID(value) == AXValueGetTypeID() {
-            return (value as! T)
-        }
-        if T.self == [AXUIElement].self, let array = value as? [AXUIElement] {
-            return (array as! T)
-        }
-        return value as? T
     }
 }
