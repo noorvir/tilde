@@ -984,8 +984,11 @@ struct UXSpecs {
             step("one colour chosen")
 
             // Esc closes the open menu, and the bar stays in style mode.
+            #expect(try await !app.seen().contains { $0.name == "Blueprint" })
             try await app.press("Wireframe style")
             try await app.waitToSee("Blueprint")
+            // The menu takes the keys once it has opened.
+            try await Task.sleep(for: .milliseconds(300))
             try await app.key(.escape)
             try await app.waitNotToSee("Blueprint")
             try await app.waitToSee("Wireframe style")
