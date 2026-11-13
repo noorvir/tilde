@@ -11,6 +11,24 @@ let wireframeWindow = null;
 export const windowOutline = document.createElement("div");
 windowOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9996;display:none;border:1.5px solid rgba(47,118,255,.6);border-radius:10px";
 
+// A change that Tilde sends shows at once only while the page has frames coming: a page at
+// rest shows it some frames late, and the components would lag their window. So the page asks
+// for frames for as long as the window moves, and for half a second after its last move.
+let framesUntil = 0;
+let hasFrame = false;
+
+function nextFrame() {
+  hasFrame = performance.now() < framesUntil;
+  if (hasFrame) requestAnimationFrame(nextFrame);
+}
+
+function keepFrames() {
+  framesUntil = performance.now() + 500;
+  if (hasFrame) return;
+  hasFrame = true;
+  requestAnimationFrame(nextFrame);
+}
+
 export function setWireframeWindow(rect) {
   const before = wireframeWindow;
   wireframeWindow = rect;
@@ -21,6 +39,7 @@ export function setWireframeWindow(rect) {
   const dx = before ? left - before[0] : 0;
   const dy = before ? top - before[1] : 0;
   if (!dx && !dy) return;
+  keepFrames();
   changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), (element) => ({ x: element.x + dx, y: element.y + dy }));
   const shift = (scene) => scene.map((element) => (taken.has(element.id) ? element : { ...element, x: element.x + dx, y: element.y + dy }));
   for (const stack of [wireframeHistory.undo, wireframeHistory.redo]) stack.forEach((scene, index) => { stack[index] = shift(scene); });
