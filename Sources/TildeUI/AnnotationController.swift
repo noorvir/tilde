@@ -513,6 +513,7 @@ final class AnnotationController: ObservableObject {
         saver.start(created: created)
         keyMonitors.startHold()
         picker.windows.start()
+        MainThreadWatch.start()
         saver.save()
 
         if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
@@ -579,6 +580,7 @@ final class AnnotationController: ObservableObject {
         PlainClickTap.stop()
         dispatch(.holdEnded)
         picker.windows.stop()
+        MainThreadWatch.stop()
         tracker.stop()
         notices.clearPause()
         drawing.panel.endSession()

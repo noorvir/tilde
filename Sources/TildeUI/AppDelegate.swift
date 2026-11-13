@@ -83,7 +83,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         CursorDebug.install()
-        MainThreadWatch.start()
         // The note box is for typing: no accent popup, whose input method can hold up a key.
         UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
         let port = UInt16(ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "") ?? 7311
