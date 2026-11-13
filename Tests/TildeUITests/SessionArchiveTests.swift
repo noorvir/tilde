@@ -55,11 +55,11 @@ struct SessionArchiveTests {
 
         history.reload()
         #expect(!history.hasRead)
-        try await waitUntil { history.records == [kept, deleted] }
+        try await until { history.records == [kept, deleted] }
         #expect(history.hasRead)
 
         history.delete(deleted)
-        try await waitUntil { history.records == [kept] }
+        try await until { history.records == [kept] }
     }
 
     @Test func restoredNotesHaveTheirSavedImages() async throws {
@@ -142,7 +142,7 @@ struct SessionArchiveTests {
         #expect(archive.all().filter { $0.state == .active }.map(\.id) == [record.id])
 
         controller.restore(record)
-        try await waitUntil { controller.drafts.count == 3 }
+        try await until { controller.drafts.count == 3 }
 
         #expect(controller.drafts.map(\.annotation.comment) == record.notes.map(\.comment))
         #expect(controller.session?.isLocal == true)
@@ -160,7 +160,7 @@ struct SessionArchiveTests {
         #expect(HistoryModel(archive: archive).canRestore(record))
 
         controller.restore(record)
-        try await waitUntil { controller.drafts.count == 2 }
+        try await until { controller.drafts.count == 2 }
 
         archive.flush()
         #expect(archive.record(record.id)?.state == .sent)
@@ -204,7 +204,7 @@ struct SessionArchiveTests {
         #expect(state != nil)
         #expect(store.session(record.id)?.client == "Codex")
         #expect(store.session(record.id)?.isLocal == false)
-        try await waitUntil { controller.drafts.count == 2 }
+        try await until { controller.drafts.count == 2 }
         #expect(controller.session?.id == record.id)
 
         // Unknown ids, and ids that are not Tilde's, find nothing.
@@ -372,13 +372,6 @@ struct SessionArchiveTests {
         let file = try FileManager.default.attributesOfItem(atPath: archive.folder(record.id).appendingPathComponent("session.json").path)
         #expect(folder[.posixPermissions] as? Int == 0o700)
         #expect(file[.posixPermissions] as? Int == 0o600)
-    }
-
-    private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(condition())
     }
 }
 

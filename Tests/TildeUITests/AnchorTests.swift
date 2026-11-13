@@ -37,11 +37,4 @@ struct AnchorTests {
         browser.anchors = [id: PageAnchor(url: "https://example.test/b", selector: "p", text: nil, documentRect: .zero)]
         try await until { self.browser.anchorRects.isEmpty }
     }
-
-    private func until(_ condition: @escaping () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        #expect(condition())
-    }
 }

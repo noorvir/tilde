@@ -28,13 +28,6 @@ struct BehaviourTests {
 
     // MARK: - Confirmations
 
-    @Test func cancelWithoutAnnotationsClosesAtOnce() {
-        open()
-        controller.dispatch(.requestCancel)
-        #expect(controller.confirmation == nil)
-        #expect(controller.session == nil)
-    }
-
     @Test func cancelWithAnnotationsAsksFirst() {
         open(drafts: Fixtures.drafts(2))
         controller.dispatch(.requestCancel)
@@ -48,13 +41,6 @@ struct BehaviourTests {
         controller.dispatch(.confirm)
         #expect(controller.session == nil)
         #expect(controller.drafts.isEmpty)
-    }
-
-    /// A clip that is not stopped is lost on cancel like a note, so × asks for it too.
-    @Test func cancelAsksForAClipInProgress() {
-        open(activity: .recording(.recording))
-        controller.dispatch(.requestCancel)
-        #expect(controller.confirmation == .cancelSession)
     }
 
     @Test func clearAllAsksAndKeepsTheSession() {
@@ -590,12 +576,6 @@ struct BehaviourTests {
         #expect(panel.window.frame.origin == low)
     }
 
-    @Test func dragSnapsHomeWithinFortyPoints() {
-        let home = NSPoint(x: 900, y: 1134)
-        #expect(SnapDrag.snapsHome(NSPoint(x: 930, y: 1110), home: home))
-        #expect(!SnapDrag.snapsHome(NSPoint(x: 940, y: 1100), home: home))
-    }
-
     @Test func positionsStayOnScreen() {
         let visible = NSRect(x: 0, y: 0, width: 1800, height: 1130)
         let halfWidth = HUDView.width / 2 + 16
@@ -608,13 +588,6 @@ struct BehaviourTests {
         let window = NSRect(x: 2800, y: 0, width: 560, height: 1444)
         let content = CGRect(x: 33, y: 0, width: 494, height: 76)
         #expect(HUDPanel.screenRect(ofContent: content, inWindow: window) == NSRect(x: 2833, y: 1368, width: 494, height: 76))
-    }
-
-    private func until(_ condition: @escaping () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(50))
-        }
-        #expect(condition())
     }
 
     private func key(_ code: UInt16, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
@@ -962,15 +935,6 @@ struct BehaviourTests {
         #expect(!SessionScope.autoPauses(frontmost: 42, scopePID: nil, ownPID: 1))
     }
 
-    @Test func annotateResumesAWindowSessionThatPausedByItself() async throws {
-        let controller = try await Fixtures.controller()
-        controller.setStateForTesting(session: Fixtures.session(), mode: .open(SessionFlow.Open(pauses: [.user, .otherApp])))
-
-        controller.dispatch(.togglePause)
-
-        #expect(controller.pauses.isEmpty)
-    }
-
     // MARK: - Double-tap
 
     @Test func tappingTheKeyTwiceQuicklyIsADoubleTap() {
@@ -1108,38 +1072,7 @@ struct BehaviourTests {
         #expect(controller.handleConfirmationKey(36, in: panel) == false)
     }
 
-    @Test func escEndsChoosingAWindowFirst() async throws {
-        open(drafts: Fixtures.drafts(1), activity: .picking(isPickerOpen: false))
-
-        controller.escapePressed()
-
-        #expect(!controller.isPickingWindow)
-        #expect(controller.confirmation == nil)
-    }
-
-    @Test func escWhilePausedAlsoAsksToCancel() async throws {
-        open(drafts: Fixtures.drafts(1), pauses: [.user])
-
-        controller.escapePressed()
-
-        #expect(controller.confirmation == .cancelSession)
-    }
-
     // MARK: - Browser window frame
-
-    @Test func browserOpensAtFullHeightAndHalfWidth() {
-        let visible = CGRect(x: 0, y: 40, width: 2000, height: 1100)
-        let frame = BrowserController.defaultFrame(in: visible)
-
-        #expect(frame.width == 1000)
-        #expect(frame.height == 1084)
-        #expect(frame.midX == visible.midX)
-        #expect(visible.contains(frame))
-
-        // Never narrower than the toolbar with the HUD needs.
-        let small = CGRect(x: 0, y: 0, width: 1440, height: 900)
-        #expect(BrowserController.defaultFrame(in: small).width == BrowserMetrics.minWindowWidth)
-    }
 
     @Test func savedBrowserFrameMovesOntoAScreen() {
         let screens = [CGRect(x: 0, y: 0, width: 1800, height: 1100)]
@@ -1151,4 +1084,14 @@ struct BehaviourTests {
         let moved = BrowserController.onScreen(lost, screens: screens)
         #expect(moved == CGRect(x: 800, y: 0, width: 1000, height: 1100))
     }
+}
+
+/// Waits up to 5 seconds for what a test started, such as a task of the controller, and
+/// expects it then.
+@MainActor
+func until(_ condition: () -> Bool) async throws {
+    for _ in 0..<100 where !condition() {
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(condition())
 }

@@ -119,10 +119,7 @@ struct NodeLinkTests {
         #expect(nodes.rows.map(\.status) == [.linked])
         #expect(NodeSetup.linkState(of: nodes.rows[0]) == .ok)
         _ = page.uninstall([codex])
-        for _ in 0..<50 where local.installer.status(of: .codex) != .installed {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(local.installer.status(of: .codex) == .installed)
+        try await until { local.installer.status(of: .codex) == .installed }
     }
 
     /// A node with an older Tilde's URL entries in several apps moves to its socket in one

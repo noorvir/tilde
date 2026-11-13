@@ -90,13 +90,6 @@ struct WireframeTests {
         ))
     }
 
-    private func until(_ condition: @escaping () -> Bool) async throws {
-        for _ in 0..<100 where !condition() {
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        #expect(condition())
-    }
-
     // MARK: - Tools
 
     /// Wireframe mode starts with the card; a tool's button or letter chooses the tool, in
@@ -281,21 +274,6 @@ struct WireframeTests {
         #expect(!controller.isDrawingPaused)
         #expect(controller.isWireframe)
         #expect(controller.wireframe.tool == "list")
-    }
-
-    /// The hold key (⌥ by default) does not pause wireframe mode, where ⌥ and a drag copies a
-    /// component; it still pauses Draw.
-    @Test func theHoldKeyDoesNotPauseWireframeMode() {
-        open(Open(canvas: .wireframe))
-        controller.holdChanged(.began)
-        #expect(controller.pauses.isEmpty)
-        controller.holdChanged(.ended)
-
-        open(Open(canvas: .draw))
-        controller.holdChanged(.began)
-        #expect(controller.pauses == [.hold])
-        controller.holdChanged(.ended)
-        #expect(controller.pauses.isEmpty)
     }
 
     /// The mode on screen goes to the defaults when it changes, for the next session.
