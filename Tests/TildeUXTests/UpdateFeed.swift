@@ -13,7 +13,8 @@ final class UpdateFeed {
     private let server = Process()
     private let folder: URL
 
-    /// `trusted`: false signs the zip with another key than the one the app trusts.
+    /// `trusted`: false makes the newer version as someone without the key would: it carries
+    /// their own public key, and their key signs the zip.
     init(port: Int = 7398, trusted: Bool = true) throws {
         app = URL(fileURLWithPath: ProcessInfo.processInfo.environment["TILDE_UX_APP"] ?? "build/TildeUX.app")
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-feed-\(UUID().uuidString)", isDirectory: true)
@@ -28,13 +29,16 @@ final class UpdateFeed {
 
         let newer = folder.appendingPathComponent(app.lastPathComponent)
         try Self.run("/usr/bin/ditto", app.path, newer.path)
-        try Self.run("/usr/libexec/PlistBuddy", "-c", "Set :CFBundleVersion \(build)", "-c", "Set :CFBundleShortVersionString \(version)", newer.appendingPathComponent("Contents/Info.plist").path)
+        let signer = trusted ? key : Curve25519.Signing.PrivateKey()
+        try Self.run(
+            "/usr/libexec/PlistBuddy", "-c", "Set :CFBundleVersion \(build)", "-c", "Set :CFBundleShortVersionString \(version)",
+            "-c", "Set :SUPublicEDKey \(signer.publicKey.rawRepresentation.base64EncodedString())", newer.appendingPathComponent("Contents/Info.plist").path
+        )
         try Self.sign(newer)
         let zip = files.appendingPathComponent("TildeUX.zip")
         try Self.run("/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", newer.path, zip.path)
 
         let bytes = try Data(contentsOf: zip)
-        let signer = trusted ? key : Curve25519.Signing.PrivateKey()
         let signature = try signer.signature(for: bytes).base64EncodedString()
         let appcast = try Self.output(
             "scripts/appcast.sh", version, build, "http://127.0.0.1:\(port)/TildeUX.zip", "sparkle:edSignature=\"\(signature)\" length=\"\(bytes.count)\""
