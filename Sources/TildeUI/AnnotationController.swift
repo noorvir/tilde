@@ -174,6 +174,8 @@ final class AnnotationController: ObservableObject {
     private var scopesNextLocalSessionToBrowser = false
     /// Draw or Wireframe was on in the session on screen.
     private var usedCanvas = false
+    /// Held while a session is on screen; see `stayAwake()`.
+    private var activity: NSObjectProtocol?
     /// How many sessions in a row ended with no use of Draw or Wireframe.
     private var sessionsWithoutCanvas: Int {
         defaults.integer(forKey: "SessionsWithoutCanvas")
@@ -531,6 +533,7 @@ final class AnnotationController: ObservableObject {
         keyMonitors.startHold()
         picker.windows.start()
         MainThreadWatch.start()
+        stayAwake()
         saver.save()
 
         if session.url != nil, !session.isLocal, let frontmost = NSWorkspace.shared.frontmostApplication, frontmost != .current {
@@ -559,6 +562,16 @@ final class AnnotationController: ObservableObject {
             // when another app was in front. A click in another app gives that app the keyboard.
             overlays.makeKey()
         }
+    }
+
+    /// While a session is on screen, macOS must not slow Tilde down as an app that is not in
+    /// front and does nothing (App Nap): its timers follow the windows of the app in front,
+    /// and the notes and components on them must not lag.
+    private func stayAwake() {
+        guard activity == nil else {
+            return
+        }
+        activity = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "A session is on screen")
     }
 
     /// Closes the session on screen. After Send the HUD shows the confirmation for a moment;
@@ -600,6 +613,10 @@ final class AnnotationController: ObservableObject {
         dispatch(.holdEnded)
         picker.windows.stop()
         MainThreadWatch.stop()
+        if let activity {
+            ProcessInfo.processInfo.endActivity(activity)
+        }
+        activity = nil
         tracker.stop()
         notices.clearPause()
         // A session can end in wireframe mode, such as by Cancel: the canvas stays for the next
