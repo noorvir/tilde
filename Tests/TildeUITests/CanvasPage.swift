@@ -30,8 +30,13 @@ final class CanvasPage {
     /// The pointer's places that the page posted, oldest first, as "x,y".
     private(set) var pointers: [String] = []
 
-    init() {
+    /// `countsFrames`: the page has frames from its start, as in a window, and
+    /// `frameRequests()` says how many it asked for.
+    init(countsFrames: Bool = false) {
         let configuration = WKWebViewConfiguration()
+        if countsFrames {
+            configuration.userContentController.addUserScript(WKUserScript(source: Self.countedFrames, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
         webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: configuration)
         configuration.userContentController.add(Messages(page: self), name: "tilde")
     }
@@ -96,11 +101,21 @@ final class CanvasPage {
         try await run(Self.helpers)
     }
 
+    /// Frames for a page in no window, from before its own scripts run, each one counted.
+    private static let countedFrames = """
+    window.frameRequests = 0;
+    window.requestAnimationFrame = (run) => {
+      window.frameRequests += 1;
+      return setTimeout(() => run(performance.now()), 0);
+    };
+    window.cancelAnimationFrame = clearTimeout;
+    """
+
     /// What a page in no window does not have: frames to draw in, and a real pointer to
     /// capture. `fire` sends a pointer event to the element at its point, or to `target`, as a
     /// captured pointer does.
     private static let helpers = """
-    window.requestAnimationFrame = (run) => setTimeout(() => run(performance.now()), 0);
+    if (window.frameRequests === undefined) window.requestAnimationFrame = (run) => setTimeout(() => run(performance.now()), 0);
     Element.prototype.setPointerCapture = () => {};
     Element.prototype.releasePointerCapture = () => {};
     window.fire = (type, x, y, options = {}) => {
@@ -216,6 +231,14 @@ final class CanvasPage {
         let isUsed = try await run("press('\(key)', {meta: \(meta), shift: \(shift)})") as? Bool == true
         try await settle()
         return isUsed
+    }
+
+    /// How many frames the page asked for since it loaded; for a page that counts them.
+    func frameRequests() async throws -> Int {
+        guard let count = try await run("window.frameRequests") as? Int else {
+            throw BadAnswer()
+        }
+        return count
     }
 
     /// Whether a press at a point is for the page, as Tilde asks it with no tool.
