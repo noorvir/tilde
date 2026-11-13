@@ -138,7 +138,9 @@ struct UpdateFeedTests {
     /// Checks as the user's button does, with a feed of `feedText` over HTTP, or none at all.
     private func check(running build: String, feedText: String?) async throws -> UpdateStatus {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-update-\(UUID().uuidString)")
-        let identifier = "dev.tilde.update-test-\(UUID().uuidString)"
+        // Sparkle keeps its settings in the host app's domain: one fixed domain, emptied each time.
+        let identifier = "dev.tilde.update-test"
+        UserDefaults.standard.removePersistentDomain(forName: identifier)
         let port = UInt16.random(in: 40000..<50000)
         let body = feedText.map { Data($0.utf8) }
         let server = try HTTPServer(port: port) { _ in
@@ -151,7 +153,6 @@ struct UpdateFeedTests {
         defer {
             server.stop()
             try? FileManager.default.removeItem(at: folder)
-            UserDefaults.standard.removeObject(forKey: "updateFeedURL")
             UserDefaults.standard.removePersistentDomain(forName: identifier)
         }
 
@@ -163,10 +164,9 @@ struct UpdateFeedTests {
             "SUPublicEDKey": Data(repeating: 1, count: 32).base64EncodedString(),
         ]
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: contents.appendingPathComponent("Info.plist"))
-        UserDefaults.standard.set("http://127.0.0.1:\(port)/appcast.xml", forKey: "updateFeedURL")
 
         let bundle = try #require(Bundle(url: folder.appendingPathComponent("Host.app")))
-        let updates = Updates(engine: SparkleUpdates(bundle: bundle))
+        let updates = Updates(engine: SparkleUpdates(feed: "http://127.0.0.1:\(port)/appcast.xml", bundle: bundle))
         updates.start()
         updates.check()
         for _ in 0..<100 where updates.status == .checking {

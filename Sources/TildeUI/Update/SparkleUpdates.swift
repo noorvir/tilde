@@ -11,6 +11,7 @@ final class SparkleUpdates: NSObject, UpdateEngine {
     /// so this must point at a public repository.
     static let feedURL = "https://github.com/noorvir/tilde/releases/latest/download/appcast.xml"
 
+    private let feed: String
     private var updater: SPUUpdater!
     private var report: (UpdateStatus) -> Void = { _ in }
     private var version = ""
@@ -23,8 +24,9 @@ final class SparkleUpdates: NSObject, UpdateEngine {
     private var expectedLength: UInt64 = 0
     private var receivedLength: UInt64 = 0
 
-    /// `bundle`: the app to update, the running one by default.
-    init(bundle: Bundle = .main) {
+    /// `feed`: the appcast's address. `bundle`: the app to update, the running one by default.
+    init(feed: String, bundle: Bundle = .main) {
+        self.feed = feed
         super.init()
         updater = SPUUpdater(hostBundle: bundle, applicationBundle: bundle, userDriver: self, delegate: self)
     }
@@ -94,8 +96,7 @@ final class SparkleUpdates: NSObject, UpdateEngine {
 
 extension SparkleUpdates: SPUUpdaterDelegate {
     func feedURLString(for updater: SPUUpdater) -> String? {
-        // The UX specs point the app at a local feed.
-        UserDefaults.standard.string(forKey: "updateFeedURL") ?? Self.feedURL
+        feed
     }
 
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {

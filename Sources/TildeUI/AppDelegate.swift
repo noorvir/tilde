@@ -113,7 +113,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             .map { flow in flow.mode == .idle || flow.accepts(.restore, controller.facts) }
             .removeDuplicates()
             .sink { [weak history] takes in history?.takesRestore = takes }
-        let updates = Updates(engine: SparkleUpdates())
+        // The UX specs point the app at a local feed.
+        let feed = UserDefaults.standard.string(forKey: "updateFeedURL") ?? SparkleUpdates.feedURL
+        let updates = Updates(engine: SparkleUpdates(feed: feed))
         let updateToast = UpdateToast { [updates] in updates.restart() }
         updates.onReady = { updateToast.show(version: $0) }
         updateSession = controller.$flow
