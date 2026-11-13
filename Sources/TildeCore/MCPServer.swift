@@ -289,19 +289,16 @@ public final class MCPServer {
         return "\(date) \(time) · \(comment)"
     }
 
-    /// Screenshot file names of a saved batch, close-up then context per annotation.
+    /// Screenshot file names of a saved batch, close-up then context per annotation. A note
+    /// with no screenshot, such as one whose window closed before its picture, leaves a gap
+    /// in the numbers.
     private func inboxImageNames(_ folder: URL) -> [String] {
-        var names: [String] = []
-        var number = 1
-        while true {
-            let found = [imageName(number), contextImageName(number)].filter {
-                FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
-            }
-            if found.isEmpty {
-                return names
-            }
-            names += found
-            number += 1
+        let files = Set((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
+        let numbers = files.compactMap { name in
+            name.wholeMatch(of: #/annotation-(\d+)(-context)?\.png/#).flatMap { Int($0.1) }
+        }
+        return Set(numbers).sorted().flatMap { number in
+            [imageName(number), contextImageName(number)].filter(files.contains)
         }
     }
 

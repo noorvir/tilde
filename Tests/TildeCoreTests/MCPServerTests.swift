@@ -138,6 +138,22 @@ struct MCPServerTests {
         #expect(missing["isError"] as? Bool == true)
     }
 
+    /// A note with no picture, such as one whose window closed before its capture, does not
+    /// hide the pictures of the notes after it.
+    @Test func aSentReportHasThePicturesAfterANoteWithNone() async throws {
+        let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: inbox) }
+        let server = MCPServer(store: store, localToken: "test", inbox: inbox)
+        let withPicture = try #require(try sampleFeedback().annotations.first)
+        let withNone = Annotation(comment: "no picture", target: withPicture.target, frame: withPicture.frame, image: nil, contextImage: nil)
+        let folder = try saveToInbox(Feedback(annotations: [withNone, withPicture]), sessionID: "a1b2c3d4", root: inbox)
+
+        let read = try await request("tools/call", ["name": "get_report", "arguments": ["id": folder.lastPathComponent]], on: server)
+        let content = try #require(read["content"] as? [[String: Any]])
+        #expect(content.compactMap { $0["text"] as? String }.dropFirst() == ["annotation-2.png", "annotation-2-context.png"])
+        #expect(content.filter { $0["type"] as? String == "image" }.count == 2)
+    }
+
     @Test func waitingToolCallsStreamProgressThenTheResult() async throws {
         let session = store.start(client: "Codex", url: nil)
         store.updateNoteCount(2, for: session.id)
