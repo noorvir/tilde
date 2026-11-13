@@ -34,15 +34,19 @@ let package = Package(
         .executableTarget(name: "tilde-mcp", dependencies: ["TildeInstaller"], swiftSettings: strict),
         // Writes the app icon from TildeMark; see scripts/build-app.sh.
         .executableTarget(name: "tilde-icon", dependencies: ["TildeUI"], swiftSettings: strict),
+        // Test tools, in Tests/Tools; they do not ship.
         // Posts real input and captures the screen for tests on a real display; see scripts/build-driver.sh.
-        .executableTarget(name: "tilde-driver", dependencies: ["TildeCore"], swiftSettings: strict),
+        .executableTarget(name: "tilde-driver", dependencies: ["TildeCore"], path: "Tests/Tools/tilde-driver", swiftSettings: strict),
         // A window whose whole content changes, for the UX specs: stands in for an app that
         // does not describe its contents, such as the iOS Simulator.
-        .executableTarget(name: "tilde-ux-fixture", swiftSettings: strict),
+        .executableTarget(name: "tilde-ux-fixture", path: "Tests/Tools/tilde-ux-fixture", swiftSettings: strict),
         // The contract tests: tilde-state draws a state file with the real views, and
         // tilde-ui-check, which uses no code of Tilde, compares the pictures. See Tests/Contract.
-        .executableTarget(name: "tilde-state", dependencies: ["TildeCore", "TildeInstaller", "TildeUI"], swiftSettings: strict),
-        .executableTarget(name: "tilde-ui-check", swiftSettings: strict),
+        .executableTarget(
+            name: "tilde-state", dependencies: ["TildeCore", "TildeInstaller", "TildeUI"], path: "Tests/Tools/tilde-state",
+            swiftSettings: strict
+        ),
+        .executableTarget(name: "tilde-ui-check", path: "Tests/Tools/tilde-ui-check", swiftSettings: strict),
         .testTarget(name: "TildeCoreTests", dependencies: ["TildeCore", "TildeSkill", "tilde-mcp"]),
         .testTarget(name: "TildeInstallerTests", dependencies: ["TildeInstaller", "TildeSkill"]),
         // Behaviour tests of the UI; they render offscreen and need a logged-in Mac.

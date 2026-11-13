@@ -36,7 +36,7 @@ enum CanvasSurface {
 
     /// The canvas's page from the sources.
     static func html() throws -> String {
-        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../TildeUI/DrawingWeb")
+        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../Sources/TildeUI/DrawingWeb")
         guard let html = DrawingCanvas.page(in: folder) else {
             throw WireframePicturePage.Failed(reason: "no page in \(folder.path)")
         }
