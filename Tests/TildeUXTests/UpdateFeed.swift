@@ -13,7 +13,8 @@ final class UpdateFeed {
     private let server = Process()
     private let folder: URL
 
-    init(port: Int = 7398) throws {
+    /// `trusted`: false signs the zip with another key than the one the app trusts.
+    init(port: Int = 7398, trusted: Bool = true) throws {
         app = URL(fileURLWithPath: ProcessInfo.processInfo.environment["TILDE_UX_APP"] ?? "build/TildeUX.app")
         folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-ux-feed-\(UUID().uuidString)", isDirectory: true)
         let files = folder.appendingPathComponent("feed", isDirectory: true)
@@ -33,7 +34,8 @@ final class UpdateFeed {
         try Self.run("/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", newer.path, zip.path)
 
         let bytes = try Data(contentsOf: zip)
-        let signature = try key.signature(for: bytes).base64EncodedString()
+        let signer = trusted ? key : Curve25519.Signing.PrivateKey()
+        let signature = try signer.signature(for: bytes).base64EncodedString()
         let appcast = try Self.output(
             "scripts/appcast.sh", version, build, "http://127.0.0.1:\(port)/TildeUX.zip", "sparkle:edSignature=\"\(signature)\" length=\"\(bytes.count)\""
         )

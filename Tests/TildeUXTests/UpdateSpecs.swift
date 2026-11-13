@@ -41,6 +41,24 @@ extension UXSpecs {
         #expect(try await !updated.seen().contains { $0.name == "Grant" })
     }
 
+    /// An update whose zip another key signed is refused after the download, and nothing
+    /// changes: the trust check is the EdDSA key, whatever the app's code signature.
+    @Test func anUpdateSignedWithAnotherKeyIsRefused() async throws {
+        let feed = try UpdateFeed(trusted: false)
+        defer { feed.stop() }
+        let before = feed.installedBuild
+        let app = try await TildeApp.launched(defaults: ["updateFeedURL": feed.url])
+        defer { app.quit() }
+
+        try await openUpdates(app)
+        try await app.press("Check for updates")
+        try await app.waitToSee("Tilde \(feed.version) is available", timeout: 20)
+        try await app.press("Install")
+        try await app.waitToSee("The update's signature is not valid", timeout: 60)
+        try await app.waitToSee("Retry")
+        #expect(feed.installedBuild == before)
+    }
+
     /// Opens Settings on the Configuration page and scrolls to its Updates card.
     private func openUpdates(_ app: TildeApp) async throws {
         try await app.menu("Settings")

@@ -65,27 +65,30 @@ final class SparkleUpdates: NSObject, UpdateEngine {
         reply?(choice)
     }
 
-    /// A short reason for the Configuration page.
+    /// A short reason for the Configuration page. Sparkle wraps the cause, such as a signature
+    /// that is not valid, in more general errors: the cause decides.
     private func reason(for error: Error) -> String {
-        let error = error as NSError
-        if error.domain == NSURLErrorDomain {
+        var errors = [error as NSError]
+        while let underlying = errors.last?.userInfo[NSUnderlyingErrorKey] as? NSError {
+            errors.append(underlying)
+        }
+        if errors.contains(where: { $0.domain == NSURLErrorDomain }) {
             return "No connection"
         }
-        guard error.domain == SUSparkleErrorDomain else {
-            return "Could not install the update"
-        }
-        switch Int(error.code) {
-        case Int(SUError.appcastParseError.rawValue), Int(SUError.appcastError.rawValue), Int(SUError.invalidFeedURLError.rawValue), Int(SUError.insecureFeedURLError.rawValue):
-            return "Could not read the update feed"
-        case Int(SUError.downloadError.rawValue), Int(SUError.temporaryDirectoryError.rawValue):
-            return feedLoaded ? "Could not download the update" : "Could not reach the update feed"
-        case Int(SUError.signatureError.rawValue), Int(SUError.validationError.rawValue), Int(SUError.noPublicDSAFoundError.rawValue), Int(SUError.insufficientSigningError.rawValue):
+        let codes = Set(errors.filter { $0.domain == SUSparkleErrorDomain }.map { OSStatus($0.code) })
+        if !codes.isDisjoint(with: [SUError.signatureError, .validationError, .noPublicDSAFoundError, .insufficientSigningError].map(\.rawValue)) {
             return "The update's signature is not valid"
-        case Int(SUError.runningTranslocated.rawValue), Int(SUError.runningFromDiskImageError.rawValue):
-            return "Move Tilde to Applications first"
-        default:
-            return "Could not install the update"
         }
+        if !codes.isDisjoint(with: [SUError.appcastParseError, .appcastError, .invalidFeedURLError, .insecureFeedURLError].map(\.rawValue)) {
+            return "Could not read the update feed"
+        }
+        if !codes.isDisjoint(with: [SUError.runningTranslocated, .runningFromDiskImageError].map(\.rawValue)) {
+            return "Move Tilde to Applications first"
+        }
+        if !codes.isDisjoint(with: [SUError.downloadError, .temporaryDirectoryError].map(\.rawValue)) {
+            return feedLoaded ? "Could not download the update" : "Could not reach the update feed"
+        }
+        return "Could not install the update"
     }
 }
 
