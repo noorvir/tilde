@@ -176,6 +176,7 @@ struct PreviewView: View {
     /// The notes, and the flow for whether they can change.
     @ObservedObject var controller: AnnotationController
     @ObservedObject private var previewCard: PreviewCard
+    @ObservedObject private var wireframes: WireframeSwitch
     /// Called when a drag of the header moves.
     let onDrag: () -> Void
     /// The corner grip's drag, by its distance since it began, and its end.
@@ -188,6 +189,7 @@ struct PreviewView: View {
     ) {
         self.controller = controller
         previewCard = controller.previewCard
+        wireframes = controller.wireframes
         self.onDrag = onDrag
         self.onResize = onResize
         self.onResizeEnded = onResizeEnded
@@ -268,7 +270,7 @@ struct PreviewView: View {
                 previewCard.step(1, in: controller.drafts)
             }
             Spacer()
-            if controller.drafts.first(where: { $0.id == id })?.isWireframe == true {
+            if wireframes.isOn, controller.drafts.first(where: { $0.id == id })?.isWireframe == true {
                 CardButton(symbol: "pencil", title: "Edit Wireframe", help: "Edit the wireframe on the screen") {
                     controller.editWireframe(id)
                 }

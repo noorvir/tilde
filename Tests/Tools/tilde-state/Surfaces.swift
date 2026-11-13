@@ -42,7 +42,9 @@ enum Surfaces {
             return try await hosted(UpdateToastView(state: toast), size: size)
 
         case .settings:
-            return try await hosted(SettingsView(model: try await settings(state.settings!, look: look)), size: size)
+            let model = try await settings(state.settings!, look: look)
+            model.wireframes.set(state.wireframes ?? false)
+            return try await hosted(SettingsView(model: model), size: size)
 
         case .canvas:
             return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip, isNested: state.nested == true)
@@ -171,6 +173,7 @@ enum Surfaces {
     }
 
     private static func apply(_ state: UIState, drafts: [Draft], to controller: AnnotationController) {
+        controller.wireframes.set(state.wireframes ?? false)
         let notice: PauseNotice? = switch state.pauseNotice {
         case .escape: .escape
         case .otherApp: .otherApp

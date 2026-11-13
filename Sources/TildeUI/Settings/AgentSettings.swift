@@ -156,23 +156,15 @@ struct AgentRow: View {
     }
 }
 
-/// The beta switch, and while it is on, the machines that an agent can use Tilde from, over
-/// ssh: each opens its own page.
+/// While the beta is on (see Configuration), the machines that an agent can use Tilde from,
+/// over ssh: each opens its own page.
 private struct NodesSection: View {
     @ObservedObject var nodes: NodeSetup
     let open: (String) -> Void
 
     var body: some View {
-        SettingsSection("Remote machines") {
-            SettingsRow(title: "Remote machines (beta)", subtitle: "Agents on a linked machine can open Tilde on this screen") {
-                Toggle("Remote machines (beta)", isOn: Binding { nodes.isEnabled } set: { nodes.setEnabled($0) })
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .tint(Color.tildeBlue)
-                    .labelsHidden()
-            }
-            if nodes.isEnabled {
-                SettingsDivider()
+        if nodes.isEnabled {
+            SettingsSection("Remote machines") {
                 NodeRows(nodes: nodes, open: open)
             }
         }

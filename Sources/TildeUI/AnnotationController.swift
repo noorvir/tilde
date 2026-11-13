@@ -119,6 +119,7 @@ final class AnnotationController: ObservableObject {
     let drawing: DrawingNotes
     /// Wireframe mode, on Draw's canvas: its tool, its window and the note of its components.
     let wireframe: WireframeMode
+    let wireframes: WireframeSwitch
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -200,6 +201,7 @@ final class AnnotationController: ObservableObject {
         scope = SessionScope(picker: picker, browser: browser)
         drawing = DrawingNotes(picker: picker)
         wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
+        wireframes = WireframeSwitch(defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
         flow.choosesInPicker = defaults.bool(forKey: "ChoosesInPicker")
 
@@ -286,6 +288,7 @@ final class AnnotationController: ObservableObject {
         var facts = SessionFlow.Facts(notes: drafts.count)
         facts.commentHasText = commentBox.hasText
         facts.commentIsOnDrawing = commentBox.pending?.drawingIDs.isEmpty == false
+        facts.wireframesOn = wireframes.isOn
         return facts
     }
 

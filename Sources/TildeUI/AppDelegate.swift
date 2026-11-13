@@ -92,6 +92,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         CursorDebug.install()
+        // Before the controller reads the switch.
+        WireframeSwitch.migrate(defaults: .standard) {
+            SessionArchive().all().contains { $0.notes.contains { $0.chip == WireframeMode.chip } }
+        }
         // The note box is for typing: no accent popup, whose input method can hold up a key.
         UserDefaults.standard.register(defaults: ["ApplePressAndHoldEnabled": false])
         let port = UInt16(ProcessInfo.processInfo.environment["TILDE_PORT"] ?? "") ?? 7311
@@ -140,7 +144,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         self.updates = updates
         self.updateToast = updateToast
         let model = SettingsModel(
-            setup: setup, shortcuts: shortcuts, browser: browser, history: history, server: serverState, updates: updates, version: version,
+            setup: setup, wireframes: controller.wireframes, shortcuts: shortcuts, browser: browser, history: history, server: serverState, updates: updates, version: version,
             onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.hud.resetPosition() }
         )
         let settings = SettingsWindow(model: model)
