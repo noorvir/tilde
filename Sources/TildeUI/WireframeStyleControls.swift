@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The wireframe bar's controls of the look, in the place of its tools: the style and the
-/// colours as native menus, and the three strengths in the Adjust popover. The same settings
+/// colours as native menus, and the three strengths in the popover of the Adjust icon button. The same settings
 /// as the Appearance page; a change shows at once on the canvas. They fit the width that the
 /// tools give them: a long name takes room from the controls' padding, never from the bar.
 struct WireframeStyleControls: View {
@@ -67,17 +67,10 @@ struct WireframeStyleControls: View {
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: pillSize.scaled(20))
 
-            Button {
+            HUDButton(image: Image(systemName: "slider.horizontal.3"), isOn: wireframe.bar.isAdjusting, showsTooltip: !wireframe.bar.isAdjusting, help: "Adjust") {
                 _ = wireframe.bar.handle(.adjust)
-            } label: {
-                HUDButtonLabel(image: Image(systemName: "slider.horizontal.3"), title: "Adjust", opensBelow: true)
-                    .modifier(HUDButtonChrome(isOn: wireframe.bar.isAdjusting, padding: padding))
             }
-            .buttonStyle(.plain)
-            .fixedSize()
             .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(Self.space)) }, action: { adjustFrame = $0 })
-            .accessibilityLabel("Adjust")
-            .accessibilityHint("Fill, blur and fade")
 
             Spacer(minLength: 0)
         }
