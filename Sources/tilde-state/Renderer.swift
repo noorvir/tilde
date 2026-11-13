@@ -27,15 +27,6 @@ enum Renderer {
         // Lets SwiftUI commit its layers; animations are off, so the result is final.
         try await Task.sleep(for: .milliseconds(150))
         view.layoutSubtreeIfNeeded()
-        // A second layout, at another width and back. In its first layout SwiftUI now and then
-        // measures a text field's reserved lines with the font of a control, before the field
-        // has its own font: the picture then had a field that was some points too low. A
-        // layout after the first one measures with the field's font.
-        window.setContentSize(NSSize(width: size.width + 1, height: size.height))
-        view.layoutSubtreeIfNeeded()
-        window.setContentSize(size)
-        view.layoutSubtreeIfNeeded()
-        try await Task.sleep(for: .milliseconds(50))
 
         let context = bitmapContext(width: Int(size.width) * scale, height: Int(size.height) * scale)!
         context.setFillColor(CGColor(gray: 0.5, alpha: 1))
