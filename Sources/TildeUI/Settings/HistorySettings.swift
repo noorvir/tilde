@@ -10,7 +10,7 @@ final class HistoryModel: ObservableObject {
     @Published private(set) var hasRead = false
     @Published var expanded: Set<String> = []
     /// Whether Restore does anything now: always without a session on screen, else as the
-    /// window button's rule allows.
+    /// rule for choosing a source allows.
     @Published var takesRestore = true
     /// The copy in progress; only the latest one writes the clipboard.
     private var copying: Task<Void, Never>?

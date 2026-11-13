@@ -131,7 +131,7 @@ struct BehaviourTests {
         controller.sourcePicker.injected = (screens, apps, .done)
 
         open(activity: .recording(.ready))
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
         controller.dispatch(.openPicker)
         #expect(controller.isRecordMode)
         #expect(controller.isSourcePickerOpen)
@@ -205,7 +205,7 @@ struct BehaviourTests {
         #expect(HUDView.status(of: controller).title == "Annotating")
     }
 
-    /// A restore and Open Browser wait while a clip records, as the window button does.
+    /// A restore and Open Browser wait while a clip records, as the source name does.
     @Test func aClipKeepsItsNotesAndSource() {
         open(drafts: Fixtures.drafts(1), activity: .recording(.recording))
         controller.restore(Fixtures.record(notes: 3))
@@ -281,7 +281,7 @@ struct BehaviourTests {
 
         open(drafts: Fixtures.drafts(1))
         controller.dispatch(.requestCancel)
-        for event: SessionFlow.Event in [.togglePause, .requestCancel, .openBrowser, .restore, .windowButton, .deleteNote, .editNote] {
+        for event: SessionFlow.Event in [.togglePause, .requestCancel, .openBrowser, .restore, .pickSource, .deleteNote, .editNote] {
             #expect(!controller.accepts(event), "\(event)")
         }
     }
@@ -376,7 +376,7 @@ struct BehaviourTests {
     @Test func aPhoneIsARecordingSourceOnly() {
         let phone = Phone(id: "phone", name: "iPhone")
         open()
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
         controller.choose(.phone(phone))
         #expect(controller.scope.source == nil)
         #expect(!controller.isPickingWindow)
@@ -563,7 +563,7 @@ struct BehaviourTests {
         let low = NSPoint(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 120 - height)
         panel.window.setFrame(NSRect(origin: low, size: NSSize(width: 800, height: height)), display: false)
         open()
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
 
         panel.fitPicker()
 
@@ -758,20 +758,20 @@ struct BehaviourTests {
     @Test func theSourceNameChoosesAgainBeforeRecord() {
         let elsewhere = CGPoint(x: -5000, y: -5000)
         open()
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
         #expect(!controller.isPickingWindow)
 
         open(activity: .recording(.ready))
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
         #expect(controller.isPickingWindow)
         #expect(!controller.isSourcePickerOpen)
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
         #expect(!controller.isPickingWindow)
 
         controller.choose(.window(Fixtures.window))
         #expect(controller.scope.source == nil)
 
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
         controller.choose(.window(Fixtures.window))
         #expect(!controller.isPickingWindow)
         #expect(controller.isRecordMode)
@@ -796,11 +796,11 @@ struct BehaviourTests {
         #expect(controller.allows(elsewhere))
     }
 
-    /// The window button does nothing while a clip is in progress: a clip keeps its source.
+    /// The source name does nothing while a clip is in progress: a clip keeps its source.
     @Test func aClipKeepsItsSource() {
         for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, thenSend: false)] {
             open(activity: .recording(clip), source: .window(Fixtures.window))
-            controller.dispatch(.windowButton)
+            controller.dispatch(.pickSource)
             controller.annotateInBrowser()
             #expect(!controller.isPickingWindow, "\(clip)")
             #expect(controller.clipSource == .window(Fixtures.window), "\(clip)")

@@ -8,8 +8,9 @@ import Foundation
 /// Tests/Contract/transitions pins this table.
 struct SessionFlow: Equatable {
     var mode: Mode = .open(Open())
-    /// The window button opens the picker at once, as the user last chose from it, instead of
-    /// clicking on screen. The flow changes it; the controller keeps it across launches.
+    /// A click on the source name opens the picker at once, as the user last chose from it,
+    /// instead of clicking on screen. The flow changes it; the controller keeps it across
+    /// launches.
     var choosesInPicker = false
     /// The last async operation started (a clip start or stop, a send, a confirmation); its
     /// result counts only while the mode still waits for that operation.
@@ -179,7 +180,9 @@ struct SessionFlow: Equatable {
         case captureStopped
         /// The window that the session is limited to closed.
         case windowClosed
-        case windowButton, openPicker
+        /// A click on the source's name in the HUD, and the menu's Record a Specific Window:
+        /// choosing what to record starts, or ends with no change. Then the picker's button.
+        case pickSource, openPicker
         /// A window, a screen or a phone was chosen to record.
         case choose
         case send, sendFinished(Int), sendFailed(Int), sentShown(Int), pushFailed
@@ -500,7 +503,7 @@ struct SessionFlow: Equatable {
             }
             open.activity = back
             return [.stopPicking]
-        case .windowButton:
+        case .pickSource:
             open.activity = back
             return [.stopPicking]
         case .openPicker:
@@ -759,7 +762,7 @@ struct SessionFlow: Equatable {
             open.activity = .recording(.ready)
             return [.showSaveFailure]
 
-        case .windowButton:
+        case .pickSource:
             // Only recording mode chooses a source, before Record: notes keep their own window.
             guard open.activity == .recording(.ready) else {
                 return []

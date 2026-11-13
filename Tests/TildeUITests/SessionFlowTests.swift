@@ -77,7 +77,7 @@ struct SessionFlowTests {
         .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .startWireframe, .wireframeTaken,
         .toggleRecordingMode, .record, .stop,
         .clipStarted(3), .clipStarted(2), .clipStartFailed(3), .clipStartFailed(2), .clipFinished(3), .clipFinished(2),
-        .clipFailed(3), .clipFailed(2), .captureStopped, .windowClosed, .windowButton, .openPicker, .choose,
+        .clipFailed(3), .clipFailed(2), .captureStopped, .windowClosed, .pickSource, .openPicker, .choose,
         .send, .sendFinished(3), .sendFinished(2), .sendFailed(3), .sendFailed(2), .sentShown(3), .sentShown(2), .pushFailed,
     ]
 
@@ -150,7 +150,7 @@ struct SessionFlowTests {
         }
     }
 
-    /// While choosing, only the window button, Esc, the picker, a choice, the record toggle,
+    /// While choosing, only the source name, Esc, the picker, a choice, the record toggle,
     /// Draw, the hold key, the front app and the session's end act.
     @Test func choosingTakesOnlyItsEvents() {
         everyTransition { state, event, next, effects in
@@ -158,7 +158,7 @@ struct SessionFlowTests {
                 return
             }
             switch event {
-            case .escape, .windowButton, .openPicker, .choose, .toggleRecordingMode, .startDrawing, .holdEnded, .otherAppInFront, .scopeAppInFront, .ended:
+            case .escape, .pickSource, .openPicker, .choose, .toggleRecordingMode, .startDrawing, .holdEnded, .otherAppInFront, .scopeAppInFront, .ended:
                 return
             case .clipStarted, .clipFinished:
                 #expect(next == state.flow && effects == [.dropClip], "\(event) gave \(effects)")

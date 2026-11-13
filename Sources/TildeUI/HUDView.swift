@@ -549,12 +549,12 @@ struct HUDView: View {
         return Group {
             if case .source = subtitleState {
                 Button {
-                    controller.dispatch(.windowButton)
+                    controller.dispatch(.pickSource)
                 } label: {
                     SubtitleLine(part: part).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!controller.accepts(.windowButton))
+                .disabled(!controller.accepts(.pickSource))
                 .tildeTooltip("Choose source")
             } else {
                 SubtitleLine(part: part)

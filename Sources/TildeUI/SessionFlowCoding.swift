@@ -178,7 +178,7 @@ extension SessionFlow.Event: Codable {
             "redoDrawing": .redoDrawing, "shapeFinished": .shapeFinished, "startWireframe": .startWireframe, "wireframeTaken": .wireframeTaken, "toggleRecordingMode": .toggleRecordingMode, "record": .record,
             "stop": .stop, "clipStarted": .clipStarted(operation), "clipStartFailed": .clipStartFailed(operation),
             "clipFinished": .clipFinished(operation), "clipFailed": .clipFailed(operation), "captureStopped": .captureStopped, "windowClosed": .windowClosed,
-            "windowButton": .windowButton, "openPicker": .openPicker, "choose": .choose,
+            "pickSource": .pickSource, "openPicker": .openPicker, "choose": .choose,
             "send": .send, "sendFinished": .sendFinished(operation), "sendFailed": .sendFailed(operation), "sentShown": .sentShown(operation),
             "pushFailed": .pushFailed,
         ]

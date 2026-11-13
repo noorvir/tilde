@@ -62,7 +62,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             menu.addItem(action(pause.title, pause.works ? #selector(togglePause) : nil, shortcut: .togglePause))
             // Notes keep their own window; only recording mode chooses what it records.
             if controller.isRecordMode {
-                menu.addItem(action("Record a Specific Window", controller.accepts(.windowButton) && !controller.isPickingWindow ? #selector(chooseWindow) : nil))
+                menu.addItem(action("Record a Specific Window", controller.accepts(.pickSource) && !controller.isPickingWindow ? #selector(chooseWindow) : nil))
             }
             menu.addItem(action("Cancel Annotation", controller.accepts(.requestCancel) ? #selector(cancelAnnotation) : nil))
         }
@@ -103,7 +103,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             none.isEnabled = false
             submenu.addItem(none)
         }
-        // Restoring into the session on screen follows the window button's rule.
+        // Restoring into the session on screen follows the rule for choosing a source.
         let takesRestore = controller.session == nil || controller.accepts(.restore)
         for record in records {
             let count = record.notes.count
@@ -283,7 +283,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// Chooses what to record, as a click on the source's name in the HUD does.
     @objc private func chooseWindow() {
-        controller.dispatch(.windowButton)
+        controller.dispatch(.pickSource)
     }
 
     /// A `shortcut` shows that global shortcut.
