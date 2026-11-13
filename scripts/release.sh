@@ -40,6 +40,10 @@ case "$TILDE_SIGN_IDENTITY" in
         echo "Warning: \"$TILDE_SIGN_IDENTITY\" is not a Developer ID identity. Gatekeeper blocks this build after a download: use it for tests only." >&2
         ;;
 esac
+if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+    echo "This clone is shallow: the build number counts the commits, so it would be too low. Run git fetch --unshallow." >&2
+    exit 2
+fi
 if ! git diff --quiet HEAD; then
     echo "Commit or remove the changes first: the release is built from a commit." >&2
     exit 2
