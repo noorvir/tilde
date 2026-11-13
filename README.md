@@ -1,46 +1,53 @@
 <p align="center">
-<img src="docs/icon.png" width="128" alt="Tilde icon">
+<img src="docs/icon.png" width="128" alt="Tilde">
+<br>
+<a href="https://github.com/noorvir/tilde/releases/latest"><img src="https://img.shields.io/github/v/release/noorvir/tilde?label=release" alt="Latest release"></a>
+<a href="https://github.com/noorvir/tilde/actions/workflows/ci.yml"><img src="https://github.com/noorvir/tilde/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<img src="https://img.shields.io/badge/macOS-14%2B-blue" alt="macOS 14+">
 </p>
-
-<h1 align="center">Tilde</h1>
-
-<p align="center">Show your coding agent what you mean, right on the screen.</p>
 
 ## About
 
-Tilde is a macOS menu bar app. You point at things on the screen, write a note, draw or sketch a wireframe, and Tilde sends it to your coding agent.
+`tilde` is a macOS app for giving feedback to coding agents. Instead of describing a problem in words, you point at it on the screen. It works on any app and uses accessibility data where available. Tilde does the following:
 
-- **Annotate.** Pick an element in any app and write a note about it. Pages in Tilde's built-in browser also give the DOM and React data of the element.
-- **Draw.** Draw arrows, rectangles, ellipses and free lines over the screen, in six colours.
-- **Wireframe.** Sketch the skeletons of components over the screen, with labels, and send them as one note.
-- **Record.** Record a display, a window, or an iPhone on a cable, to a video.
-- **Remote machines.** Link a machine over ssh, so that its agents can use Tilde on your Mac.
-- **History.** Open earlier sessions again from the menu.
-
-## How it works with agents
-
-Tilde runs a local MCP server on `127.0.0.1`. Each request needs a local token.
-
-From the **Agents** menu, Tilde adds its MCP server and its `tilde` skill to these apps: Claude Code, Codex, Cursor, VS Code, Gemini CLI and Windsurf (Devin). For other apps, Settings shows the entry to copy. `tilde-mcp` is the stdio bridge for apps that start MCP servers as processes. It also starts Tilde when Tilde is not open.
-
-The agent uses these MCP tools:
-
-- `start_annotation` opens Tilde, optionally on a web page in its browser, and returns your feedback.
-- `wait_for_annotation` waits while you still annotate.
-- `get_report` reads a sent report again by its id.
-
-The feedback is a Markdown report with your notes. Each note has a close-up picture and a picture of the window around it, with the target outlined. Tilde also keeps each report, its pictures and its videos in `~/.tilde/inbox/`, and gives the latest report as the MCP resource `tilde://feedback/latest`.
+- **Annotate any element** in any app, with a note attached
+- **Draw** arrows, boxes and free lines on top of the screen
+- **Sketch wireframes** to visually communicate a screen or component
+- **Record** a display, a window or a connected iPhone
+- Works with **any MCP agent** (Claude Code, Codex, Cursor, Gemini CLI, …)
+- Works with agents on **remote machines** over ssh (beta)
 
 ## Install
 
-Tilde needs macOS 14 or later. It asks for the Screen Recording and Accessibility permissions.
+Download the DMG from the [latest release](https://github.com/noorvir/tilde/releases/latest) and move Tilde to Applications. Tilde updates itself after that.
 
-**Download.** Get the DMG from [GitHub Releases](../../releases) and move Tilde to Applications. Tilde then updates itself with Sparkle.
+Requires macOS 14 or later.
 
-**Build from source.** You need Swift 6 (Xcode or the Command Line Tools) and Go.
+To build from source you need Xcode and Go:
 
-```sh
+```
+git clone https://github.com/noorvir/tilde.git
+cd tilde
 scripts/install-app.sh
 ```
 
-This builds `Tilde.app`, installs it in `/Applications` and opens it.
+## Usage
+
+Open Tilde from the menu bar and connect your agents in the **Agents** menu.
+
+When an agent needs your feedback, it calls the `start_annotation` MCP tool and Tilde opens over your screen. Click on things, write notes, draw, and press **Send**. The agent gets back a report with your notes and a screenshot of each element you pointed at.
+
+You can also open Tilde yourself by pressing Control twice.
+
+## How it works
+
+Tilde runs a local MCP server on your Mac, and authenticates each request with a token. When you connect an agent, Tilde adds this server to the agent's config.
+
+When you point Tilde at an element on your screen, it reads it through the macOS Accessibility API (and the DOM in Tilde's own browser) and takes a screenshot. It collects all the annotations into a report and passes it back to your agent, if the flow was started by it, or copies it to your clipboard for you to paste it manually. This also works for remote machines.
+
+### Remote machines (beta)
+
+> [!WARNING]
+> Remote machines are in beta and are off by default. Turn them on only for machines that you own and trust.
+
+Tilde copies a small proxy to a machine that you can reach over ssh, and connects it to Tilde over your ssh connection. Agents on that machine use the proxy as their MCP server. This means that a program on that machine can open Tilde on your screen and receive what you send.
