@@ -33,6 +33,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updateToast: UpdateToast?
     private var updateSession: AnyCancellable?
     private var historyRestore: AnyCancellable?
+    private var permissionRequest: AnyCancellable?
     private var hotKeys: HotKeys?
     private var browserEvents: Any?
 
@@ -149,9 +150,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         updates.start()
         offerUnfinishedSession()
 
+        // A launch shows no prompt and takes no picture of the screen: the permissions are
+        // asked for when the first session starts, which needs them.
+        permissionRequest = controller.$session.compactMap { $0 }.first().sink { _ in
+            Self.askForPermissions()
+        }
+    }
+
+    /// Asks for Screen Recording and Accessibility where Tilde does not have them.
+    private static func askForPermissions() {
         if ScreenCapture.isAllowed {
             // macOS asks the user to confirm direct screen capture from time to time; a tiny
-            // capture at launch shows that consent now instead of in the middle of annotating.
+            // capture at the session's start shows that consent now instead of in the middle
+            // of a note.
             Task {
                 _ = await ScreenCapture.png(of: CGRect(x: 0, y: 0, width: 1, height: 1), outline: nil, keeping: [], maxSide: 1024)
             }
