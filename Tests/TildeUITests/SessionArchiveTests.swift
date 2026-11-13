@@ -62,6 +62,21 @@ struct SessionArchiveTests {
         try await until { history.records == [kept] }
     }
 
+    /// A note whose pictures were taken again, such as a wireframe drawn again, has the new
+    /// ones: an image on disk is otherwise never written again.
+    @Test func aNoteWhosePicturesWereTakenAgainHasTheNewOnes() throws {
+        let archive = Fixtures.archive()
+        let record = Fixtures.record(isLocal: true, notes: 1, pageURL: nil)
+        let note = try #require(record.notes.first)
+        archive.save(record)
+        archive.saveImages([SessionArchive.imageName(note.id): Data([7])], of: record.id)
+        archive.forgetImages(of: note.id, in: record.id)
+        archive.saveImages([SessionArchive.imageName(note.id): Data([9])], of: record.id)
+        archive.flush()
+
+        #expect(archive.closeUp(of: note, in: record.id) == Data([9]))
+    }
+
     @Test func restoredNotesHaveTheirSavedImages() async throws {
         let archive = Fixtures.archive()
         let record = Fixtures.record(isLocal: true, notes: 1, pageURL: nil)

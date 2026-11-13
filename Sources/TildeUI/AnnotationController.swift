@@ -1088,6 +1088,10 @@ final class AnnotationController: ObservableObject {
             return
         }
         if let index = drafts.firstIndex(where: { $0.id == replaced }) {
+            // The note keeps its id, and so the names of its saved pictures: the old ones go.
+            if let session {
+                archive.forgetImages(of: replaced, in: session.id)
+            }
             drafts[index] = drafts[index].redrawn(as: taken.note)
         }
         drawing.panel.remove(taken.note.drawingIDs)

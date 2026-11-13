@@ -111,6 +111,16 @@ final class SessionArchive: @unchecked Sendable {
         }
     }
 
+    /// Removes a note's saved images: its pictures were taken again, and the next save writes
+    /// the new ones.
+    func forgetImages(of note: UUID, in id: String) {
+        queue.async { [self] in
+            for name in [Self.imageName(note), Self.contextImageName(note)] {
+                try? FileManager.default.removeItem(at: folder(id).appendingPathComponent(name))
+            }
+        }
+    }
+
     /// Waits for the saves in progress.
     func flush() {
         queue.sync {}
