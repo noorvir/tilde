@@ -45,13 +45,15 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
-    let webView: WKWebView
+    /// The page's view, made when the browser first needs it: a web view starts WebKit's
+    /// processes, and Tilde mostly runs with its browser never opened.
+    private(set) lazy var webView = makeWebView()
     private(set) var window: NSWindow?
     private var observations: [AnyCancellable] = []
     private var isResolving = false
     private var resolvesAgain = false
 
-    override init() {
+    private func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.userContentController.addUserScript(
@@ -59,10 +61,9 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
         )
         let messages = PageMessages()
         configuration.userContentController.add(messages, name: "tilde")
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.isInspectable = true
         webView.allowsBackForwardNavigationGestures = true
-        super.init()
         messages.onChange = { [weak self] in
             self?.resolveAnchors()
             self?.controller?.refreshHover()
@@ -85,6 +86,7 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
             },
             webView.publisher(for: \.title).sink { [weak self] title in self?.window?.title = title ?? "Tilde Browser" },
         ]
+        return webView
     }
 
     /// The page's frame on screen, in AppKit coordinates, while the window is open.
@@ -94,7 +96,8 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
             return pageFrameForTesting
         }
         #endif
-        guard let window = webView.window, window.isVisible else {
+        // No browser window: no page, and no web view to make for the question.
+        guard window != nil, let window = webView.window, window.isVisible else {
             return nil
         }
         return window.convertToScreen(webView.convert(webView.bounds, to: nil))
@@ -151,7 +154,7 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
 
     /// Adds cookies, such as logins imported from Chrome, to the browser's persistent store.
     func add(_ cookies: [HTTPCookie]) async {
-        let store = webView.configuration.websiteDataStore.httpCookieStore
+        let store = WKWebsiteDataStore.default().httpCookieStore
         for cookie in cookies {
             await store.setCookie(cookie)
         }
@@ -159,7 +162,7 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
 
     /// Removes the browser's cookies, logins, cache and other site data.
     func clearData() async {
-        await webView.configuration.websiteDataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
+        await WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast)
     }
 
     // MARK: - Menu and mouse commands
