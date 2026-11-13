@@ -1,5 +1,10 @@
 .build/
 build/
-.agent/current.md
+.agent/
+.claude/
+AGENTS.md
+CLAUDE.md
+.cursor/
+.codex/
 .DS_Store
 tools/drawing/node_modules/
