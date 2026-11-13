@@ -32,8 +32,6 @@ let package = Package(
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
         .executableTarget(name: "tilde-mcp", dependencies: ["TildeInstaller"], swiftSettings: strict),
-        // Writes the app icon from TildeMark; see scripts/build-app.sh.
-        .executableTarget(name: "tilde-icon", dependencies: ["TildeUI"], swiftSettings: strict),
         // Test tools, in Tests/Tools; they do not ship.
         // Posts real input and captures the screen for tests on a real display; see scripts/build-driver.sh.
         .executableTarget(name: "tilde-driver", dependencies: ["TildeCore"], path: "Tests/Tools/tilde-driver", swiftSettings: strict),

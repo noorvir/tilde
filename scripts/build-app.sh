@@ -4,7 +4,7 @@
 # A real identity signs every executable with the hardened runtime, and a Developer ID one also
 # with a secure timestamp, as notarization needs (see scripts/release.sh).
 # The app icon is Resources/AppIcon.icon (Icon Composer), compiled by Xcode 26 or later; with
-# only the Command Line Tools, the build has the flat icon that tilde-icon draws.
+# only the Command Line Tools, the build has the flat Resources/AppIcon.icns.
 # It holds tproxy for every node type, built with Go, or the ones in proxy/dist where there is
 # no Go.
 # TILDE_UNIVERSAL=1 (the release) builds Tilde and tilde-mcp for Apple silicon and Intel Macs;
@@ -29,8 +29,6 @@ for arch in $archs; do
     swift build -c "$configuration" --arch "$arch" --product tilde-mcp
     scripts/stamp-sdk.sh "$(swift build -c "$configuration" --arch "$arch" --show-bin-path)/Tilde"
 done
-swift build -c "$configuration" --product tilde-icon
-bin="$(swift build -c "$configuration" --show-bin-path)"
 
 app="build/Tilde.app"
 rm -rf "$app"
@@ -61,10 +59,7 @@ if DEVELOPER_DIR="$developer" xcrun actool Resources/AppIcon.icon --compile "$ap
 else
     echo "No actool of Xcode 26 or later: the app has the flat icon only." >&2
     icon_name=
-    iconset="build/AppIcon.iconset"
-    rm -rf "$iconset"
-    "$bin/tilde-icon" "$iconset"
-    iconutil -c icns "$iconset" -o "$app/Contents/Resources/AppIcon.icns"
+    cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 fi
 
 cat > "$app/Contents/Info.plist" <<'PLIST'
