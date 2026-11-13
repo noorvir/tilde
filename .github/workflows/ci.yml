@@ -1,0 +1,36 @@
+# The unit and behaviour tests, and a build of Tilde.app. The UI contract pictures are not
+# checked here: they match only on the exact macOS version they were made on (scripts/check.sh).
+# The UX specs skip themselves without TILDE_UX=1 (scripts/ux.sh).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      # proxy/build.sh fixes the toolchain with GOTOOLCHAIN; the same version here needs no download.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: false
+      - uses: actions/cache@v4
+        with:
+          path: .build
+          key: spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: spm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Test
+        run: TILDE_STRICT=1 swift test
+      - name: Build Tilde.app
+        run: TILDE_STRICT=1 scripts/build-app.sh
