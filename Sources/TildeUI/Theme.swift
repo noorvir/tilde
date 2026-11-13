@@ -135,27 +135,37 @@ final class ZoomPresenter {
     private let panel: NSPanel
     private let setShown: (Bool) -> Void
     private var pendingHide: DispatchWorkItem?
+    /// What the last call asked for.
+    private var isShown = false
 
     init(panel: NSPanel, setShown: @escaping (Bool) -> Void) {
         self.panel = panel
         self.setShown = setShown
     }
 
+    /// Shows or hides the panel as the last call says, also when the calls come sooner than
+    /// their delayed steps: a hide that waits for its end never takes a panel shown since.
     func show() {
+        isShown = true
         pendingHide?.cancel()
         panel.orderFrontRegardless()
         // Grow on the next pass, after SwiftUI has laid out the shrunk content.
-        DispatchQueue.main.async { [setShown] in
+        DispatchQueue.main.async { [weak self] in
+            guard let self, isShown else {
+                return
+            }
             withAnimation(HUDPanel.motion) {
-                setShown(true)
+                self.setShown(true)
             }
         }
     }
 
     func hide() {
+        isShown = false
         withAnimation(HUDPanel.motion) {
             setShown(false)
         }
+        pendingHide?.cancel()
         let hide = DispatchWorkItem { [panel] in
             panel.orderOut(nil)
         }
