@@ -312,7 +312,9 @@ enum Surfaces {
         case .ready: .ready(version: "0.3.0")
         case .failed: .failed(reason: "Could not reach the update feed")
         }
-        let updates = Updates(engine: FakeUpdateEngine(status: status))
+        let engine = FakeUpdateEngine(status: status)
+        engine.isAutomatic = state?.automatic ?? true
+        let updates = Updates(engine: engine)
         updates.start()
         updates.isSessionActive = state?.session ?? false
         return updates

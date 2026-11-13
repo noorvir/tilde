@@ -88,6 +88,8 @@ struct UIState: Decodable {
         let status: Status
         /// A session is on screen, so Restart waits.
         var session: Bool?
+        /// "Update automatically"; on when not given.
+        var automatic: Bool?
     }
 
     struct Settings: Decodable {
