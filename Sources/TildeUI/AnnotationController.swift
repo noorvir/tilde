@@ -583,6 +583,9 @@ final class AnnotationController: ObservableObject {
         MainThreadWatch.stop()
         tracker.stop()
         notices.clearPause()
+        // A session can end in wireframe mode, such as by Cancel: the canvas stays for the next
+        // session, and must not stay in the mode.
+        wireframe.end()
         drawing.panel.endSession()
         commentBox.close()
         previewCard.close()

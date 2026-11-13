@@ -336,6 +336,16 @@ struct WireframeTests {
         #expect(controller.isWireframe)
     }
 
+    /// A session that ends in wireframe mode, such as by Cancel, ends the mode too: the canvas
+    /// stays for the next session, which starts with the Style menu closed.
+    @Test func aSessionThatEndsInWireframeModeEndsTheMode() {
+        open(Open(canvas: .wireframe))
+        controller.wireframe.isStyleMenuOpen = true
+        controller.dispatch(.requestCancel)
+        #expect(controller.session == nil)
+        #expect(!controller.wireframe.isStyleMenuOpen)
+    }
+
     // MARK: - The note and the report
 
     /// The report of a wireframe has its components from the top left of their window (or of
