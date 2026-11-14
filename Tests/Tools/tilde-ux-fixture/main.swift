@@ -151,6 +151,10 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(field)
     }
+    // "normal": an ordinary window, which windows of other apps brought forward cover.
+    if page.hasPrefix("normal"), window.level != .normal {
+        window.level = .normal
+    }
     // The window moved, by a program or by the user.
     if page.hasPrefix("moved"), window.frame.minX < 400 {
         window.setFrameOrigin(NSPoint(x: window.frame.minX + 200, y: window.frame.minY))

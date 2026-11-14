@@ -2,9 +2,10 @@ import AppKit
 
 /// The windows on screen that the user sees, front to back, as the window list last gave them:
 /// other apps' windows, Tilde's browser and Tilde's other windows, such as Settings, which cover
-/// what is behind them but are never annotated; not Tilde's overlays, HUD or the menu bar. It is the one reader of the window list during a session. It reads off the main
-/// thread when an app comes to the front, when a mouse button comes up or a window is dragged,
-/// and once a second, so a pointer move or a scroll only looks up the last result.
+/// what is behind them but are never annotated; not Tilde's overlays, HUD or the menu bar. It is
+/// the one reader of the window list during a session. It reads off the main thread when an app
+/// comes to the front, when a mouse button comes up or a window is dragged, and once a second,
+/// so a pointer move or a scroll only looks up the last result.
 @MainActor
 final class WindowStack {
     private(set) var windows: [ElementPicker.WindowInfo] = []
