@@ -2,14 +2,14 @@
 // must know of.
 
 import { isSelectMode, setOverLabel } from "./cursor.js";
-import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame } from "./draw-mode.js";
+import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft } from "./draw-mode.js";
 import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
 import { drawLook, setWireframeLook } from "./wireframe/look.js";
 import { showPreview } from "./wireframe/preview.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
-import { snapAgain, takesPointer as wireframeTakesPointer, pointerWentThrough } from "./wireframe/pointer.js";
+import { snapAgain, takesPointer as wireframeTakesPointer, pointerWentThrough as wireframePointerWentThrough } from "./wireframe/pointer.js";
 import { setSnapTargets } from "./wireframe/snap.js";
 import { setWireframeWindow } from "./wireframe/window.js";
 
@@ -60,6 +60,13 @@ function setSnapTargetsHere(targets) {
 function takesPointer(x, y) {
   if (!isSelectMode) return true;
   return Boolean(wireframe) && wireframeTakesPointer(x, y);
+}
+
+// The pointer went through the canvas to a window behind, such as one of Tilde's own: the page
+// gets no more moves, so the tool's ring does not stay where the pointer left.
+function pointerWentThrough(isPress) {
+  pointerLeft();
+  wireframePointerWentThrough(isPress);
 }
 
 window.tildeDraw = {
