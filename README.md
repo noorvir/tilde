@@ -12,7 +12,7 @@
 
 - **Annotate any element** in any app, with a note attached
 - **Draw** arrows, boxes and free lines on top of the screen
-- **Sketch wireframes** to visually communicate a screen or component
+- **Sketch wireframes** to visually communicate a screen or component (beta)
 - **Record** a display, a window or a connected iPhone
 - Works with **any MCP agent** (Claude Code, Codex, Cursor, Gemini CLI, …)
 - Works with agents on **remote machines** over ssh (beta)
@@ -45,9 +45,13 @@ Tilde runs a local MCP server on your Mac, and authenticates each request with a
 
 When you point Tilde at an element on your screen, it reads it through the macOS Accessibility API (and the DOM in Tilde's own browser) and takes a screenshot. It collects all the annotations into a report and passes it back to your agent, if the flow was started by it, or copies it to your clipboard for you to paste it manually. This also works for remote machines.
 
-### Remote machines (beta)
+### Remote machines
 
 > [!WARNING]
-> Remote machines are in beta and are off by default. Turn them on only for machines that you own and trust.
+> Turn remote machines on only for machines that you own and trust.
 
 Tilde copies a small proxy to a machine that you can reach over ssh, and connects it to Tilde over your ssh connection. Agents on that machine use the proxy as their MCP server. This means that a program on that machine can open Tilde on your screen and receive what you send.
+
+## Beta features
+
+Wireframes and remote machines are in beta and off by default. Turn them on in **Settings → Configuration → Beta features**.
