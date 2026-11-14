@@ -72,7 +72,8 @@ struct MCPServerTests {
         #expect(invalid["isError"] as? Bool == true)
     }
 
-    @Test func openWaitReturnsAsSoonAsTheUserSends() async throws {
+    /// The wait could last an hour: only the user's end of the session returns it, with that end.
+    @Test(.timeLimit(.minutes(1))) func openWaitReturnsAsSoonAsTheUserSends() async throws {
         _ = try await call("start_annotation", ["wait_seconds": 0])
         let id = try #require(store.active?.id)
 
@@ -81,9 +82,7 @@ struct MCPServerTests {
             store.finish(id, with: .cancelled)
         }
 
-        let started = Date()
-        let result = try await call("wait_for_annotation", ["session_id": id, "wait_seconds": 30])
-        #expect(Date().timeIntervalSince(started) < 5)
+        let result = try await call("wait_for_annotation", ["session_id": id, "wait_seconds": 3600])
         #expect(text(of: result).contains("cancelled"))
     }
 
@@ -584,11 +583,14 @@ struct HTTPServerTests {
     }
 
     /// One caller may have 8 requests open on a limited listener, such as long polls; another
-    /// caller still gets through.
-    @Test func oneCallerCannotTakeEveryConnection() async throws {
+    /// caller still gets through. The busy caller's requests stay open until the test ends them.
+    @Test(.timeLimit(.minutes(1))) func oneCallerCannotTakeEveryConnection() async throws {
+        let (begun, begin) = AsyncStream<Void>.makeStream()
+        let release = Gate()
         let server = try HTTPServer(port: 0, maxRequestsPerCaller: 8) { request in
             if request.headers["authorization"] == "Bearer busy" {
-                try? await Task.sleep(for: .seconds(2))
+                begin.yield()
+                await release.wait()
             }
             return HTTPResponse(status: 200)
         }
@@ -603,13 +605,36 @@ struct HTTPServerTests {
             return (response as? HTTPURLResponse)?.statusCode ?? 0
         }
         let polls = (0..<8).map { _ in Task { try await status("busy") } }
-        try await Task.sleep(for: .milliseconds(300))
+        var started = begun.makeAsyncIterator()
+        for _ in polls {
+            await started.next()
+        }
 
         #expect(try await status("busy") == 429)
         #expect(try await status("other") == 200)
+        await release.open()
         for poll in polls {
             #expect(try await poll.value == 200)
         }
+    }
+}
+
+/// Holds whoever waits until it opens.
+private actor Gate {
+    private var isOpen = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isOpen {
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        waiting.forEach { $0.resume() }
+        waiting = []
     }
 }
 
