@@ -113,6 +113,8 @@ struct UIState: Decodable {
 
     let version: Int
     let surface: Surface
+    /// The wireframes beta; off when absent, as on a new install.
+    var wireframes: Bool?
     var size: [Double]?
     var appearance: Appearance?
     var session: Session?

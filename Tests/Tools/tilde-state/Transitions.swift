@@ -174,7 +174,7 @@ enum Transitions {
                 result.effects = state.flow.handle(event, state.facts)
                 result.state = state
             }
-            if var state = row.state, let key = row.key, let wireframeKey = AnnotationController.wireframeKey(key.lowercased(), flow: state.flow) {
+            if var state = row.state, let key = row.key, let wireframeKey = AnnotationController.wireframeKey(key.lowercased(), flow: state.flow, wireframesOn: state.facts.wireframesOn) {
                 // Wireframe mode's keys come before the keys of the HUD's buttons.
                 result.keyAction = name(wireframeKey)
                 result.effects = wireframeKey.event.map { state.flow.handle($0, state.facts) } ?? []

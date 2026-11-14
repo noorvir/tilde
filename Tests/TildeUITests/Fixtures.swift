@@ -34,6 +34,7 @@ enum Fixtures {
     /// pass and would otherwise reset the state a test sets.
     static func controller() async throws -> AnnotationController {
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive(), defaults: MemoryDefaults())
+        controller.wireframes.set(true)
         controller.sender.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
         controller.sender.pasteboard = NSPasteboard(name: NSPasteboard.Name("tilde-tests-\(UUID().uuidString)"))
         try await Task.sleep(for: .milliseconds(20))
@@ -260,7 +261,7 @@ enum Fixtures {
         page: SettingsWindow.Page, history: HistoryModel? = nil, wireframePreviews: WireframePreviews? = nil, updates: Updates? = nil
     ) throws -> SettingsModel {
         let model = SettingsModel(
-            setup: try agentSetup(), shortcuts: ShortcutStore(defaults: MemoryDefaults()), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
+            setup: try agentSetup(), wireframes: WireframeSwitch(defaults: MemoryDefaults()), shortcuts: ShortcutStore(defaults: MemoryDefaults()), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
             server: ServerState(port: 7311), updates: updates ?? Updates(engine: FakeUpdateEngine()), version: "0.1.0 (42)",
             browserProfiles: { [] }, permissions: { (true, false) }, wireframePreviews: wireframePreviews
         )

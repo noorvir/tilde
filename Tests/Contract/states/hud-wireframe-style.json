@@ -1,6 +1,7 @@
 {
   "version": 1,
   "surface": "hud",
+  "wireframes": true,
   "size": [
     600,
     130

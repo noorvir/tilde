@@ -1,6 +1,7 @@
 {
   "version": 1,
   "surface": "wireframeAdjust",
+  "wireframes": true,
   "size": [
     330,
     120

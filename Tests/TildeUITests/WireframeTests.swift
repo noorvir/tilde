@@ -279,6 +279,7 @@ struct WireframeTests {
     /// The mode on screen goes to the defaults when it changes, for the next session.
     @Test func theModeOnScreenIsSavedForTheNextSession() throws {
         let defaults = MemoryDefaults()
+        defaults.set(true, forKey: WireframeSwitch.key)
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open(pauses: [.user])))
         #expect(defaults.string(forKey: "LastMode") == nil)
@@ -326,6 +327,7 @@ struct WireframeTests {
     /// the next session, from the defaults.
     @Test func wireframeModeStartsWithTheToolChosenLast() throws {
         let defaults = MemoryDefaults()
+        defaults.set(true, forKey: WireframeSwitch.key)
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open()))
         controller.dispatch(.startWireframe)

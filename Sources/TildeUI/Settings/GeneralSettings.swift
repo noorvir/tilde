@@ -72,6 +72,8 @@ struct GeneralSettings: View {
             }
 
             UpdateSettings(updates: model.updates, version: model.version)
+
+            BetaSettings(nodes: model.setup.nodes, wireframes: model.wireframes)
         }
     }
 
@@ -94,6 +96,37 @@ struct GeneralSettings: View {
         } catch {
             launchError = "Could not change: \(error.localizedDescription)"
         }
+    }
+}
+
+/// Features that are off until the user turns them on; each shows at once.
+private struct BetaSettings: View {
+    @ObservedObject var nodes: NodeSetup
+    @ObservedObject var wireframes: WireframeSwitch
+
+    var body: some View {
+        SettingsSection("Beta features") {
+            SettingsRow(title: "Remote machines", subtitle: "Agents on a linked machine can open Tilde on this screen") {
+                BetaSwitch(title: "Remote machines", isOn: Binding { nodes.isEnabled } set: { nodes.setEnabled($0) })
+            }
+            SettingsDivider()
+            SettingsRow(title: "Wireframes", subtitle: "Sketch components over the screen and send them as one note") {
+                BetaSwitch(title: "Wireframes", isOn: Binding { wireframes.isOn } set: { wireframes.set($0) })
+            }
+        }
+    }
+}
+
+private struct BetaSwitch: View {
+    let title: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(title, isOn: $isOn)
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(Color.tildeBlue)
+            .labelsHidden()
     }
 }
 

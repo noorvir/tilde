@@ -189,19 +189,19 @@ extension AnnotationController {
         guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty, let key = event.charactersIgnoringModifiers else {
             return nil
         }
-        return Self.wireframeKey(key.lowercased(), flow: flow)
+        return Self.wireframeKey(key.lowercased(), flow: flow, wireframesOn: wireframes.isOn)
     }
 
     /// The rule of wireframe mode's keys, for a key without ⌘, ⌃ or ⌥, in lower case. W starts
-    /// the mode outside recording mode, and resumes it when it is paused. In the mode, a
+    /// the mode outside recording mode while the beta is on, and resumes it when it is paused. In the mode, a
     /// tool's letter chooses the tool, and every other letter and digit does nothing. Under a
     /// question no key is one of them.
-    nonisolated static func wireframeKey(_ key: String, flow: SessionFlow) -> WireframeKey? {
+    nonisolated static func wireframeKey(_ key: String, flow: SessionFlow, wireframesOn: Bool) -> WireframeKey? {
         guard let open = flow.session, open.question == nil, key.count == 1, key != " " else {
             return nil
         }
         guard open.canvas == .wireframe else {
-            return key == "w" && !flow.isRecordMode ? .start : nil
+            return key == "w" && wireframesOn && !flow.isRecordMode ? .start : nil
         }
         if !open.pauses.isEmpty {
             return key == "w" ? .resume : nil

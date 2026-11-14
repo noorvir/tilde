@@ -23,6 +23,8 @@ struct SessionFlow: Equatable {
         /// The comment being written has text, and is on a drawing.
         var commentHasText = false
         var commentIsOnDrawing = false
+        /// The wireframes beta is on: see `WireframeSwitch`.
+        var wireframesOn = true
     }
 
     enum Mode: Equatable {
@@ -672,7 +674,7 @@ struct SessionFlow: Equatable {
             return openCanvas(.draw, &open)
 
         case .startWireframe:
-            guard open.activity == .annotating, open.canvas != .wireframe else {
+            guard facts.wireframesOn, open.activity == .annotating, open.canvas != .wireframe else {
                 return []
             }
             // Draw's canvas goes to wireframe mode as it is.

@@ -142,7 +142,7 @@ extension SessionFlow: Codable {
 /// out), `commentHasText` and `commentIsOnDrawing` (false when left out).
 extension SessionFlow.Facts: Codable {
     enum Key: String, CodingKey, CaseIterable {
-        case notes, commentHasText, commentIsOnDrawing
+        case notes, commentHasText, commentIsOnDrawing, wireframesOn
     }
 
     init(from decoder: Decoder) throws {
@@ -150,6 +150,7 @@ extension SessionFlow.Facts: Codable {
         notes = try values.decodeIfPresent(Int.self, forKey: .notes) ?? 0
         commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
         commentIsOnDrawing = try values.decodeIfPresent(Bool.self, forKey: .commentIsOnDrawing) ?? false
+        wireframesOn = try values.decodeIfPresent(Bool.self, forKey: .wireframesOn) ?? true
     }
 
     func encode(to encoder: Encoder) throws {
@@ -157,6 +158,7 @@ extension SessionFlow.Facts: Codable {
         try values.encode(notes, forKey: .notes)
         try values.encode(commentHasText, forKey: .commentHasText)
         try values.encode(commentIsOnDrawing, forKey: .commentIsOnDrawing)
+        try values.encode(wireframesOn, forKey: .wireframesOn)
     }
 }
 

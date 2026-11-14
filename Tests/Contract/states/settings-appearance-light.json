@@ -1,6 +1,7 @@
 {
   "version": 1,
   "surface": "settings",
+  "wireframes": true,
   "size": [
     920,
     805

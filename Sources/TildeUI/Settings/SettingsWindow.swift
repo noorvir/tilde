@@ -114,6 +114,7 @@ final class SettingsModel: ObservableObject {
     /// The shortcut that waits for a key press.
     @Published var recordingShortcut: ShortcutStore.Action?
     let setup: AgentSetup
+    let wireframes: WireframeSwitch
     let shortcuts: ShortcutStore
     let browser: BrowserController
     let history: HistoryModel
@@ -130,13 +131,14 @@ final class SettingsModel: ObservableObject {
     let permissions: () -> (screenRecording: Bool, accessibility: Bool)
 
     init(
-        setup: AgentSetup, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, updates: Updates, version: String,
+        setup: AgentSetup, wireframes: WireframeSwitch, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, updates: Updates, version: String,
         onResult: @escaping (InstallResult) -> Void = { _ in }, onResetHUD: @escaping () -> Void = {},
         browserProfiles: @escaping () -> [ChromiumProfile] = { BrowserCookies.profiles() },
         permissions: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (ScreenCapture.isAllowed, AXIsProcessTrusted()) },
         wireframePreviews: WireframePreviews? = nil
     ) {
         self.setup = setup
+        self.wireframes = wireframes
         self.shortcuts = shortcuts
         self.browser = browser
         self.history = history
@@ -166,7 +168,7 @@ struct SettingsView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SettingsSidebar(model: model)
+            SettingsSidebar(model: model, wireframes: model.wireframes)
                 .frame(width: 185)
             Rectangle()
                 .fill(Color.primary.opacity(0.1))
@@ -215,10 +217,16 @@ struct SettingsView: View {
 
 private struct SettingsSidebar: View {
     @ObservedObject var model: SettingsModel
+    @ObservedObject var wireframes: WireframeSwitch
+
+    /// Appearance is the look of wireframes: it shows while they are on.
+    private var pages: [SettingsWindow.Page] {
+        SettingsWindow.Page.allCases.filter { $0 != .appearance || wireframes.isOn }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(SettingsWindow.Page.allCases) { page in
+            ForEach(pages) { page in
                 SidebarItem(page: page, isSelected: model.page == page) {
                     model.page = page
                 }

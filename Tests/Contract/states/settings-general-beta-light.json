@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "wireframes": true,
+  "size": [
+    920,
+    1200
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "general",
+    "remoteMachines": true
+  }
+}

@@ -148,10 +148,15 @@ struct UXSpecs {
             try await Task.sleep(for: .seconds(1))
             let apps = try await app.waitToSee("Apps on this Mac")
             try await app.scroll(at: CGPoint(x: apps.frame.midX, y: apps.frame.maxY + 200), by: -10)
-            // Remote machines are a beta, off on a new Mac: the list shows once it is on.
-            let beta = try await app.waitToSee("Remote machines (beta)", role: "AXCheckBox")
-            #expect(try await !app.seen().contains { $0.name == host })
-            try await app.click(at: CGPoint(x: beta.frame.midX, y: beta.frame.midY))
+            // Remote machines are a beta, off on a new Mac: the Agents page shows them once
+            // Configuration's switch is on.
+            try await Task.sleep(for: .seconds(1))
+            #expect(try await !app.seen().contains { $0.name == "Remote machines" || $0.name == host })
+            try await app.accessibilityPress("Configuration")
+            try await app.accessibilityPress("Remote machines", role: "AXCheckBox")
+            try await app.accessibilityPress("Home")
+            let home = try await app.waitToSee("Apps on this Mac")
+            try await app.scroll(at: CGPoint(x: home.frame.midX, y: home.frame.maxY + 200), by: -10)
             try await app.waitToSee(host, timeout: 15)
             try await app.press(host)
             try await app.waitToSee("Install \(host)", timeout: 20)
@@ -711,7 +716,7 @@ struct UXSpecs {
     @Test func aWireframeOnAWindowReachesTheAgentWithItsTwoPictures() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
-        try await withApp { app in
+        try await withApp(defaults: ["wireframes": "true"]) { app in
             let agent = try await MCPAgent(port: app.port, name: "Codex")
             let reply = try await agent.call("start_annotation", ["wait_seconds": 0])
             let session = try #require(reply.text.components(separatedBy: "session_id: ").last?.prefix(while: { $0 != "." && $0 != " " && $0 != "\n" }))
@@ -895,7 +900,7 @@ struct UXSpecs {
         let button = CGRect(x: frame.minX + 12, y: frame.minY + 100, width: 84, height: 40)
         let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
         let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
-        try await withApp { app in
+        try await withApp(defaults: ["wireframes": "true"]) { app in
             // The fixture's window can be in front of Settings, which stays open meanwhile.
             try await app.menu("Settings")
             try await app.accessibilityPress("Appearance")
@@ -948,7 +953,7 @@ struct UXSpecs {
         let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
         let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
         let inside = button.insetBy(dx: 10, dy: 10)
-        try await withApp { app in
+        try await withApp(defaults: ["wireframes": "true"]) { app in
             try await app.menu("Start Annotation")
             try await app.waitToSee("Annotating")
             try await app.key(.w)
@@ -1030,7 +1035,7 @@ struct UXSpecs {
         defer { window.close() }
         let frame = ChangingWindow.frame
         let drawn = CGRect(x: frame.minX + 80, y: frame.minY + 120, width: 200, height: 100)
-        try await withApp { app in
+        try await withApp(defaults: ["wireframes": "true"]) { app in
             try await drawCard(app, in: drawn)
             try await app.key(.escape)
             var part = try await sides(app, near: drawn)
@@ -1080,7 +1085,7 @@ struct UXSpecs {
         defer { window.close() }
         let frame = ChangingWindow.frame
         let drawn = CGRect(x: frame.minX + 120, y: frame.minY + 120, width: 200, height: 100)
-        try await withApp { app in
+        try await withApp(defaults: ["wireframes": "true"]) { app in
             try await drawCard(app, in: drawn)
             try await app.key(.escape)
             let part = try await sides(app, near: drawn)

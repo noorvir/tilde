@@ -15,6 +15,7 @@ struct HUDView: View {
     @ObservedObject private var notices: Notices
     @ObservedObject private var drawing: DrawingNotes
     @ObservedObject private var wireframe: WireframeMode
+    @ObservedObject private var wireframes: WireframeSwitch
     @ObservedObject private var browserOffer: BrowserOffer
     /// What Record records, which the controller reads for the source's name.
     @ObservedObject private var scope: SessionScope
@@ -39,6 +40,7 @@ struct HUDView: View {
         notices = controller.notices
         drawing = controller.drawing
         wireframe = controller.wireframe
+        wireframes = controller.wireframes
         browserOffer = controller.browserOffer
         scope = controller.scope
         self.isEmbedded = isEmbedded
@@ -419,9 +421,12 @@ struct HUDView: View {
                 canvasButton(.draw, symbol: "pencil.tip", keys: keys(.drawingMode), help: "Draw")
                     .disabled(controller.isWireframe)
             }
-            // In recording mode too, disabled, so that no button moves.
-            canvasButton(.wireframe, symbol: "squareshape.split.2x2.dotted", keys: controller.isWireframe ? ["⌘↩"] : ["W"], help: "Wireframe")
-                .disabled(controller.isRecordMode)
+            // In recording mode too, disabled, so that no button moves. While the beta is off it
+            // shows only in a wireframe that was open when it went off, for its Done.
+            if wireframes.isOn || controller.isWireframe {
+                canvasButton(.wireframe, symbol: "squareshape.split.2x2.dotted", keys: controller.isWireframe ? ["⌘↩"] : ["W"], help: "Wireframe")
+                    .disabled(controller.isRecordMode)
+            }
         }
 
 
