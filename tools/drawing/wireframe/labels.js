@@ -57,12 +57,13 @@ export function endLabel(isKept) {
 }
 
 // The second click on a component within 400 ms is a double-click, which edits its label.
+// `time` is the press's own time, as the event has it: a slow page can finish two clicks
+// further apart than they were pressed.
 let lastClick = null;
 
-export function isDoubleClick(group) {
-  const now = performance.now();
-  const isDouble = lastClick?.group === group && now - lastClick.time < 400;
-  lastClick = isDouble ? null : { group, time: now };
+export function isDoubleClick(group, time) {
+  const isDouble = lastClick?.group === group && time - lastClick.time < 400;
+  lastClick = isDouble ? null : { group, time };
   return isDouble;
 }
 
