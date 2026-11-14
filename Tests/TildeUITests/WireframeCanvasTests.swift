@@ -59,31 +59,15 @@ struct WireframeCanvasTests {
     /// each drag still draws its component, and a double-click still labels one.
     @Test func eachPressIsFinishedAlsoWhenTheNextOneComesFirst() async throws {
         try await start(tool: "card")
-        try await fireBeforeTheTimers([
+        try await page.fireAtOnce([
             ("pointerdown", corner), ("pointermove", oppositeCorner), ("pointerup", oppositeCorner),
             ("pointerdown", CGPoint(x: 600, y: 400)), ("pointermove", CGPoint(x: 800, y: 500)), ("pointerup", CGPoint(x: 800, y: 500)),
         ])
         #expect(try await page.shapes().map(\.type) == ["card", "card"])
         #expect(try await rects() == [[200, 150, 240, 120], [600, 400, 200, 100]])
 
-        try await fireBeforeTheTimers([("pointerdown", inside), ("pointerup", inside), ("pointerdown", inside), ("pointerup", inside)])
+        try await page.doubleClick(inside)
         #expect(try await page.shows("#tilde-label"))
-    }
-
-    /// Pointer events one after another, faster than the page's timers: only what the page
-    /// queued as a microtask, such as React's update for an event, runs between two of them.
-    private func fireBeforeTheTimers(_ events: [(type: String, point: CGPoint)]) async throws {
-        let calls = events.map { event in
-            let isPressed = event.type == "pointermove"
-            // A press goes to the element at its point; the rest to the pressed one.
-            var target = "window.pressed"
-            if event.type == "pointerdown" {
-                target = "undefined"
-            }
-            return "window.pressed = fire('\(event.type)', \(event.point.x), \(event.point.y), {isPressed: \(isPressed), target: \(target)}); await next();"
-        }
-        try await page.run("(async () => { const next = () => new Promise((done) => queueMicrotask(done)); \(calls.joined(separator: " ")) })(); 0")
-        try await page.settle()
     }
 
     /// A click on empty space draws nothing, and a drag of a few points too.

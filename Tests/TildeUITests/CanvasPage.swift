@@ -248,21 +248,31 @@ final class CanvasPage {
 
     /// A press and release at one point.
     func click(_ point: CGPoint) async throws {
-        try await run(Self.click(point))
+        try await run("window.pressed = fire('pointerdown', \(point.x), \(point.y)); fire('pointerup', \(point.x), \(point.y), {target: window.pressed}); 0")
         try await settle()
     }
 
-    /// Two clicks at one point, the second at once: the page gets it before it has finished
-    /// the first, as on a slow page. Waiting for the page between the two could take longer
-    /// than a double-click may.
+    /// Two clicks at one point, at once: a double-click however slow the page is. Two calls,
+    /// or a wait for the page between the clicks, can take longer than a double-click may.
     func doubleClick(_ point: CGPoint) async throws {
-        try await run(Self.click(point))
-        try await run(Self.click(point))
-        try await settle()
+        try await fireAtOnce([("pointerdown", point), ("pointerup", point), ("pointerdown", point), ("pointerup", point)])
     }
 
-    private static func click(_ point: CGPoint) -> String {
-        "window.pressed = fire('pointerdown', \(point.x), \(point.y)); fire('pointerup', \(point.x), \(point.y), {target: window.pressed}); 0"
+    /// Pointer events one after another, faster than the page's timers, as on a slow page:
+    /// only what the page queues as a microtask, such as React's update for an event, runs
+    /// between two of them.
+    func fireAtOnce(_ events: [(type: String, point: CGPoint)]) async throws {
+        let calls = events.map { event in
+            let isPressed = event.type == "pointermove"
+            // A press goes to the element at its point; the rest to the pressed one.
+            var target = "window.pressed"
+            if event.type == "pointerdown" {
+                target = "undefined"
+            }
+            return "window.pressed = fire('\(event.type)', \(event.point.x), \(event.point.y), {isPressed: \(isPressed), target: \(target)}); await next();"
+        }
+        try await run("(async () => { const next = () => new Promise((done) => queueMicrotask(done)); \(calls.joined(separator: " ")) })(); 0")
+        try await settle()
     }
 
     /// A press on the element of a CSS selector, such as a control of a component's chip.
