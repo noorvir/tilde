@@ -1,8 +1,8 @@
 import AppKit
 
-/// The windows on screen that the user sees and can annotate, front to back, as the window list
-/// last gave them: other apps' windows and Tilde's browser, not Tilde's overlays, HUD or the
-/// menu bar. It is the one reader of the window list during a session. It reads off the main
+/// The windows on screen that the user sees, front to back, as the window list last gave them:
+/// other apps' windows, Tilde's browser and Tilde's other windows, such as Settings, which cover
+/// what is behind them but are never annotated; not Tilde's overlays, HUD or the menu bar. It is the one reader of the window list during a session. It reads off the main
 /// thread when an app comes to the front, when a mouse button comes up or a window is dragged,
 /// and once a second, so a pointer move or a scroll only looks up the last result.
 @MainActor
@@ -37,7 +37,7 @@ final class WindowStack {
         guard timer == nil else {
             return
         }
-        windows = Self.read(browserWindow: browserWindow(), screenFrames: Self.screenFrames, overlayLevel: Self.overlayLevel)
+        windows = Self.read(browserWindow: browserWindow(), tildeWindows: Self.tildeWindows, screenFrames: Self.screenFrames, overlayLevel: Self.overlayLevel)
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.refresh()
@@ -78,10 +78,47 @@ final class WindowStack {
         windows = []
     }
 
-    /// The topmost window under a Quartz point, from the last read; read now outside a session.
+    /// What is under a Quartz point, from the last read; read now outside a session.
+    func hit(at point: CGPoint) -> Hit {
+        let browserWindow = browserWindow()
+        let windows = isRunning ? windows : Self.read(browserWindow: browserWindow, tildeWindows: Self.tildeWindows, screenFrames: Self.screenFrames, overlayLevel: Self.overlayLevel)
+        return Self.hit(at: point, in: windows, browserWindow: browserWindow, ownPID: ProcessInfo.processInfo.processIdentifier)
+    }
+
+    /// The topmost window under a Quartz point that can be annotated; nil over one of Tilde's
+    /// own windows.
     func window(at point: CGPoint) -> ElementPicker.WindowInfo? {
-        let windows = isRunning ? windows : Self.read(browserWindow: browserWindow(), screenFrames: Self.screenFrames, overlayLevel: Self.overlayLevel)
-        return windows.first { $0.frame.contains(point) }
+        guard case .window(let window) = hit(at: point) else {
+            return nil
+        }
+        return window
+    }
+
+    /// Whether one of Tilde's own windows, such as Settings, is the topmost window under a Quartz
+    /// point: the pointer works on it as without a session.
+    func isOverTildeWindow(_ point: CGPoint) -> Bool {
+        hit(at: point) == .tilde
+    }
+
+    enum Hit: Equatable {
+        /// A window to annotate: another app's, or Tilde's browser.
+        case window(ElementPicker.WindowInfo)
+        /// One of Tilde's own windows, such as Settings, History or a toast: never annotated.
+        case tilde
+        /// No window, such as over the desktop.
+        case nothing
+    }
+
+    /// The topmost of `windows` (front to back) under a Quartz point. Tilde's windows other than
+    /// its browser are never annotated, also where they cover another window.
+    nonisolated static func hit(at point: CGPoint, in windows: [ElementPicker.WindowInfo], browserWindow: Int?, ownPID: pid_t) -> Hit {
+        guard let window = windows.first(where: { $0.frame.contains(point) }) else {
+            return .nothing
+        }
+        if window.pid == ownPID, window.number != browserWindow {
+            return .tilde
+        }
+        return .window(window)
     }
 
     /// Reads the windows again, off the main thread. Calls while a read is under way make one
@@ -93,10 +130,11 @@ final class WindowStack {
         }
         isReading = true
         let browserWindow = browserWindow()
+        let tildeWindows = Self.tildeWindows
         let screenFrames = Self.screenFrames
         let overlayLevel = Self.overlayLevel
         queue.async { [weak self] in
-            let windows = Self.read(browserWindow: browserWindow, screenFrames: screenFrames, overlayLevel: overlayLevel)
+            let windows = Self.read(browserWindow: browserWindow, tildeWindows: tildeWindows, screenFrames: screenFrames, overlayLevel: overlayLevel)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self?.apply(windows)
@@ -156,11 +194,16 @@ final class WindowStack {
         NSScreen.screens.map(\.frame.flipped)
     }
 
+    /// Tilde's windows, but not its overlays, which take the pointer only to pass it on.
+    private static var tildeWindows: Set<Int> {
+        Set(NSApp.windows.filter { !($0 is OverlayWindow) }.map(\.windowNumber))
+    }
+
     private static var overlayLevel: Int {
         OverlayWindow.overlayLevel.rawValue
     }
 
-    nonisolated static func read(browserWindow: Int?, screenFrames: [CGRect], overlayLevel: Int) -> [ElementPicker.WindowInfo] {
+    nonisolated static func read(browserWindow: Int?, tildeWindows: Set<Int>, screenFrames: [CGRect], overlayLevel: Int) -> [ElementPicker.WindowInfo] {
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 
@@ -175,9 +218,10 @@ final class WindowStack {
             else {
                 return nil
             }
-            // Windows above the overlay never receive its clicks; Window Server owns the menu bar.
+            // Windows above the overlay, such as the HUD, never receive its clicks; Window Server
+            // owns the menu bar.
             guard alpha > 0.01, layer < overlayLevel, app != "Window Server",
-                  pid != ownPID || number == browserWindow
+                  pid != ownPID || tildeWindows.contains(number)
             else {
                 return nil
             }

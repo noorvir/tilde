@@ -30,6 +30,9 @@ final class DrawingPanel {
     var onKey: (NSEvent) -> Bool = { _ in false }
     /// Whether a note's label, which a press opens, is at a Quartz point.
     var isOnLabel: (CGPoint) -> Bool = { _ in false }
+    /// Whether one of Tilde's own windows, such as Settings, is under a Quartz point: no stroke or
+    /// component starts there.
+    var isOverTildeWindow: (CGPoint) -> Bool = { _ in false }
     /// Tilde's windows that the blurred screen under the wireframe's components shows.
     var underKeeps: () -> Set<CGWindowID> = { [] }
     private var look = WireframeLook.saved()

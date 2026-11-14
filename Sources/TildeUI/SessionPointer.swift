@@ -14,9 +14,10 @@ extension AnnotationController {
         commentBox.contains(point.flipped) || previewCard.contains(point.flipped)
     }
 
-    /// Whether a Quartz point is over Tilde's own HUD, comment box or preview.
+    /// Whether a Quartz point is over Tilde's own HUD, comment box or preview, or over another of
+    /// Tilde's windows, such as Settings: none of them is annotated.
     func isOverPanel(_ point: CGPoint) -> Bool {
-        hud.contains(point.flipped) || isOverTextPanel(point)
+        hud.contains(point.flipped) || isOverTextPanel(point) || picker.windows.isOverTildeWindow(point)
     }
 
     func mouseMoved(to point: CGPoint) {

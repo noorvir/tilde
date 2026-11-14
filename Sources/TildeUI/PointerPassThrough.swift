@@ -1,27 +1,23 @@
 import AppKit
 
-/// Whether the drawing canvas takes the mouse. With a tool, it takes it everywhere. With no
-/// tool, it takes it only where it has something under the pointer, such as a wireframe's
-/// component, its handles or a note's label; anywhere else the pointer goes to the app behind.
-/// The window server sends a click to a window before the window can look at it, so the canvas
-/// decides at each place that the pointer moves to, and takes or ignores the mouse from there.
+/// Whether a window of the session takes the mouse where the pointer is: the drawing canvas only
+/// where it has something to take a press, and no window of the session over Tilde's own windows,
+/// such as Settings. Anywhere else the pointer goes to the window behind. The window server sends
+/// a click to a window before the window can look at it, so the window decides at each place that
+/// the pointer moves to, and takes or ignores the mouse from there.
 @MainActor
-final class CanvasPassThrough {
+final class PointerPassThrough {
     weak var window: NSWindow?
-    /// The canvas is on screen to draw on: shown, and not paused.
+    /// The window is on screen to take the pointer: shown, and not paused. Without it, the window
+    /// ignores the mouse.
     var isActive = false {
         didSet {
             update()
         }
     }
-    var hasNoTool = false {
-        didSet {
-            update()
-        }
-    }
-    /// Whether the canvas has something at a Quartz point to take a press.
+    /// Whether the window takes a press at a Quartz point.
     var takesPointer: (CGPoint) async -> Bool = { _ in true }
-    /// The pointer went through the canvas to the app behind. `isPress`: it pressed there.
+    /// The pointer went through the window to the one behind. `isPress`: it pressed there.
     var onWentThrough: (_ isPress: Bool) -> Void = { _ in }
 
     private var monitors: [Any] = []
@@ -30,10 +26,11 @@ final class CanvasPassThrough {
     /// The newest place that came meanwhile, to check next.
     private var nextPoint: CGPoint?
 
-    private func update() {
-        guard isActive, hasNoTool else {
+    /// Asks `takesPointer` again where the pointer is, such as after a change of what it answers.
+    func update() {
+        guard isActive else {
             stopWatching()
-            window?.ignoresMouseEvents = !isActive
+            window?.ignoresMouseEvents = true
             return
         }
         startWatching()
