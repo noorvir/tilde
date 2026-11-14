@@ -11,17 +11,19 @@ final class OverlayWindow: FloatingPanel {
     let isWindowSized: Bool
 
     /// Whether the overlay takes the pointer; without it, clicks and moves go to the windows
-    /// under it, and it only draws.
+    /// under it, and it only draws. With it, the pointer still goes to Tilde's own windows, such
+    /// as Settings, where they are the topmost window.
     var takesInput = true {
         didSet {
             guard takesInput != oldValue else {
                 return
             }
-            ignoresMouseEvents = !takesInput
+            passThrough.isActive = takesInput
             acceptsMouseMovedEvents = takesInput
             contentView?.updateTrackingAreas()
         }
     }
+    private let passThrough = PointerPassThrough()
 
     /// `frame` in AppKit screen coordinates.
     init(frame: CGRect, level: NSWindow.Level, isWindowSized: Bool, controller: AnnotationController) {
@@ -42,6 +44,20 @@ final class OverlayWindow: FloatingPanel {
         contentView = view
         // Esc and ⌘↩ reach the view only when it is the first responder.
         makeFirstResponder(view)
+
+        passThrough.window = self
+        passThrough.takesPointer = { [weak controller] point in
+            controller?.picker.windows.isOverTildeWindow(point) != true
+        }
+        passThrough.onWentThrough = { [weak controller] _ in
+            controller?.mouseExited()
+        }
+        passThrough.isActive = true
+    }
+
+    override func close() {
+        passThrough.isActive = false
+        super.close()
     }
 
     /// Close (⌘W) acts on the key window. On Tilde's browser that is often this overlay, a

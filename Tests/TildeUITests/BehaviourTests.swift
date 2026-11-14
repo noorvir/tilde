@@ -743,6 +743,24 @@ struct BehaviourTests {
         #expect(!SessionScope.allows(CGPoint(x: 300, y: 401), scope: window))
     }
 
+    /// Tilde's own windows, such as Settings, are never annotated, also where they cover another
+    /// app's window; its browser is.
+    @Test func tildesOwnWindowsAreNeverTargets() {
+        let ownPID: pid_t = 1
+        let settings = ElementPicker.WindowInfo(number: 10, pid: ownPID, app: "Tilde", title: "Settings", frame: CGRect(x: 100, y: 100, width: 700, height: 440))
+        let browser = ElementPicker.WindowInfo(number: 11, pid: ownPID, app: "Tilde", title: nil, frame: CGRect(x: 900, y: 100, width: 400, height: 400))
+        let app = ElementPicker.WindowInfo(number: 20, pid: 42, app: "Claude", title: nil, frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        let stack = [settings, browser, app]
+        func hit(_ x: CGFloat, _ y: CGFloat) -> WindowStack.Hit {
+            WindowStack.hit(at: CGPoint(x: x, y: y), in: stack, browserWindow: browser.number, ownPID: ownPID)
+        }
+
+        #expect(hit(300, 300) == .tilde)
+        #expect(hit(50, 50) == .window(app))
+        #expect(hit(1000, 200) == .window(browser))
+        #expect(hit(1400, 900) == .nothing)
+    }
+
     @Test func regionsAreCutToTheScopedWindow() {
         let window = CGRect(x: 100, y: 100, width: 400, height: 300)
 

@@ -18,7 +18,13 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
     private var isPreparing = false
     private var pendingTool = "arrow"
     private var pendingColor: String?
-    private let passThrough = CanvasPassThrough()
+    private let passThrough = PointerPassThrough()
+    /// The page has no tool, and takes a press only on what it shows, such as a component.
+    private var hasNoTool = false {
+        didSet {
+            passThrough.update()
+        }
+    }
     var wireframe = "null" {
         didSet {
             run("setWireframe(\(wireframe))")
@@ -141,7 +147,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 
     func close() {
         passThrough.isActive = false
-        passThrough.hasNoTool = false
+        hasNoTool = false
         panel?.orderOut(nil)
         panel = nil
         webView?.configuration.userContentController.removeAllScriptMessageHandlers()
@@ -211,7 +217,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         case "typing", "notTyping":
             (panel as? CanvasPanel)?.isTyping = text == "typing"
         case "noTool", "tool":
-            passThrough.hasNoTool = text == "noTool"
+            hasNoTool = text == "noTool"
         case _ where text.hasPrefix("pointer:"):
             let values = text.dropFirst(8).split(separator: ",").compactMap { Double($0) }
             if values.count == 2 {
@@ -227,10 +233,14 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         }
     }
 
-    /// Whether a press at a Quartz point is for the canvas: on a note's label, or on what the
-    /// page takes a press on.
+    /// Whether a press at a Quartz point is for the canvas: never over one of Tilde's own
+    /// windows; else with a tool every press, and with none a press on a note's label or on what
+    /// the page takes a press on.
     private func takesPointer(at point: CGPoint) async -> Bool {
-        if owner?.isOnLabel(point) == true {
+        if owner?.isOverTildeWindow(point) == true {
+            return false
+        }
+        if !hasNoTool || owner?.isOnLabel(point) == true {
             return true
         }
         guard let webView else {

@@ -938,6 +938,96 @@ struct UXSpecs {
         }
     }
 
+    /// Tilde's Settings, open during a session, works as a window and is never annotated: the
+    /// pointer on it highlights nothing, also where it covers another app's window; a click
+    /// turns its switch on, opens no comment and leaves the session open; and in Draw a drag on
+    /// it draws nothing.
+    @Test func settingsWorkAsUsualDuringASession() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try window.show("normal")
+        try await Task.sleep(for: .milliseconds(300))
+        let fixture = ChangingWindow.frame
+        try await withApp { app in
+            // Settings opens in front of the fixture's window.
+            try await app.menu("Settings")
+            try await app.accessibilityPress("Configuration")
+            let settings = try await app.waitToSee("Tilde Settings", role: "AXWindow").frame
+            // Its page scrolls to the beta switches.
+            var toggle = try await app.waitToSee("Wireframes", role: "AXCheckBox").frame
+            for _ in 0..<8 where !settings.insetBy(dx: 0, dy: 20).contains(toggle) {
+                try await app.scroll(at: CGPoint(x: settings.maxX - 200, y: settings.midY), by: -10)
+                try await Task.sleep(for: .milliseconds(500))
+                toggle = try await app.waitToSee("Wireframes", role: "AXCheckBox").frame
+            }
+            let screen = try #require(NSScreen.screens.first).frame
+            try #require(screen.contains(toggle) && settings.contains(toggle), "The switch is at \(toggle), Settings at \(settings)")
+            // Where Settings covers the fixture's window.
+            let over = CGPoint(x: max(settings.minX, fixture.minX) + 120, y: fixture.minY + 160)
+            try #require(settings.contains(over) && fixture.contains(over))
+
+            try await app.menu("Start Annotation")
+            let hud = try await app.waitToSee("Annotating")
+            step("session on Settings")
+
+            // A highlight would outline an element of the fixture's window behind Settings.
+            let behind = (window.bounds ?? fixture).insetBy(dx: -30, dy: -30)
+            try await app.hover(over: CGPoint(x: hud.frame.midX, y: hud.frame.midY))
+            try await Task.sleep(for: .milliseconds(500))
+            let before = try await app.bluePixels(in: behind)
+            try await app.hover(over: CGPoint(x: over.x - 20, y: over.y))
+            try await app.hover(over: over)
+            try await Task.sleep(for: .seconds(1))
+            #expect(try await app.bluePixels(in: behind) <= before + 10)
+            step("no highlight")
+
+            // As on any Mac, the first click on a window of an app in the background may only
+            // bring it forward.
+            let center = CGPoint(x: toggle.midX, y: toggle.midY)
+            try await app.hover(over: CGPoint(x: center.x - 30, y: center.y))
+            try await app.click(at: center)
+            try await Task.sleep(for: .milliseconds(500))
+            if try readDefault("wireframes") != "1" {
+                try await app.click(at: center)
+            }
+            let end = Date().addingTimeInterval(3)
+            while try readDefault("wireframes") != "1", Date() < end {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            #expect(try readDefault("wireframes") == "1")
+            #expect(try await !app.seen().contains { $0.name == "add" })
+            try await app.waitToSee("Annotating")
+            step("switch on")
+
+            // Draw's rectangle, dragged on Settings, starts no shape.
+            try await app.press("Draw")
+            try await app.waitToSee("Drawing canvas", timeout: 15)
+            try await app.key(.r)
+            try await app.hover(over: CGPoint(x: over.x - 20, y: over.y))
+            try await app.hover(over: over)
+            try await Task.sleep(for: .milliseconds(300))
+            try await app.slowDrag(from: over, to: CGPoint(x: over.x + 120, y: over.y + 80))
+            try await Task.sleep(for: .seconds(1))
+            #expect(try await !app.seen().contains { $0.name == "add" })
+            try await app.waitToSee("Done, ⌘↩")
+            step("no shape")
+        }
+    }
+
+    /// A value of the test app's settings, as `defaults` reads it; nil when it has none.
+    private func readDefault(_ key: String) throws -> String? {
+        let task = Process()
+        let output = Pipe()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        task.arguments = ["read", "dev.tilde.ux", key]
+        task.standardOutput = output
+        task.standardError = FileHandle.nullDevice
+        try task.run()
+        waitForExit(task)
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return task.terminationStatus == 0 ? text.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+    }
+
     /// The wireframe bar's palette button shows the controls of the look in the place of the
     /// tools, and a second press shows the tools again; the bar keeps its width, so the palette
     /// button and Done stay put. The style and colours menus change the components drawn at
