@@ -37,6 +37,7 @@ final class CanvasPage {
         if countsFrames {
             configuration.userContentController.addUserScript(WKUserScript(source: Self.countedFrames, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
+        configuration.userContentController.addUserScript(WKUserScript(source: Self.queuedWork, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: configuration)
         configuration.userContentController.add(Messages(page: self), name: "tilde")
     }
@@ -101,6 +102,33 @@ final class CanvasPage {
         try await run(Self.helpers)
     }
 
+    /// Counts the work that the page queued for soon and that has not run yet, from before its
+    /// own scripts run: its timers of less than 100 ms, which finish a shape, post the pointer
+    /// and give frames, and React's renders, which go through `setImmediate` when the page has
+    /// one. Excalidraw's longer timers, such as its debounces, change no shape.
+    /// `window.queuedWork()` says how much is left.
+    private static let queuedWork = """
+    (() => {
+      const queued = new Set();
+      const setTimer = window.setTimeout;
+      const clearTimer = window.clearTimeout;
+      window.setTimeout = (run, delay = 0, ...args) => {
+        const id = setTimer(() => {
+          queued.delete(id);
+          run(...args);
+        }, delay);
+        if (delay < 100) queued.add(id);
+        return id;
+      };
+      window.clearTimeout = (id) => {
+        queued.delete(id);
+        clearTimer(id);
+      };
+      window.setImmediate = (run, ...args) => window.setTimeout(run, 0, ...args);
+      window.queuedWork = () => queued.size;
+    })();
+    """
+
     /// Frames for a page in no window, from before its own scripts run, each one counted.
     private static let countedFrames = """
     window.frameRequests = 0;
@@ -157,9 +185,11 @@ final class CanvasPage {
         throw NotReady()
     }
 
-    /// Lets the page finish what its timers and React hold.
+    /// Waits until the page has done all that the last event or call queued: React has drawn
+    /// the change, and a drag's shape is finished. A page in no window can get its timers late,
+    /// so no fixed time is enough.
     func settle() async throws {
-        try await Task.sleep(for: .milliseconds(60))
+        try await wait { try await self.run("window.queuedWork()") as? Int == 0 }
     }
 
     @discardableResult
