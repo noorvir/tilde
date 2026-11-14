@@ -102,7 +102,8 @@ final class CanvasPage {
     private static let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")
 
     /// The page as one document of 8 MB, made once for every test and away from the main
-    /// actor: made for each page on it, it held up every other test there for seconds on CI.
+    /// actor: made for each page on it, it took more than half of the main thread's time, and
+    /// every other test on the main actor waited.
     private static let document = Task.detached {
         DrawingCanvas.page(in: folder).map { Data($0.utf8) }
     }
