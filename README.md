@@ -21,6 +21,8 @@
 
 Download the DMG from the [latest release](https://github.com/noorvir/tilde/releases/latest) and move Tilde to Applications. Tilde updates itself after that.
 
+The releases are not notarized yet, so macOS blocks the first open. Open **System Settings > Privacy & Security** and click **Open Anyway** next to Tilde. You do this only once.
+
 Requires macOS 14 or later.
 
 To build from source you need Xcode and Go:

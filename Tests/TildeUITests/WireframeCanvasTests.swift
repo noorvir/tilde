@@ -55,6 +55,32 @@ struct WireframeCanvasTests {
         }
     }
 
+    /// On a slow page the next press can come before the page has finished the one before:
+    /// each drag still draws its component, and a double-click still labels one.
+    @Test func eachPressIsFinishedAlsoWhenTheNextOneComesFirst() async throws {
+        try await start(tool: "card")
+        try await page.fireAtOnce([
+            ("pointerdown", corner), ("pointermove", oppositeCorner), ("pointerup", oppositeCorner),
+            ("pointerdown", CGPoint(x: 600, y: 400)), ("pointermove", CGPoint(x: 800, y: 500)), ("pointerup", CGPoint(x: 800, y: 500)),
+        ])
+        #expect(try await page.shapes().map(\.type) == ["card", "card"])
+        #expect(try await rects() == [[200, 150, 240, 120], [600, 400, 200, 100]])
+
+        try await page.doubleClick(inside)
+        #expect(try await page.shows("#tilde-label"))
+    }
+
+    /// Excalidraw applies a drag's moves once a frame. A component ends where the drag is
+    /// released, also when its last move came while the page waited for a frame, and that frame
+    /// came before the release.
+    @Test func aComponentEndsWhereTheDragIsReleased() async throws {
+        try await start(tool: "card")
+        try await page.fireAtOnce([("pointerdown", corner), ("pointermove", CGPoint(x: 300, y: 200)), ("pointermove", oppositeCorner)])
+        try await page.run("fire('pointerup', \(oppositeCorner.x), \(oppositeCorner.y), {target: window.pressed}); 0")
+        try await page.settle()
+        #expect(try await rects() == [[200, 150, 240, 120]])
+    }
+
     /// A click on empty space draws nothing, and a drag of a few points too.
     @Test func aClickDrawsNothing() async throws {
         try await start(tool: "card")
@@ -84,7 +110,9 @@ struct WireframeCanvasTests {
         try await drawComponent("card")
         try await page.click(inside)
         #expect(try await !page.shows("#tilde-label"))
-        try await page.click(inside)
+        // Apart from the click before.
+        try await Task.sleep(for: .milliseconds(450))
+        try await page.doubleClick(inside)
         #expect(try await page.shows("#tilde-label"))
 
         try await page.typeLabel("Plan")
@@ -100,27 +128,23 @@ struct WireframeCanvasTests {
     /// an empty text takes the label away.
     @Test func escKeepsTheOldLabelAndAClickAwayKeepsTheNewOne() async throws {
         try await drawComponent("button")
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("Save")
         try await page.press("Enter")
 
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("Cancel")
         #expect(try await page.press("Escape"))
         #expect(try await page.shapes().map(\.label) == ["Save"])
         // Esc in the field is the field's: Tilde does not get it.
         #expect(!page.messages.contains("escape"))
 
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("Send")
         try await page.click(CGPoint(x: 900, y: 600))
         #expect(try await page.shapes().map(\.label) == ["Send"])
 
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("")
         try await page.press("Enter")
         #expect(try await page.shapes().map(\.label) == [nil])
@@ -129,8 +153,7 @@ struct WireframeCanvasTests {
     /// A section takes a label too, though a drag on it draws in it.
     @Test func aSectionTakesALabel() async throws {
         try await drawComponent("section")
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("Billing")
         try await page.press("Enter")
         let shapes = try await page.shapes()
@@ -156,8 +179,7 @@ struct WireframeCanvasTests {
         try await page.drag(from: CGPoint(x: 490, y: 300), to: CGPoint(x: 530, y: 340), on: Self.resizer)
         #expect(try await rects() == [[250, 180, 280, 160]])
 
-        try await page.click(CGPoint(x: 370, y: 240))
-        try await page.click(CGPoint(x: 370, y: 240))
+        try await page.doubleClick(CGPoint(x: 370, y: 240))
         try await page.typeLabel("Header")
         try await page.press("Enter")
         #expect(try await page.shapes().map(\.label) == ["Header"])
@@ -197,8 +219,7 @@ struct WireframeCanvasTests {
 
         // Two clicks apart from the one before are a double-click.
         try await Task.sleep(for: .milliseconds(450))
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         #expect(try await page.shows("#tilde-label"))
         #expect(try await page.takesPointer(empty))
         try await page.press("Enter")
@@ -356,8 +377,7 @@ struct WireframeCanvasTests {
     /// label and its size.
     @Test func optionAndADragCopiesAComponent() async throws {
         try await drawComponent("button")
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("Save")
         try await page.press("Enter")
 
@@ -529,8 +549,7 @@ struct WireframeCanvasTests {
         try await drawComponent("card")
         try await start(tool: "")
         try await page.drag(from: inside, to: CGPoint(x: inside.x + 60, y: inside.y + 40))
-        try await page.click(CGPoint(x: 380, y: 250))
-        try await page.click(CGPoint(x: 380, y: 250))
+        try await page.doubleClick(CGPoint(x: 380, y: 250))
         try await page.typeLabel("Plan")
         try await page.press("Enter")
         try await page.hover(CGPoint(x: 380, y: 250))
@@ -580,8 +599,7 @@ struct WireframeCanvasTests {
     /// label and its borders.
     @Test func theChipChangesTheKind() async throws {
         try await drawComponent("card")
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("Plans")
         try await page.press("Enter")
         try await page.hover(inside)
@@ -758,8 +776,7 @@ struct WireframeCanvasTests {
     /// and keeps what was.
     @Test func doneTakesTheComponentsAndTheModesEndDropsTheRest() async throws {
         try await drawComponent("card")
-        try await page.click(inside)
-        try await page.click(inside)
+        try await page.doubleClick(inside)
         try await page.typeLabel("Plan")
         try await page.press("Enter")
         let raw = try await page.rawShapes()

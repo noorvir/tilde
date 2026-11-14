@@ -27,7 +27,7 @@ import { createRoot } from "react-dom/client";
 import { post, setAPI } from "./scene.js";
 import { escapePressed, focusChanged, swallowToolKey } from "./bridge.js";
 import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
-import { blockPressWithNoTool, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
+import { blockPressWithNoTool, moveToRelease, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
 import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOutline, typeMenu } from "./wireframe/chip.js";
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
@@ -46,6 +46,8 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 const pointerEvents = ["pointerdown", "pointermove", "pointerup"];
+// Before every other listener sees the release.
+window.addEventListener("pointerup", moveToRelease, true);
 for (const type of pointerEvents) window.addEventListener(type, blockPressWithNoTool, true);
 // Wireframe mode takes the pointer before Draw mode and Excalidraw.
 for (const type of pointerEvents) window.addEventListener(type, snapPointer, true);

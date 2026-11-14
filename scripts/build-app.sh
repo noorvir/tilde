@@ -13,8 +13,8 @@ set -eu
 
 cd "$(dirname "$0")/.."
 configuration="${1:-release}"
-# scripts/release.sh changes this line.
-version=0.2.0
+# scripts/release.sh changes this line; a release from a tag sets TILDE_VERSION instead.
+version="${TILDE_VERSION:-0.2.0}"
 identity="${TILDE_SIGN_IDENTITY:--}"
 # The public half of the EdDSA key that signs updates (Sparkle's generate_keys prints it). An
 # update that this key did not sign is refused. TILDE_UPDATE_PUBLIC_KEY replaces it for tests.

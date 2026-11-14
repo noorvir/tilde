@@ -109,8 +109,7 @@ struct WireframeLookTests {
         #expect(try await count(##"rect[x="200"][y="133"][width="38"][height="15"]"##) == 1)
         #expect(try await count(##"rect[x="500"][y="7"]"##) == 1)
 
-        try await page.click(CGPoint(x: 320, y: 210))
-        try await page.click(CGPoint(x: 320, y: 210))
+        try await page.doubleClick(CGPoint(x: 320, y: 210))
         #expect(try await page.shows("#tilde-label"))
         #expect(try await page.run("[getComputedStyle(document.getElementById('tilde-label')).left, getComputedStyle(document.getElementById('tilde-label')).top].join()") as? String == "200px,133px")
         // While it is typed, the tag shows only in the field.

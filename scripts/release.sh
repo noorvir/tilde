@@ -1,27 +1,52 @@
 #!/bin/sh
 # Makes a release of Tilde in build/release/<version>/: the app for Apple silicon and Intel,
 # notarized, as a disk image for the first install and as a zip signed for Sparkle, and the
-# appcast that installed copies read. It commits the new version number, and publishes nothing:
-# at the end it prints the commands that do.
+# appcast that installed copies read. It publishes nothing: at the end it prints the commands
+# that do.
 #   TILDE_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" TILDE_NOTARY_PROFILE=tilde \
 #   scripts/release.sh 0.3.0
+# With a version, it commits the version number in scripts/build-app.sh first.
+#   scripts/release.sh --from-tag
+# takes the version from the tag vX.Y.Z on HEAD and commits nothing, as the Release workflow
+# (.github/workflows/release.yml) does when a tag is pushed. It needs TILDE_UPDATE_PRIVATE_KEY
+# and uses the update key in scripts/build-app.sh.
 # TILDE_SIGN_IDENTITY: the code signing identity (security find-identity -v -p codesigning).
 #   The same identity in every release keeps the Screen Recording and Accessibility grants.
 #   Only a "Developer ID Application" identity, notarized, opens without a Gatekeeper warning
 #   after a download. Another identity, or "-" (ad hoc), makes a build for tests only.
 # TILDE_NOTARY_PROFILE: the notarytool Keychain profile, made once with
 #   xcrun notarytool store-credentials tilde --apple-id <Apple ID> --team-id <TEAMID>
-#   It is required with a Developer ID identity.
+#   It is required with a Developer ID identity. TILDE_NOTARY_KEYCHAIN: the keychain that has
+#   the profile, if it is not the login keychain.
 # The EdDSA private key: TILDE_UPDATE_PRIVATE_KEY (as Sparkle's generate_keys -x writes it), or
 #   else the login Keychain, where generate_keys keeps it. It never goes in the repository.
 set -eu
 cd "$(dirname "$0")/.."
 
-version="${1:-}"
+from_tag=false
+if [ "${1:-}" = --from-tag ]; then
+    from_tag=true
+    tag=$(git describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null || true)
+    version=${tag#v}
+    if [ -z "$tag" ]; then
+        echo "HEAD has no tag vX.Y.Z." >&2
+        exit 2
+    fi
+    if [ -z "${TILDE_UPDATE_PRIVATE_KEY:-}" ]; then
+        echo "Set TILDE_UPDATE_PRIVATE_KEY to the EdDSA private key, as Sparkle's generate_keys -x writes it." >&2
+        exit 2
+    fi
+    if [ -n "${TILDE_UPDATE_PUBLIC_KEY:-}" ]; then
+        echo "A release from a tag uses the update key in scripts/build-app.sh: unset TILDE_UPDATE_PUBLIC_KEY." >&2
+        exit 2
+    fi
+else
+    version="${1:-}"
+fi
 case "$version" in
     [0-9]*.[0-9]*.[0-9]*) ;;
     *)
-        echo "usage: scripts/release.sh <version, such as 0.3.0>" >&2
+        echo "usage: scripts/release.sh <version, such as 0.3.0> | --from-tag" >&2
         exit 2
         ;;
 esac
@@ -58,19 +83,22 @@ if [ -z "$repo" ]; then
     exit 1
 fi
 
-sed -i '' "s/^version=.*/version=$version/" scripts/build-app.sh
-if ! git diff --quiet; then
-    git commit -q -m "Release $version" scripts/build-app.sh
+if [ "$from_tag" = false ]; then
+    sed -i '' "s/^version=.*/version=\"\${TILDE_VERSION:-$version}\"/" scripts/build-app.sh
+    if ! git diff --quiet; then
+        git commit -q -m "Release $version" scripts/build-app.sh
+    fi
 fi
 
-TILDE_UNIVERSAL=1 TILDE_STRICT=1 scripts/build-app.sh
+TILDE_VERSION=$version TILDE_UNIVERSAL=1 TILDE_STRICT=1 scripts/build-app.sh
 app=build/Tilde.app
 codesign --verify --deep --strict "$app"
 if [ ! -f "$app/Contents/Resources/Assets.car" ]; then
     echo "The app has no Assets.car, so no icon for macOS 26 and later: build with Xcode 26 or later." >&2
     exit 1
 fi
-if ! /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$app/Contents/Info.plist" >/dev/null 2>&1; then
+update_key=$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$app/Contents/Info.plist" 2>/dev/null || true)
+if [ -z "$update_key" ]; then
     echo "The app has no SUPublicEDKey, so it could not check updates: set update_key in scripts/build-app.sh." >&2
     exit 1
 fi
@@ -96,7 +124,7 @@ if [ -n "${TILDE_NOTARY_PROFILE:-}" ]; then
     # Apple checks the disk image and the app in it, and returns a ticket for both. Stapled, the
     # ticket lets a first open without a network connection pass Gatekeeper too; the app gets it
     # before it is zipped for updates.
-    xcrun notarytool submit "$dmg" --keychain-profile "$TILDE_NOTARY_PROFILE" --wait --timeout 30m
+    xcrun notarytool submit "$dmg" --keychain-profile "$TILDE_NOTARY_PROFILE" ${TILDE_NOTARY_KEYCHAIN:+--keychain "$TILDE_NOTARY_KEYCHAIN"} --wait --timeout 30m
     xcrun stapler staple "$dmg"
     xcrun stapler staple "$app"
     spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
@@ -110,9 +138,16 @@ if [ -n "${TILDE_UPDATE_PRIVATE_KEY:-}" ]; then
 else
     signature=$("$sparkle_bin/sign_update" "$zip")
 fi
+# The installed copies refuse a zip that their key did not sign: so does the release.
+ed_signature=$(printf '%s' "$signature" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
+swift scripts/verify-update.swift "$update_key" "$zip" "$ed_signature"
 url="https://github.com/$repo/releases/download/v$version/Tilde-$version.zip"
 scripts/appcast.sh "$version" "$build" "$url" "$signature" > "$out/appcast.xml"
 
+if [ "$from_tag" = true ]; then
+    echo "Tilde $version ($build) is in $out, signed by \"$TILDE_SIGN_IDENTITY\"${TILDE_NOTARY_PROFILE:+, notarized}."
+    exit 0
+fi
 cat <<DONE
 
 Tilde $version ($build) is in $out, signed by "$TILDE_SIGN_IDENTITY"${TILDE_NOTARY_PROFILE:+, notarized}.
