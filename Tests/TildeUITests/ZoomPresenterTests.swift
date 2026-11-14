@@ -40,7 +40,7 @@ struct ZoomPresenterTests {
         zoom.hide()
         zoom.hide()
         zoom.show()
-        try await Task.sleep(for: .milliseconds(600))
+        await afterTheDelayedSteps()
         #expect(panel.isOnScreen)
         #expect(content.isShown)
     }
@@ -50,8 +50,17 @@ struct ZoomPresenterTests {
     @Test func aHideRightAfterAShowHides() async throws {
         zoom.show()
         zoom.hide()
-        try await Task.sleep(for: .milliseconds(600))
+        await afterTheDelayedSteps()
         #expect(!panel.isOnScreen)
         #expect(!content.isShown)
+    }
+
+    /// Returns once the main queue has run the steps that the calls before queued: the next
+    /// pass, and a hide's end 0.4 s on, which comes before a step queued now for 0.4 s on. A
+    /// busy main thread runs them late, but in that order.
+    private func afterTheDelayedSteps() async {
+        await withCheckedContinuation { done in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { done.resume() }
+        }
     }
 }

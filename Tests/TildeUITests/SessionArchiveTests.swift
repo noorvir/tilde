@@ -130,15 +130,17 @@ struct SessionArchiveTests {
     @Test func aSessionIsSavedSoonAfterAChange() async throws {
         let archive = Fixtures.archive()
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
-        try await Task.sleep(for: .milliseconds(20))
+        await Fixtures.storeUpdated()
         let session = Fixtures.session()
         controller.setStateForTesting(session: session, drafts: Fixtures.drafts(2))
 
-        // Debounced: not at once, but within about a second.
+        // Debounced: not at once, but soon after.
         archive.flush()
         #expect(archive.record(session.id) == nil)
-        try await Task.sleep(for: .milliseconds(1300))
-        archive.flush()
+        try await until {
+            archive.flush()
+            return archive.record(session.id) != nil
+        }
 
         let record = try #require(archive.record(session.id))
         #expect(record.state == .active)
@@ -153,7 +155,7 @@ struct SessionArchiveTests {
 
         // Tilde starts again: the session is still marked active, so it is unfinished.
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
-        try await Task.sleep(for: .milliseconds(20))
+        await Fixtures.storeUpdated()
         #expect(archive.all().filter { $0.state == .active }.map(\.id) == [record.id])
 
         controller.restore(record)
@@ -171,7 +173,7 @@ struct SessionArchiveTests {
         archive.save(record)
         archive.flush()
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
-        try await Task.sleep(for: .milliseconds(20))
+        await Fixtures.storeUpdated()
         #expect(HistoryModel(archive: archive).canRestore(record))
 
         controller.restore(record)
@@ -187,7 +189,7 @@ struct SessionArchiveTests {
         archive.save(record)
         archive.flush()
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
-        try await Task.sleep(for: .milliseconds(20))
+        await Fixtures.storeUpdated()
         controller.setStateForTesting(session: Fixtures.session(), drafts: Array(Fixtures.drafts(1)))
 
         controller.restore(record)
@@ -210,7 +212,7 @@ struct SessionArchiveTests {
         let store = SessionStore()
         let controller = AnnotationController(store: store, browser: BrowserController(), archive: archive, defaults: MemoryDefaults())
         store.reattach = { id, node in controller.reattach(id, node: node) }
-        try await Task.sleep(for: .milliseconds(20))
+        await Fixtures.storeUpdated()
 
         // Not for an agent on another machine.
         #expect(await store.wait(for: record.id, node: "box", seconds: 0) == nil)

@@ -871,14 +871,14 @@ struct BehaviourTests {
         waiting.onBrowserMissing = { missing += 1 }
         chosen.onBrowserMissing = { missingAfterChoice += 1 }
 
-        waiting.limitToBrowser()
+        // The chosen one's wait starts first: when the other one's ends, its own would have too.
         chosen.limitToBrowser()
+        waiting.limitToBrowser()
         chosen.choose(.screen(1))
         waiting.windowsRead()
         #expect(missing == 0)
-        try await Task.sleep(for: .seconds(1))
+        try await until { missing == 1 }
 
-        #expect(missing == 1)
         #expect(waiting.window == nil)
         #expect(missingAfterChoice == 0)
         #expect(chosen.source == .screen(1))
