@@ -34,6 +34,8 @@ final class CanvasPage {
     /// `frameRequests()` says how many it asked for.
     init(countsFrames: Bool = false) {
         let configuration = WKWebViewConfiguration()
+        // First, so that the frames below are timers that it counts.
+        configuration.userContentController.addUserScript(WKUserScript(source: Self.queuedWork, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         if countsFrames {
             configuration.userContentController.addUserScript(WKUserScript(source: Self.countedFrames, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
@@ -101,6 +103,46 @@ final class CanvasPage {
         try await run(Self.helpers)
     }
 
+    /// Counts the work that the page queued for soon and that has not run yet, from before its
+    /// own scripts run: its timers of less than 100 ms, which finish a shape, post the pointer
+    /// and give frames, and the messages of its channels, which carry React's renders.
+    /// Excalidraw's longer timers, such as its debounces, change no shape.
+    /// `window.queuedWork()` says how much is left.
+    private static let queuedWork = """
+    (() => {
+      const timers = new Set();
+      let messages = 0;
+      const setTimer = window.setTimeout;
+      const clearTimer = window.clearTimeout;
+      window.setTimeout = (run, delay = 0, ...args) => {
+        const id = setTimer(() => {
+          timers.delete(id);
+          run(...args);
+        }, delay);
+        if (delay < 100) timers.add(id);
+        return id;
+      };
+      window.clearTimeout = (id) => {
+        timers.delete(id);
+        clearTimer(id);
+      };
+      const Channel = window.MessageChannel;
+      window.MessageChannel = function () {
+        const channel = new Channel();
+        for (const [from, to] of [[channel.port1, channel.port2], [channel.port2, channel.port1]]) {
+          const send = from.postMessage.bind(from);
+          from.postMessage = (...args) => {
+            messages += 1;
+            send(...args);
+          };
+          to.addEventListener("message", () => { messages -= 1; });
+        }
+        return channel;
+      };
+      window.queuedWork = () => timers.size + messages;
+    })();
+    """
+
     /// Frames for a page in no window, from before its own scripts run, each one counted.
     private static let countedFrames = """
     window.frameRequests = 0;
@@ -112,10 +154,14 @@ final class CanvasPage {
     """
 
     /// What a page in no window does not have: frames to draw in, and a real pointer to
-    /// capture. `fire` sends a pointer event to the element at its point, or to `target`, as a
-    /// captured pointer does.
+    /// capture. A frame that is cancelled must not come: Excalidraw cancels the frame of a
+    /// drag's pending move at the release, and that move would put the shape back. `fire` sends
+    /// a pointer event to the element at its point, or to `target`, as a captured pointer does.
     private static let helpers = """
-    if (window.frameRequests === undefined) window.requestAnimationFrame = (run) => setTimeout(() => run(performance.now()), 0);
+    if (window.frameRequests === undefined) {
+      window.requestAnimationFrame = (run) => setTimeout(() => run(performance.now()), 0);
+      window.cancelAnimationFrame = clearTimeout;
+    }
     Element.prototype.setPointerCapture = () => {};
     Element.prototype.releasePointerCapture = () => {};
     window.fire = (type, x, y, options = {}) => {
@@ -157,9 +203,11 @@ final class CanvasPage {
         throw NotReady()
     }
 
-    /// Lets the page finish what its timers and React hold.
+    /// Waits until the page has done all that the last event or call queued: React has drawn
+    /// the change, and a drag's shape is finished. A page in no window can get its timers late,
+    /// so no fixed time is enough.
     func settle() async throws {
-        try await Task.sleep(for: .milliseconds(60))
+        try await wait { try await self.run("window.queuedWork()") as? Int == 0 }
     }
 
     @discardableResult
@@ -201,6 +249,29 @@ final class CanvasPage {
     /// A press and release at one point.
     func click(_ point: CGPoint) async throws {
         try await run("window.pressed = fire('pointerdown', \(point.x), \(point.y)); fire('pointerup', \(point.x), \(point.y), {target: window.pressed}); 0")
+        try await settle()
+    }
+
+    /// Two clicks at one point, at once: a double-click however slow the page is. Two calls,
+    /// or a wait for the page between the clicks, can take longer than a double-click may.
+    func doubleClick(_ point: CGPoint) async throws {
+        try await fireAtOnce([("pointerdown", point), ("pointerup", point), ("pointerdown", point), ("pointerup", point)])
+    }
+
+    /// Pointer events one after another, faster than the page's timers, as on a slow page:
+    /// only what the page queues as a microtask, such as React's update for an event, runs
+    /// between two of them.
+    func fireAtOnce(_ events: [(type: String, point: CGPoint)]) async throws {
+        let calls = events.map { event in
+            let isPressed = event.type == "pointermove"
+            // A press goes to the element at its point; the rest to the pressed one.
+            var target = "window.pressed"
+            if event.type == "pointerdown" {
+                target = "undefined"
+            }
+            return "window.pressed = fire('\(event.type)', \(event.point.x), \(event.point.y), {isPressed: \(isPressed), target: \(target)}); await next();"
+        }
+        try await run("(async () => { const next = () => new Promise((done) => queueMicrotask(done)); \(calls.joined(separator: " ")) })(); 0")
         try await settle()
     }
 
