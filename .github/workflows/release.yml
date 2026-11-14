@@ -1,0 +1,96 @@
+# Publishes a release of Tilde when a tag vX.Y.Z is pushed: the disk image for a first install,
+# the zip signed for Sparkle, and appcast.xml, which installed copies read from the newest
+# release. scripts/release.sh --from-tag builds them, with the version from the tag; it commits
+# nothing, and it stops before anything is published if the zip's EdDSA signature is not valid
+# for the update key in scripts/build-app.sh.
+#
+# Secrets:
+#   TILDE_UPDATE_PRIVATE_KEY   the EdDSA private key, as Sparkle's generate_keys -x writes it.
+# Optional, for a Developer ID build (without them the app is signed ad hoc):
+#   TILDE_SIGN_CERT_P12        the "Developer ID Application" certificate and key, .p12 in base64.
+#   TILDE_SIGN_CERT_PASSWORD   the .p12 password.
+#   TILDE_NOTARY_APPLE_ID, TILDE_NOTARY_TEAM_ID, TILDE_NOTARY_PASSWORD (an app-specific password):
+#                              for notarytool. A Developer ID release must be notarized.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  release:
+    runs-on: macos-26
+    env:
+      HAS_SIGN_CERT: ${{ secrets.TILDE_SIGN_CERT_P12 != '' }}
+      HAS_NOTARY: ${{ secrets.TILDE_NOTARY_APPLE_ID != '' }}
+    steps:
+      # The build number counts the commits: it needs the whole history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # proxy/build.sh fixes the toolchain with GOTOOLCHAIN; the same version here needs no download.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: false
+
+      - name: Import the Developer ID certificate
+        if: env.HAS_SIGN_CERT == 'true'
+        env:
+          TILDE_SIGN_CERT_P12: ${{ secrets.TILDE_SIGN_CERT_P12 }}
+          TILDE_SIGN_CERT_PASSWORD: ${{ secrets.TILDE_SIGN_CERT_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/tilde.keychain-db"
+          password=$(uuidgen)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$TILDE_SIGN_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$TILDE_SIGN_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application: .*\)"$/\1/p' | head -n 1)
+          if [ -z "$identity" ]; then
+            echo "TILDE_SIGN_CERT_P12 has no Developer ID Application identity." >&2
+            exit 1
+          fi
+          echo "TILDE_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "TILDE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Store the notarization credentials
+        if: env.HAS_SIGN_CERT == 'true' && env.HAS_NOTARY == 'true'
+        env:
+          TILDE_NOTARY_APPLE_ID: ${{ secrets.TILDE_NOTARY_APPLE_ID }}
+          TILDE_NOTARY_TEAM_ID: ${{ secrets.TILDE_NOTARY_TEAM_ID }}
+          TILDE_NOTARY_PASSWORD: ${{ secrets.TILDE_NOTARY_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials tilde-release --apple-id "$TILDE_NOTARY_APPLE_ID" --team-id "$TILDE_NOTARY_TEAM_ID" \
+            --password "$TILDE_NOTARY_PASSWORD" --keychain "$TILDE_KEYCHAIN"
+          echo "TILDE_NOTARY_PROFILE=tilde-release" >> "$GITHUB_ENV"
+          echo "TILDE_NOTARY_KEYCHAIN=$TILDE_KEYCHAIN" >> "$GITHUB_ENV"
+
+      - name: Build the release
+        env:
+          TILDE_UPDATE_PRIVATE_KEY: ${{ secrets.TILDE_UPDATE_PRIVATE_KEY }}
+        run: TILDE_SIGN_IDENTITY="${TILDE_SIGN_IDENTITY:--}" scripts/release.sh --from-tag
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          out="build/release/$version"
+          gh release create "$GITHUB_REF_NAME" "$out/Tilde-$version.dmg" "$out/Tilde-$version.zip" "$out/appcast.xml" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "Tilde $version" --notes "Tilde $version"
+
+      - name: Remove the keychain
+        if: always() && env.TILDE_KEYCHAIN != ''
+        run: security delete-keychain "$TILDE_KEYCHAIN"
