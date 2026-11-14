@@ -34,10 +34,11 @@ final class CanvasPage {
     /// `frameRequests()` says how many it asked for.
     init(countsFrames: Bool = false) {
         let configuration = WKWebViewConfiguration()
+        // First, so that the frames below are timers that it counts.
+        configuration.userContentController.addUserScript(WKUserScript(source: Self.queuedWork, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         if countsFrames {
             configuration.userContentController.addUserScript(WKUserScript(source: Self.countedFrames, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
-        configuration.userContentController.addUserScript(WKUserScript(source: Self.queuedWork, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         webView = WKWebView(frame: CGRect(origin: .zero, size: Self.size), configuration: configuration)
         configuration.userContentController.add(Messages(page: self), name: "tilde")
     }
@@ -153,10 +154,14 @@ final class CanvasPage {
     """
 
     /// What a page in no window does not have: frames to draw in, and a real pointer to
-    /// capture. `fire` sends a pointer event to the element at its point, or to `target`, as a
-    /// captured pointer does.
+    /// capture. A frame that is cancelled must not come: Excalidraw cancels the frame of a
+    /// drag's pending move at the release, and that move would put the shape back. `fire` sends
+    /// a pointer event to the element at its point, or to `target`, as a captured pointer does.
     private static let helpers = """
-    if (window.frameRequests === undefined) window.requestAnimationFrame = (run) => setTimeout(() => run(performance.now()), 0);
+    if (window.frameRequests === undefined) {
+      window.requestAnimationFrame = (run) => setTimeout(() => run(performance.now()), 0);
+      window.cancelAnimationFrame = clearTimeout;
+    }
     Element.prototype.setPointerCapture = () => {};
     Element.prototype.releasePointerCapture = () => {};
     window.fire = (type, x, y, options = {}) => {
