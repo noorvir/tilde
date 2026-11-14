@@ -323,9 +323,11 @@ final class TildeApp {
 
     /// Presses the control with this name through Accessibility, as VoiceOver does: also when
     /// another app's window is in front of it.
-    func accessibilityPress(_ name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        try await waitToSee(name, sourceLocation: sourceLocation)
-        _ = try await drive("press", ["pid": pid, "name": name])
+    func accessibilityPress(_ name: String, role: String? = nil, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        try await waitToSee(name, role: role, sourceLocation: sourceLocation)
+        var body: [String: Any] = ["pid": pid, "name": name]
+        body["role"] = role
+        _ = try await drive("press", body)
     }
 
     /// Clicks the control with this name with the mouse, as a user does: unlike an
