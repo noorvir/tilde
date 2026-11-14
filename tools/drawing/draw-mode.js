@@ -6,7 +6,7 @@ import { ringStyle } from "./rings.js";
 import { api, taken, post, postPointer, live, changeElements } from "./scene.js";
 import { isHandle } from "./wireframe/chip.js";
 import { wireframe } from "./wireframe/mode.js";
-import { isOverComponent, wireframeReleased } from "./wireframe/pointer.js";
+import { isOverComponent, isResent, wireframeReleased } from "./wireframe/pointer.js";
 import { isWireframeSnapped } from "./wireframe/snap.js";
 
 let drawingTool = "arrow";
@@ -242,6 +242,22 @@ function finishClickArrow(element, event) {
   api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
   isWaitingForEdit = true;
   post("shape");
+}
+
+// Excalidraw applies a drag's moves once a frame, and loses a move that came while the frame
+// waited if that frame comes before the release: on a slow page a shape would end short of the
+// release. So a release away from the press comes after a move to its place, which Excalidraw
+// applies with the release. A copy that wireframe mode sends in place of the release has had
+// its move.
+export function moveToRelease(event) {
+  if (!isPressed || isResent(event) || (event.clientX === pressAt.x && event.clientY === pressAt.y)) return;
+  event.target.dispatchEvent(new PointerEvent("pointermove", {
+    bubbles: true, cancelable: true, composed: true, view: window,
+    clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+    pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: event.isPrimary, button: -1, buttons: 1,
+    pressure: 0.5, width: event.width, height: event.height,
+    shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
+  }));
 }
 
 // The release: Excalidraw has finished a shape, or the edit of one.

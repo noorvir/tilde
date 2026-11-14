@@ -70,6 +70,17 @@ struct WireframeCanvasTests {
         #expect(try await page.shows("#tilde-label"))
     }
 
+    /// Excalidraw applies a drag's moves once a frame. A component ends where the drag is
+    /// released, also when its last move came while the page waited for a frame, and that frame
+    /// came before the release.
+    @Test func aComponentEndsWhereTheDragIsReleased() async throws {
+        try await start(tool: "card")
+        try await page.fireAtOnce([("pointerdown", corner), ("pointermove", CGPoint(x: 300, y: 200)), ("pointermove", oppositeCorner)])
+        try await page.run("fire('pointerup', \(oppositeCorner.x), \(oppositeCorner.y), {target: window.pressed}); 0")
+        try await page.settle()
+        #expect(try await rects() == [[200, 150, 240, 120]])
+    }
+
     /// A click on empty space draws nothing, and a drag of a few points too.
     @Test func aClickDrawsNothing() async throws {
         try await start(tool: "card")

@@ -276,6 +276,7 @@ function editWireframe(event) {
 // shape follows the guides while it is drawn. ⌘ turns all snapping off: Excalidraw gets the
 // event again without ⌘, which would turn its own snapping to other shapes on.
 const retargeted = new WeakSet();
+export const isResent = (event) => retargeted.has(event);
 
 // Sends Excalidraw a copy of a pointer event at `point`, without ⌘, in place of the event.
 function resend(event, point) {
