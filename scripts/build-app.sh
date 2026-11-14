@@ -24,17 +24,24 @@ archs=$(uname -m)
 if [ "${TILDE_UNIVERSAL:-}" = 1 ]; then
     archs="arm64 x86_64"
 fi
+# Each architecture's binaries are copied out at once: newer toolchains put every architecture
+# in the same products folder, so the next build replaces them.
+stage=".build/app-binaries"
+rm -rf "$stage"
 for arch in $archs; do
     swift build -c "$configuration" --arch "$arch" --product Tilde
     swift build -c "$configuration" --arch "$arch" --product tilde-mcp
-    scripts/stamp-sdk.sh "$(swift build -c "$configuration" --arch "$arch" --show-bin-path)/Tilde"
+    bin="$(swift build -c "$configuration" --arch "$arch" --show-bin-path)"
+    mkdir -p "$stage/$arch"
+    cp "$bin/Tilde" "$bin/tilde-mcp" "$stage/$arch/"
+    scripts/stamp-sdk.sh "$stage/$arch/Tilde"
 done
 
 app="build/Tilde.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
 for tool in Tilde tilde-mcp; do
-    lipo -create -output "$app/Contents/MacOS/$tool" $(for arch in $archs; do echo "$(swift build -c "$configuration" --arch "$arch" --show-bin-path)/$tool"; done)
+    lipo -create -output "$app/Contents/MacOS/$tool" $(for arch in $archs; do echo "$stage/$arch/$tool"; done)
 done
 cp Sources/TildeUI/DrawingWeb/* "$app/Contents/Resources/"
 # Sparkle, without the XPC services that only sandboxed apps use.
