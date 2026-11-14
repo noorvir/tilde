@@ -461,6 +461,8 @@ private final class FeedHost {
         }
         server.stop()
         try? FileManager.default.removeItem(at: folder)
+        // Sparkle downloads into the host app's caches.
+        try? FileManager.default.removeItem(at: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent(identifier))
         UserDefaults.standard.removePersistentDomain(forName: identifier)
     }
 
