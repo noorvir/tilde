@@ -18,7 +18,7 @@ version=0.2.0
 identity="${TILDE_SIGN_IDENTITY:--}"
 # The public half of the EdDSA key that signs updates (Sparkle's generate_keys prints it). An
 # update that this key did not sign is refused. TILDE_UPDATE_PUBLIC_KEY replaces it for tests.
-update_key="${TILDE_UPDATE_PUBLIC_KEY:-}"
+update_key="${TILDE_UPDATE_PUBLIC_KEY:-xiw+Yz3U0QaRnLRWa50R4xKdxMxiZIfR6f/MlvyyGX0=}"
 
 archs=$(uname -m)
 if [ "${TILDE_UNIVERSAL:-}" = 1 ]; then
