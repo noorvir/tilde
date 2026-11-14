@@ -449,5 +449,24 @@ extension ScreenRecorder {
         recorder.endCapture = endCapture
         return recorder
     }
+
+    /// Returns once the recorder's queue has done what was asked of it before, such as the
+    /// start of a pause. Debug builds only.
+    func queueDoneForTesting() async {
+        await withCheckedContinuation { done in
+            queue.async {
+                done.resume()
+            }
+        }
+    }
+
+    /// Whether a frame is in the clip, as the recorder's queue has it now. Debug builds only.
+    func hasFrameForTesting() async -> Bool {
+        await withCheckedContinuation { done in
+            queue.async { [self] in
+                done.resume(returning: lastTime != nil)
+            }
+        }
+    }
 }
 #endif
