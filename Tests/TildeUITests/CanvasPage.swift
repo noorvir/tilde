@@ -99,15 +99,22 @@ final class CanvasPage {
         }
     }
 
+    private static let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")
+
+    /// The page as one document of 8 MB, made once for every test and away from the main
+    /// actor: made for each page on it, it held up every other test there for seconds on CI.
+    private static let document = Task.detached {
+        DrawingCanvas.page(in: folder).map { Data($0.utf8) }
+    }
+
     /// Loads the page and waits until Excalidraw is ready.
     func load() async throws {
         await Self.takeSlot()
         hasSlot = true
-        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")
-        guard let page = DrawingCanvas.page(in: folder) else {
-            throw NotReady(waitedFor: "the page's files in \(folder.path)")
+        guard let document = await Self.document.value else {
+            throw NotReady(waitedFor: "the page's files in \(Self.folder.path)")
         }
-        webView.loadHTMLString(page, baseURL: URL(string: "https://drawing.tilde.invalid/"))
+        webView.load(document, mimeType: "text/html", characterEncodingName: "utf-8", baseURL: URL(string: "https://drawing.tilde.invalid/")!)
         try await wait(for: "Excalidraw's \"ready\"") { self.messages.contains("ready") }
         try await run(Self.helpers)
     }
