@@ -104,28 +104,41 @@ final class CanvasPage {
 
     /// Counts the work that the page queued for soon and that has not run yet, from before its
     /// own scripts run: its timers of less than 100 ms, which finish a shape, post the pointer
-    /// and give frames, and React's renders, which go through `setImmediate` when the page has
-    /// one. Excalidraw's longer timers, such as its debounces, change no shape.
+    /// and give frames, and the messages of its channels, which carry React's renders.
+    /// Excalidraw's longer timers, such as its debounces, change no shape.
     /// `window.queuedWork()` says how much is left.
     private static let queuedWork = """
     (() => {
-      const queued = new Set();
+      const timers = new Set();
+      let messages = 0;
       const setTimer = window.setTimeout;
       const clearTimer = window.clearTimeout;
       window.setTimeout = (run, delay = 0, ...args) => {
         const id = setTimer(() => {
-          queued.delete(id);
+          timers.delete(id);
           run(...args);
         }, delay);
-        if (delay < 100) queued.add(id);
+        if (delay < 100) timers.add(id);
         return id;
       };
       window.clearTimeout = (id) => {
-        queued.delete(id);
+        timers.delete(id);
         clearTimer(id);
       };
-      window.setImmediate = (run, ...args) => window.setTimeout(run, 0, ...args);
-      window.queuedWork = () => queued.size;
+      const Channel = window.MessageChannel;
+      window.MessageChannel = function () {
+        const channel = new Channel();
+        for (const [from, to] of [[channel.port1, channel.port2], [channel.port2, channel.port1]]) {
+          const send = from.postMessage.bind(from);
+          from.postMessage = (...args) => {
+            messages += 1;
+            send(...args);
+          };
+          to.addEventListener("message", () => { messages -= 1; });
+        }
+        return channel;
+      };
+      window.queuedWork = () => timers.size + messages;
     })();
     """
 
