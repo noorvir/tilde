@@ -82,7 +82,7 @@ struct UIState: Decodable {
     /// The Updates card of the Configuration page, with Tilde 0.3.0 as the newer version.
     struct Update: Decodable {
         enum Status: String, Decodable {
-            case idle, checking, upToDate, available, downloading, ready, failed
+            case off, idle, checking, upToDate, available, downloading, ready, failed
         }
 
         let status: Status

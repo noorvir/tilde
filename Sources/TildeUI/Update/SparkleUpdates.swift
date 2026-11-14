@@ -4,7 +4,8 @@ import Sparkle
 /// Updates through Sparkle: an appcast with EdDSA-signed zips of Tilde.app. The EdDSA key in
 /// the app's Info.plist (`SUPublicEDKey`) is the trust check, as the app has no Developer ID.
 /// Sparkle checks once a day with a single timer, and installs a downloaded update when Tilde
-/// quits; it never shows a window of its own.
+/// quits; it never shows a window of its own. A build with no key has updates off: Sparkle
+/// never starts.
 @MainActor
 final class SparkleUpdates: NSObject, UpdateEngine {
     /// The appcast of the latest release. Release assets of a private repository need a token,
@@ -12,7 +13,7 @@ final class SparkleUpdates: NSObject, UpdateEngine {
     static let feedURL = "https://github.com/noorvir/tilde/releases/latest/download/appcast.xml"
 
     private let feed: String
-    private var updater: SPUUpdater!
+    private var updater: SPUUpdater?
     private var report: (UpdateStatus) -> Void = { _ in }
     private var mayRelaunch: () -> Bool = { true }
     private var version = ""
@@ -31,26 +32,39 @@ final class SparkleUpdates: NSObject, UpdateEngine {
     init(feed: String, bundle: Bundle = .main) {
         self.feed = feed
         super.init()
-        updater = SPUUpdater(hostBundle: bundle, applicationBundle: bundle, userDriver: self, delegate: self)
+        // Without its own key Sparkle would trust any update that is code signed.
+        let key = bundle.object(forInfoDictionaryKey: "SUPublicEDKey") as? String ?? ""
+        if !key.isEmpty {
+            updater = SPUUpdater(hostBundle: bundle, applicationBundle: bundle, userDriver: self, delegate: self)
+        }
     }
 
     var isAutomatic: Bool {
-        get { updater.automaticallyDownloadsUpdates }
-        set { updater.automaticallyDownloadsUpdates = newValue }
+        get { updater?.automaticallyDownloadsUpdates ?? false }
+        set { updater?.automaticallyDownloadsUpdates = newValue }
     }
 
     func start(reporting: @escaping (UpdateStatus) -> Void, mayRelaunch: @escaping () -> Bool) {
         report = reporting
         self.mayRelaunch = mayRelaunch
+        guard let updater else {
+            report(.off)
+            return
+        }
+
         do {
             try updater.start()
+        } catch let error as NSError where error.domain == SUSparkleErrorDomain && error.code == Int(SUError.noPublicDSAFoundError.rawValue) {
+            // The key is not a valid EdDSA key: a fault of the build, not of an update.
+            self.updater = nil
+            report(.off)
         } catch {
             report(.failed(reason: reason(for: error)))
         }
     }
 
     func check() {
-        updater.checkForUpdates()
+        updater?.checkForUpdates()
     }
 
     func install() {
@@ -85,7 +99,7 @@ final class SparkleUpdates: NSObject, UpdateEngine {
             return "No connection"
         }
         let codes = Set(errors.filter { $0.domain == SUSparkleErrorDomain }.map { OSStatus($0.code) })
-        if !codes.isDisjoint(with: [SUError.signatureError, .validationError, .noPublicDSAFoundError, .insufficientSigningError].map(\.rawValue)) {
+        if !codes.isDisjoint(with: [SUError.signatureError, .validationError, .insufficientSigningError].map(\.rawValue)) {
             return "The update's signature is not valid"
         }
         if !codes.isDisjoint(with: [SUError.appcastParseError, .appcastError, .invalidFeedURLError, .insecureFeedURLError].map(\.rawValue)) {

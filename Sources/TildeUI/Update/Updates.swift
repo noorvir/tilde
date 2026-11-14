@@ -2,6 +2,8 @@ import Foundation
 
 /// Where an update is, as the Configuration page and the toast show it.
 enum UpdateStatus: Equatable {
+    /// This build has no update key, so Tilde never looks for updates.
+    case off
     /// No check yet since launch.
     case idle
     case checking
@@ -116,7 +118,7 @@ final class Updates: ObservableObject {
     var canCheck: Bool {
         switch status {
         case .idle, .upToDate, .failed: true
-        case .checking, .available, .downloading, .ready: false
+        case .off, .checking, .available, .downloading, .ready: false
         }
     }
 

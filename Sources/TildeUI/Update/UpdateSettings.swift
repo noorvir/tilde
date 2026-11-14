@@ -12,20 +12,22 @@ struct UpdateSettings: View {
             SettingsRow(title: title, subtitle: subtitle, subtitleIsError: isFailed) {
                 action
             }
-            SettingsDivider()
-            SettingsRow(title: "Update automatically", subtitle: "Installs updates and reopens Tilde when you are not using it") {
-                Toggle("Update automatically", isOn: $updates.isAutomatic)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .tint(Color.tildeBlue)
-                    .labelsHidden()
+            if updates.status != .off {
+                SettingsDivider()
+                SettingsRow(title: "Update automatically", subtitle: "Installs updates and reopens Tilde when you are not using it") {
+                    Toggle("Update automatically", isOn: $updates.isAutomatic)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .tint(Color.tildeBlue)
+                        .labelsHidden()
+                }
             }
         }
     }
 
     private var title: String {
         switch updates.status {
-        case .idle, .checking, .upToDate, .failed: "Tilde \(version)"
+        case .off, .idle, .checking, .upToDate, .failed: "Tilde \(version)"
         case .available(let version): "Tilde \(version) is available"
         case .downloading(let version, _): "Downloading Tilde \(version)"
         case .ready(let version): "Tilde \(version) is ready"
@@ -34,6 +36,7 @@ struct UpdateSettings: View {
 
     private var subtitle: String {
         switch updates.status {
+        case .off: "Updates are off in this build"
         case .idle: "Checks for a newer version once a day"
         case .checking: "Checking for updates"
         case .upToDate: "Up to date"
@@ -65,6 +68,8 @@ struct UpdateSettings: View {
     @ViewBuilder
     private var action: some View {
         switch updates.status {
+        case .off:
+            EmptyView()
         case .idle, .upToDate:
             Button("Check for updates", action: updates.check)
         case .checking:

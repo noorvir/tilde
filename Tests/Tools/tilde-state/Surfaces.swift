@@ -317,6 +317,7 @@ enum Surfaces {
         let status: UpdateStatus = switch state?.status ?? .idle {
         case .idle: .idle
         case .checking: .checking
+        case .off: .off
         case .upToDate: .upToDate
         case .available: .available(version: "0.3.0")
         case .downloading: .downloading(version: "0.3.0", progress: 0.4)
