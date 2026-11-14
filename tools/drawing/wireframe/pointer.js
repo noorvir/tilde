@@ -44,11 +44,17 @@ export function pointerWentThrough(isPress) {
   hideHandles();
 }
 
-// After Excalidraw has finished the rectangle of a drag: it becomes the component of the tool.
-// A click instead selects the component under it, and a double-click edits its label.
-export function finishWireframeShape() {
+// The release of a press that may draw a component. The press goes with it: on a slow page the
+// next press can come before this one is finished, as in a quick double-click.
+export function wireframeReleased() {
   const press = wireframePress;
   wireframePress = null;
+  setTimeout(() => finishWireframeShape(press), 0);
+}
+
+// After Excalidraw has finished the rectangle of a drag: it becomes the component of the tool.
+// A click instead selects the component under it, and a double-click edits its label.
+function finishWireframeShape(press) {
   if (!press || !wireframe) return;
   const created = live().filter((element) => !press.ids.has(element.id));
   const box = created.find((element) => element.type === "rectangle" && !element.customData);

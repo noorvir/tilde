@@ -6,7 +6,7 @@ import { ringStyle } from "./rings.js";
 import { api, taken, post, postPointer, live, changeElements } from "./scene.js";
 import { isHandle } from "./wireframe/chip.js";
 import { wireframe } from "./wireframe/mode.js";
-import { isOverComponent, finishWireframeShape } from "./wireframe/pointer.js";
+import { isOverComponent, wireframeReleased } from "./wireframe/pointer.js";
 import { isWireframeSnapped } from "./wireframe/snap.js";
 
 let drawingTool = "arrow";
@@ -248,7 +248,7 @@ function finishClickArrow(element, event) {
 export function pointerReleased(event) {
   isPressed = false;
   if (wireframe) {
-    setTimeout(finishWireframeShape, 0);
+    wireframeReleased();
     return;
   }
   if (!isPressOnShape) return;
