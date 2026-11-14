@@ -6,6 +6,7 @@ import Testing
 /// its process and Tilde, at the screen's rate: a page that asks for one after another uses
 /// the processor for as long as Draw or Wireframe is on.
 @MainActor
+@Suite(.tags(.webKit), .webKitRuns)
 struct CanvasAtRestTests {
     /// With a component drawn and a tool ready, the page asks for no frame once it has drawn
     /// what it shows. A page in no window gets its timers about once a second, so a page that

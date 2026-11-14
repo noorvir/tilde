@@ -6,7 +6,7 @@ import WebKit
 /// Finding annotated elements again in a real web view: by selector, then by text when the
 /// selector no longer matches, and never on another page.
 @MainActor
-@Suite(.serialized)
+@Suite(.serialized, .tags(.webKit), .webKitRuns)
 struct AnchorTests {
     let browser = BrowserController()
     let id = UUID()

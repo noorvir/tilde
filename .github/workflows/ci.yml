@@ -1,6 +1,8 @@
 # The unit and behaviour tests, and a build of Tilde.app. The UI contract pictures are not
 # checked here: they match only on the exact macOS version they were made on (scripts/check.sh).
-# The UX specs skip themselves without TILDE_UX=1 (scripts/ux.sh).
+# The UX specs skip themselves without TILDE_UX=1 (scripts/ux.sh). The suites tagged `webKit`,
+# which load a page in WebKit, skip themselves with TILDE_SKIP_WEBKIT=1: a shared runner is not
+# always fast enough for them. scripts/check.sh runs them.
 name: CI
 
 on:
@@ -31,6 +33,6 @@ jobs:
           key: spm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: spm-${{ runner.os }}-${{ runner.arch }}-
       - name: Test
-        run: TILDE_STRICT=1 swift test
+        run: TILDE_STRICT=1 TILDE_SKIP_WEBKIT=1 swift test
       - name: Build Tilde.app
         run: TILDE_STRICT=1 scripts/build-app.sh

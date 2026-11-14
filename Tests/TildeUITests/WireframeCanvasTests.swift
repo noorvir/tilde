@@ -6,6 +6,7 @@ import Testing
 /// components, and what the page reports of them. The page is the real one, in no window;
 /// each test has its own.
 @MainActor
+@Suite(.tags(.webKit), .webKitRuns)
 struct WireframeCanvasTests {
     typealias Shape = CanvasPage.Shape
     let page: CanvasPage
