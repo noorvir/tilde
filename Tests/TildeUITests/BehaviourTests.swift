@@ -895,15 +895,13 @@ struct BehaviourTests {
         ]
         // One of each state, then every value it can have; a new state does not compile here
         // until it has its values.
-        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice(""), .source("")]
+        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice("")]
         let states = kinds.flatMap { kind -> [HUDView.SubtitleState] in
             switch kind {
             case .annotating, .choosingWindow, .inPicker, .waitingForWindow: [kind]
             case .paused: shortcuts.map { .paused(shortcut: $0) }
             case .holding: DoubleTapKey.allCases.map { .holding($0.symbol) }
             case .notice: Notice.allCases.map { .notice($0.rawValue) }
-            // The screens of Macs, Tilde's own window and a phone, as Record names them.
-            case .source: ["Built-in Retina Display", "Studio Display", "Display", "Tilde Browser", "iPhone"].map { .source($0) }
             }
         }
 
