@@ -12,7 +12,7 @@
 //   wireframe/preview.js     still pictures of components in each state, for Tilde's Settings
 //   wireframe/pointer.js     drawing, moving, resizing and copying with the pointer
 //   wireframe/chip.js        a component's handles: the chip, its kinds and borders, the corners and the grip
-//   wireframe/labels.js      a label typed in place
+//   wireframe/labels.js      a label or a text typed in place
 //   wireframe/comment.js     a component's comment
 //   wireframe/snap.js        the lines to snap to, and the guides
 //   wireframe/history.js     undo and redo

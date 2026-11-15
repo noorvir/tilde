@@ -2,8 +2,8 @@
 // no tool moves one; the chip and the top grip move one too, a corner handle resizes one from
 // that corner, and ⌥ and a drag copies one. A click selects one, a double-click edits its text,
 // and a click on its tag edits its label. A drag on the text of the selected component, with
-// any tool, moves the text off it as a free text, which moves as a component does. The Text tool's click types a
-// component's text, or a free text where there is no component.
+// any tool, moves the text off it as a free text, which moves as a component does. The Text
+// tool's click types a component's text, or a free text where there is no component.
 
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
