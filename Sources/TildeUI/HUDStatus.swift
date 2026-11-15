@@ -117,7 +117,7 @@ extension HUDView {
             return SubtitlePart(text: "Esc cancels")
         case .inPicker:
             return SubtitlePart(text: "Esc goes back")
-        // Paused, it still says where the report goes; the button's tooltip has the shortcut.
+        // Paused, it still says where the report goes.
         case .annotating, .paused:
             break
         }

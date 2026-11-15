@@ -205,7 +205,7 @@ struct BehaviourTests {
         #expect(HUDView.status(of: controller).title == "Annotating")
     }
 
-    /// A restore and Open Browser wait while a clip records, as the source name does.
+    /// A restore and Open Browser wait while a clip records, as the source button does.
     @Test func aClipKeepsItsNotesAndSource() {
         open(drafts: Fixtures.drafts(1), activity: .recording(.recording))
         controller.restore(Fixtures.record(notes: 3))
@@ -769,7 +769,7 @@ struct BehaviourTests {
         #expect(SessionScope.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: nil) == CGRect(x: 0, y: 0, width: 50, height: 50))
     }
 
-    /// Annotating has no source to choose. Before Record, a click on the source name picks on
+    /// Annotating has no source to choose. Before Record, a click on the source button picks on
     /// screen, with the picker closed to its button; a second click stops with no change. A
     /// choice is taken only while choosing, and Record records it; back in annotating, the
     /// session is limited to nothing again.
@@ -814,7 +814,7 @@ struct BehaviourTests {
         #expect(controller.allows(elsewhere))
     }
 
-    /// The source name does nothing while a clip is in progress: a clip keeps its source.
+    /// The source button does nothing while a clip is in progress: a clip keeps its source.
     @Test func aClipKeepsItsSource() {
         for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, then: .stay)] {
             open(activity: .recording(clip), source: .window(Fixtures.window))

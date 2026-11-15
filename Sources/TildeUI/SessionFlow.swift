@@ -8,7 +8,7 @@ import Foundation
 /// Tests/Contract/transitions pins this table.
 struct SessionFlow: Equatable {
     var mode: Mode = .open(Open())
-    /// A click on the source name opens the picker at once, as the user last chose from it,
+    /// A click on the source button opens the picker at once, as the user last chose from it,
     /// instead of clicking on screen. The flow changes it; the controller keeps it across
     /// launches.
     var choosesInPicker = false
@@ -197,7 +197,7 @@ struct SessionFlow: Equatable {
         case captureStopped
         /// The window that the session is limited to closed.
         case windowClosed
-        /// A click on the source's name in the HUD, and the menu's Record a Specific Window:
+        /// A click on the recording bar's source button, and the menu's Record a Specific Window:
         /// choosing what to record starts, or ends with no change. Then the picker's button.
         case pickSource, openPicker
         /// A window, a screen or a phone was chosen to record.
