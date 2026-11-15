@@ -943,6 +943,41 @@ struct UXSpecs {
         }
     }
 
+    /// Settings opens with no field focused, also the second time: the Command name field takes
+    /// the keyboard only when the user clicks it.
+    @Test func settingsOpenWithNoFieldFocused() async throws {
+        try await withApp { app in
+            try await app.menu("Settings")
+            let field = try await app.waitToSee("Command name", role: "AXTextField").frame
+            try await waitForFocus(in: app) { $0.app == app.pid }
+            #expect(try await app.focus().role != "AXTextField")
+            step("opened, nothing focused")
+
+            try await app.click(at: CGPoint(x: field.midX, y: field.midY))
+            try await waitForFocus(in: app) { $0.role == "AXTextField" }
+            let clicked = try await app.focus()
+            #expect(clicked.isEditable)
+            #expect(clicked.value == "annotate")
+            step("clicked, field focused")
+
+            try await app.key(.w, command: true)
+            try await app.waitNotToSee("Tilde Settings")
+            try await app.menu("Settings")
+            try await app.waitToSee("Command name", role: "AXTextField")
+            try await waitForFocus(in: app) { $0.app == app.pid }
+            #expect(try await app.focus().role != "AXTextField")
+            step("opened again, nothing focused")
+        }
+    }
+
+    /// Waits up to 3 s until the Mac's focus is as `isReady` says; the caller checks it after.
+    private func waitForFocus(in app: TildeApp, until isReady: (TildeApp.Focus) -> Bool) async throws {
+        let end = Date().addingTimeInterval(3)
+        while try await !isReady(app.focus()), Date() < end {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
     /// Tilde's Settings, open during a session, works as a window and is never annotated: the
     /// pointer on it highlights nothing, also where it covers another app's window; a click
     /// turns its switch on, opens no comment and leaves the session open; and in Draw a drag on

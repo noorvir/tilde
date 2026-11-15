@@ -48,6 +48,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
 
     private let model: SettingsModel
     private(set) var window: NSWindow?
+    /// Set from opening until the window is key: Settings opens with no control focused, and a
+    /// click or Tab gives one the keyboard. AppKit otherwise gives it to the first text field.
+    private var isOpening = false
 
     init(model: SettingsModel) {
         self.model = model
@@ -61,11 +64,21 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         model.page = page
         let window = self.window ?? makeWindow()
         self.window = window
+        isOpening = !window.isVisible
 
         NSApp.setActivationPolicy(.regular)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// The window becomes key in `show`, or later, when the app is active.
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard isOpening else {
+            return
+        }
+        isOpening = false
+        window?.makeFirstResponder(nil)
     }
 
     func windowWillClose(_ notification: Notification) {
