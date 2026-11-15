@@ -464,9 +464,9 @@ struct UXSpecs {
 
     // MARK: - Recording
 
-    /// Two clips reach the agent as videos: the first of the screen without its 2 s pause, and
-    /// the second of a chosen window, sent while it records. Esc asks before it drops a clip
-    /// that is not stopped.
+    /// Two clips reach the agent as videos: the first of the screen without its 2 s pause, kept
+    /// when Annotate stops it, and the second of a chosen window, sent while it records. Esc
+    /// asks before it drops a clip that is not stopped.
     @Test func twoClipsReachTheAgentAsVideos() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -491,9 +491,10 @@ struct UXSpecs {
             try await Task.sleep(for: .seconds(2))
             try await app.press("Resume")
             try await Task.sleep(for: .seconds(1))
-            try await app.press("Stop recording")
+            // Another mode's button stops the clip and keeps it, as Stop does, then switches.
+            try await app.press("Annotate")
             let firstClipTime = Date().timeIntervalSince(started)
-            try await app.waitToSeeText(containing: "Ready to record")
+            try await app.waitToSee("Annotating")
 
             // The clip waits in the preview's native player; Esc closes the preview.
             try await app.press("Show notes")
@@ -504,12 +505,12 @@ struct UXSpecs {
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
 
-            // Esc leaves recording mode, with no mode.
+            // Esc pauses annotating.
             try await app.key(.escape)
             try await app.waitToSee("Paused")
 
             // The record toggle chooses at once: a click on the fixture's window chooses it for
-            // the next clip, and the subtitle names it.
+            // the next clip, and the source button names it.
             try await app.press("Record screen")
             try await app.waitToSee("Choose a window")
             let frame = ChangingWindow.frame
