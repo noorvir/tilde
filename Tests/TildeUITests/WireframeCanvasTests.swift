@@ -145,6 +145,36 @@ struct WireframeCanvasTests {
         }
     }
 
+    /// A double-click types the text of the component under it in every state: with a tool and
+    /// with none, selected or not, and nested in a section, for the part and for the section.
+    @Test func aDoubleClickTypesTextInEveryState() async throws {
+        try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
+        try await drawComponent("card", from: CGPoint(x: 150, y: 150), to: CGPoint(x: 350, y: 250))
+        let card = CGPoint(x: 250, y: 200)
+        let section = CGPoint(x: 500, y: 400)
+        var texts: [String?] = [nil, nil]
+        for hasTool in [true, false] {
+            try await start(tool: hasTool ? "card" : "")
+            for isSelected in [false, true] {
+                for (index, point) in [section, card].enumerated() {
+                    if isSelected {
+                        try await page.click(point)
+                        try await Task.sleep(for: .milliseconds(450))
+                    } else {
+                        try await page.click(CGPoint(x: 900, y: 700))
+                    }
+                    try await page.doubleClick(point)
+                    let text = "\(index) \(hasTool) \(isSelected)"
+                    try await page.typeLabel(text)
+                    try await page.press("Enter")
+                    texts[index] = text
+                    #expect(try await page.shapes().map(\.text) == texts, "with a tool: \(hasTool), selected: \(isSelected)")
+                    #expect(try await page.shapes().count == 2)
+                }
+            }
+        }
+    }
+
     /// Esc in the field keeps the text as it was; a click elsewhere keeps the new text; an
     /// empty text takes the text away.
     @Test func escKeepsTheOldTextAndAClickAwayKeepsTheNewOne() async throws {
