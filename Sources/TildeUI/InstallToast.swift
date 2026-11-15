@@ -15,7 +15,7 @@ final class InstallToast {
     }
     private var monitors: [Any] = []
 
-    private static let size = NSSize(width: 560, height: PillMetrics.height + 32)
+    private static let size = NSSize(width: 760, height: PillMetrics.height + 32)
 
     init(onDetails: @escaping () -> Void) {
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: Self.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)

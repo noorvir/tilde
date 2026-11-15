@@ -83,18 +83,14 @@ private struct CommandSection: View {
         let canChange = name != setup.command && problem == nil
 
         SettingsSection("Command") {
-            SettingsRow(title: "Command name", subtitle: problem ?? "Type /\(name) in an agent to start Tilde; in Codex, $\(name).", subtitleIsError: problem != nil) {
+            SettingsRow(title: "Command name", subtitle: problem ?? "Type /\(setup.command) in an agent to start Tilde; in Codex, $\(setup.command).", subtitleIsError: problem != nil) {
                 HStack(spacing: 8) {
-                    HStack(spacing: 2) {
-                        Text("/")
-                            .foregroundStyle(.secondary)
-                        TextField("Command name", text: Binding { text } set: { draft = $0 }, prompt: Text(CommandName.standard))
-                            .textFieldStyle(.roundedBorder)
-                            .autocorrectionDisabled()
-                            .frame(width: 150)
-                            .onSubmit(change)
-                    }
-                    .font(.system(size: 13, design: .monospaced))
+                    TextField("Command name", text: Binding { text } set: { draft = $0 }, prompt: Text(CommandName.standard))
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 13, design: .monospaced))
+                        .frame(width: 150)
+                        .onSubmit(change)
                     Button("Change", action: change)
                         .disabled(!canChange)
                 }

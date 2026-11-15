@@ -45,6 +45,8 @@ struct UIState: Decodable {
     struct Toast: Decodable {
         let failed: Int
         let oneApp: Bool
+        /// Apps skipped because the command name is another skill's there.
+        var taken: Int?
     }
     struct NodeState: Decodable {
         enum Status: String, Decodable {
@@ -109,6 +111,12 @@ struct UIState: Decodable {
         /// The machine whose page is open.
         var machine: String?
         var update: Update?
+        /// The saved command name; `annotate` when absent.
+        var commandName: String?
+        /// The command name as typed, before Change.
+        var commandDraft: String?
+        /// Apps that have another skill of the command name.
+        var taken: [Harness]?
     }
 
     let version: Int

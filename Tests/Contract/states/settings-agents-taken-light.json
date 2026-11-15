@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "surface": "settings",
+  "size": [
+    920,
+    805
+  ],
+  "appearance": "light",
+  "settings": {
+    "page": "agents",
+    "expandedAgents": [
+      "Claude"
+    ],
+    "taken": [
+      "claude-code"
+    ]
+  }
+}

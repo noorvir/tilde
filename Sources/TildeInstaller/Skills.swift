@@ -40,6 +40,13 @@ public struct Conflict: Equatable, Sendable {
     /// The other skill's folder, or the other command's file.
     public let item: URL
 
+    public init(kind: Kind, name: String, harness: Harness, item: URL) {
+        self.kind = kind
+        self.name = name
+        self.harness = harness
+        self.item = item
+    }
+
     public var message: String {
         "A \(kind.rawValue) named \(name) already exists in \(harness.name). Choose another command name."
     }

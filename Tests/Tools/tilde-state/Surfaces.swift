@@ -292,6 +292,15 @@ enum Surfaces {
         }
         let model = try Fixtures.settingsModel(page: page, history: history, wireframePreviews: previews, updates: updates(state.update))
         model.expandedAgents = Set(state.expandedAgents ?? [])
+        if let name = state.commandName {
+            model.setup.setCommand(name, oldCommands: [])
+        }
+        model.commandDraft = state.commandDraft
+        for harness in state.taken ?? [] {
+            let skill = model.setup.installer.skillFile(for: harness)
+            try FileManager.default.createDirectory(at: skill.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("---\nname: \(model.setup.command)\n---\n\nThe user's own skill.\n".utf8).write(to: skill)
+        }
         model.setup.nodes.setEnabledForTesting(state.remoteMachines ?? false)
         if let host = state.machine, let node = state.nodes?.first(where: { $0.host == host }) {
             let machine = AgentSetup(installer: model.setup.installer, placeholderIcon: Fixtures.appIcon, nodes: model.setup.nodes, isRemote: true)
@@ -336,6 +345,16 @@ enum Surfaces {
         if toast.oneApp {
             return InstallResult(action: .removed, apps: [.init(name: "Cursor", icon: Fixtures.appIcon, failed: false, changed: true)])
         }
-        return Fixtures.installResult(failed: toast.failed)
+        let result = Fixtures.installResult(failed: toast.failed)
+        let taken = toast.taken ?? 0
+        guard taken > 0 else {
+            return result
+        }
+        // The first apps are skipped: the name is another skill's there.
+        let apps = result.apps.enumerated().map { index, app in
+            let conflict = index < taken ? "A skill named annotate already exists in \(app.name). Choose another command name." : nil
+            return InstallResult.App(name: app.name, icon: app.icon, failed: app.failed, changed: app.changed && conflict == nil, conflict: conflict)
+        }
+        return InstallResult(action: .installed, apps: apps)
     }
 }
