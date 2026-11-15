@@ -9,8 +9,7 @@ struct Phone: Equatable, Sendable {
     let name: String
 }
 
-/// Finds iPhones connected by cable, and captures their screens for the picker's pictures and
-/// for recordings. The phone must be unlocked and trust this Mac; Tilde needs the camera
+/// Finds iPhones connected by cable, and captures their screens for recordings. The phone must be unlocked and trust this Mac; Tilde needs the camera
 /// permission.
 enum PhoneCapture {
     /// Lets macOS offer the screens of iPhones and iPads on a cable as capture devices. They
@@ -68,25 +67,13 @@ enum PhoneCapture {
         return (session, device, output)
     }
 
-    /// One frame of the phone's screen, or nil when it sends none within two seconds.
-    static func snapshot(of phone: Phone) async -> CGImage? {
-        guard let capture = try? await session(for: phone) else {
-            return nil
-        }
-        let firstFrame = FirstFrame()
-        capture.output.setSampleBufferDelegate(firstFrame, queue: firstFrame.queue)
-        capture.session.startRunning()
-        defer { capture.session.stopRunning() }
-        return try? await firstFrame.image(timeout: 2)
-    }
-
     private static func devices() -> [AVCaptureDevice] {
         AVCaptureDevice.DiscoverySession(deviceTypes: [.external], mediaType: .muxed, position: .unspecified).devices
     }
 }
 
 /// Waits for a capture session's first frame: a phone's format says 0 × 0 until it streams,
-/// so the first frame gives its size, and its picture.
+/// so the first frame gives its size.
 final class FirstFrame: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     let queue = DispatchQueue(label: "dev.tilde.first-frame")
     // Read and written on `queue` only.

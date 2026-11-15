@@ -8,8 +8,8 @@ import Foundation
 /// An unknown key or value is an error, so a typo cannot test another state.
 extension SessionFlow: Codable {
     private enum Key: String, CodingKey, CaseIterable {
-        case mode, pauses, drawing, wireframe, panel, question, clip, operation, then, pickerOpen, returnTo
-        case choosesInPicker, lastOperation
+        case mode, pauses, drawing, wireframe, panel, question, clip, operation, then, picking, returnTo
+        case lastOperation
     }
 
     private struct AnyKey: CodingKey {
@@ -35,7 +35,6 @@ extension SessionFlow: Codable {
             throw Self.unknown("key \(key.stringValue)", decoder)
         }
         let values = try decoder.container(keyedBy: Key.self)
-        choosesInPicker = try values.decodeIfPresent(Bool.self, forKey: .choosesInPicker) ?? false
         lastOperation = try values.decodeIfPresent(Int.self, forKey: .lastOperation) ?? 0
         let operation = try values.decodeIfPresent(Int.self, forKey: .operation) ?? 0
 
@@ -77,7 +76,11 @@ extension SessionFlow: Codable {
             }
             open.activity = .recording(clip)
         case "picking":
-            open.activity = .picking(isPickerOpen: try values.decodeIfPresent(Bool.self, forKey: .pickerOpen) ?? false)
+            let name = try values.decodeIfPresent(String.self, forKey: .picking) ?? "onScreen"
+            guard let picking = Picking(rawValue: name) else {
+                throw unknown("picking \(name)", decoder)
+            }
+            open.activity = .picking(picking)
         default:
             open.activity = .annotating
         }
@@ -107,7 +110,6 @@ extension SessionFlow: Codable {
 
     func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: Key.self)
-        try values.encode(choosesInPicker, forKey: .choosesInPicker)
         try values.encode(lastOperation, forKey: .lastOperation)
 
         switch mode {
@@ -135,9 +137,9 @@ extension SessionFlow: Codable {
         switch open.activity {
         case .annotating:
             try values.encode("annotating", forKey: .mode)
-        case .picking(let isPickerOpen):
+        case .picking(let picking):
             try values.encode("picking", forKey: .mode)
-            try values.encode(isPickerOpen, forKey: .pickerOpen)
+            try values.encode(picking.rawValue, forKey: .picking)
         case .recording(let clip):
             try values.encode("recording", forKey: .mode)
             switch clip {
@@ -201,7 +203,7 @@ extension SessionFlow.Event: Codable {
             "redoDrawing": .redoDrawing, "shapeFinished": .shapeFinished, "startWireframe": .startWireframe, "wireframeTaken": .wireframeTaken, "toggleRecordingMode": .toggleRecordingMode, "record": .record,
             "stop": .stop, "clipStarted": .clipStarted(operation), "clipStartFailed": .clipStartFailed(operation),
             "clipFinished": .clipFinished(operation), "clipFailed": .clipFailed(operation), "captureStopped": .captureStopped, "windowClosed": .windowClosed,
-            "pickSource": .pickSource, "openPicker": .openPicker, "choose": .choose,
+            "selectOnScreen": .selectOnScreen, "showAllWindows": .showAllWindows, "choose": .choose,
             "send": .send, "sendFinished": .sendFinished(operation), "sendFailed": .sendFailed(operation), "sentShown": .sentShown(operation),
             "pushFailed": .pushFailed,
         ]

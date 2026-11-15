@@ -8,10 +8,6 @@ import Foundation
 /// Tests/Contract/transitions pins this table.
 struct SessionFlow: Equatable {
     var mode: Mode = .open(Open())
-    /// A click on the source button opens the picker at once, as the user last chose from it,
-    /// instead of clicking on screen. The flow changes it; the controller keeps it across
-    /// launches.
-    var choosesInPicker = false
     /// The last async operation started (a clip start or stop, a send, a confirmation); its
     /// result counts only while the mode still waits for that operation.
     var lastOperation = 0
@@ -79,9 +75,17 @@ struct SessionFlow: Equatable {
         case annotating
         case recording(Clip)
         /// Choosing what to record, in recording mode with no clip in progress; the session
-        /// goes back there after the choice. The picker is open in full, or only its "Use
-        /// window picker" button shows.
-        case picking(isPickerOpen: Bool)
+        /// goes back there after the choice. The source menu's screens choose with no step of
+        /// their own.
+        case picking(Picking)
+    }
+
+    /// How a window is being chosen.
+    enum Picking: String {
+        /// A click on a window on screen chooses it.
+        case onScreen
+        /// The window grid under the recording bar: apps, then their windows.
+        case windowGrid
     }
 
     /// What the drawing canvas is open for.
@@ -197,10 +201,11 @@ struct SessionFlow: Equatable {
         case captureStopped
         /// The window that the session is limited to closed.
         case windowClosed
-        /// A click on the recording bar's source button, and the menu's Record a Specific Window:
-        /// choosing what to record starts, or ends with no change. Then the picker's button.
-        case pickSource, openPicker
-        /// A window, a screen or a phone was chosen to record.
+        /// The source menu's "Select on screen", also the status menu's Record a Specific
+        /// Window, and its "Show all windows".
+        case selectOnScreen, showAllWindows
+        /// A window, a screen or a phone was chosen to record: on screen, in the window grid or
+        /// in the source menu.
         case choose
         case send, sendFinished(Int), sendFailed(Int), sentShown(Int), pushFailed
     }
@@ -225,7 +230,8 @@ struct SessionFlow: Equatable {
         /// for any more throws its recorder or file away.
         case adoptClip, keepClip, dropClip
         case showStartFailure, showSaveFailure, showSourceGone
-        case startPicking, stopPicking, openPicker, closePicker, applySource, openBrowser
+        /// Choosing starts and ends; the window grid opens and closes while choosing.
+        case startPicking, stopPicking, openWindowGrid, closeWindowGrid, applySource, openBrowser
         case startSend, finishSend, showSendFailure, showPushFailure, hideHUD
     }
 
@@ -422,8 +428,8 @@ struct SessionFlow: Equatable {
             return effects
         case .open(var open):
             let effects: [Effect]
-            if case .picking(let isPickerOpen) = open.activity {
-                effects = handlePicking(event, isPickerOpen: isPickerOpen, &open)
+            if case .picking(let picking) = open.activity {
+                effects = handlePicking(event, picking, &open)
             } else if open.question != nil, !Self.isAnswer(event) {
                 // A question waits for its answer; nothing else acts under it.
                 effects = []
@@ -505,28 +511,27 @@ struct SessionFlow: Equatable {
         }
     }
 
-    /// While choosing, only the source button, Esc (or the picker's Back), the picker, a
-    /// choice and the buttons of the modes act, and the front app and hold key keep the pause
-    /// the session goes back to; nothing else does anything.
-    private mutating func handlePicking(_ event: Event, isPickerOpen: Bool, _ open: inout Open) -> [Effect] {
+    /// While choosing, only Esc, the source menu, a choice and the buttons of the modes act,
+    /// and the front app and hold key keep the pause the session goes back to; nothing else
+    /// does anything.
+    private mutating func handlePicking(_ event: Event, _ picking: Picking, _ open: inout Open) -> [Effect] {
         let back = Activity.recording(.ready)
         switch event {
         case .escape:
-            // One level back at a time, as in the preview: the open picker, then choosing.
-            if isPickerOpen {
-                open.activity = .picking(isPickerOpen: false)
-                choosesInPicker = false
-                return [.closePicker]
+            open.activity = back
+            return [.stopPicking]
+        case .selectOnScreen:
+            guard picking == .windowGrid else {
+                return []
             }
-            open.activity = back
-            return [.stopPicking]
-        case .pickSource:
-            open.activity = back
-            return [.stopPicking]
-        case .openPicker:
-            open.activity = .picking(isPickerOpen: true)
-            choosesInPicker = true
-            return [.openPicker]
+            open.activity = .picking(.onScreen)
+            return [.closeWindowGrid]
+        case .showAllWindows:
+            guard picking == .onScreen else {
+                return []
+            }
+            open.activity = .picking(.windowGrid)
+            return [.openWindowGrid]
         case .toggleRecordingMode:
             // Choosing ends with no change, and the toggle goes back to annotating.
             open.activity = back
@@ -739,12 +744,12 @@ struct SessionFlow: Equatable {
             if case .recording = open.activity {
                 return leaveRecording(&open)
             }
-            // Recording mode starts by choosing what to record, the way the user last chose.
+            // Recording mode starts by choosing a window on screen; Esc keeps the screen.
             let entered = enterRecording(&open)
             guard open.activity == .recording(.ready) else {
                 return entered
             }
-            return entered + startPicking(&open)
+            return entered + startPicking(.onScreen, &open)
 
         case .record:
             return record(&open)
@@ -797,7 +802,7 @@ struct SessionFlow: Equatable {
             open.activity = .recording(.ready)
             return [.showSaveFailure]
 
-        case .pickSource:
+        case .selectOnScreen, .showAllWindows:
             // Only recording mode chooses a source, before Record: notes keep their own window.
             guard open.activity == .recording(.ready) else {
                 return []
@@ -805,10 +810,15 @@ struct SessionFlow: Equatable {
             if open.panel == .comment, facts.commentHasText {
                 return leaveComment(&open)
             }
-            return finishDrawingAndPanel(&open) + startPicking(&open)
+            let picking: Picking = event == .showAllWindows ? .windowGrid : .onScreen
+            return finishDrawingAndPanel(&open) + startPicking(picking, &open)
 
-        case .openPicker, .choose:
-            return []
+        case .choose:
+            // A screen or a phone from the source menu, before Record.
+            guard open.activity == .recording(.ready) else {
+                return []
+            }
+            return [.applySource]
 
         case .send:
             return send(&open)
@@ -1025,9 +1035,9 @@ struct SessionFlow: Equatable {
         return closes + [.enterRecording]
     }
 
-    private func startPicking(_ open: inout Open) -> [Effect] {
-        open.activity = .picking(isPickerOpen: choosesInPicker)
-        return [.startPicking] + (choosesInPicker ? [.openPicker] : [])
+    private func startPicking(_ picking: Picking, _ open: inout Open) -> [Effect] {
+        open.activity = .picking(picking)
+        return [.startPicking] + (picking == .windowGrid ? [.openWindowGrid] : [])
     }
 
     /// Esc and the record toggle: back to no mode; a clip that is not stopped is lost, so

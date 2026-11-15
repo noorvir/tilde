@@ -219,7 +219,7 @@ enum Surfaces {
             open.activity = .recording(clip)
         }
         if state.pickingWindow == true {
-            open.activity = .picking(isPickerOpen: state.sourcePicker != nil)
+            open.activity = .picking(state.windowGrid == nil ? .onScreen : .windowGrid)
         }
         var mode = SessionFlow.Mode.open(open)
         if state.sent != nil {
@@ -253,32 +253,30 @@ enum Surfaces {
             // A clip in progress has run for 12 seconds.
             clipClock: (Date(), 12)
         )
-        if let picker = state.sourcePicker {
+        if let grid = state.windowGrid {
             var (screens, apps) = Fixtures.sources()
             let phase: SourcePickerModel.Phase
-            switch state.pickerPhase {
+            switch state.gridPhase {
             case .listing:
-                (screens, apps) = ([], [])
+                apps = []
                 phase = .listing
             case .failed:
-                (screens, apps) = ([], [])
+                apps = []
                 phase = .failed
             case .empty:
-                (screens, apps) = ([], [])
+                apps = []
                 phase = .done
             case .picturing, .noPictures:
                 // The tiles are listed, and their pictures are coming, or could not be taken.
-                screens = screens.map { tile in var tile = tile; tile.picture = nil; return tile }
                 apps = apps.map { app in var app = app; app.windows = app.windows.map { tile in var tile = tile; tile.picture = nil; return tile }; return app }
-                phase = state.pickerPhase == .picturing ? .picturing : .done
+                phase = state.gridPhase == .picturing ? .picturing : .done
             case nil:
                 phase = .done
             }
             // Opened as the app opens it, so it offers what the app would.
             controller.sourcePicker.injected = (screens, apps, phase)
-            controller.dispatch(.openPicker)
-            controller.sourcePicker.tab = picker == .screens ? .screens : .windows
-            controller.sourcePicker.openApp = picker == .app ? Fixtures.window.pid : nil
+            controller.sourcePicker.load(browserWindow: nil)
+            controller.sourcePicker.openApp = grid == .app ? Fixtures.window.pid : nil
         }
     }
 

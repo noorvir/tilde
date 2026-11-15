@@ -3,7 +3,7 @@ import SwiftUI
 struct HUDButton: View {
     /// An SF Symbol, or an image such as an app icon; nil for a title alone.
     let image: Image?
-    /// A label after the icon, such as "Use window picker", which is its accessible name.
+    /// A label after the icon, such as "Open in Tilde's browser", which is its accessible name.
     var title: String?
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
     /// count keeps the width of two digits, so the buttons stay put as the count changes.
@@ -111,13 +111,15 @@ struct HUDButtonChrome: ViewModifier {
     }
 }
 
-/// A HUD button's content: the icon, the title, a chevron for what opens under it, then a
-/// slot two digits wide for the count, empty at zero, so the icon stays put as the count
-/// changes.
+/// A HUD button's content: the icon, the title, the key that does the same, a chevron for what
+/// opens under it, then a slot two digits wide for the count, empty at zero, so the icon stays
+/// put as the count changes.
 struct HUDButtonLabel: View {
     let image: Image?
     var title: String?
     var badge: Int?
+    /// The key that does the same as the button now, such as "Esc", after the title.
+    var key: String?
     /// It opens a menu or a popover under it: a chevron after the title.
     var opensBelow = false
     /// The title takes the width the button gives it, so the chevron is at the button's end.
@@ -137,6 +139,9 @@ struct HUDButtonLabel: View {
                     .font(.system(size: pillSize.font(12.5), weight: .medium))
                     .lineLimit(1)
                     .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+            }
+            if let key {
+                KeyHint(key: key)
             }
             if opensBelow {
                 Image(systemName: "chevron.down")

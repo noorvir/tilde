@@ -177,7 +177,7 @@ enum Fixtures {
 
     // MARK: - Recording sources
 
-    /// A screen or window: a coloured backdrop with a light window on it.
+    /// A window: a coloured backdrop with a light window on it.
     static func sourcePicture(width: Int, height: Int, seed: Int) -> CGImage {
         picture(width: width, height: height) { context, size in
             let hues: [(CGFloat, CGFloat, CGFloat)] = [(0.22, 0.36, 0.62), (0.45, 0.30, 0.55), (0.20, 0.50, 0.45), (0.62, 0.42, 0.25)]
@@ -192,27 +192,15 @@ enum Fixtures {
         }
     }
 
-    /// A phone's screen: tall, with rows like a list.
-    static func phonePicture() -> CGImage {
-        picture(width: 118, height: 256) { context, size in
-            context.setFillColor(CGColor(gray: 0.98, alpha: 1))
-            context.fill(CGRect(origin: .zero, size: size))
-            for row in 0..<8 {
-                context.setFillColor(CGColor(gray: 0.88, alpha: 1))
-                context.fill(CGRect(x: 10, y: size.height - 48 - CGFloat(row) * 26, width: size.width - 20, height: 18))
-            }
-        }
-    }
-
     static let phone = Phone(id: "phone", name: "iPhone")
     static let display: CGDirectDisplayID = 9002
 
     /// Two screens and a phone; Safari (with `window`), Xcode, Terminal, Notes and Finder.
     static func sources() -> (screens: [SourcePickerModel.Tile], apps: [SourcePickerModel.App]) {
         let screens = [
-            SourcePickerModel.Tile(source: .screen(9001), title: "Built-in Retina Display", detail: "3024 × 1964", picture: sourcePicture(width: 302, height: 196, seed: 0)),
-            SourcePickerModel.Tile(source: .screen(display), title: "Studio Display", detail: "5120 × 2880", picture: sourcePicture(width: 320, height: 180, seed: 1)),
-            SourcePickerModel.Tile(source: .phone(phone), title: phone.name, detail: "Cable", picture: phonePicture()),
+            SourcePickerModel.Tile(source: .screen(9001), title: "Built-in Retina Display", detail: ""),
+            SourcePickerModel.Tile(source: .screen(display), title: "Studio Display", detail: ""),
+            SourcePickerModel.Tile(source: .phone(phone), title: phone.name, detail: "Cable"),
         ]
         let windows: [(pid: pid_t, app: String, titles: [String])] = [
             (window.pid, "Safari", [window.title ?? "", "Pull request", "Downloads"]),

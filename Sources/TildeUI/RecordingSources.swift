@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import ScreenCaptureKit
 
 /// What a clip records.
@@ -17,15 +18,11 @@ enum RecordingSource: Equatable {
     }
 }
 
-/// The recording source picker under the HUD: the screens and a phone on a cable, and the
-/// apps' windows, each with a picture taken when the picker opens.
+/// What recording mode can record: the screens and phones on a cable, for the source menu,
+/// and the apps' windows, for the window grid, each window with a picture taken when the grid
+/// opens.
 @MainActor
 final class SourcePickerModel: ObservableObject {
-    enum Tab: Hashable {
-        case screens
-        case windows
-    }
-
     struct Tile: Identifiable {
         let source: RecordingSource
         let title: String
@@ -46,8 +43,8 @@ final class SourcePickerModel: ObservableObject {
         var id: pid_t { pid }
     }
 
-    /// Where the list is: listing the sources, taking their pictures, done, or failed, such as
-    /// without the Screen Recording permission.
+    /// Where the window grid is: listing the windows, taking their pictures, done, or failed,
+    /// such as without the Screen Recording permission.
     enum Phase: Equatable {
         case listing
         case picturing
@@ -56,25 +53,52 @@ final class SourcePickerModel: ObservableObject {
     }
 
     @Published private(set) var phase = Phase.listing
-    /// The most room the picker has under the HUD's pill on its screen; the HUD sets it.
+    /// The most room the window grid has under the HUD's pill on its screen; the HUD sets it.
     @Published var space = CGSize(width: 780, height: 900)
-    @Published var tab = Tab.screens
     /// The app whose windows are shown, or nil for the list of apps.
     @Published var openApp: pid_t?
+    /// The source menu's screens, then phones; their tiles have no picture.
     @Published private(set) var screens: [Tile] = []
     @Published private(set) var apps: [App] = []
 
     private var loading: Task<Void, Never>?
-    /// Sources offered in place of the screen's, such as fixtures for pictures and tests; a
-    /// load treats them as it treats the screen's.
+    private var observers: [NSObjectProtocol] = []
+    /// Sources offered in place of the Mac's, such as fixtures for pictures and tests; a
+    /// listing treats them as it treats the Mac's.
     var injected: (screens: [Tile], apps: [App], phase: Phase)?
 
-    /// Lists the sources on screen now, then takes their pictures, in place of a load still
-    /// running. It lists a phone in both modes; the picker offers it only for recording.
+    /// Lists the screens and phones now, and again whenever a screen or a phone comes or goes.
+    func listScreens() {
+        if let injected {
+            screens = injected.screens
+            return
+        }
+        PhoneCapture.allowPhones()
+        let displays = NSScreen.screens.compactMap(\.displayID).map { display in
+            Tile(source: .screen(display), title: Self.name(of: display), detail: "")
+        }
+        let detail = PhoneCapture.hasCameraAccess ? "Cable" : "Needs Camera access"
+        let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: detail) }
+        screens = displays + phones
+
+        guard observers.isEmpty else {
+            return
+        }
+        let changes: [Notification.Name] = [NSApplication.didChangeScreenParametersNotification, AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification]
+        observers = changes.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.listScreens()
+                }
+            }
+        }
+    }
+
+    /// Lists the windows on screen now, then takes their pictures, in place of a load still
+    /// running.
     func load(browserWindow: Int?) {
         loading?.cancel()
         if let injected {
-            screens = injected.screens
             apps = injected.apps
             phase = injected.phase
             return
@@ -85,57 +109,33 @@ final class SourcePickerModel: ObservableObject {
         }
     }
 
-    /// The picker closed: a load still running writes nothing more.
+    /// The window grid closed: a load still running writes nothing more.
     func stopLoading() {
         loading?.cancel()
         loading = nil
     }
 
     private func reload(browserWindow: Int?) async {
-        PhoneCapture.allowPhones()
         let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         guard !Task.isCancelled else {
             return
         }
         guard let content else {
-            screens = []
             apps = []
             phase = .failed
             return
         }
 
-        let displays = content.displays.map { display in
-            Tile(source: .screen(display.displayID), title: Self.name(of: display.displayID), detail: Self.pixelSize(of: display.displayID))
-        }
-        // A phone's picture needs the Camera permission, which is asked for only when the user
-        // chooses the phone to record.
-        let mayFilmPhones = PhoneCapture.hasCameraAccess
-        let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: mayFilmPhones ? "Cable" : "Needs Camera access") }
-        screens = displays + phones
-        apps = Self.apps(of: content.windows, browserWindow: browserWindow)
-
         // Tilde's browser is a window like any other; its other windows are left out.
-        let tilde = content.applications.filter { $0.processID == getpid() }
-        let browser = content.windows.filter { Int($0.windowID) == browserWindow }
-        let tiles = screens + apps.flatMap(\.windows)
+        apps = Self.apps(of: content.windows, browserWindow: browserWindow)
+        let tiles = apps.flatMap(\.windows)
         phase = .picturing
         await withTaskGroup(of: (String, CGImage?).self) { group in
             for tile in tiles {
-                switch tile.source {
-                case .screen(let id):
-                    if let display = content.displays.first(where: { $0.displayID == id }) {
-                        let filter = SCContentFilter(display: display, excludingApplications: tilde, exceptingWindows: browser)
-                        group.addTask { await (tile.id, Self.picture(of: filter, size: display.frame.size)) }
-                    }
-                case .window(let info):
-                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }) {
-                        group.addTask { await (tile.id, Self.picture(of: SCContentFilter(desktopIndependentWindow: window), size: window.frame.size)) }
-                    }
-                case .phone(let phone):
-                    if mayFilmPhones {
-                        group.addTask { await (tile.id, PhoneCapture.snapshot(of: phone)) }
-                    }
+                guard case .window(let info) = tile.source, let window = content.windows.first(where: { Int($0.windowID) == info.number }) else {
+                    continue
                 }
+                group.addTask { await (tile.id, Self.picture(of: SCContentFilter(desktopIndependentWindow: window), size: window.frame.size)) }
             }
             for await (id, picture) in group {
                 guard !Task.isCancelled else {
@@ -151,9 +151,6 @@ final class SourcePickerModel: ObservableObject {
     }
 
     private func setPicture(_ picture: CGImage?, for id: String) {
-        if let index = screens.firstIndex(where: { $0.id == id }) {
-            screens[index].picture = picture
-        }
         for appIndex in apps.indices {
             if let index = apps[appIndex].windows.firstIndex(where: { $0.id == id }) {
                 apps[appIndex].windows[index].picture = picture
@@ -213,13 +210,6 @@ final class SourcePickerModel: ObservableObject {
             return "Display"
         }
         return name
-    }
-
-    private static func pixelSize(of display: CGDirectDisplayID) -> String {
-        guard let mode = CGDisplayCopyDisplayMode(display) else {
-            return ""
-        }
-        return "\(mode.pixelWidth) × \(mode.pixelHeight)"
     }
 }
 

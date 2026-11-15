@@ -58,7 +58,7 @@ struct HUDView: View {
         VStack(spacing: HUDAccessory.gap) {
             // In Tilde's browser the main bar is on the toolbar, below the canvas.
             if !hud.isInBrowser {
-                // Its own width, also above a wider accessory picker.
+                // Its own width, also above the wider window grid.
                 pill
                     .fixedSize()
             }
@@ -85,12 +85,8 @@ struct HUDView: View {
                 AnnotationList(controller: controller)
                     .transition(Self.zoom)
             }
-            if hud.isShown, controller.isPickingWindow {
-                HUDAccessoryPicker(
-                    model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
-                    selectedID: controller.clipSource.id,
-                    onOpen: { controller.dispatch(.openPicker) }, onBack: controller.escapePressed, onChoose: controller.choose
-                )
+            if hud.isShown, controller.isWindowGridOpen {
+                HUDWindowGrid(model: controller.sourcePicker, selectedID: controller.clipSource.id, onBack: controller.escapePressed, onChoose: controller.choose)
                     .transition(Self.zoom)
             }
         }
@@ -100,8 +96,7 @@ struct HUDView: View {
         .tildeTooltipHost()
         .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
         .animation(.spring(duration: 0.28), value: hud.showsList)
-        .animation(.spring(duration: 0.28), value: controller.isPickingWindow)
-        .animation(.spring(duration: 0.3, bounce: 0), value: controller.isSourcePickerOpen)
+        .animation(.spring(duration: 0.28), value: controller.isWindowGridOpen)
         .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
         .animation(.easeOut(duration: 0.15), value: controller.isRecordMode)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
@@ -344,11 +339,11 @@ struct HUDView: View {
             )
     }
 
-    /// Record's bar under the pill: the source, then Play or Pause and Stop. It keeps its
-    /// width in every state of the clip; only the icon of Play or Pause changes.
+    /// Record's bar under the pill: the source menu, then Record or Pause and Stop. It keeps
+    /// its width in every state of the clip and of choosing.
     private var recordingAccessoryBar: some View {
         HUDRecordingBar(
-            controller: controller, sourceName: controller.clipSourceName, source: controller.clipSource, appIcon: controller.clipSourceAppIcon,
+            controller: controller, sources: controller.sourcePicker, sourceName: controller.clipSourceName, source: controller.clipSource, appIcon: controller.clipSourceAppIcon,
             recordKeys: keys(.pauseOrResume)
         )
             .pillInsets(HUDAccessory.size)
@@ -598,7 +593,7 @@ struct HUDView: View {
             return .notice(notice.rawValue)
         }
         if controller.isPickingWindow {
-            return controller.isSourcePickerOpen ? .inPicker : .choosingWindow
+            return controller.isWindowGridOpen ? .inWindowGrid : .choosingWindow
         }
         let pauses = controller.pauses
         if pauses.contains(.user) {
@@ -645,7 +640,7 @@ private struct SubtitleLine: View {
 
 /// The browser accessory bar: under the HUD after the first click in another browser in a
 /// session, it opens its page in Tilde's browser. The pill's buttons in an accessory bar, like
-/// "Use window picker", that stays until it is used or dismissed.
+/// the recording bar, that stays until it is used or dismissed.
 struct HUDAccessoryBrowserBar: View {
     let onOpen: () -> Void
     let onDismiss: () -> Void

@@ -11,7 +11,7 @@ struct UIState: Decodable {
     enum Appearance: String, Decodable {
         case light, dark
     }
-    enum PickerPhase: String, Decodable {
+    enum GridPhase: String, Decodable {
         case listing, failed, empty, picturing, noPictures
     }
     enum PauseNotice: String, Decodable {
@@ -23,8 +23,8 @@ struct UIState: Decodable {
     enum Source: String, Decodable {
         case display, phone
     }
-    enum SourcePicker: String, Decodable {
-        case screens, windows, app
+    enum WindowGrid: String, Decodable {
+        case apps, app
     }
     enum SentStatus: String, Decodable {
         case done, failed
@@ -139,10 +139,10 @@ struct UIState: Decodable {
     var clip: Bool?
     /// The last note is a wireframe on the Safari window.
     var wireframeNote: Bool?
-    /// The source picker while it lists ("listing"), after it failed ("failed"), with nothing
+    /// The window grid while it lists ("listing"), after it failed ("failed"), with nothing
     /// to offer ("empty"), while it takes the tiles' pictures ("picturing"), or when it could not
     /// take them ("noPictures").
-    var pickerPhase: PickerPhase?
+    var gridPhase: GridPhase?
     var paused: Bool?
     var autoPaused: Bool?
     var confirmation: SessionFlow.Question?
@@ -169,10 +169,9 @@ struct UIState: Decodable {
     var source: Source?
     /// The name of the screen that Record records; "Studio Display" when absent.
     var screenName: String?
-    /// The source picker's page when it is open in full while choosing (`pickingWindow`):
-    /// "screens", "windows", or "app" for Safari's windows. Without it the picker is its
-    /// "Use window picker" button.
-    var sourcePicker: SourcePicker?
+    /// The window grid, open while choosing (`pickingWindow`): "apps", or "app" for Safari's
+    /// windows. Without it a click on screen chooses.
+    var windowGrid: WindowGrid?
     var sentStatus: SentStatus?
     var drawingColor: String?
     var commentText: String?

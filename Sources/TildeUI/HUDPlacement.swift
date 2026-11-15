@@ -27,20 +27,20 @@ final class HUDPlacement: ObservableObject {
 
     /// Puts the HUD where the session is. `inBrowser`: the session is limited to Tilde's
     /// browser, where the HUD stays in the toolbar and the floating panel shows only the
-    /// source picker, under the toolbar, while choosing.
-    func place(inBrowser: Bool, isPicking: Bool) {
+    /// window grid, under the toolbar, while it is open.
+    func place(inBrowser: Bool, isWindowGridOpen: Bool) {
         isInBrowser = inBrowser
-        if inBrowser, isPicking, let frame = browser.window?.frame {
+        if inBrowser, isWindowGridOpen, let frame = browser.window?.frame {
             panel.show(top: NSPoint(x: frame.midX, y: frame.maxY - BrowserMetrics.toolbarHeight + 10))
         } else if inBrowser {
             panel.hide()
         } else if !isShown {
             panel.show()
         }
-        if isPicking {
-            panel.fitPicker()
+        if isWindowGridOpen {
+            panel.fitWindowGrid()
         } else {
-            panel.endPicking()
+            panel.endWindowGrid()
         }
     }
 

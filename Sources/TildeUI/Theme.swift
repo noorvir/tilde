@@ -83,7 +83,7 @@ enum PillEnd {
 }
 
 /// An accessory bar: a compact pill attached under the HUD, such as the drawing bar, the
-/// browser accessory bar and "Use window picker" (with the picker it grows into). It is
+/// browser accessory bar and the recording bar; the window grid under it uses its size. It is
 /// compact so the HUD stays the main surface.
 enum HUDAccessory {
     static let size = PillSize.compact
@@ -116,7 +116,7 @@ extension View {
             .environment(\.pillSize, size)
     }
 
-    /// A card in the HUD's style: the list, the source picker, the comment box and the pause
+    /// A card in the HUD's style: the list, the window grid, the comment box and the pause
     /// note.
     func hudCard(cornerRadius: CGFloat = 16) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius)

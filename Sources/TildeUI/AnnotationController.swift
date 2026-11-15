@@ -35,13 +35,10 @@ final class AnnotationController: ObservableObject {
     var isPickingWindow: Bool { flow.isPicking }
     /// Recording mode, also while choosing its next clip's source.
     var isRecordMode: Bool { flow.isRecordMode }
-    /// While choosing, the source picker is open in full in place of its "Use window picker"
-    /// button, and clicks on screen choose nothing.
-    var isSourcePickerOpen: Bool {
-        if case .picking(isPickerOpen: true) = flow.session?.activity {
-            return true
-        }
-        return false
+    /// While choosing, the window grid is open under the recording bar, and clicks on screen
+    /// choose nothing.
+    var isWindowGridOpen: Bool {
+        flow.session?.activity == .picking(.windowGrid)
     }
     /// A question in the pill, waiting for the user.
     var confirmation: SessionFlow.Question? { flow.session?.question }
@@ -206,7 +203,6 @@ final class AnnotationController: ObservableObject {
         wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
         wireframes = WireframeSwitch(defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
-        flow.choosesInPicker = defaults.bool(forKey: "ChoosesInPicker")
 
         subscription = store.$sessions
             .receive(on: RunLoop.main)
@@ -325,9 +321,6 @@ final class AnnotationController: ObservableObject {
         var next = flow
         let effects = next.handle(event, facts)
         let questionChanged = next.session?.question != flow.session?.question
-        if next.choosesInPicker != flow.choosesInPicker {
-            defaults.set(next.choosesInPicker, forKey: "ChoosesInPicker")
-        }
         if let startMode = next.startMode, startMode != flow.startMode {
             defaults.set(startMode.rawValue, forKey: "LastMode")
         }
@@ -439,6 +432,7 @@ final class AnnotationController: ObservableObject {
             PlainClickTap.stop()
         case .enterRecording:
             hover = nil
+            sourcePicker.listScreens()
             scope.enterRecording()
         case .exitRecording:
             clips.discard()
@@ -462,23 +456,26 @@ final class AnnotationController: ObservableObject {
             hover = nil
             sourcePicker.stopLoading()
             pickingChanged()
-        case .openPicker: openPicker()
+        case .openWindowGrid:
+            openWindowGrid()
+            placeHUD()
         case .openBrowser: openBrowser(at: nil)
-        case .closePicker:
+        case .closeWindowGrid:
             hover = nil
             sourcePicker.stopLoading()
+            placeHUD()
         case .startSend: startSend()
         case .showSendFailure: notices.show(.reportNotSaved)
         }
     }
 
-    /// Esc, and the picker's "Select on screen" and "All apps".
+    /// Esc, and the window grid's "All apps".
     func escapePressed() {
         if wireframe.bar.handle(.escape) {
             return
         }
-        // In the picker, Esc first goes from an app's windows back to the apps.
-        if isSourcePickerOpen, sourcePicker.openApp != nil {
+        // In the window grid, Esc first goes from an app's windows back to the apps.
+        if isWindowGridOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
             return
         }
@@ -779,7 +776,7 @@ final class AnnotationController: ObservableObject {
         guard session != nil, isOpen else {
             return
         }
-        hud.place(inBrowser: scope.isBrowser, isPicking: isPickingWindow)
+        hud.place(inBrowser: scope.isBrowser, isWindowGridOpen: isWindowGridOpen)
     }
 
     private func toggleList() {
@@ -912,15 +909,15 @@ final class AnnotationController: ObservableObject {
         overlays.orderAbove(scope.window?.number)
     }
 
-    /// The choice of what the next clip records, in the picker or by a click on screen.
+    /// The choice of what the next clip records: in the source menu, in the window grid or by a
+    /// click on screen.
     func choose(_ source: RecordingSource) {
         dispatch(.choose, with: [.applySource: { [self] in
             scope.choose(source)
         }])
     }
 
-    private func openPicker() {
-        sourcePicker.tab = .screens
+    private func openWindowGrid() {
         sourcePicker.openApp = nil
         hover = nil
         sourcePicker.load(browserWindow: browser.windowNumber)
@@ -1309,10 +1306,7 @@ extension AnnotationController {
     ) {
         self.session = session
         self.drafts = drafts
-        // How the user chooses a window is theirs, not the session's.
-        let choosesInPicker = flow.choosesInPicker
         flow = SessionFlow(mode: mode)
-        flow.choosesInPicker = choosesInPicker
         self.hover = hover
         commentBox.setStateForTesting(pending: pending)
         previewCard.setStateForTesting(id: previewID)

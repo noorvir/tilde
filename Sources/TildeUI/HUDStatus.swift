@@ -61,7 +61,7 @@ extension HUDView {
     /// Every title the HUD shows, with the widest clock, for the width of the title column.
     static let titles: [String] = {
         let modes: [SessionFlow.Open] = [
-            SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(isPickerOpen: false)),
+            SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(.onScreen)),
         ] + [SessionFlow.Clip.ready, .starting(operation: 0), .recording, .paused, .finishing(operation: 0, then: .stay)].map {
             SessionFlow.Open(activity: .recording($0))
         }
@@ -72,8 +72,8 @@ extension HUDView {
     enum SubtitleState: Equatable {
         case annotating
         case choosingWindow
-        /// The picker is open, where Esc goes back one level.
-        case inPicker
+        /// The window grid is open, where Esc goes back one level.
+        case inWindowGrid
         case paused(shortcut: Shortcut?)
         /// Another app is in front of the window being annotated.
         case waitingForWindow
@@ -115,7 +115,7 @@ extension HUDView {
             return SubtitlePart(text: "Click the window")
         case .choosingWindow:
             return SubtitlePart(text: "Esc cancels")
-        case .inPicker:
+        case .inWindowGrid:
             return SubtitlePart(text: "Esc goes back")
         // Paused, it still says where the report goes.
         case .annotating, .paused:

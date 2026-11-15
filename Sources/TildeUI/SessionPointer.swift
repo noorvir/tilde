@@ -31,7 +31,7 @@ extension AnnotationController {
             return
         }
         if isPickingWindow {
-            hover = isSourcePickerOpen ? nil : picker.windowTarget(at: point)
+            hover = isWindowGridOpen ? nil : picker.windowTarget(at: point)
             return
         }
 
@@ -70,7 +70,7 @@ extension AnnotationController {
             return
         }
         if isPickingWindow {
-            guard !isSourcePickerOpen else {
+            guard !isWindowGridOpen else {
                 return
             }
             // A window, or outside windows the screen.
