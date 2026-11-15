@@ -4,6 +4,7 @@ import SwiftUI
 struct AgentSettings: View {
     @ObservedObject var setup: AgentSetup
     @Binding var expanded: Set<String>
+    @Binding var commandDraft: String?
     var onResult: (InstallResult) -> Void = { _ in }
     /// Opens a machine's page.
     var open: (String) -> Void = { _ in }
@@ -30,6 +31,8 @@ struct AgentSettings: View {
                 }
                 .disabled(rows.isEmpty)
             }
+
+            CommandSection(setup: setup, draft: $commandDraft, onResult: onResult)
 
             NodesSection(nodes: setup.nodes, open: open)
 
@@ -66,7 +69,47 @@ struct AgentSettings: View {
     }
 }
 
-/// Icon, name and status dot, a switch (on = installed) and a chevron; open, the files.
+/// The command that starts Tilde in every agent: a field and Change, which moves Tilde's
+/// skill to the new name in each app that has Tilde.
+private struct CommandSection: View {
+    @ObservedObject var setup: AgentSetup
+    @Binding var draft: String?
+    let onResult: (InstallResult) -> Void
+
+    var body: some View {
+        let text = draft ?? setup.command
+        let name = text.trimmingCharacters(in: .whitespaces)
+        let problem = CommandName.problem(name)
+        let canChange = name != setup.command && problem == nil
+
+        SettingsSection("Command") {
+            SettingsRow(title: "Command name", subtitle: problem ?? "Type /\(setup.command) in an agent to start Tilde; in Codex, $\(setup.command).", subtitleIsError: problem != nil) {
+                HStack(spacing: 8) {
+                    TextField("Command name", text: Binding { text } set: { draft = $0 }, prompt: Text(CommandName.standard))
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 13, design: .monospaced))
+                        .frame(width: 150)
+                        .onSubmit(change)
+                    Button("Change", action: change)
+                        .disabled(!canChange)
+                }
+            }
+        }
+    }
+
+    private func change() {
+        let name = (draft ?? setup.command).trimmingCharacters(in: .whitespaces)
+        guard name != setup.command, CommandName.problem(name) == nil else {
+            return
+        }
+        draft = nil
+        onResult(setup.rename(to: name))
+    }
+}
+
+/// Icon, name and status dot, a switch (on = installed) and a chevron; open, the files. When
+/// the command name is another skill's in the app, a warning under it that asks for another name.
 struct AgentRow: View {
     @ObservedObject var setup: AgentSetup
     let row: AgentSetup.Row
@@ -75,6 +118,7 @@ struct AgentRow: View {
 
     var body: some View {
         let status = setup.status(of: row)
+        let skill = setup.skillStatus(row.harness)
 
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -107,6 +151,15 @@ struct AgentRow: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityHint(isExpanded ? "Hides the files" : "Shows the files")
+
+            if case .taken(let conflict) = skill {
+                ConflictWarning(conflict: conflict) {
+                    setup.askForName([conflict])
+                }
+                .padding(.leading, 16 + 12 + 10 + 24 + 10)
+                .padding(.trailing, 16)
+                .padding(.bottom, 12)
+            }
 
             if isExpanded {
                 files
@@ -147,11 +200,34 @@ struct AgentRow: View {
                 onResult(setup.install([row]))
             }
             SetupItemRow(
-                title: "skill", code: "/tilde", state: setup.hasSkill(row.harness) ? .ok : .action("Set Up"),
+                title: row.harness == .gemini ? "command" : "skill", code: installer.invocation(for: row.harness),
+                state: SetupState.of(setup.skillStatus(row.harness)),
                 file: installer.skillFile(for: row.harness), isLocalFile: !setup.isRemote
             ) {
                 onResult(setup.install([row]))
             }
+        }
+    }
+}
+
+/// A yellow warning that the command name is another skill's or command's, and a button that
+/// asks for another name.
+private struct ConflictWarning: View {
+    let conflict: Conflict
+    let chooseName: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.yellow)
+                .accessibilityHidden(true)
+            Text("\(conflict.message) Choose another command name.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 16)
+            Button("Choose Name", action: chooseName)
+                .controlSize(.small)
         }
     }
 }

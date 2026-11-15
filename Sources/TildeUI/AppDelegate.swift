@@ -27,6 +27,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menu: StatusMenu?
     private var settings: SettingsWindow?
     private var toast: InstallToast?
+    private var namePromptWindow: NamePromptWindow?
     private var restoreToast: RestoreToast?
     private var updates: Updates?
     private var updateToast: UpdateToast?
@@ -106,13 +107,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let setup = AgentSetup(
             // Without the token the listener does not start, so entries without it change nothing.
             installer: Installer(environment: (try? .local(home: home, port: String(port), bridgePath: bridge)) ?? .standard(home: home, port: String(port), bridgePath: bridge)),
-            nodes: NodeSetup(nodePort: port + 1)
+            nodes: NodeSetup(nodePort: port + 1),
+            defaults: .standard
         )
+        // After an update: Tilde's skill under an old name, such as `tilde`, moves to the current one.
+        Task { await setup.migrate() }
         self.nodes = setup.nodes
         let shortcuts = controller.shortcuts
         let version = SettingsModel.bundleVersion
         let toast = InstallToast { [weak self] in
             self?.settings?.show(.home)
+        }
+        // An install that found the name taken in an app asks for another name first.
+        let namePrompt = NamePrompt()
+        namePrompt.onResult = { toast.show($0) }
+        setup.namePrompt = namePrompt
+        self.namePromptWindow = NamePromptWindow(prompt: namePrompt)
+        let onResult: (InstallResult) -> Void = { result in
+            if result.conflicts.isEmpty {
+                toast.show(result)
+            } else {
+                setup.askForName(result.conflicts, pending: result)
+            }
         }
         let controller = self.controller
         let history = HistoryModel(archive: controller.archive) {
@@ -145,14 +161,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         self.updateToast = updateToast
         let model = SettingsModel(
             setup: setup, wireframes: controller.wireframes, shortcuts: shortcuts, browser: browser, history: history, server: serverState, updates: updates, version: version,
-            onResult: { toast.show($0) }, onResetHUD: { [controller] in controller.hud.resetPosition() }
+            onResult: onResult, onResetHUD: { [controller] in controller.hud.resetPosition() }
         )
         let settings = SettingsWindow(model: model)
         controller.clientIcon = { setup.icon(forClient: $0) }
         controller.machineDot = { host in setup.nodes.rows.first { $0.host == host }?.dot ?? .grey }
         self.toast = toast
         self.settings = settings
-        menu = StatusMenu(browser: browser, controller: controller, settings: settings, setup: setup, version: version) { toast.show($0) }
+        menu = StatusMenu(browser: browser, controller: controller, settings: settings, setup: setup, version: version, onResult: onResult)
         hotKeys = HotKeys(controller: controller, shortcuts: shortcuts)
         NSApp.mainMenu = MainMenu.make(browser: browser, settings: settings)
         browserEvents = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .keyDown]) { [browser] event in

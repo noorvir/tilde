@@ -6,7 +6,7 @@ import TildeInstaller
 /// A key or a value that it does not know is an error, so a typo cannot record another picture.
 struct UIState: Decodable {
     enum Surface: String, Decodable {
-        case toast, updateToast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, wireframeAdjust, comment, preview, overlay, canvas
+        case toast, updateToast, namePrompt, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, wireframeAdjust, comment, preview, overlay, canvas
     }
     enum Appearance: String, Decodable {
         case light, dark
@@ -45,6 +45,8 @@ struct UIState: Decodable {
     struct Toast: Decodable {
         let failed: Int
         let oneApp: Bool
+        /// Apps skipped because the command name is another skill's there.
+        var taken: Int?
     }
     struct NodeState: Decodable {
         enum Status: String, Decodable {
@@ -109,6 +111,12 @@ struct UIState: Decodable {
         /// The machine whose page is open.
         var machine: String?
         var update: Update?
+        /// The saved command name; `annotate` when absent.
+        var commandName: String?
+        /// The command name as typed, before Change.
+        var commandDraft: String?
+        /// Apps that have another skill of the command name.
+        var taken: [Harness]?
     }
 
     let version: Int
@@ -116,6 +124,8 @@ struct UIState: Decodable {
     /// The wireframes beta; off when absent, as on a new install.
     var wireframes: Bool?
     var size: [Double]?
+    /// The name typed in the name prompt, then Install.
+    var promptName: String?
     var appearance: Appearance?
     var session: Session?
     var notes: Int?

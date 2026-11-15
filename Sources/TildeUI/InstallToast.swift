@@ -15,7 +15,7 @@ final class InstallToast {
     }
     private var monitors: [Any] = []
 
-    private static let size = NSSize(width: 560, height: PillMetrics.height + 32)
+    private static let size = NSSize(width: 760, height: PillMetrics.height + 32)
 
     init(onDetails: @escaping () -> Void) {
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: Self.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -61,14 +61,14 @@ final class InstallToast {
         panel.setFrameOrigin(NSPoint(x: top.x - Self.size.width / 2, y: top.y - Self.size.height))
     }
 
-    /// Errors stay longer, so there is time to open Details.
+    /// Errors and warnings stay longer, so there is time to open Details.
     private func scheduleDismiss() {
         pendingDismiss?.cancel()
         let dismiss = DispatchWorkItem { [weak self] in
             self?.hide()
         }
         pendingDismiss = dismiss
-        let seconds: Double = (state.result?.failures ?? 0) > 0 ? 8 : 4
+        let seconds: Double = (state.result.map { $0.failures + $0.conflicts.count } ?? 0) > 0 ? 8 : 4
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: dismiss)
     }
 
@@ -166,15 +166,22 @@ struct InstallToastView: View {
         }
 
         let failures = result.failures
+        // An app where the name is another skill's is skipped: Tilde changed nothing there.
+        let skipped = result.conflicts.count
         let apps = count == 1 ? first.name : "\(count) apps"
-        let done = result.action == .installed ? "Installed in" : "Removed from"
-        if failures == 0 {
+        let done = result.action == .removed ? "Removed from" : "Installed in"
+        if failures == 0, skipped == 0 {
             return "\(done) \(apps)"
         }
-        if failures == count {
-            return result.action == .installed ? "Could not install in \(apps)" : "Could not remove from \(apps)"
+        if skipped == count {
+            return "Did not install in \(apps)"
         }
-        return "\(done) \(count - failures) of \(count) apps · \(failures) failed"
+        if failures == count {
+            return result.action == .removed ? "Could not remove from \(apps)" : "Could not install in \(apps)"
+        }
+        let failed = failures > 0 ? " · \(failures) failed" : ""
+        let skips = skipped > 0 ? " · \(skipped) skipped" : ""
+        return "\(done) \(count - failures - skipped) of \(count) apps\(failed)\(skips)"
     }
 
     static func subtitle(_ result: InstallResult) -> String {
@@ -183,6 +190,13 @@ struct InstallToastView: View {
         }
         if result.failures > 0 {
             return "Details show what went wrong"
+        }
+        let conflicts = result.conflicts
+        if conflicts.count == 1 {
+            return "\(conflicts[0].message) Choose another command name in Settings."
+        }
+        if conflicts.count > 1 {
+            return "\(conflicts.count) apps already have a skill or command of that name. Choose another in Settings."
         }
         if !result.apps.contains(where: \.changed) {
             return result.action == .installed ? "Already up to date" : "Nothing to remove"
@@ -194,14 +208,15 @@ struct InstallToastView: View {
     }
 
     private static func symbol(_ result: InstallResult) -> String {
-        if result.failures == 0 {
+        if result.failures == 0, result.conflicts.isEmpty {
             return "checkmark.circle.fill"
         }
         return result.failures == result.apps.count ? "xmark.circle.fill" : "exclamationmark.circle.fill"
     }
 
+    /// Red when everything failed; yellow when something failed or was skipped.
     private static func color(_ result: InstallResult) -> Color {
-        if result.failures == 0 {
+        if result.failures == 0, result.conflicts.isEmpty {
             return .green
         }
         return result.failures == result.apps.count ? .red : .yellow

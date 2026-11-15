@@ -513,5 +513,146 @@
   "expect": {
    "setup": "Not on this machine"
   }
+ },
+ {
+  "name": "A skill under the command name shows a check",
+  "skillStatus": "installed",
+  "expect": {
+   "setup": "ok"
+  }
+ },
+ {
+  "name": "A missing skill offers Set Up",
+  "skillStatus": "missing",
+  "expect": {
+   "setup": "Set Up"
+  }
+ },
+ {
+  "name": "A command name that another skill has shows Name taken; the warning above it asks for another name",
+  "skillStatus": "taken",
+  "expect": {
+   "setup": "Name taken"
+  }
+ },
+ {
+  "name": "A command name of lowercase letters, digits and hyphens can be used",
+  "commandName": "look-2",
+  "expect": {
+   "commandProblem": null
+  }
+ },
+ {
+  "name": "An empty command name asks for a name",
+  "commandName": "",
+  "expect": {
+   "commandProblem": "Enter a name."
+  }
+ },
+ {
+  "name": "A capital letter or a space in the command name is refused",
+  "commandName": "My skill",
+  "expect": {
+   "commandProblem": "Use only lowercase letters, digits and hyphens."
+  }
+ },
+ {
+  "name": "A command name that starts or ends with a hyphen is refused",
+  "commandName": "look-",
+  "expect": {
+   "commandProblem": "Start and end with a letter or digit, with no double hyphen."
+  }
+ },
+ {
+  "name": "Install everywhere where one app has another skill of the name skips that app and says why",
+  "install": {
+   "apps": [
+    "Claude Code",
+    "Codex",
+    "Cursor"
+   ],
+   "taken": [
+    "Claude Code"
+   ]
+  },
+  "expect": {
+   "toastTitle": "Installed in 2 of 3 apps · 1 skipped",
+   "toastSubtitle": "Claude Code already has a skill named annotate. Choose another command name in Settings."
+  }
+ },
+ {
+  "name": "An install in the one app where the name is taken did not install",
+  "install": {
+   "apps": [
+    "Claude Code"
+   ],
+   "taken": [
+    "Claude Code"
+   ]
+  },
+  "expect": {
+   "toastTitle": "Did not install in Claude Code",
+   "toastSubtitle": "Claude Code already has a skill named annotate. Choose another command name in Settings."
+  }
+ },
+ {
+  "name": "Two apps where the name is taken are counted",
+  "install": {
+   "apps": [
+    "Claude Code",
+    "Codex",
+    "Cursor"
+   ],
+   "taken": [
+    "Claude Code",
+    "Codex"
+   ]
+  },
+  "expect": {
+   "toastTitle": "Installed in 1 of 3 apps · 2 skipped",
+   "toastSubtitle": "2 apps already have a skill or command of that name. Choose another in Settings."
+  }
+ },
+ {
+  "name": "A failure and a skipped app are both counted; Details show the failure",
+  "install": {
+   "apps": [
+    "Claude Code",
+    "Codex",
+    "Cursor"
+   ],
+   "failed": [
+    "Cursor"
+   ],
+   "taken": [
+    "Claude Code"
+   ]
+  },
+  "expect": {
+   "toastTitle": "Installed in 1 of 3 apps · 1 failed · 1 skipped",
+   "toastSubtitle": "Details show what went wrong"
+  }
+ },
+ {
+  "name": "The prompt suggests the name with -2 when that is free",
+  "commandName": "annotate",
+  "takenNames": [
+   "annotate"
+  ],
+  "expect": {
+   "suggestion": "annotate-2"
+  }
+ },
+ {
+  "name": "The prompt suggests the first free number",
+  "commandName": "annotate",
+  "takenNames": [
+   "annotate",
+   "annotate-2",
+   "annotate-3"
+  ],
+  "expect": {
+   "suggestion": "annotate-4"
+  }
  }
 ]

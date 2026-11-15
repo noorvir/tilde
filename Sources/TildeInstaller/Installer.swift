@@ -51,6 +51,9 @@ public struct InstallEnvironment: Sendable {
     public var variables: [String: String] = [:]
     /// A Linux machine, where some apps keep their config elsewhere, such as VS Code.
     public var isLinux = false
+    /// Tilde's own folder for the backups that older versions left in skills folders. Never
+    /// inside a skills folder, which may be a repository.
+    public var backups: URL
 
     public init(home: URL, applications: [URL], binaries: [URL], mcpURL: String, bridgePath: String) {
         self.home = home
@@ -58,6 +61,7 @@ public struct InstallEnvironment: Sendable {
         self.binaries = binaries
         self.mcpURL = mcpURL
         self.bridgePath = bridgePath
+        backups = home.appendingPathComponent("Library/Application Support/Tilde/Backups")
     }
 
     /// This Mac: `standard`, with the local token that Tilde's listener asks for.
@@ -100,6 +104,8 @@ public struct InstallReport: Sendable {
     public let harness: Harness
     public let dryRun: Bool
     public internal(set) var changes: [FileChange] = []
+    /// The name is another skill's or command's, so the install changed nothing.
+    public internal(set) var conflict: Conflict?
 
     public var hasChanges: Bool {
         changes.contains { $0.action.isChange }
@@ -126,6 +132,8 @@ public struct InstallReport: Sendable {
                 return dryRun ? "Would update \(file)" : "Updated \(file)"
             case .removed:
                 return dryRun ? "Would remove \(file)" : "Removed \(file)"
+            case .moved(let destination):
+                return dryRun ? "Would move \(file) to \(short(destination))" : "Moved \(file) to \(short(destination))"
             case .unchanged:
                 return "Already set: \(file)"
             case .unchangedNotPrivate(let message):
@@ -133,6 +141,9 @@ public struct InstallReport: Sendable {
             case .failed(let message):
                 return "Could not change \(file): \(message)"
             }
+        }
+        if let conflict {
+            lines.append("\(conflict.message) Nothing changed: choose another command name.")
         }
         if changes.first?.action.isChange == true, !dryRun {
             lines.append("Restart \(harness.name) to load the change.")
@@ -146,13 +157,25 @@ public struct FileChange: Sendable {
         case created
         case updated
         case removed
+        /// Moved to Tilde's backup folder.
+        case moved(to: URL)
         case unchanged
         /// The right text, in a file that could not be made private, such as a read-only one.
         case unchangedNotPrivate(String)
         case failed(String)
 
         public var isChange: Bool {
-            self == .created || self == .updated || self == .removed
+            switch self {
+            case .created, .updated, .removed, .moved: true
+            case .unchanged, .unchangedNotPrivate, .failed: false
+            }
+        }
+
+        public var isFailure: Bool {
+            if case .failed = self {
+                return true
+            }
+            return false
         }
     }
 
@@ -168,6 +191,10 @@ public struct Installer: Sendable {
     public let files: InstallFiles
     /// Reports what would change without writing.
     public var dryRun = false
+    /// The command that starts Tilde, such as `annotate` for `/annotate`.
+    public var command = CommandName.standard
+    /// The names that the command had before: Tilde's files under them go on the next install.
+    public var oldCommands: [String] = []
 
     public init(environment: InstallEnvironment, files: InstallFiles = LocalFiles()) {
         self.environment = environment
@@ -192,6 +219,7 @@ public struct Installer: Sendable {
         environment.binaries += values[1].split(separator: ":").map { URL(fileURLWithPath: String($0)) }
         environment.mcpURL = mcpURL
         environment.authorization = authorization
+        environment.backups = URL(fileURLWithPath: values[0] + "/.tilde/backups")
         if proxied {
             environment.proxy = [values[0] + "/.tilde/bin/tproxy", values[0] + "/.tilde/tilde.sock"]
         }
@@ -227,16 +255,6 @@ public struct Installer: Sendable {
         target(for: harness).config
     }
 
-    /// The `SKILL.md` that Tilde writes for the app.
-    public func skillFile(for harness: Harness) -> URL {
-        target(for: harness).skillFile
-    }
-
-    /// Whether the app has Tilde's skill as Tilde wrote it.
-    public func hasSkill(_ harness: Harness) -> Bool {
-        (try? files.read(skillFile(for: harness))) == tildeSkill
-    }
-
     public func appBundle(for harness: Harness) -> URL? {
         let target = target(for: harness)
         return (target.detect.apps + target.iconApps).lazy
@@ -244,12 +262,45 @@ public struct Installer: Sendable {
             .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    /// Adds Tilde's entry, and its skill and command under `command`, then removes Tilde's
+    /// files under the old names. When the name is another skill's or command's, the install
+    /// changes nothing and reports the conflict: Tilde never changes what it did not write.
     public func install(_ harness: Harness) -> InstallReport {
+        install(harness, entry: true)
+    }
+
+    /// The install, with the app's MCP entry or only its skill.
+    private func install(_ harness: Harness, entry: Bool) -> InstallReport {
         let target = target(for: harness)
         var report = InstallReport(harness: harness, dryRun: dryRun)
-        report.changes.append(edit(target.config) { try target.format.installing(in: $0) })
-        report.changes.append(edit(target.skillFile) { _ in tildeSkill })
+        let backups = newBackupFolder()
+        do {
+            if let conflict = try conflict(in: harness) {
+                report.conflict = conflict
+                return report
+            }
+        } catch {
+            report.changes.append(FileChange(file: skillFile(for: harness), action: .failed(String(describing: error))))
+            return report
+        }
+
+        if entry {
+            report.changes.append(edit(target.config) { try target.format.installing(in: $0) })
+        }
+        for file in skillFiles(for: harness, command: command) {
+            report.changes.append(edit(file.file) { _ in file.text })
+        }
+        for file in oldSkillFiles(for: harness) where !isUsedByAnotherApp(file, besides: harness, includingOld: true) {
+            report.changes += removeSkillFile(file, backupFolder: backups)
+        }
         return report
+    }
+
+    /// Moves Tilde's skill where the app has Tilde's files under an old name, such as the
+    /// `tilde` skill of older versions or a name the user changed: they go, and the current
+    /// ones come. The app's MCP entry stays as it is. Nil when there is nothing to move.
+    public func migrate(_ harness: Harness) -> InstallReport? {
+        oldSkillFiles(for: harness).isEmpty ? nil : install(harness, entry: false)
     }
 
     public func uninstall(_ harness: Harness) -> InstallReport {
@@ -262,10 +313,13 @@ public struct Installer: Sendable {
         } catch {
             report.changes.append(FileChange(file: target.config, action: .failed(String(describing: error))))
         }
-        // A skill folder can be shared by several apps; it goes when the last of them is uninstalled.
-        let sharing = Harness.allCases.filter { $0 != harness && self.target(for: $0).skills == target.skills && status(of: $0) == .installed }
-        if sharing.isEmpty, let text = try? files.read(target.skillFile), text == tildeSkill {
-            report.changes.append(remove(target.skillFile))
+        // A skill folder can be shared by several apps; a file goes when the last of them is uninstalled.
+        let backups = newBackupFolder()
+        let current = skillFiles(for: harness, command: command).map(\.file).filter { file in
+            (try? files.read(file)).map(Mark.isValid) == true
+        }
+        for file in current + oldSkillFiles(for: harness) where !isUsedByAnotherApp(file, besides: harness, includingOld: false) {
+            report.changes += removeSkillFile(file, backupFolder: backups)
         }
         return report
     }
@@ -303,21 +357,6 @@ public struct Installer: Sendable {
             return FileChange(file: file, action: .failed(String(describing: error)))
         }
     }
-
-    /// Removes a skill file Tilde wrote, and its folder when nothing else is in it.
-    private func remove(_ file: URL) -> FileChange {
-        if dryRun {
-            return FileChange(file: file, action: .removed)
-        }
-
-        do {
-            try files.remove(file)
-            files.removeFolderIfEmpty(file.deletingLastPathComponent())
-            return FileChange(file: file, action: .removed)
-        } catch {
-            return FileChange(file: file, action: .failed(String(describing: error)))
-        }
-    }
 }
 
 public enum InstallerError: Error {
@@ -336,16 +375,31 @@ struct Target {
         var binaries: [String] = []
     }
 
+    /// A folder of the app's command files, such as `annotate.toml` for `/annotate`.
+    struct Commands {
+        let folder: URL
+        let fileExtension: String
+        /// Tilde writes its command here, because the app starts skills only through the model.
+        /// Otherwise the folder is only checked for a command that Tilde's skill would hide.
+        let isTildes: Bool
+
+        func file(_ name: String) -> URL {
+            folder.appendingPathComponent("\(name).\(fileExtension)")
+        }
+    }
+
     let config: URL
     let format: ConfigFormat
+    /// Where Tilde writes its skill.
     let skills: URL
     let detect: Detection
     /// Apps whose icon stands for a command-line tool; they do not count as the tool being installed.
     var iconApps: [String] = []
-
-    var skillFile: URL {
-        skills.appendingPathComponent("tilde/SKILL.md")
-    }
+    /// Other folders that the app reads skills from: a skill there under Tilde's name takes the command.
+    var otherSkills: [URL] = []
+    var commands: Commands?
+    /// Where versions before the command name wrote the `tilde` skill.
+    var legacySkill: URL
 }
 
 enum ConfigFormat {
@@ -429,6 +483,9 @@ extension Installer {
         let configFolder = environment.variables["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".config")
         // Claude reads only its own folder. The other apps all read ~/.agents/skills; Cursor and
         // VS Code also read ~/.claude/skills, so they get one skill folder in common with Claude.
+        // The skill is named after the command in every app. It is the slash command, except
+        // in Gemini CLI, which starts skills only through the model and so also gets a command
+        // file of that name; Codex starts a skill with `$`.
         var codexServer = ["url = \"\(environment.mcpURL)\""] + (environment.authorization.map { ["http_headers = { Authorization = \"\($0)\" }"] } ?? [])
         if let command = environment.proxy {
             let args = command.dropFirst().map { "\"\($0)\"" }.joined(separator: ", ")
@@ -436,6 +493,7 @@ extension Installer {
         }
         let claudeSkills = claudeFolder?.appendingPathComponent("skills") ?? home.appendingPathComponent(".claude/skills")
         let agentSkills = home.appendingPathComponent(".agents/skills")
+        let agentLegacy = agentSkills.appendingPathComponent("tilde/SKILL.md")
 
         switch harness {
         case .claudeCode:
@@ -444,7 +502,10 @@ extension Installer {
                 format: .json(path: ["mcpServers", "tilde"], entry: server(urlKey: "url", typed: true)),
                 skills: claudeSkills,
                 detect: Target.Detection(paths: [".claude.json"], files: claudeFolder.map { [$0] } ?? [], binaries: ["claude"]),
-                iconApps: ["Claude.app"]
+                iconApps: ["Claude.app"],
+                // Commands are Claude's older kind of skill: a skill of the same name hides one.
+                commands: Target.Commands(folder: (claudeFolder ?? home.appendingPathComponent(".claude")).appendingPathComponent("commands"), fileExtension: "md", isTildes: false),
+                legacySkill: claudeSkills.appendingPathComponent("tilde/SKILL.md")
             )
         case .codex:
             return Target(
@@ -452,14 +513,18 @@ extension Installer {
                 format: .toml(table: "mcp_servers.tilde", lines: ["[mcp_servers.tilde]"] + codexServer + ["default_tools_approval_mode = \"approve\""]),
                 skills: agentSkills,
                 detect: Target.Detection(paths: [".codex"], files: codexFolder.map { [$0] } ?? [], apps: ["Codex.app"], binaries: ["codex"]),
-                iconApps: ["ChatGPT.app"]
+                iconApps: ["ChatGPT.app"],
+                otherSkills: [(codexFolder ?? home.appendingPathComponent(".codex")).appendingPathComponent("skills")],
+                legacySkill: agentLegacy
             )
         case .cursor:
             return Target(
                 config: home.appendingPathComponent(".cursor/mcp.json"),
                 format: .json(path: ["mcpServers", "tilde"], entry: server(urlKey: "url")),
                 skills: agentSkills,
-                detect: Target.Detection(paths: [".cursor"], apps: ["Cursor.app"])
+                detect: Target.Detection(paths: [".cursor"], apps: ["Cursor.app"]),
+                otherSkills: [claudeSkills, home.appendingPathComponent(".cursor/skills")],
+                legacySkill: agentLegacy
             )
         case .vscode:
             let codeFolder = environment.isLinux ? configFolder.appendingPathComponent("Code/User") : home.appendingPathComponent("Library/Application Support/Code/User")
@@ -467,14 +532,19 @@ extension Installer {
                 config: codeFolder.appendingPathComponent("mcp.json"),
                 format: .json(path: ["servers", "tilde"], entry: server(urlKey: "url", typed: true)),
                 skills: agentSkills,
-                detect: Target.Detection(files: [codeFolder], apps: ["Visual Studio Code.app"], binaries: ["code"])
+                detect: Target.Detection(files: [codeFolder], apps: ["Visual Studio Code.app"], binaries: ["code"]),
+                otherSkills: [claudeSkills, home.appendingPathComponent(".copilot/skills")],
+                legacySkill: agentLegacy
             )
         case .gemini:
             return Target(
                 config: home.appendingPathComponent(".gemini/settings.json"),
                 format: .json(path: ["mcpServers", "tilde"], entry: server(urlKey: "httpUrl")),
                 skills: agentSkills,
-                detect: Target.Detection(paths: [".gemini/settings.json"], binaries: ["gemini"])
+                detect: Target.Detection(paths: [".gemini/settings.json"], binaries: ["gemini"]),
+                otherSkills: [home.appendingPathComponent(".gemini/skills")],
+                commands: Target.Commands(folder: home.appendingPathComponent(".gemini/commands"), fileExtension: "toml", isTildes: true),
+                legacySkill: agentLegacy
             )
         case .windsurf:
             return Target(
@@ -482,7 +552,9 @@ extension Installer {
                 config: configFolder.appendingPathComponent("devin/mcp_config.json"),
                 format: .json(path: ["mcpServers", "tilde"], entry: server(urlKey: "serverUrl")),
                 skills: agentSkills,
-                detect: Target.Detection(paths: [".codeium/windsurf"], files: [configFolder.appendingPathComponent("devin")], apps: ["Devin.app", "Windsurf.app"])
+                detect: Target.Detection(paths: [".codeium/windsurf"], files: [configFolder.appendingPathComponent("devin")], apps: ["Devin.app", "Windsurf.app"]),
+                otherSkills: [configFolder.appendingPathComponent("devin/skills"), home.appendingPathComponent(".codeium/windsurf/skills")],
+                legacySkill: agentLegacy
             )
         }
     }

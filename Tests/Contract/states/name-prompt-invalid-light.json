@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "surface": "namePrompt",
+  "size": [
+    400,
+    205
+  ],
+  "appearance": "light",
+  "promptName": "My Skill"
+}

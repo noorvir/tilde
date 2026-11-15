@@ -16,7 +16,7 @@ final class AgentSetup: ObservableObject {
     static let rows = [Row(name: "Claude", harness: .claudeCode)]
         + Harness.allCases.filter { $0 != .claudeCode }.map { Row(name: $0.name, harness: $0) }
 
-    let installer: Installer
+    private(set) var installer: Installer
     /// Changes after every install or uninstall, so views read the files again.
     @Published fileprivate(set) var revision = 0
     /// Tests draw one placeholder instead of the apps' icons.
@@ -28,19 +28,98 @@ final class AgentSetup: ObservableObject {
     /// This Mac's setup, for the icons of a machine's apps.
     private weak var iconSource: AgentSetup?
     @Published private var remoteStatuses: [Harness: InstallStatus] = [:]
-    @Published fileprivate var remoteSkills: Set<Harness> = []
+    @Published fileprivate var remoteSkills: [Harness: SkillStatus] = [:]
     /// After an install or uninstall on a machine.
     var onChange: () -> Void = {}
+    /// Where this Mac keeps the command name; none for a machine, which takes this Mac's.
+    private let defaults: UserDefaults?
 
-    init(installer: Installer, placeholderIcon: NSImage? = nil, nodes: NodeSetup? = nil, isRemote: Bool = false, iconSource: AgentSetup? = nil) {
+    nonisolated static let commandKey = "commandName"
+    nonisolated static let oldCommandsKey = "oldCommandNames"
+
+    init(
+        installer: Installer, placeholderIcon: NSImage? = nil, nodes: NodeSetup? = nil, isRemote: Bool = false, iconSource: AgentSetup? = nil,
+        defaults: UserDefaults? = nil
+    ) {
         self.nodes = nodes ?? NodeSetup(nodePort: 7312)
         self.installer = installer
         self.placeholderIcon = placeholderIcon
         self.isRemote = isRemote
         self.iconSource = iconSource
+        self.defaults = defaults
+        if let defaults {
+            self.installer.command = defaults.string(forKey: Self.commandKey) ?? CommandName.standard
+            self.installer.oldCommands = defaults.stringArray(forKey: Self.oldCommandsKey) ?? []
+        }
         if !isRemote {
             self.nodes.localSetup = self
         }
+    }
+
+    /// The command that starts Tilde in the agents, such as `annotate`.
+    var command: String {
+        installer.command
+    }
+
+    /// Uses `name` for the files from now on; Tilde's files under earlier names go on the next
+    /// install or migration. Nothing is written.
+    func setCommand(_ name: String, oldCommands: [String]) {
+        installer.command = name
+        installer.oldCommands = oldCommands
+        revision += 1
+    }
+
+    /// Changes the command name: each app with Tilde, and the apps in `installing`, get the
+    /// skill under the new name and lose Tilde's files under the old one, on this Mac and on
+    /// the linked machines. An app where the new name is another skill's keeps everything.
+    func rename(to name: String, installing rows: [Row] = []) -> InstallResult {
+        let oldCommands = Array(Set(installer.oldCommands + [installer.command]).subtracting([name])).sorted()
+        defaults?.set(name, forKey: Self.commandKey)
+        defaults?.set(oldCommands, forKey: Self.oldCommandsKey)
+        setCommand(name, oldCommands: oldCommands)
+        nodes.commandChanged()
+        let installed = foundRows.filter { status(of: $0) == .installed }
+        return install(installed + rows.filter { !installed.contains($0) })
+    }
+
+    /// This Mac's setup: the one that keeps the command name.
+    var thisMac: AgentSetup? {
+        isRemote ? iconSource : self
+    }
+
+    /// The prompt for another name when an install finds the name taken: this Mac's, which
+    /// a machine's page uses too.
+    weak var namePrompt: NamePrompt?
+
+    /// Asks the user for another command name for the apps in `conflicts`. `pending` is what
+    /// the install did elsewhere, for the toast after the answer.
+    func askForName(_ conflicts: [Conflict], pending: InstallResult? = nil) {
+        guard let prompt = thisMac?.namePrompt else {
+            return
+        }
+        let installer = self.installer
+        let harnesses = foundRows.map(\.harness)
+        Task {
+            let suggestion = await Task.detached {
+                CommandName.suggestion(after: installer.command) { name in harnesses.contains { installer.conflict(named: name, in: $0) != nil } }
+            }.value
+            prompt.ask(conflicts, setup: self, suggestion: suggestion, pending: pending)
+        }
+    }
+
+    /// Moves Tilde's files under old names, such as the `tilde` skill of older versions, to
+    /// the current name in each app; then reads what the apps have.
+    func migrate() async {
+        let installer = self.installer
+        await Task.detached {
+            for harness in Harness.allCases where installer.isPresent(harness) {
+                _ = installer.migrate(harness)
+            }
+        }.value
+        if isRemote {
+            await load()
+        }
+        revision += 1
     }
 
     /// Reads what a machine has.
@@ -48,7 +127,8 @@ final class AgentSetup: ObservableObject {
         let installer = self.installer
         let (statuses, skills) = await Task.detached {
             let statuses = Dictionary(uniqueKeysWithValues: Harness.allCases.map { ($0, installer.status(of: $0)) })
-            let skills = Set(Harness.allCases.filter { statuses[$0] != .notFound && installer.hasSkill($0) })
+            let found = Harness.allCases.filter { statuses[$0] != .notFound }
+            let skills = Dictionary(uniqueKeysWithValues: found.map { ($0, installer.skillStatus(of: $0)) })
             return (statuses, skills)
         }.value
         remoteStatuses = statuses
@@ -58,7 +138,7 @@ final class AgentSetup: ObservableObject {
     /// For the contract: a machine's apps without the machine.
     func setRemoteStatusesForTesting(_ statuses: [Harness: InstallStatus]) {
         remoteStatuses = statuses
-        remoteSkills = Set(statuses.filter { $0.value == .installed }.keys)
+        remoteSkills = statuses.mapValues { $0 == .installed ? .installed : .missing }
     }
 
     /// The rows whose app is on this Mac, or on the machine.
@@ -141,12 +221,19 @@ final class AgentSetup: ObservableObject {
         }
 
         let apps = found.map { row in
-            let report = action == .installed ? installer.install(row.harness) : installer.uninstall(row.harness)
-            let failed = report.changes.contains { if case .failed = $0.action { true } else { false } }
-            return InstallResult.App(name: row.name, icon: icon(for: row), failed: failed, changed: report.hasChanges)
+            let report = Self.run(action, row.harness, with: installer)
+            let failed = report.changes.contains(where: \.action.isFailure)
+            return InstallResult.App(name: row.name, icon: icon(for: row), failed: failed, changed: report.hasChanges, conflict: report.conflict)
         }
         revision += 1
         return InstallResult(action: action, apps: apps)
+    }
+
+    nonisolated static func run(_ action: InstallResult.Action, _ harness: Harness, with installer: Installer) -> InstallReport {
+        switch action {
+        case .installed: installer.install(harness)
+        case .removed: installer.uninstall(harness)
+        }
     }
 }
 
@@ -157,7 +244,7 @@ extension AgentSetup {
         Task {
             await Task.detached {
                 for harness in harnesses {
-                    _ = action == .installed ? installer.install(harness) : installer.uninstall(harness)
+                    _ = Self.run(action, harness, with: installer)
                 }
             }.value
             await load()
@@ -168,9 +255,10 @@ extension AgentSetup {
 }
 
 extension AgentSetup {
-    /// Whether the app has Tilde's skill: read now on this Mac, kept from the last read on a machine.
-    func hasSkill(_ harness: Harness) -> Bool {
-        isRemote ? remoteSkills.contains(harness) : installer.hasSkill(harness)
+    /// Whether the app has Tilde's skill, or another has its name: read now on this Mac, kept
+    /// from the last read on a machine.
+    func skillStatus(_ harness: Harness) -> SkillStatus {
+        isRemote ? remoteSkills[harness] ?? .missing : installer.skillStatus(of: harness)
     }
 }
 
@@ -186,6 +274,8 @@ struct InstallResult {
         let icon: NSImage
         let failed: Bool
         let changed: Bool
+        /// Why nothing changed: the name is another skill's or command's.
+        var conflict: Conflict?
     }
 
     let action: Action
@@ -193,5 +283,9 @@ struct InstallResult {
 
     var failures: Int {
         apps.filter(\.failed).count
+    }
+
+    var conflicts: [Conflict] {
+        apps.compactMap(\.conflict)
     }
 }

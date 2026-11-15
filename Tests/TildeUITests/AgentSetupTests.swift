@@ -36,4 +36,80 @@ struct AgentSetupTests {
         let server = MCPServer(store: SessionStore(), localToken: "secret")
         #expect(await server.handleLocal(ping).status == 200)
     }
+
+    /// A new command name moves Tilde's skill in each app with Tilde and is kept for the next
+    /// launch; an app where the name is another skill's keeps everything, and the toast says so.
+    @Test func aNewCommandNameMovesTheSkillInEachAppWithTilde() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-rename-\(UUID().uuidString)")
+        func write(_ path: String, _ text: String) throws {
+            let url = home.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        func exists(_ path: String) -> Bool {
+            FileManager.default.fileExists(atPath: home.appendingPathComponent(path).path)
+        }
+        try write(".claude.json", "{}")
+        try write(".codex/config.toml", "")
+        let defaults = MemoryDefaults()
+        let installer = Installer(environment: .standard(home: home, port: "7311", bridgePath: "", isolated: true))
+        let setup = AgentSetup(installer: installer, placeholderIcon: Fixtures.appIcon, defaults: defaults)
+        _ = setup.install(setup.foundRows)
+        try write(".agents/skills/look/SKILL.md", "---\nname: look\n---\n")
+
+        let result = setup.rename(to: "look")
+
+        #expect(result.conflicts.map(\.message) == ["Codex already has a skill named look."])
+        #expect(InstallToastView.title(result) == "Installed in 1 of 2 apps · 1 skipped")
+        #expect(InstallToastView.subtitle(result) == "Codex already has a skill named look. Choose another command name in Settings.")
+        #expect(exists(".claude/skills/look/SKILL.md"))
+        #expect(!exists(".claude/skills/annotate"))
+        #expect(exists(".agents/skills/annotate/SKILL.md"))
+        #expect(defaults.string(forKey: AgentSetup.commandKey) == "look")
+        #expect(defaults.stringArray(forKey: AgentSetup.oldCommandsKey) == ["annotate"])
+        #expect(AgentSetup(installer: installer, placeholderIcon: Fixtures.appIcon, defaults: defaults).command == "look")
+        let codex = try #require(AgentSetup.rows.first { $0.harness == .codex })
+        guard case .taken = setup.skillStatus(codex.harness) else {
+            Issue.record("Codex should show that the name is taken")
+            return
+        }
+
+        // The prompt asks for another name; Install uses it in every app and leaves the other skill.
+        let prompt = NamePrompt()
+        var shown: [InstallResult] = []
+        prompt.onResult = { shown.append($0) }
+        let conflict = try #require(result.conflicts.first)
+        prompt.ask([conflict], setup: setup, suggestion: "look-2", pending: result)
+        prompt.name = "look"
+        prompt.install()
+        #expect(prompt.problem == "Codex already has a skill named look.")
+        prompt.name = "look-2"
+        prompt.install()
+
+        #expect(prompt.request == nil)
+        #expect(shown.count == 1 && shown[0].conflicts.isEmpty)
+        #expect(setup.command == "look-2")
+        #expect(setup.skillStatus(codex.harness) == .installed)
+        #expect(exists(".claude/skills/look-2/SKILL.md"))
+        #expect(!exists(".claude/skills/look"))
+        #expect(!exists(".agents/skills/annotate"))
+        #expect(try String(contentsOf: home.appendingPathComponent(".agents/skills/look/SKILL.md"), encoding: .utf8) == "---\nname: look\n---\n")
+    }
+
+    /// Cancel installs nothing more and shows what the install did.
+    @Test func cancelShowsWhatTheInstallDid() throws {
+        let setup = try Fixtures.agentSetup()
+        let prompt = NamePrompt()
+        var shown: [InstallResult] = []
+        prompt.onResult = { shown.append($0) }
+        let pending = Fixtures.installResult(failed: 0)
+        let conflict = Conflict(kind: .skill, name: "annotate", harness: .claudeCode, item: URL(fileURLWithPath: "/"))
+
+        prompt.ask([conflict], setup: setup, suggestion: "annotate-2", pending: pending)
+        prompt.cancel()
+
+        #expect(prompt.request == nil)
+        #expect(shown.count == 1)
+        #expect(setup.command == "annotate")
+    }
 }

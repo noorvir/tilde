@@ -14,6 +14,14 @@ public protocol InstallFiles: Sendable {
     func makePrivate(_ file: URL) throws
     func remove(_ file: URL) throws
     func removeFolderIfEmpty(_ folder: URL)
+    /// The names in a folder; none when the folder is not there.
+    func contents(of folder: URL) throws -> [String]
+    /// Moves a file or folder, creating the destination's folders on the way. A link is moved
+    /// as a link: what it points to stays where it is.
+    func move(_ item: URL, to destination: URL) throws
+    /// The path with its links followed, to tell whether two paths are one file, such as
+    /// `~/.claude/skills` linked to `~/.agents/skills`. As given when it cannot be told.
+    func resolved(_ file: URL) -> URL
 }
 
 public struct LocalFiles: InstallFiles {
@@ -54,6 +62,23 @@ public struct LocalFiles: InstallFiles {
         if (try? FileManager.default.contentsOfDirectory(atPath: real.path))?.isEmpty == true {
             try? FileManager.default.removeItem(at: real)
         }
+    }
+
+    public func contents(of folder: URL) throws -> [String] {
+        let real = folder.resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: real.path) else {
+            return []
+        }
+        return try FileManager.default.contentsOfDirectory(atPath: real.path).sorted()
+    }
+
+    public func move(_ item: URL, to destination: URL) throws {
+        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: item, to: destination)
+    }
+
+    public func resolved(_ file: URL) -> URL {
+        file.resolvingSymlinksInPath()
     }
 }
 
@@ -102,5 +127,19 @@ public struct ShellFiles: InstallFiles {
 
     public func removeFolderIfEmpty(_ folder: URL) {
         _ = try? run("rmdir \(quoted(folder))", nil)
+    }
+
+    public func contents(of folder: URL) throws -> [String] {
+        let output = try run("if [ -d \(quoted(folder)) ]; then ls -A \(quoted(folder)); fi", nil)
+        return output.split(separator: "\n").map(String.init).sorted()
+    }
+
+    public func move(_ item: URL, to destination: URL) throws {
+        _ = try run("mkdir -p \(quoted(destination.deletingLastPathComponent())) && mv \(quoted(item)) \(quoted(destination))", nil)
+    }
+
+    /// As given: one more command for each file is not worth it.
+    public func resolved(_ file: URL) -> URL {
+        file
     }
 }

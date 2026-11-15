@@ -4,7 +4,9 @@ import TildeInstaller
 let installUsage = """
 Usage: tilde-mcp install [--all | <app>...] [--uninstall] [--dry-run] [--home <dir>]
 
-Adds Tilde's MCP server and `tilde` skill to agent apps, or removes them with --uninstall.
+Adds Tilde's MCP server and its skill to agent apps, or removes them with --uninstall.
+The skill's name is the command name in Tilde's Settings, `annotate` unless changed. Where an
+app already has another skill or command of that name, nothing changes for that app.
 Without an app, lists the apps and their status. --all means every app found on this Mac.
 --home uses another home folder and finds only apps inside it.
 
@@ -59,6 +61,11 @@ func runInstall(_ arguments: [String]) -> Int32 {
     }
     var installer = Installer(environment: environment)
     installer.dryRun = dryRun
+    // The app's Settings, except for another home, which has its own.
+    if home == nil, let defaults = UserDefaults(suiteName: "dev.tilde.app") {
+        installer.command = defaults.string(forKey: "commandName") ?? CommandName.standard
+        installer.oldCommands = defaults.stringArray(forKey: "oldCommandNames") ?? []
+    }
 
     if all {
         harnesses = Harness.allCases.filter { installer.isPresent($0) }
@@ -82,10 +89,10 @@ func runInstall(_ arguments: [String]) -> Int32 {
         for line in report.summary(home: environment.home) {
             print("  \(line)")
         }
-        if report.changes.isEmpty {
+        if report.changes.isEmpty, report.conflict == nil {
             print("  Nothing to remove.")
         }
-        if report.changes.contains(where: { if case .failed = $0.action { true } else { false } }) {
+        if report.conflict != nil || report.changes.contains(where: \.action.isFailure) {
             status = 1
         }
     }

@@ -335,15 +335,41 @@ final class NodeSetup: ObservableObject {
     }
 
     private func show(_ host: String, _ installer: Installer) async {
-        let setup = AgentSetup(installer: installer, nodes: self, isRemote: true, iconSource: localSetup)
+        let setup = AgentSetup(installer: named(installer), nodes: self, isRemote: true, iconSource: localSetup)
         // A page that the move replaced may still finish a change: it no longer speaks for the machine.
         setup.onChange = { [weak self, weak setup] in
             if let self, let setup, setups[host] === setup {
                 agentsChanged(host, setup)
             }
         }
-        await setup.load()
+        // A machine follows the rules of this Mac: Tilde's files under old names move on its first read.
+        await setup.migrate()
         setups[host] = setup
+    }
+
+    /// A machine's installer with this Mac's command name.
+    private func named(_ installer: Installer) -> Installer {
+        var named = installer
+        if let localSetup {
+            named.command = localSetup.installer.command
+            named.oldCommands = localSetup.installer.oldCommands
+        }
+        return named
+    }
+
+    /// After the command name changed on this Mac: each linked machine moves its files to the
+    /// new name, the same way as this Mac.
+    func commandChanged() {
+        for row in rows where row.status.isInstalled {
+            let host = row.host
+            guard let setup = setups[host] else {
+                Task { await loadSetup(host) }
+                continue
+            }
+            let named = named(setup.installer)
+            setup.setCommand(named.command, oldCommands: named.oldCommands)
+            Task { await setup.migrate() }
+        }
     }
 
     /// Moves a node from the port to its socket: every app with Tilde gets its stdio entry in
@@ -360,10 +386,14 @@ final class NodeSetup: ObservableObject {
         let token = token(for: host)
         let url = remoteURL
         let makeInstaller = makeInstaller
+        let oldInstaller = old.installer
+        let names = named(oldInstaller)
         Task {
             let result = await Task.detached { () throws -> Installer? in
-                let (new, _) = try makeInstaller(host, url, token, false)
-                return Self.move(installed, from: old.installer, to: new) ? new : nil
+                var new = try makeInstaller(host, url, token, false).0
+                new.command = names.command
+                new.oldCommands = names.oldCommands
+                return Self.move(installed, from: oldInstaller, to: new) ? new : nil
             }.result
             guard case .success(let moved?) = result else {
                 var detail: String?
@@ -390,7 +420,7 @@ final class NodeSetup: ObservableObject {
     nonisolated static func move(_ harnesses: [Harness], from old: Installer, to new: Installer) -> Bool {
         let failed = harnesses.contains { harness in
             let report = new.install(harness)
-            return report.changes.contains { if case .failed = $0.action { true } else { false } } || new.status(of: harness) != .installed
+            return report.changes.contains(where: \.action.isFailure) || new.status(of: harness) != .installed
         }
         if failed {
             harnesses.forEach { _ = old.install($0) }
