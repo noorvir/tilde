@@ -175,6 +175,11 @@ struct UXSpecs {
             #expect(modes.split(separator: "\n") == ["drwx------", "drwx------", "-rwx------", "srw-------"], "\(modes)")
             #expect(try onNode(host, "(ss -ltn 2>/dev/null || netstat -an -p tcp) | grep -c '[.:]7319 ' || true").hasPrefix("0"))
             print("NODE \(type), tproxy \(try onNode(host, hash))\(modes)\(configs)")
+            // The skill is under the command name with Tilde's mark, and no backup is beside it.
+            let skill = try onNode(host, "cat ~/.claude/skills/annotate/SKILL.md")
+            #expect(skill.contains("\nname: annotate\n") && skill.contains("tilde-checksum: "), "\(skill)")
+            #expect(try onNode(host, "ls -A ~/.claude/skills/annotate") == "SKILL.md\n")
+            #expect(try onNode(host, "ls -A ~/.claude/skills ~/.agents/skills 2>/dev/null | grep -c backup || true").hasPrefix("0"))
             step("files")
 
             // An agent there, through tproxy, as Codex. It runs until the end, through drops.
