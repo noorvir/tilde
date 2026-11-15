@@ -1,7 +1,6 @@
 import Foundation
 import Testing
 @testable import TildeInstaller
-import TildeSkill
 
 /// Runs the installer's commands in a shell, with a temporary folder as the home of the machine.
 private func run(home: URL, variables: [String: String] = [:]) -> ShellFiles.Run {
@@ -72,8 +71,9 @@ struct RemoteInstallerTests {
         #expect(claude.contains("127.0.0.1:7319"))
         #expect(try text(home, ".codex/config.toml").contains("Bearer secret"))
         #expect(try text(home, ".cursor/mcp.json").contains("Bearer secret"))
-        #expect(try text(home, ".claude/skills/tilde/SKILL.md") == tildeSkill)
-        #expect(try text(home, ".agents/skills/tilde/SKILL.md") == tildeSkill)
+        let skill = installer.skillFiles(for: .cursor, command: "annotate")[0].text
+        #expect(try text(home, ".claude/skills/annotate/SKILL.md") == skill)
+        #expect(try text(home, ".agents/skills/annotate/SKILL.md") == skill)
         #expect(try !FileManager.default.contentsOfDirectory(atPath: home.path).contains { $0.contains("tilde-backup") })
 
         for harness in [Harness.claudeCode, .codex, .cursor] {
@@ -81,8 +81,8 @@ struct RemoteInstallerTests {
         }
         #expect(try !text(home, ".claude.json").contains("Bearer"))
         #expect(try text(home, ".claude.json").contains("\"other\""))
-        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/tilde").path))
-        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/tilde").path))
+        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/annotate").path))
+        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/annotate").path))
     }
 
     /// A machine that does not answer the question "is the file there?", such as when its
@@ -231,8 +231,45 @@ struct RemoteInstallerTests {
         try make(home, "repo/skills")
         try make(home, ".codex")
         try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(".agents"), withDestinationURL: home.appendingPathComponent("repo"))
-        _ = try installer(home).install(.codex)
-        #expect(try text(home, "repo/skills/tilde/SKILL.md") == tildeSkill)
+        let installer = try installer(home)
+        _ = installer.install(.codex)
+        #expect(try text(home, "repo/skills/annotate/SKILL.md") == installer.skillFiles(for: .codex, command: "annotate")[0].text)
+    }
+
+    /// On a machine the rules are this Mac's: another skill of the name stays to the byte,
+    /// Replace backs it up in the machine's ~/.tilde, a new name moves Tilde's files, and the
+    /// `tilde` skill of older versions goes with its backups.
+    @Test func aMachineKeepsOtherSkillsAndMovesTildesOwn() throws {
+        let home = try home()
+        try make(home, ".codex")
+        try make(home, ".cursor")
+        let other = "---\nname: annotate\n---\n\nMine.\n"
+        try make(home, ".agents/skills/annotate")
+        try other.write(to: home.appendingPathComponent(".agents/skills/annotate/SKILL.md"), atomically: true, encoding: .utf8)
+        try make(home, ".agents/skills/tilde")
+        try SkillTests.oldSkill.write(to: home.appendingPathComponent(".agents/skills/tilde/SKILL.md"), atomically: true, encoding: .utf8)
+        try "old".write(to: home.appendingPathComponent(".agents/skills/tilde/SKILL.md.tilde-backup-20261103-112033"), atomically: true, encoding: .utf8)
+        var installer = try installer(home)
+
+        let conflict = installer.install(.codex)
+        #expect(conflict.conflict?.message == "A skill named annotate already exists in Codex. Choose another command name.")
+        #expect(try text(home, ".agents/skills/annotate/SKILL.md") == other)
+        #expect(installer.status(of: .codex) == .notInstalled)
+
+        let replaced = installer.install(.codex, replace: true)
+        #expect(replaced.conflict == nil)
+        #expect(installer.skillStatus(of: .codex) == .installed)
+        let backups = try FileManager.default.subpathsOfDirectory(atPath: home.appendingPathComponent(".tilde/backups").path)
+        #expect(backups.contains { $0.hasSuffix(".agents/skills/annotate/SKILL.md") })
+        #expect(backups.contains { $0.hasSuffix(".agents/skills/tilde/SKILL.md.tilde-backup-20261103-112033") })
+        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/tilde").path))
+
+        installer.command = "look"
+        installer.oldCommands = ["annotate"]
+        _ = installer.install(.codex)
+        #expect(installer.skillStatus(of: .codex) == .installed)
+        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".agents/skills/annotate").path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".agents/skills").path) == ["look"])
     }
 
     @Test func aVariableMovesAnAgentsFolder() throws {

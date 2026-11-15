@@ -1,7 +1,6 @@
 @testable import TildeInstaller
 import Foundation
 import os
-import TildeSkill
 import Testing
 
 struct InstallerTests {
@@ -165,8 +164,9 @@ struct InstallerTests {
         }
 
         """)
-        #expect(try read(".agents/skills/tilde/SKILL.md") == tildeSkill)
+        #expect(try read(".agents/skills/annotate/SKILL.md") == skill)
         #expect(installer.status(of: .cursor) == .installed)
+        #expect(installer.skillStatus(of: .cursor) == .installed)
     }
 
     @Test func installKeepsOtherServersAndFormatting() throws {
@@ -227,14 +227,15 @@ struct InstallerTests {
         """)
     }
 
+    /// A skill with Tilde's mark is Tilde's, whatever its text: a later version replaces it.
     @Test func installUpdatesAnOlderSkill() throws {
         try write(".cursor/mcp.json", "{}")
-        try write(".agents/skills/tilde/SKILL.md", "---\nname: tilde\n---\n\nOld text.\n")
+        try write(".agents/skills/annotate/SKILL.md", Mark.signed { "---\nname: annotate\nmetadata:\n  tilde-checksum: \($0)\n---\n\nOld text.\n" })
 
         let report = installer.install(.cursor)
 
         #expect(report.changes.last?.action == .updated)
-        #expect(try read(".agents/skills/tilde/SKILL.md") == tildeSkill)
+        #expect(try read(".agents/skills/annotate/SKILL.md") == skill)
     }
 
     @Test func secondInstallChangesNothing() throws {
@@ -244,10 +245,11 @@ struct InstallerTests {
         let settings = try read(".gemini/settings.json")
         let second = installer.install(.gemini)
 
-        #expect(second.changes.map(\.action) == [.unchanged, .unchanged])
+        // The entry, the skill and the command.
+        #expect(second.changes.map(\.action) == [.unchanged, .unchanged, .unchanged])
         #expect(!second.hasChanges)
         #expect(try read(".gemini/settings.json") == settings)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".gemini").path) == ["settings.json"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".gemini").path).sorted() == ["commands", "settings.json", "skills"])
     }
 
     /// Everything that is not Tilde's stays as it was, to the byte, through an install and an
@@ -305,7 +307,7 @@ struct InstallerTests {
 
         #expect(report.changes.map(\.action) == [.updated, .removed])
         #expect(try read(".claude.json") == original)
-        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/tilde").path))
+        #expect(!FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude/skills/annotate").path))
     }
 
     @Test func uninstallKeepsASkillThatAnotherAppStillUses() throws {
@@ -317,7 +319,7 @@ struct InstallerTests {
         let report = installer.uninstall(.cursor)
 
         #expect(report.changes.map(\.action) == [.updated])
-        #expect(try read(".agents/skills/tilde/SKILL.md") == tildeSkill)
+        #expect(try read(".agents/skills/annotate/SKILL.md") == skill)
     }
 
     @Test func codexReplacesTheTildeTableAndKeepsTheRest() throws {
@@ -390,12 +392,12 @@ struct InstallerTests {
         let report = installer.install(.codex)
 
         #expect(report.changes.map(\.action) == [.updated, .created])
-        #expect(try String(contentsOf: dotfiles.appendingPathComponent("skills/tilde/SKILL.md"), encoding: .utf8) == tildeSkill)
+        #expect(try String(contentsOf: dotfiles.appendingPathComponent("skills/annotate/SKILL.md"), encoding: .utf8) == skill)
         let link = try FileManager.default.destinationOfSymbolicLink(atPath: home.appendingPathComponent(".agents").path)
         #expect(link == dotfiles.path)
 
         _ = installer.uninstall(.codex)
-        #expect(!FileManager.default.fileExists(atPath: dotfiles.appendingPathComponent("skills/tilde").path))
+        #expect(!FileManager.default.fileExists(atPath: dotfiles.appendingPathComponent("skills/annotate").path))
         #expect(FileManager.default.fileExists(atPath: dotfiles.appendingPathComponent("skills").path))
     }
 
@@ -412,6 +414,11 @@ struct InstallerTests {
     }
 
     // MARK: - Helpers
+
+    /// Tilde's skill under the default name, as every app but Gemini CLI has it.
+    private var skill: String {
+        installer.skillFiles(for: .cursor, command: "annotate")[0].text
+    }
 
     private func write(_ path: String, _ text: String) throws {
         let url = home.appendingPathComponent(path)

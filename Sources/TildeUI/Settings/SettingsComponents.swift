@@ -184,6 +184,15 @@ enum SetupState: Equatable {
         case .notFound: .notApplicable("Not on this machine")
         }
     }
+
+    /// The state of an app's skill: another skill or command of the name is shown above, with Replace.
+    static func of(_ status: SkillStatus) -> SetupState {
+        switch status {
+        case .installed: .ok
+        case .missing: .action("Set Up")
+        case .taken: .notApplicable("Name taken")
+        }
+    }
 }
 
 /// The trailing status of a sub-row: a green check, a small button, a red cross with a button,

@@ -106,8 +106,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let setup = AgentSetup(
             // Without the token the listener does not start, so entries without it change nothing.
             installer: Installer(environment: (try? .local(home: home, port: String(port), bridgePath: bridge)) ?? .standard(home: home, port: String(port), bridgePath: bridge)),
-            nodes: NodeSetup(nodePort: port + 1)
+            nodes: NodeSetup(nodePort: port + 1),
+            defaults: .standard
         )
+        // After an update: Tilde's skill under an old name, such as `tilde`, moves to the current one.
+        Task { await setup.migrate() }
         self.nodes = setup.nodes
         let shortcuts = controller.shortcuts
         let version = SettingsModel.bundleVersion

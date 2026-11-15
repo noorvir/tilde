@@ -111,6 +111,8 @@ final class SettingsModel: ObservableObject {
     @Published var machinePath: [String] = []
     /// The agent rows that show their files.
     @Published var expandedAgents: Set<String> = []
+    /// The command name as the user types it, before Change; nil while it is the saved one.
+    @Published var commandDraft: String?
     /// The shortcut that waits for a key press.
     @Published var recordingShortcut: ShortcutStore.Action?
     let setup: AgentSetup
@@ -201,7 +203,7 @@ struct SettingsView: View {
                     model.machinePath.removeLast()
                 }
             } else {
-                AgentSettings(setup: model.setup, expanded: $model.expandedAgents, onResult: model.onResult) { host in
+                AgentSettings(setup: model.setup, expanded: $model.expandedAgents, commandDraft: $model.commandDraft, onResult: model.onResult) { host in
                     model.machinePath.append(host)
                 }
             }
