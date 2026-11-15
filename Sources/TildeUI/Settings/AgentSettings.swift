@@ -226,7 +226,7 @@ private struct ConflictWarning: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 16)
-            Button("Choose Name…", action: chooseName)
+            Button("Choose Name", action: chooseName)
                 .controlSize(.small)
         }
     }

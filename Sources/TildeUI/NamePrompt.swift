@@ -109,6 +109,7 @@ struct NamePromptView: View {
                 Spacer()
                 Button("Cancel", action: prompt.cancel)
                     .keyboardShortcut(.cancelAction)
+                // The default button, which Return presses; Esc is Cancel.
                 Button("Install", action: prompt.install)
                     .keyboardShortcut(.defaultAction)
             }
