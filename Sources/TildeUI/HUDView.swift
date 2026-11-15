@@ -347,7 +347,10 @@ struct HUDView: View {
     /// Record's bar under the pill: the source, then Play or Pause and Stop. It keeps its
     /// width in every state of the clip; only the icon of Play or Pause changes.
     private var recordingAccessoryBar: some View {
-        HUDRecordingBar(controller: controller, sourceName: controller.clipSourceName, source: controller.clipSource, recordKeys: keys(.pauseOrResume))
+        HUDRecordingBar(
+            controller: controller, sourceName: controller.clipSourceName, source: controller.clipSource, appIcon: controller.clipSourceAppIcon,
+            recordKeys: keys(.pauseOrResume)
+        )
             .pillInsets(HUDAccessory.size)
             .pill()
             .opacity(hud.isShown ? 1 : 0)

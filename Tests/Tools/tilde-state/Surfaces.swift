@@ -235,6 +235,8 @@ enum Surfaces {
         // A stand-in for the screen Record records, never the name of the Mac that draws it.
         let screenName = state.screenName ?? "Studio Display"
         controller.screenName = { _ in screenName }
+        // A stand-in for the icon of the recorded window's app.
+        controller.appIcon = { _ in Fixtures.appIcon }
         controller.setStateForTesting(
             session: state.session.map { Fixtures.session(client: $0.client, node: $0.node, isLocal: $0.isLocal ?? false) },
             drafts: drafts,
