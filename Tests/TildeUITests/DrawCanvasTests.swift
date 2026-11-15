@@ -6,6 +6,7 @@ import Testing
 /// edited while its comment is open, and snapping to the element under the pointer. The page
 /// is the real one, in no window; each test has its own.
 @MainActor
+@Suite(.tags(.webKit), .webKitRuns)
 struct DrawCanvasTests {
     let page: CanvasPage
 

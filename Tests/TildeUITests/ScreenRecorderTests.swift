@@ -14,7 +14,7 @@ struct ScreenRecorderTests {
         recorder.pause()
         recorder.resume()
         await gate.release(with: try picture(at: now()))
-        try await Task.sleep(for: .milliseconds(200))
+        try await eventually { await recorder.hasFrameForTesting() }
 
         let clip = try await recorder.stop()
         #expect(clip.seconds > 0)
@@ -28,7 +28,7 @@ struct ScreenRecorderTests {
         recorder.resume()
         try await Task.sleep(for: .milliseconds(20))
         recorder.pause()
-        try await Task.sleep(for: .milliseconds(20))
+        await recorder.queueDoneForTesting()
         let takenWhilePaused = try picture(at: now())
         recorder.resume()
         await gate.release(with: takenWhilePaused)
@@ -55,8 +55,7 @@ struct ScreenRecorderTests {
         discarded.resume()
         discarded.discard()
         await discardGate.release(with: try picture(at: now()))
-        try await Task.sleep(for: .milliseconds(200))
-        #expect(!FileManager.default.fileExists(atPath: discarded.video.path))
+        try await eventually { !FileManager.default.fileExists(atPath: discarded.video.path) }
     }
 
     /// Stop ends the clip before the capture has shut down: a Resume picture that arrives
@@ -81,6 +80,18 @@ struct ScreenRecorderTests {
         await #expect(throws: ScreenRecorder.Failure.self) {
             try await stopping.value
         }
+    }
+
+    /// Waits until `condition` holds, and expects it then: for at most 5 s, which only a
+    /// recorder that never gets there needs.
+    private func eventually(_ condition: () async -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        for _ in 0..<500 {
+            if await condition() {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await condition(), sourceLocation: sourceLocation)
     }
 
     private func makeRecorder(gate: Gate, endCapture: @escaping () async -> Void = {}) throws -> ScreenRecorder {

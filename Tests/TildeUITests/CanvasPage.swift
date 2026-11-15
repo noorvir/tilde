@@ -7,8 +7,17 @@ import WebKit
 /// shapes that it would report. Nothing shows on the screen.
 @MainActor
 final class CanvasPage {
-    struct NotReady: Error {}
-    struct BadAnswer: Error {}
+    struct NotReady: Error, CustomStringConvertible {
+        var waitedFor = "the condition"
+        var description: String { "The page did not get ready: waited 5 s for \(waitedFor)" }
+    }
+
+    /// The page answered a call with something that the test cannot use.
+    struct BadAnswer: Error, CustomStringConvertible {
+        let call: String
+        let answer: Any?
+        var description: String { "\(call): the page answered \(answer.map { "\($0)" } ?? "nothing")" }
+    }
 
     /// A shape as the page reports it.
     struct Shape: Equatable {
@@ -90,16 +99,24 @@ final class CanvasPage {
         }
     }
 
+    private static let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")
+
+    /// The page as one document of 8 MB, made once for every test and away from the main
+    /// actor: made for each page on it, it took more than half of the main thread's time, and
+    /// every other test on the main actor waited.
+    private static let document = Task.detached {
+        DrawingCanvas.page(in: folder).map { Data($0.utf8) }
+    }
+
     /// Loads the page and waits until Excalidraw is ready.
     func load() async throws {
         await Self.takeSlot()
         hasSlot = true
-        let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")
-        guard let page = DrawingCanvas.page(in: folder) else {
-            throw NotReady()
+        guard let document = await Self.document.value else {
+            throw NotReady(waitedFor: "the page's files in \(Self.folder.path)")
         }
-        webView.loadHTMLString(page, baseURL: URL(string: "https://drawing.tilde.invalid/"))
-        try await wait { self.messages.contains("ready") }
+        webView.load(document, mimeType: "text/html", characterEncodingName: "utf-8", baseURL: URL(string: "https://drawing.tilde.invalid/")!)
+        try await wait(for: "Excalidraw's \"ready\"") { self.messages.contains("ready") }
         try await run(Self.helpers)
     }
 
@@ -192,22 +209,22 @@ final class CanvasPage {
         }
     }
 
-    /// Waits until `condition` holds, for at most 5 s.
-    func wait(until condition: @MainActor () async throws -> Bool) async throws {
+    /// Waits until `condition` holds, for at most 5 s. `what` names it in the error.
+    func wait(for what: String = "the condition", until condition: @MainActor () async throws -> Bool) async throws {
         for _ in 0..<500 {
             if try await condition() {
                 return
             }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw NotReady()
+        throw NotReady(waitedFor: what)
     }
 
     /// Waits until the page has done all that the last event or call queued: React has drawn
     /// the change, and a drag's shape is finished. A page in no window can get its timers late,
     /// so no fixed time is enough.
     func settle() async throws {
-        try await wait { try await self.run("window.queuedWork()") as? Int == 0 }
+        try await wait(for: "the page's queued work to end") { try await self.run("window.queuedWork()") as? Int == 0 }
     }
 
     @discardableResult
@@ -280,7 +297,7 @@ final class CanvasPage {
         let script = """
         (() => {
           const element = document.querySelector('\(selector)');
-          if (!element) return false;
+          if (!element) return 'no such element';
           const box = element.getBoundingClientRect();
           const x = box.left + box.width / 2, y = box.top + box.height / 2;
           fire('pointerdown', x, y, {target: element});
@@ -288,8 +305,9 @@ final class CanvasPage {
           return true;
         })()
         """
-        guard try await run(script) as? Bool == true else {
-            throw BadAnswer()
+        let answer = try await run(script)
+        guard answer as? Bool == true else {
+            throw BadAnswer(call: "click(on: \(selector))", answer: answer)
         }
         try await settle()
     }
@@ -306,8 +324,9 @@ final class CanvasPage {
 
     /// How many frames the page asked for since it loaded; for a page that counts them.
     func frameRequests() async throws -> Int {
-        guard let count = try await run("window.frameRequests") as? Int else {
-            throw BadAnswer()
+        let answer = try await run("window.frameRequests")
+        guard let count = answer as? Int else {
+            throw BadAnswer(call: "frameRequests()", answer: answer)
         }
         return count
     }
@@ -322,14 +341,15 @@ final class CanvasPage {
         let script = """
         (() => {
           const field = document.getElementById('tilde-label');
-          if (field.style.display === 'none') return false;
+          if (field.style.display === 'none') return 'the label field is not open';
           field.value = '\(text)';
           field.dispatchEvent(new Event('input', { bubbles: true }));
           return true;
         })()
         """
-        guard try await run(script) as? Bool == true else {
-            throw BadAnswer()
+        let answer = try await run(script)
+        guard answer as? Bool == true else {
+            throw BadAnswer(call: "typeLabel(\"\(text)\")", answer: answer)
         }
     }
 
@@ -344,15 +364,17 @@ final class CanvasPage {
 
     /// The shapes drawn and not taken, back to front.
     func shapes() async throws -> [Shape] {
-        try Self.shapes(in: try await run("window.tildeDraw.newShapes()"))
+        let answer = try await run("window.tildeDraw.newShapes()")
+        return try Self.shapes(in: answer, of: "shapes()")
     }
 
     /// The same shapes as dictionaries, as `DrawingPanel` gets them.
     func rawShapes() async throws -> [[String: Any]] {
-        guard let text = try await run("window.tildeDraw.newShapes()") as? String,
+        let answer = try await run("window.tildeDraw.newShapes()")
+        guard let text = answer as? String,
               let shapes = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]]
         else {
-            throw BadAnswer()
+            throw BadAnswer(call: "rawShapes()", answer: answer)
         }
         return shapes
     }
@@ -360,12 +382,12 @@ final class CanvasPage {
     /// Takes the new shapes, as Done does. Empty when there is none.
     func takeShapes() async throws -> [Shape] {
         let text = try await run("window.tildeDraw.takeNewShapes()") as? String
-        return text == "" ? [] : try Self.shapes(in: text)
+        return text == "" ? [] : try Self.shapes(in: text, of: "takeShapes()")
     }
 
-    private static func shapes(in answer: Any?) throws -> [Shape] {
+    private static func shapes(in answer: Any?, of call: String) throws -> [Shape] {
         guard let text = answer as? String, let list = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]] else {
-            throw BadAnswer()
+            throw BadAnswer(call: call, answer: answer)
         }
         return list.map { item in
             Shape(

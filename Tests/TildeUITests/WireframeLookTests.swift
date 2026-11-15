@@ -6,6 +6,7 @@ import Testing
 /// and the fade of Settings, the label tag, and the shapes that Tilde blurs the screen under.
 /// The page is the real one, in no window; each test has its own.
 @MainActor
+@Suite(.tags(.webKit), .webKitRuns)
 struct WireframeLookTests {
     let page: CanvasPage
 
@@ -306,6 +307,7 @@ struct WireframeLookTests {
 /// The pictures of the Appearance page: the canvas's own page draws a tile for each style and
 /// the component in each state, and draws nothing again for the same look.
 @MainActor
+@Suite(.tags(.webKit), .webKitRuns)
 struct WireframePreviewsTests {
     @Test func eachStyleAndStateIsDrawnOnceForALook() async throws {
         let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")

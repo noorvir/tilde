@@ -37,8 +37,17 @@ enum Fixtures {
         controller.wireframes.set(true)
         controller.sender.inbox = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-inbox-\(UUID().uuidString)")
         controller.sender.pasteboard = NSPasteboard(name: NSPasteboard.Name("tilde-tests-\(UUID().uuidString)"))
-        try await Task.sleep(for: .milliseconds(20))
+        await storeUpdated()
         return controller
+    }
+
+    /// Returns once the run loop has given a new controller its store's first update, which
+    /// comes on the next pass and would otherwise reset the state a test sets: the run loop's
+    /// blocks run in the order they came.
+    static func storeUpdated() async {
+        await withCheckedContinuation { done in
+            RunLoop.main.perform { done.resume() }
+        }
     }
 
     /// A session from a store the controller does not watch, so no window opens.

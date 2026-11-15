@@ -14,7 +14,7 @@ import { tagAt } from "./look.js";
 import { wireframe } from "./mode.js";
 import { snapLines, nearest, nearestOf, hideGuides, showGuides } from "./snap.js";
 
-// The press that may draw a component: the elements before it, and its place.
+// The press that may draw a component: the elements before it, its place and its time.
 let wireframePress = null;
 // The move or resize under way.
 export let adjusting = null;
@@ -67,7 +67,7 @@ function finishWireframeShape(press) {
       return element.customData?.tildeWireframe && x >= element.x && x <= element.x + element.width && y >= element.y && y <= element.y + element.height;
     }).pop();
     selectGroup(component?.groupIds[0] ?? null);
-    if (component && isDoubleClick(component.groupIds[0])) editLabel(component);
+    if (component && isDoubleClick(component.groupIds[0], press.time)) editLabel(component);
     return;
   }
   const elements = wireframeElements(wireframe.tool, box, newData(wireframe.tool));
@@ -82,7 +82,7 @@ function startAdjusting(event, frame, mode, from, corner = null) {
   selection.menu = null;
   const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
   adjusting = {
-    mode, from, corner, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, rect, data: frame.customData, moved: false, menuBefore,
+    mode, from, corner, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, pressedAt: event.timeStamp, rect, data: frame.customData, moved: false, menuBefore,
     before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && event.altKey,
   };
   event.target.setPointerCapture?.(event.pointerId);
@@ -155,13 +155,13 @@ function editWireframe(event) {
     event.preventDefault();
     if (event.type === "pointermove") adjust(event);
     if (event.type === "pointerup") {
-      const { from, moved, menuBefore } = adjusting;
+      const { from, moved, menuBefore, pressedAt } = adjusting;
       const frame = frameOf(adjusting.group);
       adjusting = null;
       hideGuides();
       if (!moved && frame && from === "body") {
         selectGroup(frame.groupIds[0]);
-        if (isDoubleClick(frame.groupIds[0])) editLabel(frame);
+        if (isDoubleClick(frame.groupIds[0], pressedAt)) editLabel(frame);
       }
       // A click on the grip selects the component, as one on it does.
       if (!moved && frame && from === "grip") selectGroup(frame.groupIds[0]);
@@ -327,7 +327,7 @@ export function snapPointer(event) {
     return;
   }
   if (event.type === "pointerdown") {
-    wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY };
+    wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY, time: event.timeStamp };
   }
   const tool = api?.getAppState().activeTool.type;
   const pointer = { x: event.clientX, y: event.clientY };
