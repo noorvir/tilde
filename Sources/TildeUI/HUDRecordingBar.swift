@@ -47,6 +47,8 @@ struct HUDRecordingBar: View {
             } label: {
                 HUDButtonLabel(image: buttonImage(size), title: buttonTitle, key: isSelectingOnScreen ? "Esc" : nil, opensBelow: true, fillsWidth: true)
                     .modifier(HUDButtonChrome(width: 200, isActive: controller.isPickingWindow, padding: 10))
+                    // One button for VoiceOver, not one for each part of the label.
+                    .accessibilityElement(children: .combine)
             }
             .menuStyle(.button)
             .menuIndicator(.hidden)

@@ -556,7 +556,8 @@ struct UXSpecs {
     /// recording mode starts by selecting on screen in the source button, and Esc keeps the
     /// screen; Esc closes the open menu only; "Show all windows" opens the window grid, where an
     /// app with one window is chosen at once; "Select on screen" waits for a click, and Esc keeps
-    /// the choice.
+    /// the choice, as it does in the window grid. The first click on the source button opens
+    /// the menu, also while another app has the keyboard.
     @Test func theSourceMenuChoosesWhatTheNextClipRecords() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -570,6 +571,8 @@ struct UXSpecs {
             try await app.waitToSeeText(containing: "Click a window")
             try await app.key(.escape)
             try await app.waitToSeeText(containing: "Ready to record")
+            let sourceButtons = try await app.seen().filter { $0.name == "Source" }
+            #expect(sourceButtons.count == 1, "\(sourceButtons.map(\.frame))")
             step("selecting on screen ended")
 
             try await app.press("Source")
@@ -601,6 +604,14 @@ struct UXSpecs {
             let kept = try await app.seen().first { $0.name == "Source" }
             #expect(kept?.value?.contains("tilde-ux-fixture") == true)
             step("Esc kept the window")
+
+            try await app.press("Source")
+            try await app.press("Show all windows")
+            try await app.waitToSee("tilde-ux-fixture")
+            try await app.key(.escape)
+            try await app.waitNotToSee("tilde-ux-fixture")
+            try await app.waitToSeeText(containing: "Ready to record")
+            step("Esc closed the window grid")
         }
     }
 

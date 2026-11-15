@@ -45,8 +45,9 @@ final class HUDPanel {
         window.hasShadow = false
         window.isReleasedWhenClosed = false
         window.contentView = hosting
-        // A click on the HUD gives Tilde the keyboard, for Esc and ↩.
-        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window, weak controller] event in
+        // A click on the HUD gives Tilde the keyboard, for Esc and ↩. It does so as the click
+        // ends: activating Tilde on the press would close the source menu that the press opens.
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak window, weak controller] event in
             if event.window === window {
                 MainActor.assumeIsolated { controller?.takeKeyboard() }
             }
