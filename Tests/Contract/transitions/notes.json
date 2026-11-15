@@ -529,7 +529,7 @@
   }
  },
  {
-  "name": "A command name that another skill has shows Name taken; the warning above it has Replace",
+  "name": "A command name that another skill has shows Name taken; the warning above it asks for another name",
   "skillStatus": "taken",
   "expect": {
    "setup": "Name taken"
@@ -577,7 +577,7 @@
   },
   "expect": {
    "toastTitle": "Installed in 2 of 3 apps · 1 skipped",
-   "toastSubtitle": "A skill named annotate already exists in Claude Code. Choose another command name."
+   "toastSubtitle": "Claude Code already has a skill named annotate. Choose another command name in Settings."
   }
  },
  {
@@ -592,7 +592,7 @@
   },
   "expect": {
    "toastTitle": "Did not install in Claude Code",
-   "toastSubtitle": "A skill named annotate already exists in Claude Code. Choose another command name."
+   "toastSubtitle": "Claude Code already has a skill named annotate. Choose another command name in Settings."
   }
  },
  {
@@ -610,7 +610,7 @@
   },
   "expect": {
    "toastTitle": "Installed in 1 of 3 apps · 2 skipped",
-   "toastSubtitle": "2 apps already have a skill or command of that name. Choose another command name."
+   "toastSubtitle": "2 apps already have a skill or command of that name. Choose another in Settings."
   }
  },
  {
@@ -631,6 +631,28 @@
   "expect": {
    "toastTitle": "Installed in 1 of 3 apps · 1 failed · 1 skipped",
    "toastSubtitle": "Details show what went wrong"
+  }
+ },
+ {
+  "name": "The prompt suggests the name with -2 when that is free",
+  "commandName": "annotate",
+  "takenNames": [
+   "annotate"
+  ],
+  "expect": {
+   "suggestion": "annotate-2"
+  }
+ },
+ {
+  "name": "The prompt suggests the first free number",
+  "commandName": "annotate",
+  "takenNames": [
+   "annotate",
+   "annotate-2",
+   "annotate-3"
+  ],
+  "expect": {
+   "suggestion": "annotate-4"
   }
  }
 ]
