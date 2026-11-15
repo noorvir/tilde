@@ -262,6 +262,7 @@
 {"name": "L in wireframe mode chooses the list", "state": {"wireframe": true, "notes": 1}, "key": "L", "expect": {"keyAction": "wireframeTool:list", "state": {"wireframe": true}, "effects": []}},
 {"name": "R in wireframe mode chooses the rectangle, not recording mode", "state": {"wireframe": true, "notes": 1}, "key": "R", "expect": {"keyAction": "wireframeTool:rectangle", "state": {"mode": "annotating", "wireframe": true}, "effects": []}},
 {"name": "O in wireframe mode chooses the circle", "state": {"wireframe": true, "notes": 1}, "key": "O", "expect": {"keyAction": "wireframeTool:ellipse", "state": {"wireframe": true}, "effects": []}},
+{"name": "X in wireframe mode chooses the text", "state": {"wireframe": true, "notes": 1}, "key": "X", "expect": {"keyAction": "wireframeTool:text", "state": {"wireframe": true}, "effects": []}},
 {"name": "A in wireframe mode does nothing: no arrow, and annotation mode stays off", "state": {"wireframe": true, "notes": 1}, "key": "A", "expect": {"keyAction": "ignoredInWireframe", "state": {"wireframe": true, "pauses": []}, "effects": []}},
 {"name": "1 in wireframe mode picks no colour", "state": {"wireframe": true, "notes": 1}, "key": "1", "expect": {"keyAction": "ignoredInWireframe", "state": {"wireframe": true}, "effects": []}},
 {"name": "O while annotating has no action: drawing keys work only while drawing", "state": {"notes": 1}, "key": "O", "expect": {"keyAction": null, "state": {"pauses": [], "mode": "annotating", "drawing": false}, "effects": []}}
