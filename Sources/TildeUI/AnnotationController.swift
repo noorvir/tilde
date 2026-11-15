@@ -102,6 +102,9 @@ final class AnnotationController: ObservableObject {
     /// A screen's name as the system gives it; pictures of the HUD give a stand-in, so that
     /// they never show the name of the Mac that drew them.
     var screenName: (CGDirectDisplayID) -> String = SourcePickerModel.name(of:)
+    /// The icon of the app with this process, as the source picker shows it; pictures of the
+    /// HUD give a stand-in.
+    var appIcon: (pid_t) -> NSImage? = { NSRunningApplication(processIdentifier: $0)?.icon }
 
     // MARK: - Parts
 
@@ -989,6 +992,14 @@ final class AnnotationController: ObservableObject {
     /// What Record records: the chosen source, or the screen with the HUD when there is none.
     var clipSource: RecordingSource {
         scope.source ?? .screen(hud.display ?? CGMainDisplayID())
+    }
+
+    /// The icon of the app whose window Record records; nil for a screen or a phone.
+    var clipSourceAppIcon: NSImage? {
+        guard case .window(let window) = clipSource else {
+            return nil
+        }
+        return appIcon(window.pid)
     }
 
     /// The name of what Record records, such as "Studio Display", for the HUD.
