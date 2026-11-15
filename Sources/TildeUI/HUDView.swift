@@ -28,8 +28,6 @@ struct HUDView: View {
     let onContentFrame: (CGRect) -> Void
     @State private var isPillHovered = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// How often recording mode began, which bounces the record button.
-    @State private var recordModeEntries = 0
 
     init(
         controller: AnnotationController, isEmbedded: Bool = false, onDrag: @escaping () -> Void = {},
@@ -70,6 +68,11 @@ struct HUDView: View {
                     .fixedSize()
                     .transition(.opacity)
             }
+            if controller.isRecordMode {
+                recordingAccessoryBar
+                    .fixedSize()
+                    .transition(.opacity)
+            }
             if hud.isShown, controller.showsBrowserAccessory {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: browserOffer.dismiss)
                     .transition(Self.zoom)
@@ -100,6 +103,7 @@ struct HUDView: View {
         .animation(.spring(duration: 0.28), value: controller.isPickingWindow)
         .animation(.spring(duration: 0.3, bounce: 0), value: controller.isSourcePickerOpen)
         .animation(.easeOut(duration: 0.15), value: controller.isDrawing)
+        .animation(.easeOut(duration: 0.15), value: controller.isRecordMode)
         .animation(.spring(duration: 0.28), value: controller.drafts.count)
         .animation(HUDPanel.motion, value: controller.sentConfirmation)
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
@@ -183,7 +187,7 @@ struct HUDView: View {
     private func canvasBarContent(@ViewBuilder tools: () -> some View) -> some View {
         Group {
             tools()
-            barDivider
+            HUDBarDivider()
             undoRedo()
         }
         .disabled(controller.isDrawingPaused)
@@ -201,7 +205,7 @@ struct HUDView: View {
         Group {
             HStack(spacing: HUDAccessory.size.scaled(4)) {
                 wireframeTools
-                barDivider
+                HUDBarDivider()
                 undoRedo(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"])
             }
             .opacity(isStyling ? 0 : 1)
@@ -215,7 +219,7 @@ struct HUDView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .animation(reduceMotion ? .linear(duration: 0.1) : .easeInOut(duration: 0.2), value: isStyling)
-            barDivider
+            HUDBarDivider()
             HUDButton(image: Image(systemName: "paintpalette"), isOn: isStyling, help: "Style") {
                 _ = wireframe.bar.handle(.palette)
             }
@@ -247,10 +251,6 @@ struct HUDView: View {
         .fixedSize()
     }
 
-    private var barDivider: some View {
-        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: HUDAccessory.size.scaled(20))
-    }
-
     /// Draw's tools and colours. No tool is on after Esc put the tool down.
     @ViewBuilder
     private var drawingTools: some View {
@@ -261,7 +261,7 @@ struct HUDView: View {
                 controller.setDrawingTool(entry.tool)
             }
         }
-        barDivider
+        HUDBarDivider()
         ForEach(Self.drawingColors, id: \.hex) { entry in
             Button {
                 controller.setDrawingColor(entry.hex)
@@ -344,17 +344,33 @@ struct HUDView: View {
             )
     }
 
+    /// Record's bar under the pill: the source, then Play or Pause and Stop. It keeps its
+    /// width in every state of the clip; only the icon of Play or Pause changes.
+    private var recordingAccessoryBar: some View {
+        HUDRecordingBar(controller: controller, sourceName: controller.clipSourceName, source: controller.clipSource, recordKeys: keys(.pauseOrResume))
+            .pillInsets(HUDAccessory.size)
+            .pill()
+            .opacity(hud.isShown ? 1 : 0)
+            .gesture(
+                DragGesture(minimumDistance: 4, coordinateSpace: .global)
+                    .onChanged { _ in onDrag() }
+            )
+    }
+
     /// The button of a canvas's mode: it starts the mode, resumes it when it is paused, and is
     /// Done while it is on.
     private func canvasButton(_ canvas: SessionFlow.Canvas, symbol: String, keys: [String], help: String) -> some View {
         let isOn = controller.flow.session?.canvas == canvas
-        return HUDButton(image: Image(systemName: symbol), isOn: isOn, keys: keys, help: help) {
-            if isOn {
-                controller.dispatch(controller.isDrawingPaused ? .resume : .finishDrawing)
-            } else {
-                controller.dispatch(canvas == .draw ? .startDrawing : .startWireframe)
-            }
+        let event: SessionFlow.Event
+        if isOn {
+            event = controller.isDrawingPaused ? .resume : .finishDrawing
+        } else {
+            event = canvas == .draw ? .startDrawing : .startWireframe
         }
+        return HUDButton(image: Image(systemName: symbol), isOn: isOn, keys: keys, help: help) {
+            controller.dispatch(event)
+        }
+        .disabled(!controller.accepts(event))
     }
 
     /// `width`: the pill's smallest width, which wider content grows, or nil to fit the content.
@@ -370,21 +386,16 @@ struct HUDView: View {
         let count = controller.drafts.count
         let status = Self.status(of: controller)
 
-        // While a source is being chosen, only the record toggle works; the others keep their
-        // places with the disabled look. While the report is made, nothing works.
+        // The four modes keep their places in every state and work in every state but a busy
+        // one; while a source is being chosen, the buttons after them wait. While the report
+        // is made, nothing works.
         Group {
             HStack(spacing: PillMetrics.iconGap) {
-                // The status button: in recording mode the record button, else pause and play.
-                HUDButton(image: Image(systemName: status.symbol), size: 26, tint: status.tint, bounce: recordModeEntries, keys: controller.isDrawing ? [] : status.keys + keys(.pauseOrResume), help: status.help) {
-                    controller.pressStatusButton()
-                }
-                .disabled(status.isBusy || controller.isPickingWindow)
-                // The red record button bounces once on the way into recording mode.
-                .onChange(of: controller.isRecordMode) { _, isRecordMode in
-                    if isRecordMode {
-                        recordModeEntries += 1
-                    }
-                }
+                // What the session does now, as a dot: no control.
+                Circle()
+                    .fill(status.dot)
+                    .frame(width: 8, height: 8)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     titleText(status)
                         .font(.system(size: 13, weight: .semibold))
@@ -400,6 +411,7 @@ struct HUDView: View {
 
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 20)
 
+            // In recording mode another mode's button stops the clip, keeps it, then switches.
             HUDButton(image: Image(systemName: "hand.point.up.left"), isOn: controller.isAnnotating, keys: keys(.annotationMode), help: "Annotate") {
                 controller.dispatch(.toggleAnnotating)
             }
@@ -411,21 +423,11 @@ struct HUDView: View {
             }
             .disabled(status.isBusy)
 
-            // Recording mode puts Stop where Draw is; the other buttons stay.
-            if controller.isRecordMode {
-                HUDButton(image: Image(systemName: "stop.fill"), help: "Stop recording") {
-                    controller.dispatch(.stop)
-                }
-                .disabled(controller.recording != .recording && controller.recording != .paused)
-            } else {
-                canvasButton(.draw, symbol: "pencil.tip", keys: keys(.drawingMode), help: "Draw")
-                    .disabled(controller.isWireframe)
-            }
-            // In recording mode too, disabled, so that no button moves. While the beta is off it
-            // shows only in a wireframe that was open when it went off, for its Done.
+            canvasButton(.draw, symbol: "pencil.tip", keys: keys(.drawingMode), help: "Draw")
+            // While the beta is off it shows only in a wireframe that was open when it went
+            // off, for its Done.
             if wireframes.isOn || controller.isWireframe {
                 canvasButton(.wireframe, symbol: "squareshape.split.2x2.dotted", keys: controller.isWireframe ? ["⌘↩"] : ["W"], help: "Wireframe")
-                    .disabled(controller.isRecordMode)
             }
         }
 
@@ -574,8 +576,7 @@ struct HUDView: View {
         .monospacedDigit()
     }
 
-    /// The subtitle on one line: where the report goes, in full, what to do now, or in
-    /// recording mode what Record records, which a click chooses again before Record. It never
+    /// The subtitle on one line: where the report goes, in full, or what to do now. It never
     /// widens the pill: every agent's name fits, and a longer one is cut.
     private var subtitle: some View {
         let part = Self.subtitlePart(
@@ -585,21 +586,8 @@ struct HUDView: View {
             machine: controller.session?.node.map { Machine(host: $0, dot: controller.machineDot($0)) },
             state: subtitleState
         )
-        return Group {
-            if case .source = subtitleState {
-                Button {
-                    controller.dispatch(.pickSource)
-                } label: {
-                    SubtitleLine(part: part).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!controller.accepts(.pickSource))
-                .tildeTooltip("Choose source")
-            } else {
-                SubtitleLine(part: part)
-            }
-        }
-        .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
+        return SubtitleLine(part: part)
+            .frame(minWidth: 0, idealWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
     private var subtitleState: SubtitleState {
@@ -608,9 +596,6 @@ struct HUDView: View {
         }
         if controller.isPickingWindow {
             return controller.isSourcePickerOpen ? .inPicker : .choosingWindow
-        }
-        if controller.isRecordMode {
-            return .source(controller.clipSourceName)
         }
         let pauses = controller.pauses
         if pauses.contains(.user) {

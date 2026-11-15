@@ -8,8 +8,13 @@ struct HUDButton: View {
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
     /// count keeps the width of two digits, so the buttons stay put as the count changes.
     var badge: Int?
+    /// It opens something under it, such as a picker: a chevron after the title.
+    var opensBelow = false
     /// The smallest width and the height; nil for the surface's button size.
     var size: CGFloat?
+    /// A fixed width in points, for a title that changes: a longer title is cut at its end,
+    /// and the chevron stays at the button's end. Nil to fit the label.
+    var width: CGFloat?
     /// Selected, such as the window the session is limited to: a grey fill.
     var isOn = false
     /// Doing what it started, such as choosing a window: a Tilde-blue fill.
@@ -28,8 +33,8 @@ struct HUDButton: View {
 
     var body: some View {
         Button(action: action) {
-            HUDButtonLabel(image: image, title: title, badge: badge, bounce: bounce)
-                .modifier(HUDButtonChrome(size: size, isOn: isOn, isActive: isActive, isDestructive: isDestructive, tint: tint, padding: padding))
+            HUDButtonLabel(image: image, title: title, badge: badge, opensBelow: opensBelow, fillsWidth: width != nil, bounce: bounce)
+                .modifier(HUDButtonChrome(size: size, width: width, isOn: isOn, isActive: isActive, isDestructive: isDestructive, tint: tint, padding: padding))
         }
         .buttonStyle(.plain)
         .tildeTooltip(showsTooltip ? help : nil, keys: keys)
@@ -45,12 +50,21 @@ struct HUDButton: View {
     }
 }
 
+/// Between groups of buttons in an accessory bar, such as the drawing bar's tools and colours.
+struct HUDBarDivider: View {
+    var body: some View {
+        Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: HUDAccessory.size.scaled(20))
+    }
+}
+
 /// The look of the HUD's buttons around their label, in a plain button: also for the label of
 /// a native menu (`Menu` in the button menu style), so that a dropdown looks like the buttons
 /// beside it.
 struct HUDButtonChrome: ViewModifier {
     /// The smallest width and the height; nil for the surface's button size.
     var size: CGFloat?
+    /// A fixed width in points; nil to fit the label.
+    var width: CGFloat?
     var isOn = false
     var isActive = false
     var isDestructive = false
@@ -67,6 +81,7 @@ struct HUDButtonChrome: ViewModifier {
             .foregroundStyle(foreground)
             .padding(.horizontal, pillSize.scaled(padding))
             .frame(minWidth: size ?? pillSize.buttonSize, minHeight: size ?? pillSize.buttonSize)
+            .frame(width: width)
             .background(RoundedRectangle(cornerRadius: pillSize.scaled(isHUDEmbedded ? 8 : 9)).fill(background))
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
@@ -105,6 +120,8 @@ struct HUDButtonLabel: View {
     var badge: Int?
     /// It opens a menu or a popover under it: a chevron after the title.
     var opensBelow = false
+    /// The title takes the width the button gives it, so the chevron is at the button's end.
+    var fillsWidth = false
     var bounce = 0
     @Environment(\.pillSize) private var pillSize
 
@@ -119,6 +136,7 @@ struct HUDButtonLabel: View {
                 Text(title)
                     .font(.system(size: pillSize.font(12.5), weight: .medium))
                     .lineLimit(1)
+                    .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
             }
             if opensBelow {
                 Image(systemName: "chevron.down")

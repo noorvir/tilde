@@ -123,8 +123,23 @@ struct SessionFlow: Equatable {
         case starting(operation: Int)
         case recording
         case paused
-        /// Stop was pressed; the clip is being saved, then goes to the list (and is sent).
-        case finishing(operation: Int, thenSend: Bool)
+        /// Stop was pressed; the clip is being saved, then goes to the list, and the session
+        /// does `then`.
+        case finishing(operation: Int, then: AfterClip)
+    }
+
+    /// What the session does once a stopped clip is saved.
+    enum AfterClip: Equatable {
+        /// Stays in recording mode, ready for the next clip.
+        case stay
+        case send
+        /// Leaves recording mode for the mode whose button was pressed while the clip recorded.
+        case switchTo(OtherMode)
+    }
+
+    /// A mode that recording mode leaves for from the HUD's buttons and their keys.
+    enum OtherMode: String {
+        case annotating, draw, wireframe
     }
 
     enum PauseReason: String, Codable, Hashable, Comparable {
@@ -337,11 +352,11 @@ struct SessionFlow: Equatable {
         }
         switch action {
         case .annotationMode:
-            return isBusy || isPicking ? [] : [.toggleAnnotating]
+            return isBusy ? [] : [.toggleAnnotating]
         case .recordingMode:
             return isBusy ? [] : [.toggleRecordingMode]
         case .drawingMode:
-            return isRecordMode || isBusy ? [] : [.startDrawing]
+            return isBusy ? [] : [.startDrawing]
         case .pauseOrResume:
             guard !isBusy, !isPicking else {
                 return []
@@ -490,9 +505,9 @@ struct SessionFlow: Equatable {
         }
     }
 
-    /// While choosing, only the source name, Esc (or the picker's Back), the picker, a choice
-    /// and the record toggle act, and the front app and hold key keep the pause the session
-    /// goes back to; nothing else does anything.
+    /// While choosing, only the source button, Esc (or the picker's Back), the picker, a
+    /// choice and the buttons of the modes act, and the front app and hold key keep the pause
+    /// the session goes back to; nothing else does anything.
     private mutating func handlePicking(_ event: Event, isPickerOpen: Bool, _ open: inout Open) -> [Effect] {
         let back = Activity.recording(.ready)
         switch event {
@@ -516,6 +531,16 @@ struct SessionFlow: Equatable {
             // Choosing ends with no change, and the toggle goes back to annotating.
             open.activity = back
             return [.stopPicking] + handleOpen(.toggleRecordingMode, &open)
+        case .toggleAnnotating, .startDrawing, .startWireframe:
+            // Choosing ends with no change, and recording mode leaves for that mode.
+            var ready = open
+            ready.activity = back
+            let switched = handleOpen(event, &ready)
+            guard !switched.isEmpty else {
+                return []
+            }
+            open = ready
+            return [.stopPicking] + switched
         case .choose:
             open.activity = back
             return [.applySource, .stopPicking]
@@ -668,13 +693,22 @@ struct SessionFlow: Equatable {
             return [.toggleList]
 
         case .startDrawing:
+            if case .recording = open.activity {
+                return leaveRecording(for: .draw, &open)
+            }
             guard open.activity == .annotating, !open.isDrawing else {
                 return []
             }
             return openCanvas(.draw, &open)
 
         case .startWireframe:
-            guard facts.wireframesOn, open.activity == .annotating, open.canvas != .wireframe else {
+            guard facts.wireframesOn else {
+                return []
+            }
+            if case .recording = open.activity {
+                return leaveRecording(for: .wireframe, &open)
+            }
+            guard open.activity == .annotating, open.canvas != .wireframe else {
                 return []
             }
             // Draw's canvas goes to wireframe mode as it is.
@@ -682,8 +716,7 @@ struct SessionFlow: Equatable {
                 open.canvas = .wireframe
                 return [.showWireframe]
             }
-            let opened = openCanvas(.wireframe, &open)
-            return open.canvas == .wireframe ? opened + [.showWireframe] : opened
+            return openWireframe(&open)
 
         case .shapeFinished:
             // A wireframe's components get no comment each.
@@ -720,7 +753,7 @@ struct SessionFlow: Equatable {
             guard open.clipInProgress else {
                 return []
             }
-            open.activity = .recording(.finishing(operation: nextOperation(), thenSend: false))
+            open.activity = .recording(.finishing(operation: nextOperation(), then: .stay))
             return [.finishClip]
 
         case .clipStarted(let operation):
@@ -750,12 +783,12 @@ struct SessionFlow: Equatable {
             return ended + togglePause(&open)
 
         case .clipFinished(let operation):
-            guard case .recording(.finishing(operation, let thenSend)) = open.activity else {
+            guard case .recording(.finishing(operation, let then)) = open.activity else {
                 return [.dropClip]
             }
             open.activity = .recording(.ready)
             facts.notes += 1
-            return [.keepClip] + (thenSend ? send(&open) : [])
+            return [.keepClip] + afterClip(then, &open)
 
         case .clipFailed(let operation):
             guard case .recording(.finishing(operation, _)) = open.activity else {
@@ -857,21 +890,20 @@ struct SessionFlow: Equatable {
         return [.applyPause, .giveKeyboardBack, .takeKeyboard]
     }
 
-    /// Annotation mode on: from Draw, recording mode (unless a clip asks first) or no mode.
-    /// Off: no mode.
-    private func toggleAnnotating(_ open: inout Open) -> [Effect] {
+    /// Annotation mode on: from Draw, recording mode, a pause or no mode. Off: no mode.
+    private mutating func toggleAnnotating(_ open: inout Open) -> [Effect] {
         if case .recording = open.activity {
-            let left = leaveRecording(&open)
-            guard open.activity == .annotating else {
-                return left
-            }
-            return left + startAnnotating(&open)
+            return leaveRecording(for: .annotating, &open)
         }
         guard open.activity == .annotating else {
             return []
         }
         if open.isDrawing {
             return finishDrawing(&open) + startAnnotating(&open)
+        }
+        // A pause for another app ends too, as for the pause by the user.
+        if open.pauses.contains(.otherApp) {
+            return startAnnotating(&open)
         }
         return togglePause(&open)
     }
@@ -898,12 +930,62 @@ struct SessionFlow: Equatable {
         return closes + [.applyPause, .showCanvas]
     }
 
+    private func openWireframe(_ open: inout Open) -> [Effect] {
+        let opened = openCanvas(.wireframe, &open)
+        return open.canvas == .wireframe ? opened + [.showWireframe] : opened
+    }
+
+    /// Another mode's button or key in recording mode: a clip in progress is stopped and kept,
+    /// as Stop keeps it, and the mode comes once it is saved. Nothing while a clip starts or
+    /// is saved.
+    private mutating func leaveRecording(for other: OtherMode, _ open: inout Open) -> [Effect] {
+        switch open.activity {
+        case .recording(.ready), .recording(.recording), .recording(.paused):
+            break
+        default:
+            return []
+        }
+        // A comment with text asks first, as leaving it any other way does.
+        if open.panel == .comment, facts.commentHasText {
+            return leaveComment(&open)
+        }
+        guard open.clipInProgress else {
+            return exitRecording(&open) + enter(other, &open)
+        }
+        open.activity = .recording(.finishing(operation: nextOperation(), then: .switchTo(other)))
+        return [.finishClip]
+    }
+
+    private func enter(_ other: OtherMode, _ open: inout Open) -> [Effect] {
+        switch other {
+        case .annotating: startAnnotating(&open)
+        case .draw: openCanvas(.draw, &open)
+        case .wireframe: openWireframe(&open)
+        }
+    }
+
+    /// After a clip is saved: send, or leave for another mode. A question or a comment with
+    /// text keeps the session in recording mode, ready.
+    private mutating func afterClip(_ then: AfterClip, _ open: inout Open) -> [Effect] {
+        switch then {
+        case .stay:
+            return []
+        case .send:
+            return send(&open)
+        case .switchTo(let other):
+            guard open.question == nil, !(open.panel == .comment && facts.commentHasText) else {
+                return []
+            }
+            return exitRecording(&open) + enter(other, &open)
+        }
+    }
+
     /// The source went away: the clip ends at its last frame and goes to the list.
     private mutating func endClipOfLostSource(_ open: inout Open) -> [Effect] {
         guard open.clipInProgress else {
             return []
         }
-        open.activity = .recording(.finishing(operation: nextOperation(), thenSend: false))
+        open.activity = .recording(.finishing(operation: nextOperation(), then: .stay))
         return [.finishClip, .showSourceGone]
     }
 
@@ -948,8 +1030,8 @@ struct SessionFlow: Equatable {
         return [.startPicking] + (choosesInPicker ? [.openPicker] : [])
     }
 
-    /// Back to no mode; a clip that is not stopped is lost, so that asks first. A clip being
-    /// saved finishes first.
+    /// Esc and the record toggle: back to no mode; a clip that is not stopped is lost, so
+    /// that asks first. A clip being saved finishes first.
     private func leaveRecording(_ open: inout Open) -> [Effect] {
         switch open.activity {
         case .recording(.recording), .recording(.paused):
@@ -1014,7 +1096,7 @@ struct SessionFlow: Equatable {
             facts.notes = max(facts.notes, 1)
         }
         if open.clipInProgress {
-            open.activity = .recording(.finishing(operation: nextOperation(), thenSend: true))
+            open.activity = .recording(.finishing(operation: nextOperation(), then: .send))
             return effects + [.finishClip]
         }
         guard facts.notes > 0 else {

@@ -484,7 +484,7 @@ struct BehaviourTests {
     /// adding notes never moves a button.
     @Test(arguments: [
         SessionFlow.Activity.annotating, .recording(.ready), .recording(.starting(operation: 0)), .recording(.recording),
-        .recording(.paused), .recording(.finishing(operation: 0, thenSend: false)), .picking(isPickerOpen: false),
+        .recording(.paused), .recording(.finishing(operation: 0, then: .stay)), .picking(isPickerOpen: false),
     ])
     func everyModeFitsThePillWidth(activity: SessionFlow.Activity) {
         for pauses in [[], [SessionFlow.PauseReason.user]] as [Set<SessionFlow.PauseReason>] {
@@ -816,7 +816,7 @@ struct BehaviourTests {
 
     /// The source name does nothing while a clip is in progress: a clip keeps its source.
     @Test func aClipKeepsItsSource() {
-        for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, thenSend: false)] {
+        for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, then: .stay)] {
             open(activity: .recording(clip), source: .window(Fixtures.window))
             controller.dispatch(.pickSource)
             controller.annotateInBrowser()

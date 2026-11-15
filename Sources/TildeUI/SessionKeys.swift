@@ -193,7 +193,7 @@ extension AnnotationController {
     }
 
     /// The rule of wireframe mode's keys, for a key without ⌘, ⌃ or ⌥, in lower case. W starts
-    /// the mode outside recording mode while the beta is on, and resumes it when it is paused. In the mode, a
+    /// the mode while the beta is on, also from recording mode, and resumes it when it is paused. In the mode, a
     /// tool's letter chooses the tool, and every other letter and digit does nothing. Under a
     /// question no key is one of them.
     nonisolated static func wireframeKey(_ key: String, flow: SessionFlow, wireframesOn: Bool) -> WireframeKey? {
@@ -201,7 +201,7 @@ extension AnnotationController {
             return nil
         }
         guard open.canvas == .wireframe else {
-            return key == "w" && wireframesOn && !flow.isRecordMode ? .start : nil
+            return key == "w" && wireframesOn ? .start : nil
         }
         if !open.pauses.isEmpty {
             return key == "w" ? .resume : nil

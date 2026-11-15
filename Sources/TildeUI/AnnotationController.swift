@@ -482,18 +482,6 @@ final class AnnotationController: ObservableObject {
         dispatch(.escape)
     }
 
-    /// The HUD's leading button: records, pauses or resumes a clip in recording mode; else
-    /// resumes after any pause, or pauses.
-    func pressStatusButton() {
-        if isRecordMode {
-            dispatch(.record)
-        } else if !pauses.isEmpty {
-            dispatch(.resume)
-        } else {
-            dispatch(.togglePause)
-        }
-    }
-
     // MARK: - Session lifecycle
 
     private func syncWithStore() {
