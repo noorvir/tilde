@@ -247,6 +247,7 @@ func isNotApplication(_ element: AXUIElement) -> Bool {
 func node(_ element: AXUIElement, depth: Int) -> [String: Any] {
     var result: [String: Any] = ["role": axValue(element, kAXRoleAttribute) as String? ?? ""]
     result["name"] = axName(element)
+    result["value"] = axValue(element, kAXValueAttribute) as String?
     result["enabled"] = axValue(element, kAXEnabledAttribute) as Bool? ?? true
     var position = CGPoint.zero
     var size = CGSize.zero

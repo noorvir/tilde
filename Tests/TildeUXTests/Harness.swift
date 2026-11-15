@@ -22,6 +22,8 @@ struct UXFailure: Error, CustomStringConvertible {
 struct Seen {
     let role: String
     let name: String?
+    /// What it shows besides its name, such as the source that a menu button names.
+    let value: String?
     let enabled: Bool
     let frame: CGRect
     let children: [Seen]
@@ -29,6 +31,7 @@ struct Seen {
     init(_ json: [String: Any]) {
         role = json["role"] as? String ?? ""
         name = json["name"] as? String
+        value = json["value"] as? String
         enabled = json["enabled"] as? Bool ?? true
         let numbers = json["frame"] as? [Double] ?? [0, 0, 0, 0]
         frame = CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
@@ -499,12 +502,12 @@ final class TildeApp {
         Issue.record("\"\(name)\" is still on screen", sourceLocation: sourceLocation)
     }
 
-    /// Waits until some text containing this is on screen.
+    /// Waits until some text containing this is on screen, as a name or a value.
     @discardableResult
     func waitToSeeText(containing part: String, timeout: Double = 10, sourceLocation: SourceLocation = #_sourceLocation) async throws -> Seen {
         let end = Date().addingTimeInterval(timeout)
         while Date() < end {
-            if let found = try await seen().first(where: { $0.name?.contains(part) == true }) {
+            if let found = try await seen().first(where: { $0.name?.contains(part) == true || $0.value?.contains(part) == true }) {
                 return found
             }
             try await Task.sleep(for: .milliseconds(20))

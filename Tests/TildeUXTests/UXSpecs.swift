@@ -552,6 +552,58 @@ struct UXSpecs {
         }
     }
 
+    /// The recording bar's source menu chooses what the next clip records, with no third row:
+    /// recording mode starts by selecting on screen in the source button, and Esc keeps the
+    /// screen; Esc closes the open menu only; "Show all windows" opens the window grid, where an
+    /// app with one window is chosen at once; "Select on screen" waits for a click, and Esc keeps
+    /// the choice.
+    @Test func theSourceMenuChoosesWhatTheNextClipRecords() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Codex")
+            _ = try await agent.call("start_annotation", ["wait_seconds": 0])
+            try await app.waitToSee("Annotating")
+
+            try await app.key(.r)
+            try await app.waitToSee("Choose a window")
+            try await app.waitToSeeText(containing: "Click a window")
+            try await app.key(.escape)
+            try await app.waitToSeeText(containing: "Ready to record")
+            step("selecting on screen ended")
+
+            try await app.press("Source")
+            try await app.waitToSee("Show all windows")
+            try await app.waitToSee("Select on screen")
+            // The menu takes the keys once it has opened.
+            try await Task.sleep(for: .milliseconds(300))
+            try await app.key(.escape)
+            try await app.waitNotToSee("Show all windows")
+            try await app.waitToSeeText(containing: "Ready to record")
+            step("menu closed")
+
+            try await app.press("Source")
+            try await app.press("Show all windows")
+            try await app.waitToSee("tilde-ux-fixture")
+            try await app.press("tilde-ux-fixture")
+            try await app.waitNotToSee("tilde-ux-fixture")
+            try await app.waitToSeeText(containing: "Ready to record")
+            let chosen = try await app.seen().first { $0.name == "Source" }
+            #expect(chosen?.value?.contains("tilde-ux-fixture") == true)
+            step("window chosen in the grid")
+
+            try await app.press("Source")
+            try await app.press("Select on screen")
+            try await app.waitToSee("Choose a window")
+            try await app.waitToSeeText(containing: "Click a window")
+            try await app.key(.escape)
+            try await app.waitToSeeText(containing: "Ready to record")
+            let kept = try await app.seen().first { $0.name == "Source" }
+            #expect(kept?.value?.contains("tilde-ux-fixture") == true)
+            step("Esc kept the window")
+        }
+    }
+
     // MARK: - Draw and the keyboard
 
     /// In Draw, Esc on a shape's comment with text asks first, and Esc again keeps the comment
