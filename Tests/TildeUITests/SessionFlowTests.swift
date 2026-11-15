@@ -19,7 +19,8 @@ struct SessionFlowTests {
     static let states: [State] = {
         let activities: [SessionFlow.Activity] = [
             .annotating, .recording(.ready), .recording(.starting(operation: 3)), .recording(.recording), .recording(.paused),
-            .recording(.finishing(operation: 3, thenSend: false)), .recording(.finishing(operation: 3, thenSend: true)),
+            .recording(.finishing(operation: 3, then: .stay)), .recording(.finishing(operation: 3, then: .send)),
+            .recording(.finishing(operation: 3, then: .switchTo(.draw))),
             .picking(isPickerOpen: false), .picking(isPickerOpen: true),
         ]
         var opens: [Open] = []
@@ -150,15 +151,16 @@ struct SessionFlowTests {
         }
     }
 
-    /// While choosing, only the source name, Esc, the picker, a choice, the record toggle,
-    /// Draw, the hold key, the front app and the session's end act.
+    /// While choosing, only the source button, Esc, the picker, a choice, the buttons of the
+    /// modes, the hold key, the front app and the session's end act.
     @Test func choosingTakesOnlyItsEvents() {
         everyTransition { state, event, next, effects in
             guard case .open(let open) = state.mode, open.activity.isPicking else {
                 return
             }
             switch event {
-            case .escape, .pickSource, .openPicker, .choose, .toggleRecordingMode, .startDrawing, .holdEnded, .otherAppInFront, .scopeAppInFront, .ended:
+            case .escape, .pickSource, .openPicker, .choose, .toggleRecordingMode, .toggleAnnotating, .startDrawing, .startWireframe, .holdEnded,
+                 .otherAppInFront, .scopeAppInFront, .ended:
                 return
             case .clipStarted, .clipFinished:
                 #expect(next == state.flow && effects == [.dropClip], "\(event) gave \(effects)")

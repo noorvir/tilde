@@ -281,7 +281,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         controller.annotateInBrowser()
     }
 
-    /// Chooses what to record, as a click on the source's name in the HUD does.
+    /// Chooses what to record, as a click on the recording bar's source button does.
     @objc private func chooseWindow() {
         controller.dispatch(.pickSource)
     }

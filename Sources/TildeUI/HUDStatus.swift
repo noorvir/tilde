@@ -3,17 +3,14 @@ import SwiftUI
 
 /// What the pill's title and subtitle say in each mode.
 extension HUDView {
-    /// The title and the leading button of one mode.
+    /// The title of one mode and the dot before it.
     struct Status: Equatable {
         var title: String
         /// The clip's length after the title: running since a date, or stopped.
         var clock: Clock?
-        var symbol: String
-        var tint: Color?
-        var help: String
-        /// The keys that do the same, in the tooltip; the view adds the in-app key.
-        var keys: [String] = []
-        /// Starting, saving or sending: the leading button and the record toggle wait.
+        /// Blue while annotating, red while a clip records, grey in every other state.
+        var dot: Color
+        /// Starting, saving or sending: the buttons of the modes wait.
         var isBusy = false
 
         enum Clock: Equatable {
@@ -23,61 +20,52 @@ extension HUDView {
     }
 
     static func status(of controller: AnnotationController) -> Status {
-        let shortcut = controller.shortcuts.shortcut(for: .startAnnotation) ?? controller.shortcuts.shortcut(for: .togglePause)
         let clock = controller.clips.clock
         switch controller.mode {
-        case .sending(_, let returnTo):
-            var status = status(of: returnTo, shortcut: shortcut, clock: clock)
-            status.title = "Sending"
-            status.clock = nil
-            status.isBusy = true
-            return status
+        case .sending:
+            return Status(title: "Sending", dot: idleDot, isBusy: true)
         case .open(let open):
-            return status(of: open, shortcut: shortcut, clock: clock)
+            return status(of: open, clock: clock)
         case .idle, .sent:
-            return status(of: SessionFlow.Open(), shortcut: nil, clock: clock)
+            return status(of: SessionFlow.Open(), clock: clock)
         }
     }
 
-    /// "Pause" with Esc, and when paused "Annotate" with the start shortcut, such as ⌃⌃; in
-    /// recording mode the record button, red to start or resume a clip and pause while it records.
-    static func status(of open: SessionFlow.Open, shortcut: Shortcut?, clock: (since: Date, before: TimeInterval)) -> Status {
+    static func status(of open: SessionFlow.Open, clock: (since: Date, before: TimeInterval)) -> Status {
         switch open.activity {
         case .picking:
-            var back = open
-            back.activity = .recording(.ready)
-            var status = status(of: back, shortcut: shortcut, clock: clock)
-            status.title = "Choose a window"
-            return status
+            return Status(title: "Choose a window", dot: idleDot)
         case .annotating:
             if open.pauses.isEmpty {
-                return Status(title: "Annotating", symbol: "pause.fill", help: "Pause", keys: ["Esc"])
+                return Status(title: "Annotating", dot: .tildeBlue)
             }
-            return Status(title: "Paused", symbol: "play.fill", help: "Annotate", keys: shortcut.map { [$0.chip] } ?? [])
+            return Status(title: "Paused", dot: idleDot)
         case .recording(let clip):
             switch clip {
             case .ready:
-                return Status(title: "Ready to record", symbol: "circle.fill", tint: .red, help: "Record")
+                return Status(title: "Ready to record", dot: idleDot)
             case .starting:
-                return Status(title: "Starting", symbol: "circle.fill", tint: .red, help: "Record", isBusy: true)
+                return Status(title: "Starting", dot: idleDot, isBusy: true)
             case .recording:
-                return Status(title: "Recording", clock: .running(since: clock.since, before: clock.before), symbol: "pause.fill", help: "Pause")
+                return Status(title: "Recording", clock: .running(since: clock.since, before: clock.before), dot: .red)
             case .paused:
-                return Status(title: "Paused", clock: .stopped(clock.before), symbol: "circle.fill", tint: .red, help: "Resume")
+                return Status(title: "Paused", clock: .stopped(clock.before), dot: idleDot)
             case .finishing:
-                return Status(title: "Saving", symbol: "circle.fill", tint: .red, help: "Record", isBusy: true)
+                return Status(title: "Saving", dot: idleDot, isBusy: true)
             }
         }
     }
+
+    private static let idleDot = Color.white.opacity(0.35)
 
     /// Every title the HUD shows, with the widest clock, for the width of the title column.
     static let titles: [String] = {
         let modes: [SessionFlow.Open] = [
             SessionFlow.Open(), SessionFlow.Open(pauses: [.user]), SessionFlow.Open(activity: .picking(isPickerOpen: false)),
-        ] + [SessionFlow.Clip.ready, .starting(operation: 0), .recording, .paused, .finishing(operation: 0, thenSend: false)].map {
+        ] + [SessionFlow.Clip.ready, .starting(operation: 0), .recording, .paused, .finishing(operation: 0, then: .stay)].map {
             SessionFlow.Open(activity: .recording($0))
         }
-        let statuses = modes.map { status(of: $0, shortcut: nil, clock: (Date(), 0)) }
+        let statuses = modes.map { status(of: $0, clock: (Date(), 0)) }
         return statuses.map { $0.clock == nil ? $0.title : "\($0.title) 00:00" } + ["Sending"]
     }()
 
@@ -92,8 +80,6 @@ extension HUDView {
         /// The hold key is down; its symbol.
         case holding(String)
         case notice(String)
-        /// Recording mode: the name of what Record records.
-        case source(String)
     }
 
     /// The subtitle: an optional word, an optional app icon, a name or text, and a remote
@@ -131,9 +117,7 @@ extension HUDView {
             return SubtitlePart(text: "Esc cancels")
         case .inPicker:
             return SubtitlePart(text: "Esc goes back")
-        case .source(let name):
-            return SubtitlePart(text: name)
-        // Paused, it still says where the report goes; the button's tooltip has the shortcut.
+        // Paused, it still says where the report goes.
         case .annotating, .paused:
             break
         }

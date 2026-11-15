@@ -8,7 +8,7 @@ import Foundation
 /// An unknown key or value is an error, so a typo cannot test another state.
 extension SessionFlow: Codable {
     private enum Key: String, CodingKey, CaseIterable {
-        case mode, pauses, drawing, wireframe, panel, question, clip, operation, thenSend, pickerOpen, returnTo
+        case mode, pauses, drawing, wireframe, panel, question, clip, operation, then, pickerOpen, returnTo
         case choosesInPicker, lastOperation
     }
 
@@ -72,7 +72,7 @@ extension SessionFlow: Codable {
             case "starting": .starting(operation: operation)
             case "recording": .recording
             case "paused": .paused
-            case "finishing": .finishing(operation: operation, thenSend: try values.decodeIfPresent(Bool.self, forKey: .thenSend) ?? false)
+            case "finishing": .finishing(operation: operation, then: try afterClip(try values.decodeIfPresent(String.self, forKey: .then) ?? "stay", decoder))
             case let other: throw unknown("clip \(other)", decoder)
             }
             open.activity = .recording(clip)
@@ -82,6 +82,27 @@ extension SessionFlow: Codable {
             open.activity = .annotating
         }
         return open
+    }
+
+    /// `then` of a clip being saved: "stay", "send", or the mode to leave for, such as "draw".
+    private static func afterClip(_ name: String, _ decoder: Decoder) throws -> AfterClip {
+        switch name {
+        case "stay": return .stay
+        case "send": return .send
+        default:
+            guard let other = OtherMode(rawValue: name) else {
+                throw unknown("then \(name)", decoder)
+            }
+            return .switchTo(other)
+        }
+    }
+
+    private static func name(_ then: AfterClip) -> String {
+        switch then {
+        case .stay: "stay"
+        case .send: "send"
+        case .switchTo(let other): other.rawValue
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -129,10 +150,10 @@ extension SessionFlow: Codable {
                 try values.encode("recording", forKey: .clip)
             case .paused:
                 try values.encode("paused", forKey: .clip)
-            case .finishing(let operation, let thenSend):
+            case .finishing(let operation, let then):
                 try values.encode("finishing", forKey: .clip)
                 try values.encode(operation, forKey: .operation)
-                try values.encode(thenSend, forKey: .thenSend)
+                try values.encode(name(then), forKey: .then)
             }
         }
     }

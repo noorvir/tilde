@@ -205,7 +205,7 @@ struct BehaviourTests {
         #expect(HUDView.status(of: controller).title == "Annotating")
     }
 
-    /// A restore and Open Browser wait while a clip records, as the source name does.
+    /// A restore and Open Browser wait while a clip records, as the source button does.
     @Test func aClipKeepsItsNotesAndSource() {
         open(drafts: Fixtures.drafts(1), activity: .recording(.recording))
         controller.restore(Fixtures.record(notes: 3))
@@ -484,7 +484,7 @@ struct BehaviourTests {
     /// adding notes never moves a button.
     @Test(arguments: [
         SessionFlow.Activity.annotating, .recording(.ready), .recording(.starting(operation: 0)), .recording(.recording),
-        .recording(.paused), .recording(.finishing(operation: 0, thenSend: false)), .picking(isPickerOpen: false),
+        .recording(.paused), .recording(.finishing(operation: 0, then: .stay)), .picking(isPickerOpen: false),
     ])
     func everyModeFitsThePillWidth(activity: SessionFlow.Activity) {
         for pauses in [[], [SessionFlow.PauseReason.user]] as [Set<SessionFlow.PauseReason>] {
@@ -769,7 +769,7 @@ struct BehaviourTests {
         #expect(SessionScope.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: nil) == CGRect(x: 0, y: 0, width: 50, height: 50))
     }
 
-    /// Annotating has no source to choose. Before Record, a click on the source name picks on
+    /// Annotating has no source to choose. Before Record, a click on the source button picks on
     /// screen, with the picker closed to its button; a second click stops with no change. A
     /// choice is taken only while choosing, and Record records it; back in annotating, the
     /// session is limited to nothing again.
@@ -814,9 +814,9 @@ struct BehaviourTests {
         #expect(controller.allows(elsewhere))
     }
 
-    /// The source name does nothing while a clip is in progress: a clip keeps its source.
+    /// The source button does nothing while a clip is in progress: a clip keeps its source.
     @Test func aClipKeepsItsSource() {
-        for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, thenSend: false)] {
+        for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, then: .stay)] {
             open(activity: .recording(clip), source: .window(Fixtures.window))
             controller.dispatch(.pickSource)
             controller.annotateInBrowser()
@@ -895,15 +895,13 @@ struct BehaviourTests {
         ]
         // One of each state, then every value it can have; a new state does not compile here
         // until it has its values.
-        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice(""), .source("")]
+        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice("")]
         let states = kinds.flatMap { kind -> [HUDView.SubtitleState] in
             switch kind {
             case .annotating, .choosingWindow, .inPicker, .waitingForWindow: [kind]
             case .paused: shortcuts.map { .paused(shortcut: $0) }
             case .holding: DoubleTapKey.allCases.map { .holding($0.symbol) }
             case .notice: Notice.allCases.map { .notice($0.rawValue) }
-            // The screens of Macs, Tilde's own window and a phone, as Record names them.
-            case .source: ["Built-in Retina Display", "Studio Display", "Display", "Tilde Browser", "iPhone"].map { .source($0) }
             }
         }
 

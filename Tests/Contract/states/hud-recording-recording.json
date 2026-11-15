@@ -3,7 +3,7 @@
   "surface": "hud",
   "size": [
     600,
-    80
+    130
   ],
   "session": {
     "client": "Codex"
