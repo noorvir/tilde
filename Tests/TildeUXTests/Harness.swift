@@ -53,6 +53,8 @@ enum Key: Int {
     case b = 11
     case d = 2
     case c = 8
+    case t = 17
+    case x = 7
 }
 
 /// A picture of the screen, or an image of the app's, read in points.
