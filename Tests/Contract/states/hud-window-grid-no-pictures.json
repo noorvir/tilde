@@ -10,7 +10,7 @@
   },
   "notes": 0,
   "recording": "ready",
-  "scoped": true,
   "pickingWindow": true,
-  "sourcePicker": "windows"
+  "windowGrid": "apps",
+  "gridPhase": "noPictures"
 }

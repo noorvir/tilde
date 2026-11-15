@@ -776,7 +776,7 @@ final class AnnotationController: ObservableObject {
         guard session != nil, isOpen else {
             return
         }
-        hud.place(inBrowser: scope.isBrowser, isWindowGridOpen: isWindowGridOpen)
+        hud.place(inBrowser: scope.isBrowser, isPicking: isPickingWindow, isWindowGridOpen: isWindowGridOpen)
     }
 
     private func toggleList() {

@@ -58,7 +58,7 @@ struct StartModeTests {
         #expect(kept(Open(activity: .recording(.ready))) == .noMode)
         #expect(kept(Open(activity: .recording(.recording))) == .noMode)
 
-        #expect(kept(Open(activity: .picking(isPickerOpen: false))) == nil)
+        #expect(kept(Open(activity: .picking(.onScreen))) == nil)
         #expect(kept(Open(pauses: [.hold])) == nil)
         #expect(kept(Open(pauses: [.otherApp])) == nil)
         #expect(SessionFlow(mode: .sending(operation: 1, returnTo: Open())).startMode == nil)

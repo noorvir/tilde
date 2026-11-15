@@ -10,8 +10,7 @@
   },
   "notes": 0,
   "recording": "ready",
+  "scoped": true,
   "pickingWindow": true,
-  "sourcePicker": "windows",
-  "hudInBrowser": true,
-  "scoped": true
+  "windowGrid": "app"
 }

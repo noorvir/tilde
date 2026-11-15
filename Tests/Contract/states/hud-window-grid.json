@@ -12,5 +12,5 @@
   "recording": "ready",
   "scoped": true,
   "pickingWindow": true,
-  "sourcePicker": "app"
+  "windowGrid": "apps"
 }

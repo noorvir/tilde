@@ -21,7 +21,7 @@ struct SessionFlowTests {
             .annotating, .recording(.ready), .recording(.starting(operation: 3)), .recording(.recording), .recording(.paused),
             .recording(.finishing(operation: 3, then: .stay)), .recording(.finishing(operation: 3, then: .send)),
             .recording(.finishing(operation: 3, then: .switchTo(.draw))),
-            .picking(isPickerOpen: false), .picking(isPickerOpen: true),
+            .picking(.onScreen), .picking(.windowGrid),
         ]
         var opens: [Open] = []
         for activity in activities {
@@ -78,7 +78,7 @@ struct SessionFlowTests {
         .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .startWireframe, .wireframeTaken,
         .toggleRecordingMode, .record, .stop,
         .clipStarted(3), .clipStarted(2), .clipStartFailed(3), .clipStartFailed(2), .clipFinished(3), .clipFinished(2),
-        .clipFailed(3), .clipFailed(2), .captureStopped, .windowClosed, .pickSource, .openPicker, .choose,
+        .clipFailed(3), .clipFailed(2), .captureStopped, .windowClosed, .selectOnScreen, .showAllWindows, .choose,
         .send, .sendFinished(3), .sendFinished(2), .sendFailed(3), .sendFailed(2), .sentShown(3), .sentShown(2), .pushFailed,
     ]
 
@@ -151,15 +151,15 @@ struct SessionFlowTests {
         }
     }
 
-    /// While choosing, only the source button, Esc, the picker, a choice, the buttons of the
-    /// modes, the hold key, the front app and the session's end act.
+    /// While choosing, only Esc, the source menu, a choice, the buttons of the modes, the hold
+    /// key, the front app and the session's end act.
     @Test func choosingTakesOnlyItsEvents() {
         everyTransition { state, event, next, effects in
             guard case .open(let open) = state.mode, open.activity.isPicking else {
                 return
             }
             switch event {
-            case .escape, .pickSource, .openPicker, .choose, .toggleRecordingMode, .toggleAnnotating, .startDrawing, .startWireframe, .holdEnded,
+            case .escape, .selectOnScreen, .showAllWindows, .choose, .toggleRecordingMode, .toggleAnnotating, .startDrawing, .startWireframe, .holdEnded,
                  .otherAppInFront, .scopeAppInFront, .ended:
                 return
             case .clipStarted, .clipFinished:

@@ -124,53 +124,23 @@ struct BehaviourTests {
         #expect(!controller.canSend)
     }
 
-    /// The picker lists a phone in both modes, and the HUD stays in its mode; the record toggle
-    /// changes the mode with the picker open, and a phone is taken only in recording mode.
-    @Test func choosingInRecordingModeOffersAPhone() {
+    /// Recording mode lists the screens and a phone for the source menu, and starts by
+    /// selecting on screen; a phone from the menu is the next clip's source at once.
+    @Test func theSourceMenuOffersAPhoneInRecordingMode() {
         let (screens, apps) = Fixtures.sources()
         controller.sourcePicker.injected = (screens, apps, .done)
 
-        open(activity: .recording(.ready))
-        controller.dispatch(.pickSource)
-        controller.dispatch(.openPicker)
-        #expect(controller.isRecordMode)
-        #expect(controller.isSourcePickerOpen)
+        open()
+        controller.dispatch(.toggleRecordingMode)
+        #expect(controller.isPickingWindow)
+        #expect(!controller.isWindowGridOpen)
+        controller.escapePressed()
         let offersPhone = controller.sourcePicker.screens.contains { $0.source == .phone(Fixtures.phone) }
         #expect(offersPhone)
         controller.choose(.phone(Fixtures.phone))
         #expect(!controller.isPickingWindow)
+        #expect(controller.isRecordMode)
         #expect(controller.clipSource == .phone(Fixtures.phone))
-    }
-
-    /// Recording mode starts choosing the way the user last chose, also after a restart: in
-    /// the picker once they opened it, on screen once they went back to clicking there.
-    @Test func recordingModeStartsChoosingTheWayTheUserLastChose() async throws {
-        let defaults = MemoryDefaults()
-        func restarted() -> AnnotationController {
-            let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
-            controller.sourcePicker.injected = (Fixtures.sources().screens, Fixtures.sources().apps, .done)
-            controller.setStateForTesting(session: Fixtures.session(), mode: .open(SessionFlow.Open()))
-            return controller
-        }
-
-        let first = restarted()
-        first.dispatch(.toggleRecordingMode)
-        #expect(first.isPickingWindow)
-        #expect(!first.isSourcePickerOpen)
-        first.dispatch(.openPicker)
-        first.dispatch(.toggleRecordingMode)
-
-        let second = restarted()
-        second.dispatch(.toggleRecordingMode)
-        #expect(second.isSourcePickerOpen)
-        second.escapePressed()
-        #expect(second.isPickingWindow)
-        #expect(!second.isSourcePickerOpen)
-
-        let third = restarted()
-        third.dispatch(.toggleRecordingMode)
-        #expect(third.isPickingWindow)
-        #expect(!third.isSourcePickerOpen)
     }
 
     /// Clear History keeps the session on screen, whose notes and recordings are in use.
@@ -281,7 +251,7 @@ struct BehaviourTests {
 
         open(drafts: Fixtures.drafts(1))
         controller.dispatch(.requestCancel)
-        for event: SessionFlow.Event in [.togglePause, .requestCancel, .openBrowser, .restore, .pickSource, .deleteNote, .editNote] {
+        for event: SessionFlow.Event in [.togglePause, .requestCancel, .openBrowser, .restore, .selectOnScreen, .choose, .deleteNote, .editNote] {
             #expect(!controller.accepts(event), "\(event)")
         }
     }
@@ -341,7 +311,7 @@ struct BehaviourTests {
             characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36
         ))
 
-        open(drafts: Fixtures.drafts(1), activity: .picking(isPickerOpen: false))
+        open(drafts: Fixtures.drafts(1), activity: .picking(.onScreen))
         view.keyDown(with: send)
         #expect(controller.isPickingWindow)
 
@@ -376,13 +346,13 @@ struct BehaviourTests {
     @Test func aPhoneIsARecordingSourceOnly() {
         let phone = Phone(id: "phone", name: "iPhone")
         open()
-        controller.dispatch(.pickSource)
+        controller.dispatch(.selectOnScreen)
         controller.choose(.phone(phone))
         #expect(controller.scope.source == nil)
         #expect(!controller.isPickingWindow)
         #expect(!controller.isRecordMode)
 
-        open(activity: .picking(isPickerOpen: false))
+        open(activity: .recording(.ready))
         controller.choose(.phone(phone))
         #expect(controller.scope.source == .phone(phone))
         controller.dispatch(.toggleRecordingMode)
@@ -484,7 +454,7 @@ struct BehaviourTests {
     /// adding notes never moves a button.
     @Test(arguments: [
         SessionFlow.Activity.annotating, .recording(.ready), .recording(.starting(operation: 0)), .recording(.recording),
-        .recording(.paused), .recording(.finishing(operation: 0, then: .stay)), .picking(isPickerOpen: false),
+        .recording(.paused), .recording(.finishing(operation: 0, then: .stay)), .picking(.onScreen),
     ])
     func everyModeFitsThePillWidth(activity: SessionFlow.Activity) {
         for pauses in [[], [SessionFlow.PauseReason.user]] as [Set<SessionFlow.PauseReason>] {
@@ -555,24 +525,25 @@ struct BehaviourTests {
         #expect(HUDPanel.pillScreen(of: panel.offsetBy(dx: 0, dy: -200), among: [lower, upper]) == 0)
     }
 
-    /// A HUD too low for the picker goes to its home (x and y) while choosing, and back after.
+    /// A HUD too low for the window grid goes to its home (x and y) while it is open, and back
+    /// after.
     @Test func aLowHUDGoesHomeForThePickerAndBack() throws {
         let screen = try #require(NSScreen.screens.first)
         let panel = HUDPanel(controller: controller)
         let height = screen.visibleFrame.height + 4
         let low = NSPoint(x: screen.visibleFrame.minX + 40, y: screen.visibleFrame.minY + 120 - height)
         panel.window.setFrame(NSRect(origin: low, size: NSSize(width: 800, height: height)), display: false)
-        open()
-        controller.dispatch(.pickSource)
+        open(activity: .recording(.ready))
+        controller.dispatch(.showAllWindows)
 
-        panel.fitPicker()
+        panel.fitWindowGrid()
 
         let home = HUDPanel.homeTop(screenFrame: screen.frame, visibleFrame: screen.visibleFrame)
         #expect(panel.window.frame.midX == home.x)
         #expect(panel.window.frame.maxY == home.y)
-        #expect(controller.sourcePicker.space.height >= HUDAccessoryPicker.sizes.min.height)
+        #expect(controller.sourcePicker.space.height >= HUDWindowGrid.sizes.min.height)
 
-        panel.endPicking()
+        panel.endWindowGrid()
         #expect(panel.window.frame.origin == low)
     }
 
@@ -769,27 +740,26 @@ struct BehaviourTests {
         #expect(SessionScope.clamped(CGRect(x: 0, y: 0, width: 50, height: 50), scope: nil) == CGRect(x: 0, y: 0, width: 50, height: 50))
     }
 
-    /// Annotating has no source to choose. Before Record, a click on the source button picks on
-    /// screen, with the picker closed to its button; a second click stops with no change. A
-    /// choice is taken only while choosing, and Record records it; back in annotating, the
-    /// session is limited to nothing again.
-    @Test func theSourceNameChoosesAgainBeforeRecord() {
+    /// Annotating has no source to choose. Before Record, Select on screen picks on screen,
+    /// and Esc stops with no change; a click on a window chooses it and Record records it.
+    /// Back in annotating, the session is limited to nothing again.
+    @Test func theSourceMenuChoosesAgainBeforeRecord() {
         let elsewhere = CGPoint(x: -5000, y: -5000)
         open()
-        controller.dispatch(.pickSource)
+        controller.dispatch(.selectOnScreen)
+        controller.choose(.screen(1))
         #expect(!controller.isPickingWindow)
-
-        open(activity: .recording(.ready))
-        controller.dispatch(.pickSource)
-        #expect(controller.isPickingWindow)
-        #expect(!controller.isSourcePickerOpen)
-        controller.dispatch(.pickSource)
-        #expect(!controller.isPickingWindow)
-
-        controller.choose(.window(Fixtures.window))
         #expect(controller.scope.source == nil)
 
-        controller.dispatch(.pickSource)
+        open(activity: .recording(.ready))
+        controller.dispatch(.selectOnScreen)
+        #expect(controller.isPickingWindow)
+        #expect(!controller.isWindowGridOpen)
+        controller.escapePressed()
+        #expect(!controller.isPickingWindow)
+        #expect(controller.scope.source == nil)
+
+        controller.dispatch(.selectOnScreen)
         controller.choose(.window(Fixtures.window))
         #expect(!controller.isPickingWindow)
         #expect(controller.isRecordMode)
@@ -797,13 +767,13 @@ struct BehaviourTests {
         #expect(controller.clipSourceName == "Safari")
 
         // While choosing, every window can be clicked, and Esc keeps the choice.
-        open(activity: .picking(isPickerOpen: false), source: .window(Fixtures.window))
+        open(activity: .picking(.onScreen), source: .window(Fixtures.window))
         #expect(controller.allows(elsewhere))
         controller.escapePressed()
         #expect(controller.isRecordMode)
         #expect(controller.clipSource == .window(Fixtures.window))
 
-        open(activity: .picking(isPickerOpen: false), source: .window(Fixtures.window))
+        open(activity: .picking(.onScreen), source: .window(Fixtures.window))
         controller.choose(.screen(1))
         #expect(!controller.isPickingWindow)
         #expect(controller.scope.source == .screen(1))
@@ -814,37 +784,36 @@ struct BehaviourTests {
         #expect(controller.allows(elsewhere))
     }
 
-    /// The source button does nothing while a clip is in progress: a clip keeps its source.
+    /// The source menu does nothing while a clip is in progress: a clip keeps its source.
     @Test func aClipKeepsItsSource() {
         for clip in [SessionFlow.Clip.starting(operation: 1), .recording, .paused, .finishing(operation: 1, then: .stay)] {
             open(activity: .recording(clip), source: .window(Fixtures.window))
-            controller.dispatch(.pickSource)
+            controller.dispatch(.selectOnScreen)
+            controller.dispatch(.showAllWindows)
+            controller.choose(.screen(1))
             controller.annotateInBrowser()
             #expect(!controller.isPickingWindow, "\(clip)")
             #expect(controller.clipSource == .window(Fixtures.window), "\(clip)")
         }
     }
 
-    /// The open picker takes no clicks on screen. "All apps", "Select on screen" and Esc step
-    /// back one level: an app's windows, then the picker, then choosing.
-    @Test func theOpenPickerStepsBackOneLevelAtATime() {
-        open(activity: .picking(isPickerOpen: true))
+    /// The window grid takes no clicks on screen. Esc steps back one level: from an app's
+    /// windows to the apps, then out of the grid with no change.
+    @Test func theWindowGridStepsBackOneLevelAtATime() {
+        open(activity: .picking(.windowGrid))
         controller.click(at: CGPoint(x: -5000, y: -5000))
-        #expect(controller.isSourcePickerOpen)
+        #expect(controller.isWindowGridOpen)
         #expect(controller.scope.source == nil)
 
         controller.sourcePicker.openApp = Fixtures.window.pid
         controller.escapePressed()
         #expect(controller.sourcePicker.openApp == nil)
-        #expect(controller.isSourcePickerOpen)
-
-        controller.escapePressed()
-        #expect(controller.isPickingWindow)
-        #expect(!controller.isSourcePickerOpen)
+        #expect(controller.isWindowGridOpen)
 
         controller.escapePressed()
         #expect(!controller.isPickingWindow)
         #expect(controller.isRecordMode)
+        #expect(controller.scope.source == nil)
     }
 
     @Test func scopeEndsWhenTheWindowIsGone() {
@@ -895,10 +864,10 @@ struct BehaviourTests {
         ]
         // One of each state, then every value it can have; a new state does not compile here
         // until it has its values.
-        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inPicker, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice("")]
+        let kinds: [HUDView.SubtitleState] = [.annotating, .choosingWindow, .inWindowGrid, .paused(shortcut: nil), .waitingForWindow, .holding(""), .notice("")]
         let states = kinds.flatMap { kind -> [HUDView.SubtitleState] in
             switch kind {
-            case .annotating, .choosingWindow, .inPicker, .waitingForWindow: [kind]
+            case .annotating, .choosingWindow, .inWindowGrid, .waitingForWindow: [kind]
             case .paused: shortcuts.map { .paused(shortcut: $0) }
             case .holding: DoubleTapKey.allCases.map { .holding($0.symbol) }
             case .notice: Notice.allCases.map { .notice($0.rawValue) }

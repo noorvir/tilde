@@ -11,6 +11,6 @@
   "notes": 0,
   "recording": "ready",
   "pickingWindow": true,
-  "sourcePicker": "windows",
-  "pickerPhase": "picturing"
+  "windowGrid": "apps",
+  "gridPhase": "failed"
 }
