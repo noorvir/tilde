@@ -948,7 +948,7 @@ struct UXSpecs {
     @Test func settingsOpenWithNoFieldFocused() async throws {
         try await withApp { app in
             try await app.menu("Settings")
-            let field = try await app.waitToSee("Command name", role: "AXTextField").frame
+            let field = try await app.waitToSee("annotate", role: "AXTextField").frame
             try await waitForFocus(in: app) { $0.app == app.pid }
             #expect(try await app.focus().role != "AXTextField")
             step("opened, nothing focused")
@@ -963,7 +963,7 @@ struct UXSpecs {
             try await app.key(.w, command: true)
             try await app.waitNotToSee("Tilde Settings")
             try await app.menu("Settings")
-            try await app.waitToSee("Command name", role: "AXTextField")
+            try await app.waitToSee("annotate", role: "AXTextField")
             try await waitForFocus(in: app) { $0.app == app.pid }
             #expect(try await app.focus().role != "AXTextField")
             step("opened again, nothing focused")
