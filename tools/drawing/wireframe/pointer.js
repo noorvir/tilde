@@ -1,8 +1,8 @@
 // What the pointer does in wireframe mode: a drag draws a component, also in another, or with
 // no tool moves one; the chip and the top grip move one too, a corner handle resizes one from
 // that corner, and ⌥ and a drag copies one. A click selects one, a double-click edits its text,
-// and a click on its tag edits its label. A drag on a component's text, with any tool, moves the
-// text off it as a free text, which moves as a component does. The Text tool's click types a
+// and a click on its tag edits its label. A drag on the text of the selected component, with
+// any tool, moves the text off it as a free text, which moves as a component does. The Text tool's click types a
 // component's text, or a free text where there is no component.
 
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
@@ -214,8 +214,10 @@ function editWireframe(event) {
       editLabel(tagged);
       return true;
     }
-    // A press on a component's text, with any tool, may move the text off it.
-    const texted = textAt(event.clientX, event.clientY);
+    // A press on the selected component's text, with any tool, may move the text off it; ⌥
+    // still copies the component.
+    const textOwner = textAt(event.clientX, event.clientY);
+    const texted = textOwner && textOwner.groupIds[0] === selection.selected && !event.altKey ? textOwner : null;
     if (event.type === "pointerdown" && texted) {
       event.stopImmediatePropagation();
       event.preventDefault();
@@ -309,8 +311,8 @@ function editWireframe(event) {
 
 // The press ended the label or text that was typed: its release types no new one.
 let pressEndedTyping = false;
-// The press is the Text tool's own, not one on a tag, a text or a handle.
-let isTextPress = false;
+// The place of the Text tool's own press, not one on a tag, a text or a handle.
+let textPress = null;
 
 // The Text tool's click: on a component it types the component's text, elsewhere a new free
 // text that starts at the point.
@@ -373,14 +375,16 @@ export function snapPointer(event) {
     },
   };
   if (editWireframe(event)) return;
-  // The Text tool draws nothing: its click types a text, unless the press ended one.
+  // The Text tool draws nothing: its click types a text, unless the press ended one. A drag
+  // with it does nothing.
   if (wireframe.tool === "text") {
     if (event.type === "pointerdown") {
       selectGroup(null);
-      isTextPress = !pressEndedTyping;
+      textPress = pressEndedTyping ? null : { x: event.clientX, y: event.clientY };
     }
-    if (event.type === "pointerup" && isTextPress) placeText(event.clientX, event.clientY);
-    if (event.type === "pointerup") isTextPress = false;
+    const isClick = textPress && Math.hypot(event.clientX - textPress.x, event.clientY - textPress.y) < 4;
+    if (event.type === "pointerup" && isClick) placeText(textPress.x, textPress.y);
+    if (event.type === "pointerup") textPress = null;
     hideGuides();
     event.stopImmediatePropagation();
     event.preventDefault();

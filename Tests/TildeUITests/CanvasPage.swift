@@ -26,6 +26,7 @@ final class CanvasPage {
         /// x, y, width and height, in points from the top left of the page.
         var rect: [Double] = []
         var label: String?
+        var text: String?
         var borders: [String]?
         var rows: Int?
         var columns: Int?
@@ -336,12 +337,12 @@ final class CanvasPage {
         try await run("window.tildeDraw.takesPointer(\(point.x), \(point.y))") as? Bool == true
     }
 
-    /// Types into the label field that is open on a component.
+    /// Types into the field that is open for a label or a text.
     func typeLabel(_ text: String) async throws {
         let script = """
         (() => {
           const field = document.getElementById('tilde-label');
-          if (field.style.display === 'none') return 'the label field is not open';
+          if (field.style.display === 'none') return 'the field is not open';
           field.value = '\(text)';
           field.dispatchEvent(new Event('input', { bubbles: true }));
           return true;
@@ -392,7 +393,7 @@ final class CanvasPage {
         return list.map { item in
             Shape(
                 id: item["id"] as? String ?? "", type: item["type"] as? String ?? "", rect: (item["rect"] as? [NSNumber] ?? []).map(\.doubleValue),
-                label: item["label"] as? String, borders: item["borders"] as? [String], rows: item["rows"] as? Int, columns: item["columns"] as? Int,
+                label: item["label"] as? String, text: item["text"] as? String, borders: item["borders"] as? [String], rows: item["rows"] as? Int, columns: item["columns"] as? Int,
                 filled: item["filled"] as? Bool
             )
         }

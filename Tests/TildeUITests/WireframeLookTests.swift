@@ -102,7 +102,7 @@ struct WireframeLookTests {
     }
 
     /// The label is a tag on the component's top left edge, or inside it at the top of the
-    /// screen; a double-click types it in place, on the tag.
+    /// screen; a click on the tag types it in place, on the tag.
     @Test func theLabelIsATagAtTheTopLeft() async throws {
         try await page.draw("setWireframe({tool: 'card', icons: {}})")
         try await restore("[{type: 'card', rect: [200, 150, 240, 120], label: 'Plan'}, {type: 'list', rect: [500, 5, 100, 200], label: 'Tags'}]")
@@ -110,7 +110,7 @@ struct WireframeLookTests {
         #expect(try await count(##"rect[x="200"][y="133"][width="38"][height="15"]"##) == 1)
         #expect(try await count(##"rect[x="500"][y="7"]"##) == 1)
 
-        try await page.doubleClick(CGPoint(x: 320, y: 210))
+        try await page.click(CGPoint(x: 210, y: 140))
         #expect(try await page.shows("#tilde-label"))
         #expect(try await page.run("[getComputedStyle(document.getElementById('tilde-label')).left, getComputedStyle(document.getElementById('tilde-label')).top].join()") as? String == "200px,133px")
         // While it is typed, the tag shows only in the field.
