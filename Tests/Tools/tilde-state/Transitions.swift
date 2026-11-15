@@ -49,6 +49,8 @@ enum Transitions {
         var skillStatus: String?
         /// A command name as the user types it in Settings.
         var commandName: String?
+        /// Names that apps have, for the name that the prompt suggests after `commandName`.
+        var takenNames: [String]?
         /// An install's result in the toast: its apps, and those that failed or were skipped
         /// because the name is another skill's.
         var install: InstallRow?
@@ -148,6 +150,7 @@ enum Transitions {
         var setup: String?
         /// Why the command name cannot be used; nil when it can.
         var commandProblem: String?
+        var suggestion: String?
         var toastTitle: String?
         var toastSubtitle: String?
         var reachable: String?
@@ -243,11 +246,14 @@ enum Transitions {
             }
             if let name = row.commandName {
                 result.commandProblem = CommandName.problem(name)
+                if let taken = row.takenNames {
+                    result.suggestion = CommandName.suggestion(after: name) { taken.contains($0) }
+                }
             }
             if let install = row.install {
                 let apps = install.apps.map { name in
                     let harness = Harness.allCases.first { $0.name == name } ?? .claudeCode
-                    let conflict = (install.taken ?? []).contains(name) ? Conflict(kind: .skill, name: "annotate", harness: harness, item: URL(fileURLWithPath: "/")).message : nil
+                    let conflict = (install.taken ?? []).contains(name) ? Conflict(kind: .skill, name: "annotate", harness: harness, item: URL(fileURLWithPath: "/")) : nil
                     return InstallResult.App(name: name, icon: Fixtures.appIcon, failed: (install.failed ?? []).contains(name), changed: true, conflict: conflict)
                 }
                 let install = InstallResult(action: .installed, apps: apps)

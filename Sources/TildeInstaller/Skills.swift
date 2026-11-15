@@ -9,7 +9,7 @@ public enum CommandName {
     static let legacy = "tilde"
 
     /// Why `name` cannot be a command name, or nil when it can. A name is also a folder name
-    /// and a skill name, which agents limit to 64 characters; Gemini CLI's skill adds `tilde-`.
+    /// and a skill name, which agents limit to 64 characters.
     public static func problem(_ name: String) -> String? {
         if name.isEmpty {
             return "Enter a name."
@@ -20,10 +20,16 @@ public enum CommandName {
         if name.hasPrefix("-") || name.hasSuffix("-") || name.contains("--") {
             return "Start and end with a letter or digit, with no double hyphen."
         }
-        if name.count > 58 {
-            return "Use at most 58 characters."
+        if name.count > 64 {
+            return "Use at most 64 characters."
         }
         return nil
+    }
+
+    /// The first of `name-2`, `name-3` and so on that `isTaken` does not refuse.
+    public static func suggestion(after name: String, isTaken: (String) -> Bool) -> String {
+        let base = String(name.prefix(60))
+        return (2...).lazy.map { "\(base)-\($0)" }.first { !isTaken($0) }!
     }
 }
 
@@ -47,8 +53,9 @@ public struct Conflict: Equatable, Sendable {
         self.item = item
     }
 
+    /// Why Tilde did not install, such as "Claude Code already has a skill named annotate."
     public var message: String {
-        "A \(kind.rawValue) named \(name) already exists in \(harness.name). Choose another command name."
+        "\(harness.name) already has a \(kind.rawValue) named \(name)."
     }
 }
 
@@ -130,6 +137,14 @@ extension Installer {
         skillFiles(for: harness, command: command).last!.file
     }
 
+    /// The skill or command that has `name` in the app and that Tilde did not write; nil also
+    /// when the files cannot be asked.
+    public func conflict(named name: String, in harness: Harness) -> Conflict? {
+        var named = self
+        named.command = name
+        return try? named.conflict(in: harness)
+    }
+
     /// Whether the app has Tilde's files under the current name, or another skill or command
     /// has that name.
     public func skillStatus(of harness: Harness) -> SkillStatus {
@@ -146,10 +161,7 @@ extension Installer {
     public func conflict(in harness: Harness) throws -> Conflict? {
         let target = target(for: harness)
         var items = skillFiles(for: harness, command: command).map { ($0.kind, $0.name, $0.item) }
-        if target.commands == nil {
-            // An app whose skills are its commands: a skill of that name in any folder it reads.
-            items += target.otherSkills.map { (.skill, command, $0.appendingPathComponent(command)) }
-        }
+        items += target.otherSkills.map { (.skill, command, $0.appendingPathComponent(command)) }
         if let commands = target.commands, !commands.isTildes {
             items.append((.command, command, commands.file(command)))
         }
@@ -163,17 +175,13 @@ extension Installer {
     /// The files of Tilde's skill and command in the app under `command`.
     func skillFiles(for harness: Harness, command: String) -> [SkillFile] {
         let target = target(for: harness)
-        guard let commands = target.commands, commands.isTildes else {
-            let file = target.skills.appendingPathComponent("\(command)/SKILL.md")
-            let text = Mark.signed { tildeSkill(name: command, checksum: $0) }
-            return [SkillFile(kind: .skill, name: command, file: file, text: text)]
-        }
-
-        let name = "tilde-\(command)"
         let skill = SkillFile(
-            kind: .skill, name: name, file: target.skills.appendingPathComponent("\(name)/SKILL.md"),
-            text: Mark.signed { tildeSkill(name: name, checksum: $0) }
+            kind: .skill, name: command, file: target.skills.appendingPathComponent("\(command)/SKILL.md"),
+            text: Mark.signed { tildeSkill(name: command, checksum: $0) }
         )
+        guard let commands = target.commands, commands.isTildes else {
+            return [skill]
+        }
         let file = SkillFile(kind: .command, name: command, file: commands.file(command), text: Mark.signed { tildeCommandTOML(checksum: $0) })
         return [skill, file]
     }

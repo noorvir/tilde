@@ -193,10 +193,10 @@ struct InstallToastView: View {
         }
         let conflicts = result.conflicts
         if conflicts.count == 1 {
-            return conflicts[0]
+            return "\(conflicts[0].message) Choose another command name in Settings."
         }
         if conflicts.count > 1 {
-            return "\(conflicts.count) apps already have a skill or command of that name. Choose another command name."
+            return "\(conflicts.count) apps already have a skill or command of that name. Choose another in Settings."
         }
         if !result.apps.contains(where: \.changed) {
             return result.action == .installed ? "Already up to date" : "Nothing to remove"

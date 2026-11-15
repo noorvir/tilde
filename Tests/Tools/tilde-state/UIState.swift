@@ -6,7 +6,7 @@ import TildeInstaller
 /// A key or a value that it does not know is an error, so a typo cannot record another picture.
 struct UIState: Decodable {
     enum Surface: String, Decodable {
-        case toast, updateToast, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, wireframeAdjust, comment, preview, overlay, canvas
+        case toast, updateToast, namePrompt, settings, restorePrompt, tooltip, outline, notesPanel, toolbar, hud, wireframeAdjust, comment, preview, overlay, canvas
     }
     enum Appearance: String, Decodable {
         case light, dark
@@ -124,6 +124,8 @@ struct UIState: Decodable {
     /// The wireframes beta; off when absent, as on a new install.
     var wireframes: Bool?
     var size: [Double]?
+    /// The name typed in the name prompt, then Install.
+    var promptName: String?
     var appearance: Appearance?
     var session: Session?
     var notes: Int?

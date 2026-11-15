@@ -51,8 +51,8 @@ public struct InstallEnvironment: Sendable {
     public var variables: [String: String] = [:]
     /// A Linux machine, where some apps keep their config elsewhere, such as VS Code.
     public var isLinux = false
-    /// Tilde's own folder for what it moves out of an app's folders, such as another skill
-    /// that the user chose to replace. Never inside a skills folder, which may be a repository.
+    /// Tilde's own folder for the backups that older versions left in skills folders. Never
+    /// inside a skills folder, which may be a repository.
     public var backups: URL
 
     public init(home: URL, applications: [URL], binaries: [URL], mcpURL: String, bridgePath: String) {
@@ -143,7 +143,7 @@ public struct InstallReport: Sendable {
             }
         }
         if let conflict {
-            lines.append("\(conflict.message) Nothing changed.")
+            lines.append("\(conflict.message) Nothing changed: choose another command name.")
         }
         if changes.first?.action.isChange == true, !dryRun {
             lines.append("Restart \(harness.name) to load the change.")
@@ -264,27 +264,20 @@ public struct Installer: Sendable {
 
     /// Adds Tilde's entry, and its skill and command under `command`, then removes Tilde's
     /// files under the old names. When the name is another skill's or command's, the install
-    /// changes nothing and reports the conflict, unless the user chose to `replace` that skill
-    /// or command: it then goes to Tilde's backup folder first.
-    public func install(_ harness: Harness, replace: Bool = false) -> InstallReport {
-        install(harness, replace: replace, entry: true)
+    /// changes nothing and reports the conflict: Tilde never changes what it did not write.
+    public func install(_ harness: Harness) -> InstallReport {
+        install(harness, entry: true)
     }
 
     /// The install, with the app's MCP entry or only its skill.
-    private func install(_ harness: Harness, replace: Bool, entry: Bool) -> InstallReport {
+    private func install(_ harness: Harness, entry: Bool) -> InstallReport {
         let target = target(for: harness)
         var report = InstallReport(harness: harness, dryRun: dryRun)
         let backups = newBackupFolder()
         do {
             if let conflict = try conflict(in: harness) {
-                guard replace else {
-                    report.conflict = conflict
-                    return report
-                }
-                report.changes += backUp(harness, to: backups)
-                if report.changes.contains(where: \.action.isFailure) {
-                    return report
-                }
+                report.conflict = conflict
+                return report
             }
         } catch {
             report.changes.append(FileChange(file: skillFile(for: harness), action: .failed(String(describing: error))))
@@ -303,29 +296,11 @@ public struct Installer: Sendable {
         return report
     }
 
-    /// Moves the skills and commands that are not Tilde's but have its names to `backups`.
-    private func backUp(_ harness: Harness, to backups: URL) -> [FileChange] {
-        var changes: [FileChange] = []
-        while let conflict = try? conflict(in: harness), !changes.contains(where: { $0.file == conflict.item }) {
-            let destination = backupDestination(conflict.item, in: backups)
-            if dryRun {
-                return changes + [FileChange(file: conflict.item, action: .moved(to: destination))]
-            }
-            do {
-                try files.move(conflict.item, to: destination)
-                changes.append(FileChange(file: conflict.item, action: .moved(to: destination)))
-            } catch {
-                return changes + [FileChange(file: conflict.item, action: .failed(String(describing: error)))]
-            }
-        }
-        return changes
-    }
-
     /// Moves Tilde's skill where the app has Tilde's files under an old name, such as the
     /// `tilde` skill of older versions or a name the user changed: they go, and the current
     /// ones come. The app's MCP entry stays as it is. Nil when there is nothing to move.
     public func migrate(_ harness: Harness) -> InstallReport? {
-        oldSkillFiles(for: harness).isEmpty ? nil : install(harness, replace: false, entry: false)
+        oldSkillFiles(for: harness).isEmpty ? nil : install(harness, entry: false)
     }
 
     public func uninstall(_ harness: Harness) -> InstallReport {
@@ -508,8 +483,9 @@ extension Installer {
         let configFolder = environment.variables["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".config")
         // Claude reads only its own folder. The other apps all read ~/.agents/skills; Cursor and
         // VS Code also read ~/.claude/skills, so they get one skill folder in common with Claude.
-        // Each app's skill is its slash command, except in Gemini CLI, which has a command
-        // that holds the instructions (Codex starts a skill with `$`).
+        // The skill is named after the command in every app. It is the slash command, except
+        // in Gemini CLI, which starts skills only through the model and so also gets a command
+        // file of that name; Codex starts a skill with `$`.
         var codexServer = ["url = \"\(environment.mcpURL)\""] + (environment.authorization.map { ["http_headers = { Authorization = \"\($0)\" }"] } ?? [])
         if let command = environment.proxy {
             let args = command.dropFirst().map { "\"\($0)\"" }.joined(separator: ", ")
@@ -564,10 +540,9 @@ extension Installer {
             return Target(
                 config: home.appendingPathComponent(".gemini/settings.json"),
                 format: .json(path: ["mcpServers", "tilde"], entry: server(urlKey: "httpUrl")),
-                // Gemini's own skills folder, so that the other apps that read ~/.agents/skills
-                // do not get a second skill.
-                skills: home.appendingPathComponent(".gemini/skills"),
+                skills: agentSkills,
                 detect: Target.Detection(paths: [".gemini/settings.json"], binaries: ["gemini"]),
+                otherSkills: [home.appendingPathComponent(".gemini/skills")],
                 commands: Target.Commands(folder: home.appendingPathComponent(".gemini/commands"), fileExtension: "toml", isTildes: true),
                 legacySkill: agentLegacy
             )

@@ -35,6 +35,18 @@ enum Surfaces {
             toast.isShown = true
             return try await hosted(InstallToastView(state: toast), size: size)
 
+        case .namePrompt:
+            // Claude Code has a skill named annotate; the field holds the free name.
+            let prompt = NamePrompt()
+            let setup = try Fixtures.agentSetup()
+            let conflict = Conflict(kind: .skill, name: "annotate", harness: .claudeCode, item: URL(fileURLWithPath: "/"))
+            prompt.ask([conflict], setup: setup, suggestion: "annotate-2", pending: nil)
+            if let name = state.promptName {
+                prompt.name = name
+                prompt.install()
+            }
+            return try await hosted(NamePromptView(prompt: prompt).background(Color(nsColor: .windowBackgroundColor)), size: size)
+
         case .updateToast:
             let toast = UpdateToastState()
             toast.version = "0.3.0"
@@ -352,7 +364,8 @@ enum Surfaces {
         }
         // The first apps are skipped: the name is another skill's there.
         let apps = result.apps.enumerated().map { index, app in
-            let conflict = index < taken ? "A skill named annotate already exists in \(app.name). Choose another command name." : nil
+            let harness = AgentSetup.rows.first { $0.name == app.name }?.harness ?? .claudeCode
+            let conflict = index < taken ? Conflict(kind: .skill, name: "annotate", harness: harness, item: URL(fileURLWithPath: "/")) : nil
             return InstallResult.App(name: app.name, icon: app.icon, failed: app.failed, changed: app.changed && conflict == nil, conflict: conflict)
         }
         return InstallResult(action: .installed, apps: apps)

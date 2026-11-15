@@ -249,7 +249,7 @@ struct InstallerTests {
         #expect(second.changes.map(\.action) == [.unchanged, .unchanged, .unchanged])
         #expect(!second.hasChanges)
         #expect(try read(".gemini/settings.json") == settings)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".gemini").path).sorted() == ["commands", "settings.json", "skills"])
+        #expect(try FileManager.default.contentsOfDirectory(atPath: home.appendingPathComponent(".gemini").path).sorted() == ["commands", "settings.json"])
     }
 
     /// Everything that is not Tilde's stays as it was, to the byte, through an install and an

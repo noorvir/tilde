@@ -22,11 +22,12 @@ struct SkillTests {
         installer = Installer(environment: .standard(home: home, port: "7311", bridgePath: "", isolated: true))
     }
 
-    /// Where each app's files go under a name: the skill is the command, except in Gemini CLI.
+    /// Where each app's files go under a name: the skill has the name everywhere, and Gemini
+    /// CLI also has a command of that name.
     private func files(_ harness: Harness, _ name: String) -> [String] {
         switch harness {
         case .claudeCode: [".claude/skills/\(name)/SKILL.md"]
-        case .gemini: [".gemini/skills/tilde-\(name)/SKILL.md", ".gemini/commands/\(name).toml"]
+        case .gemini: [".agents/skills/\(name)/SKILL.md", ".gemini/commands/\(name).toml"]
         case .codex, .cursor, .vscode, .windsurf: [".agents/skills/\(name)/SKILL.md"]
         }
     }
@@ -88,33 +89,43 @@ struct SkillTests {
         let report = installer.install(harness)
 
         let kind = harness == .gemini ? "command" : "skill"
-        #expect(report.conflict?.message == "A \(kind) named annotate already exists in \(harness.name). Choose another command name.")
+        #expect(report.conflict?.message == "\(harness.name) already has a \(kind) named annotate.")
         #expect(report.changes.isEmpty)
         #expect(try read(path) == other)
         #expect(try String(contentsOf: configFile, encoding: .utf8) == config)
         #expect(installer.skillStatus(of: harness) == .taken(report.conflict!))
-        #expect(report.summary(home: home).last == "\(report.conflict!.message) Nothing changed.")
+        #expect(report.summary(home: home).last == "\(report.conflict!.message) Nothing changed: choose another command name.")
     }
 
+    /// Tilde never moves the other skill: a free name, which the prompt suggests, installs
+    /// beside it.
     @Test(arguments: Harness.allCases)
-    func replaceMovesTheOtherSkillToTildesBackupsFirst(harness: Harness) throws {
+    func anotherNameInstallsBesideTheOtherSkill(harness: Harness) throws {
         let other = "---\nname: annotate\n---\n\nMy own steps.\n"
-        let path = harness == .gemini ? ".gemini/commands/annotate.toml" : files(harness, "annotate")[0]
+        let path = files(harness, "annotate").last!
         try write(path, other)
+        try write(".agents/skills/annotate-2/SKILL.md", "---\nname: annotate-2\n---\n")
 
-        let report = installer.install(harness, replace: true)
+        let suggestion = CommandName.suggestion(after: "annotate") { installer.conflict(named: $0, in: harness) != nil }
+        var renamed = installer
+        renamed.command = suggestion
+        renamed.oldCommands = ["annotate"]
+        let report = renamed.install(harness)
 
+        // Claude Code does not read ~/.agents/skills, where annotate-2 is taken.
+        #expect(suggestion == (harness == .claudeCode ? "annotate-2" : "annotate-3"))
         #expect(report.conflict == nil)
-        #expect(installer.skillStatus(of: harness) == .installed)
-        let moved = try #require(report.changes.first)
-        guard case .moved(let destination) = moved.action else {
-            Issue.record("Expected a move, got \(moved.action)")
-            return
-        }
-        #expect(destination.path.hasPrefix(home.appendingPathComponent("Library/Application Support/Tilde/Backups").path))
-        let backup = harness == .gemini ? destination : destination.appendingPathComponent("SKILL.md")
-        #expect(try String(contentsOf: backup, encoding: .utf8) == other)
+        #expect(renamed.skillStatus(of: harness) == .installed)
+        #expect(try read(path) == other)
         #expect(try backupsInSkillFolders().isEmpty)
+    }
+
+    /// Gemini CLI also reads its own skills folder.
+    @Test func aSkillInGeminisOwnFolderIsAConflict() throws {
+        try write(".gemini/skills/annotate/SKILL.md", "---\nname: annotate\n---\n")
+
+        #expect(installer.install(.gemini).conflict?.message == "Gemini CLI already has a skill named annotate.")
+        #expect(!exists(".agents/skills/annotate"))
     }
 
     /// Claude Code runs a skill before a command of the same name, so Tilde's skill would hide
@@ -124,7 +135,7 @@ struct SkillTests {
 
         let report = installer.install(.claudeCode)
 
-        #expect(report.conflict?.message == "A command named annotate already exists in Claude Code. Choose another command name.")
+        #expect(report.conflict?.message == "Claude Code already has a command named annotate.")
         #expect(!exists(".claude/skills/annotate"))
     }
 
@@ -224,7 +235,7 @@ struct SkillTests {
 
         _ = installer.uninstall(.gemini)
 
-        #expect(!exists(".gemini/skills/tilde-annotate"))
+        #expect(!exists(".agents/skills/annotate"))
         #expect(!exists(".gemini/commands/annotate.toml"))
         #expect(!exists(".agents/skills/tilde"))
     }
@@ -236,7 +247,7 @@ struct SkillTests {
         #expect(CommandName.problem("Annotate") == "Use only lowercase letters, digits and hyphens.")
         #expect(CommandName.problem("my skill") == "Use only lowercase letters, digits and hyphens.")
         #expect(CommandName.problem("-look") == "Start and end with a letter or digit, with no double hyphen.")
-        #expect(CommandName.problem(String(repeating: "a", count: 59)) == "Use at most 58 characters.")
+        #expect(CommandName.problem(String(repeating: "a", count: 65)) == "Use at most 64 characters.")
     }
 
     // MARK: - Helpers

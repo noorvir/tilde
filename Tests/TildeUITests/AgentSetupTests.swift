@@ -59,9 +59,9 @@ struct AgentSetupTests {
 
         let result = setup.rename(to: "look")
 
-        #expect(result.conflicts == ["A skill named look already exists in Codex. Choose another command name."])
+        #expect(result.conflicts.map(\.message) == ["Codex already has a skill named look."])
         #expect(InstallToastView.title(result) == "Installed in 1 of 2 apps · 1 skipped")
-        #expect(InstallToastView.subtitle(result) == "A skill named look already exists in Codex. Choose another command name.")
+        #expect(InstallToastView.subtitle(result) == "Codex already has a skill named look. Choose another command name in Settings.")
         #expect(exists(".claude/skills/look/SKILL.md"))
         #expect(!exists(".claude/skills/annotate"))
         #expect(exists(".agents/skills/annotate/SKILL.md"))
@@ -74,8 +74,42 @@ struct AgentSetupTests {
             return
         }
 
-        _ = setup.replace(codex)
-        #expect(setup.skillStatus(.codex) == .installed)
+        // The prompt asks for another name; Install uses it in every app and leaves the other skill.
+        let prompt = NamePrompt()
+        var shown: [InstallResult] = []
+        prompt.onResult = { shown.append($0) }
+        let conflict = try #require(result.conflicts.first)
+        prompt.ask([conflict], setup: setup, suggestion: "look-2", pending: result)
+        prompt.name = "look"
+        prompt.install()
+        #expect(prompt.problem == "Codex already has a skill named look.")
+        prompt.name = "look-2"
+        prompt.install()
+
+        #expect(prompt.request == nil)
+        #expect(shown.count == 1 && shown[0].conflicts.isEmpty)
+        #expect(setup.command == "look-2")
+        #expect(setup.skillStatus(codex.harness) == .installed)
+        #expect(exists(".claude/skills/look-2/SKILL.md"))
+        #expect(!exists(".claude/skills/look"))
         #expect(!exists(".agents/skills/annotate"))
+        #expect(try String(contentsOf: home.appendingPathComponent(".agents/skills/look/SKILL.md"), encoding: .utf8) == "---\nname: look\n---\n")
+    }
+
+    /// Cancel installs nothing more and shows what the install did.
+    @Test func cancelShowsWhatTheInstallDid() throws {
+        let setup = try Fixtures.agentSetup()
+        let prompt = NamePrompt()
+        var shown: [InstallResult] = []
+        prompt.onResult = { shown.append($0) }
+        let pending = Fixtures.installResult(failed: 0)
+        let conflict = Conflict(kind: .skill, name: "annotate", harness: .claudeCode, item: URL(fileURLWithPath: "/"))
+
+        prompt.ask([conflict], setup: setup, suggestion: "annotate-2", pending: pending)
+        prompt.cancel()
+
+        #expect(prompt.request == nil)
+        #expect(shown.count == 1)
+        #expect(setup.command == "annotate")
     }
 }

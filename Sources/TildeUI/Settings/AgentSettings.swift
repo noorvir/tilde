@@ -109,13 +109,12 @@ private struct CommandSection: View {
 }
 
 /// Icon, name and status dot, a switch (on = installed) and a chevron; open, the files. When
-/// the command name is another skill's in the app, a warning under it, with Replace.
+/// the command name is another skill's in the app, a warning under it that asks for another name.
 struct AgentRow: View {
     @ObservedObject var setup: AgentSetup
     let row: AgentSetup.Row
     @Binding var isExpanded: Bool
     let onResult: (InstallResult) -> Void
-    @State private var replacing: Conflict?
 
     var body: some View {
         let status = setup.status(of: row)
@@ -155,7 +154,7 @@ struct AgentRow: View {
 
             if case .taken(let conflict) = skill {
                 ConflictWarning(conflict: conflict) {
-                    replacing = conflict
+                    setup.askForName([conflict])
                 }
                 .padding(.leading, 16 + 12 + 10 + 24 + 10)
                 .padding(.trailing, 16)
@@ -168,14 +167,6 @@ struct AgentRow: View {
                     .padding(.trailing, 16)
                     .padding(.bottom, 14)
             }
-        }
-        .alert(replacing.map { "Replace the \($0.kind.rawValue) \($0.name) in \($0.harness.name)?" } ?? "", isPresented: Binding { replacing != nil } set: { if !$0 { replacing = nil } }, presenting: replacing) { _ in
-            Button("Replace", role: .destructive) {
-                onResult(setup.replace(row))
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { conflict in
-            Text("Tilde moves the other \(conflict.kind.rawValue) to its backup folder, \(tildePath(setup.installer.environment.backups)), and installs its own \(setup.installer.invocation(for: row.harness)).")
         }
         .contextMenu {
             Button("Reinstall") {
@@ -219,24 +210,24 @@ struct AgentRow: View {
     }
 }
 
-/// A yellow warning that the command name is another skill's or command's, and Replace.
+/// A yellow warning that the command name is another skill's or command's, and a button that
+/// asks for another name.
 private struct ConflictWarning: View {
     let conflict: Conflict
-    let replace: () -> Void
+    let chooseName: () -> Void
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
                 .accessibilityHidden(true)
-            Text(conflict.message)
+            Text("\(conflict.message) Choose another command name.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 16)
-            Button("Replace…", action: replace)
+            Button("Choose Name…", action: chooseName)
                 .controlSize(.small)
-                .accessibilityLabel("Replace the \(conflict.kind.rawValue) \(conflict.name) in \(conflict.harness.name)")
         }
     }
 }

@@ -185,7 +185,8 @@ enum SetupState: Equatable {
         }
     }
 
-    /// The state of an app's skill: another skill or command of the name is shown above, with Replace.
+    /// The state of an app's skill: another skill or command of the name shows above, with a
+    /// button that asks for another name.
     static func of(_ status: SkillStatus) -> SetupState {
         switch status {
         case .installed: .ok

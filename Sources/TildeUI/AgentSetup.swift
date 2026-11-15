@@ -69,16 +69,42 @@ final class AgentSetup: ObservableObject {
         revision += 1
     }
 
-    /// Changes the command name: each app with Tilde gets the skill under the new name and
-    /// loses Tilde's files under the old one, on this Mac and on the linked machines. An app
-    /// where the new name is another skill's keeps everything as it was.
-    func rename(to name: String) -> InstallResult {
+    /// Changes the command name: each app with Tilde, and the apps in `installing`, get the
+    /// skill under the new name and lose Tilde's files under the old one, on this Mac and on
+    /// the linked machines. An app where the new name is another skill's keeps everything.
+    func rename(to name: String, installing rows: [Row] = []) -> InstallResult {
         let oldCommands = Array(Set(installer.oldCommands + [installer.command]).subtracting([name])).sorted()
         defaults?.set(name, forKey: Self.commandKey)
         defaults?.set(oldCommands, forKey: Self.oldCommandsKey)
         setCommand(name, oldCommands: oldCommands)
         nodes.commandChanged()
-        return install(foundRows.filter { status(of: $0) == .installed })
+        let installed = foundRows.filter { status(of: $0) == .installed }
+        return install(installed + rows.filter { !installed.contains($0) })
+    }
+
+    /// This Mac's setup: the one that keeps the command name.
+    var thisMac: AgentSetup? {
+        isRemote ? iconSource : self
+    }
+
+    /// The prompt for another name when an install finds the name taken: this Mac's, which
+    /// a machine's page uses too.
+    weak var namePrompt: NamePrompt?
+
+    /// Asks the user for another command name for the apps in `conflicts`. `pending` is what
+    /// the install did elsewhere, for the toast after the answer.
+    func askForName(_ conflicts: [Conflict], pending: InstallResult? = nil) {
+        guard let prompt = thisMac?.namePrompt else {
+            return
+        }
+        let installer = self.installer
+        let harnesses = foundRows.map(\.harness)
+        Task {
+            let suggestion = await Task.detached {
+                CommandName.suggestion(after: installer.command) { name in harnesses.contains { installer.conflict(named: name, in: $0) != nil } }
+            }.value
+            prompt.ask(conflicts, setup: self, suggestion: suggestion, pending: pending)
+        }
     }
 
     /// Moves Tilde's files under old names, such as the `tilde` skill of older versions, to
@@ -187,12 +213,6 @@ final class AgentSetup: ObservableObject {
         run(rows, action: .removed)
     }
 
-    /// Installs in the app after the user confirmed that the other skill or command of the
-    /// same name goes to Tilde's backup folder.
-    func replace(_ row: Row) -> InstallResult {
-        run([row], action: .replaced)
-    }
-
     private func run(_ rows: [Row], action: InstallResult.Action) -> InstallResult {
         let found = rows.filter { status(of: $0) != .notFound }
         if isRemote {
@@ -203,7 +223,7 @@ final class AgentSetup: ObservableObject {
         let apps = found.map { row in
             let report = Self.run(action, row.harness, with: installer)
             let failed = report.changes.contains(where: \.action.isFailure)
-            return InstallResult.App(name: row.name, icon: icon(for: row), failed: failed, changed: report.hasChanges, conflict: report.conflict?.message)
+            return InstallResult.App(name: row.name, icon: icon(for: row), failed: failed, changed: report.hasChanges, conflict: report.conflict)
         }
         revision += 1
         return InstallResult(action: action, apps: apps)
@@ -212,7 +232,6 @@ final class AgentSetup: ObservableObject {
     nonisolated static func run(_ action: InstallResult.Action, _ harness: Harness, with installer: Installer) -> InstallReport {
         switch action {
         case .installed: installer.install(harness)
-        case .replaced: installer.install(harness, replace: true)
         case .removed: installer.uninstall(harness)
         }
     }
@@ -247,8 +266,6 @@ extension AgentSetup {
 struct InstallResult {
     enum Action {
         case installed
-        /// Installed after another skill of the same name went to the backup folder.
-        case replaced
         case removed
     }
 
@@ -258,7 +275,7 @@ struct InstallResult {
         let failed: Bool
         let changed: Bool
         /// Why nothing changed: the name is another skill's or command's.
-        var conflict: String?
+        var conflict: Conflict?
     }
 
     let action: Action
@@ -268,7 +285,7 @@ struct InstallResult {
         apps.filter(\.failed).count
     }
 
-    var conflicts: [String] {
+    var conflicts: [Conflict] {
         apps.compactMap(\.conflict)
     }
 }
