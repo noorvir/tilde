@@ -54,9 +54,9 @@ export function setWireframe(state) {
 // The components of a wireframe note, to edit it again: its shapes as the report gives them,
 // and their origin in points from the top left of the canvas.
 export function restoreWireframe({ shapes, origin: [left, top] }) {
-  const elements = shapes.filter((shape) => kindNames[shape.type]).flatMap((shape) => {
+  const elements = shapes.filter((shape) => kindNames[shape.type] || shape.type === "text").flatMap((shape) => {
     const [x, y, width, height] = shape.rect;
-    const data = Object.fromEntries(["label", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
+    const data = Object.fromEntries(["label", "text", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
     return wireframeElements(shape.type, { x: x + left, y: y + top, width, height }, data);
   });
   api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });

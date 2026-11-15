@@ -1,6 +1,6 @@
 // Editing a component after it is drawn. Over one, it shows as selected: with no tool a drag
 // anywhere on it moves it (with a tool a drag draws in it, and its chip or grip moves it), ⌥ and
-// a drag moves a copy, and a double-click edits its label. A chip just below it moves it too:
+// a drag moves a copy, and a double-click edits its text. A chip just below it moves it too:
 // a click on its name changes the kind, its Borders button opens the borders, its Comment
 // button its comment, its other controls set the rows and columns of a table or list or the
 // fill of a rectangle or ellipse, and × deletes it. A handle at each corner resizes it, and
@@ -119,6 +119,7 @@ function fillToggle(isOn) {
 function chipControls(frame) {
   const data = frame.customData;
   const kind = data.tildeWireframe;
+  if (kind === "text") return commentButton(Boolean(data.comment));
   let controls = bordersButton(data.borders ?? []) + commentButton(Boolean(data.comment));
   if (kind === "table" || kind === "list") {
     const counts = rowsOf(kind, frame, data);
@@ -173,11 +174,13 @@ export function showHandles() {
   const group = selection.hovered ?? selection.selected;
   const frame = group ? frameOf(group) : null;
   const isShown = Boolean(frame && wireframe && !labelled && !editing);
+  // A free text has no size of its own to change, and moves by a drag on it.
+  const isFreeText = frame?.customData.tildeWireframe === "text";
   setActiveTag(isShown && selection.hovered ? selection.hovered : null);
   handleOutline.style.display = isShown ? "block" : "none";
   chip.style.display = isShown ? "flex" : "none";
-  for (const handle of corners) handle.style.display = isShown ? "block" : "none";
-  grip.style.display = isShown ? "flex" : "none";
+  for (const handle of corners) handle.style.display = isShown && !isFreeText ? "block" : "none";
+  grip.style.display = isShown && !isFreeText ? "flex" : "none";
   typeMenu.style.display = isShown && selection.menu === "kinds" ? "flex" : "none";
   bordersMenu.style.display = isShown && selection.menu === "borders" ? "flex" : "none";
   if (!isShown) return;
@@ -189,7 +192,9 @@ export function showHandles() {
     const y = corner.includes("n") ? frame.y : frame.y + frame.height;
     Object.assign(handle.style, { left: `${x}px`, top: `${y}px` });
   }
-  const content = `<span data-menu="kinds" title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>${chipControls(frame)}${deleteButton}`;
+  let name = `<span data-menu="kinds" title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>`;
+  if (isFreeText) name = `<span style="margin-right:4px">⠿ Text</span>`;
+  const content = `${name}${chipControls(frame)}${deleteButton}`;
   if (chip.innerHTML !== content) chip.innerHTML = content;
   placeChip(frame);
   placeGrip(frame);

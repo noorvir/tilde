@@ -122,7 +122,7 @@ const cursorTools = new Set([...drawingTools, "freedraw"]);
 function showCursorRing(event, isSnapping) {
   const tool = api?.getAppState().activeTool.type;
   const isShown = cursorTools.has(tool) && !isSelectMode && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target)
-    && !(wireframe && isOverComponent);
+    && !(wireframe && (isOverComponent || wireframe.tool === "text"));
   cursorRing.style.display = isShown ? "block" : "none";
   if (!isShown) return;
   // Wireframe shapes have their own colours: the ring is Tilde's blue.

@@ -1,7 +1,8 @@
 // The look of the components: an SVG over the canvas that draws each one from its element, in
 // the style, fill, fade and colours of Tilde's settings. Each has square corners, a plain inner
 // block in place of its content, which is not known, the lines that make its kind, and a label
-// tag at its top left, empty until it has a label. A component inside another has a white gap
+// tag at its top left, empty until it has a label, and its text, if it has one, in its middle.
+// A free text, of kind "text", is only its text. A component inside another has a white gap
 // around its border. Under a component with a fill, the screen is faded here, and blurred by
 // Tilde, which gets the shapes to blur from the `under:` message.
 
@@ -92,10 +93,54 @@ export function shownTagWidth(frame) {
 
 // The component whose tag is at a point; not one that Done took.
 export function tagAt(x, y) {
-  return live().filter((element) => element.customData?.tildeWireframe && !taken.has(element.id) && !element.customData.isLabelling).reverse().find((frame) => {
+  return live().filter((element) => isComponent(element) && !taken.has(element.id) && element.customData.typing !== "label").reverse().find((frame) => {
     const top = tagTop(frame);
     return x >= frame.x && x <= frame.x + shownTagWidth(frame) && y >= top && y <= top + 15;
   });
+}
+
+const isComponent = (element) => element.customData?.tildeWireframe && element.customData.tildeWireframe !== "text";
+
+// Text, on a component or free, in one font, with a white halo that keeps it legible over any
+// line or fill.
+const textFont = { size: 13, family: "-apple-system,system-ui,sans-serif" };
+const measure = document.createElement("canvas").getContext("2d");
+measure.font = `${textFont.size}px ${textFont.family}`;
+export const textHeight = 18;
+
+export function textWidth(text) {
+  return Math.ceil(measure.measureText(text).width);
+}
+
+// Where a component's text is: in its middle, or a table's in the middle of its header.
+export function textCentre({ x, y, width, height, customData }) {
+  if (customData.tildeWireframe !== "table") return { x: x + width / 2, y: y + height / 2 };
+  const { header } = rowsOf("table", { width, height }, customData);
+  return { x: x + width / 2, y: y + header / 2 };
+}
+
+// The box of a component's text, as large as the text.
+export function textBox(frame) {
+  const centre = textCentre(frame);
+  const width = textWidth(frame.customData.text) + 4;
+  return { x: centre.x - width / 2, y: centre.y - textHeight / 2, width, height: textHeight };
+}
+
+// The component whose text is at a point; not one that Done took, nor one whose text is typed.
+export function textAt(x, y) {
+  return live().filter((element) => isComponent(element) && element.customData.text && !taken.has(element.id) && element.customData.typing !== "text").reverse().find((frame) => {
+    const box = textBox(frame);
+    return x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height;
+  });
+}
+
+function textNode({ x, y, anchor, colour }, text) {
+  const textElement = node("text", {
+    x, y, "text-anchor": anchor, "dominant-baseline": "central", "font-size": textFont.size, "font-family": textFont.family, fill: colour,
+    stroke: "#FFFFFF", "stroke-width": 3, "stroke-linejoin": "round", "paint-order": "stroke",
+  });
+  textElement.textContent = text;
+  return textElement;
 }
 
 // What each component looks like now, by element id: the version, look and tag it was drawn
@@ -118,7 +163,7 @@ export function drawLook() {
 
   const next = components.map((component) => {
     const old = shown.find((entry) => entry.id === component.id);
-    const isNested = components.some((other) => contains(other.rect, component.rect));
+    const isNested = components.some((other) => other.kind !== "text" && contains(other.rect, component.rect));
     const tagKey = `${component.tag.text} ${component.tag.isActive} ${component.tag.isShown}`;
     if (old?.version === component.version && old.lookKey === lookKey && old.tagKey === tagKey && old.isNested === isNested) return old;
     return { id: component.id, version: component.version, lookKey, tagKey, isNested, ...componentNodes(component, isNested) };
@@ -149,7 +194,7 @@ function contains(outer, inner) {
 let sentUnder = "[]";
 
 function postUnder(components) {
-  const shapes = components.filter(({ data }) => data.filled !== false).map(({ kind, rect }) => {
+  const shapes = components.filter(({ kind, data }) => kind !== "text" && data.filled !== false).map(({ kind, rect }) => {
     const values = [rect.x, rect.y, rect.width, rect.height].map((value) => Math.round(value * 10) / 10);
     return [...values, kind === "ellipse" ? 1 : 0];
   });
@@ -167,6 +212,10 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }, isNe
   const under = node("g");
   const top = node("g");
   const add = (name, attributes) => top.appendChild(node(name, attributes));
+  if (kind === "text") {
+    if (data.typing !== "text") top.append(textNode({ x: x + 2, y: y + height / 2, anchor: "start", colour: dark }, data.text));
+    return { under, top };
+  }
   const isEllipse = kind === "ellipse";
   const isFilled = data.filled !== false;
   const borders = data.borders ?? [];
@@ -221,8 +270,13 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }, isNe
     innerBox(width - 2 * pad);
   }
 
+  if (data.text && data.typing !== "text") {
+    const centre = textCentre({ x, y, width, height, customData: data });
+    top.append(textNode({ ...centre, anchor: "middle", colour: dark }, data.text));
+  }
+
   // While the label is typed, the field stands in for the tag.
-  if (!data.isLabelling && tag.isShown) {
+  if (data.typing !== "label" && tag.isShown) {
     const labelTop = tagTop({ y });
     add("rect", { x, y: labelTop, width: tagWidth(tag.text), height: 15, fill: tag.isActive ? dark : main });
     if (tag.text) {
