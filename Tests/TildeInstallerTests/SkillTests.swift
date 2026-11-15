@@ -184,6 +184,20 @@ struct SkillTests {
         #expect(installer.migrate(harness).map(\.harness) == nil)
     }
 
+    /// An update moves the skill only: an app without Tilde's entry, such as one where the user
+    /// removed it by hand, does not get it back.
+    @Test func anUpdateLeavesTheEntryAsItIs() throws {
+        try write(".agents/skills/tilde/SKILL.md", Self.oldSkill)
+
+        let report = try #require(installer.migrate(.codex))
+
+        #expect(report.changes.allSatisfy { $0.file != installer.configFile(for: .codex) })
+        #expect(try read(".codex/config.toml") == "")
+        #expect(installer.status(of: .codex) == .notInstalled)
+        #expect(exists(".agents/skills/annotate/SKILL.md"))
+        #expect(!exists(".agents/skills/tilde"))
+    }
+
     @Test func anOldTildeSkillThatTheUserChangedStaysWithoutAWarning() throws {
         _ = installer.install(.codex)
         let changed = Self.oldSkill + "\nMy own line.\n"

@@ -267,6 +267,11 @@ public struct Installer: Sendable {
     /// changes nothing and reports the conflict, unless the user chose to `replace` that skill
     /// or command: it then goes to Tilde's backup folder first.
     public func install(_ harness: Harness, replace: Bool = false) -> InstallReport {
+        install(harness, replace: replace, entry: true)
+    }
+
+    /// The install, with the app's MCP entry or only its skill.
+    private func install(_ harness: Harness, replace: Bool, entry: Bool) -> InstallReport {
         let target = target(for: harness)
         var report = InstallReport(harness: harness, dryRun: dryRun)
         let backups = newBackupFolder()
@@ -286,7 +291,9 @@ public struct Installer: Sendable {
             return report
         }
 
-        report.changes.append(edit(target.config) { try target.format.installing(in: $0) })
+        if entry {
+            report.changes.append(edit(target.config) { try target.format.installing(in: $0) })
+        }
         for file in skillFiles(for: harness, command: command) {
             report.changes.append(edit(file.file) { _ in file.text })
         }
@@ -314,11 +321,11 @@ public struct Installer: Sendable {
         return changes
     }
 
-    /// Installs again where the app has Tilde's files under an old name, such as the `tilde`
-    /// skill of older versions or a name the user changed: they go, and the current ones come.
-    /// Nil when there is nothing to move.
+    /// Moves Tilde's skill where the app has Tilde's files under an old name, such as the
+    /// `tilde` skill of older versions or a name the user changed: they go, and the current
+    /// ones come. The app's MCP entry stays as it is. Nil when there is nothing to move.
     public func migrate(_ harness: Harness) -> InstallReport? {
-        oldSkillFiles(for: harness).isEmpty ? nil : install(harness)
+        oldSkillFiles(for: harness).isEmpty ? nil : install(harness, replace: false, entry: false)
     }
 
     public func uninstall(_ harness: Harness) -> InstallReport {
