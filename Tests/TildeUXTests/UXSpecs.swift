@@ -577,7 +577,7 @@ struct UXSpecs {
             step("picker open")
 
             try await app.press("Windows")
-            try await app.waitToSeeText(containing: "1 window")
+            try await app.waitToSee("tilde-ux-fixture")
             step("windows listed")
 
             try await app.key(.escape)
