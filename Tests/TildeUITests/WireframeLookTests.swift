@@ -304,18 +304,17 @@ struct WireframeLookTests {
     }
 }
 
-/// The pictures of the Appearance page: the canvas's own page draws a tile for each style and
-/// the component in each state, and draws nothing again for the same look.
+/// The pictures of the Appearance page: the canvas's own page draws a tile for each style, and
+/// draws nothing again for the same look.
 @MainActor
 @Suite(.tags(.webKit), .webKitRuns)
 struct WireframePreviewsTests {
-    @Test func eachStyleAndStateIsDrawnOnceForALook() async throws {
+    @Test func eachStyleIsDrawnOnceForALook() async throws {
         let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources/TildeUI/DrawingWeb")
         let previews = WireframePreviews(html: { DrawingCanvas.page(in: folder) })
         let look = WireframeLook(style: .hatched, fill: 0.3, blur: 2, fade: 0.5)
         try await previews.draw(look)
         #expect(Set(previews.tiles.keys) == Set(WireframeLook.Style.allCases))
-        #expect(Set(previews.states.keys) == Set(WireframePreviews.State.allCases))
         #expect(previews.tiles.values.allSatisfy { $0.size == WireframePreviews.tileSize })
 
         let tiles = previews.tiles

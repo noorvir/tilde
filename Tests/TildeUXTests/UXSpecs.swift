@@ -946,7 +946,7 @@ struct UXSpecs {
             // The fixture's window can be in front of Settings, which stays open meanwhile.
             try await app.menu("Settings")
             try await app.accessibilityPress("Appearance")
-            try await app.waitToSee("Dragged, snapping")
+            try await app.waitToSee("Blueprint")
             try await app.accessibilityPress("Blueprint")
             step("blueprint chosen")
 
