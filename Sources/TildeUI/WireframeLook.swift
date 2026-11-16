@@ -77,6 +77,16 @@ struct WireframeLook: Equatable {
         return look
     }
 
+    /// Puts the colours and the three strengths in `defaults` back to the values of a new
+    /// install; the style stays.
+    static func resetColoursAndStrengths(in defaults: UserDefaults = .standard) {
+        let initial = WireframeLook()
+        defaults.set(initial.colours.rawValue, forKey: Key.colours)
+        defaults.set(initial.fill, forKey: Key.fill)
+        defaults.set(initial.blur, forKey: Key.blur)
+        defaults.set(initial.fade, forKey: Key.fade)
+    }
+
     /// What the canvas's page draws with; the blur is Tilde's own.
     var pageValues: [String: Any] {
         ["style": style.rawValue, "fill": fill, "fade": fade, "colours": colours.rawValue]

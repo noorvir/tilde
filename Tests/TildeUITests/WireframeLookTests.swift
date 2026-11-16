@@ -302,6 +302,21 @@ struct WireframeLookTests {
         #expect(WireframeLook.saved(in: defaults) == WireframeLook(style: .hatched, fill: 0.6, blur: 0, fade: 0.5, colours: .oneColour))
         #expect(WireframeLook.saved(in: defaults).pageJSON.contains(#""colours":"oneColour""#))
     }
+
+    @Test func resetPutsTheColoursAndStrengthsBackAndKeepsTheStyle() throws {
+        let defaults = MemoryDefaults()
+        defaults.set("hatched", forKey: WireframeLook.Key.style)
+        defaults.set(0.4, forKey: WireframeLook.Key.fill)
+        defaults.set(6.5, forKey: WireframeLook.Key.blur)
+        defaults.set(0.3, forKey: WireframeLook.Key.fade)
+        defaults.set("oneColour", forKey: WireframeLook.Key.colours)
+
+        WireframeLook.resetColoursAndStrengths(in: defaults)
+        #expect(WireframeLook.saved(in: defaults) == WireframeLook(style: .hatched))
+
+        WireframeLook.resetColoursAndStrengths(in: defaults)
+        #expect(WireframeLook.saved(in: defaults) == WireframeLook(style: .hatched))
+    }
 }
 
 /// The pictures of the Appearance page: the canvas's own page draws a tile for each style, and

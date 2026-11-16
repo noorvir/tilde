@@ -60,6 +60,11 @@ struct AppearanceSettings: View {
                             .frame(width: 234)
                     }
                 }
+            } accessory: {
+                Button("Reset") {
+                    WireframeLook.resetColoursAndStrengths()
+                }
+                .controlSize(.small)
             }
         }
         .task(id: look) {
