@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The accessory bar under the HUD while choosing a source: a "Use window picker" button that
-/// grows into the picker, a card in the style of the HUD's list, with screens and a phone on a cable in one tab, apps and
+/// The source picker under the HUD, which "Use window picker" opens while choosing a source: a
+/// card in the style of the HUD's list, with screens and a phone on a cable in one tab, apps and
 /// then their windows in the other. "Select on screen" ("All apps" in an app's windows) and
 /// Esc step back one level: from an app's windows to the apps, then to clicking on screen. A phone shows in both modes, and can be chosen only
 /// in recording mode, as Tilde cannot draw on it.
@@ -15,12 +15,9 @@ struct HUDAccessoryPicker: View {
     )
 
     @ObservedObject var model: SourcePickerModel
-    /// Open in full, or only its "Use window picker" button.
-    let isOpen: Bool
     /// The source that shows as chosen: in recording mode what Record records, else the
     /// chosen one.
     let selectedID: String?
-    let onOpen: () -> Void
     /// "Select on screen" or "All apps", one level back as Esc.
     let onBack: () -> Void
     let onChoose: (RecordingSource) -> Void
@@ -37,23 +34,10 @@ struct HUDAccessoryPicker: View {
     }
 
     var body: some View {
-        ZStack {
-            if isOpen {
-                picker
-                    .transition(.opacity)
-            } else {
-                // As the browser accessory bar: the pill's button in a compact pill.
-                HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", help: "Show screens and windows") {
-                    onOpen()
-                }
-                .pillInsets(HUDAccessory.size)
-                .transition(.opacity)
-            }
-        }
-        // An accessory bar around its button, which grows into a card.
-        .hudCard(cornerRadius: isOpen ? HUDAccessory.size.scaled(16) : HUDAccessory.size.height / 2)
-        .environment(\.pillSize, HUDAccessory.size)
-        .environment(\.colorScheme, .dark)
+        picker
+            .hudCard(cornerRadius: HUDAccessory.size.scaled(16))
+            .environment(\.pillSize, HUDAccessory.size)
+            .environment(\.colorScheme, .dark)
     }
 
     private var picker: some View {
@@ -62,7 +46,7 @@ struct HUDAccessoryPicker: View {
             // The tabs stay centred between two columns of the same width.
             HStack(spacing: HUDAccessory.size.scaled(8)) {
                 Group {
-                    // The pair of "Use window picker", which opened the picker.
+                    // The other way to choose, from the source dropdown.
                     if openApp == nil {
                         CardButton(symbol: "cursorarrow", title: "Select on screen", keys: ["Esc"], help: "Click on screen") {
                             onBack()

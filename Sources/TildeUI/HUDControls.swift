@@ -3,7 +3,7 @@ import SwiftUI
 struct HUDButton: View {
     /// An SF Symbol, or an image such as an app icon; nil for a title alone.
     let image: Image?
-    /// A label after the icon, such as "Use window picker", which is its accessible name.
+    /// A label after the icon, such as "Open in Tilde's browser", which is its accessible name.
     var title: String?
     /// A count after the icon, such as the number of notes; nil for no count. A button with a
     /// count keeps the width of two digits, so the buttons stay put as the count changes.

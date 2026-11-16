@@ -2,9 +2,12 @@ import AppKit
 import SwiftUI
 
 /// Record's accessory bar under the HUD, while recording mode is on: what the next clip
-/// records, which opens the source picker, then Play or Pause and Stop. The source button has
+/// records, which starts choosing it, then Play or Pause and Stop. The source button has
 /// a fixed width, so the bar keeps its width in every state of the clip.
 struct HUDRecordingBar: View {
+    /// The source button's width, which the source dropdown's rows share.
+    static let sourceWidth: CGFloat = 200
+
     @ObservedObject var controller: AnnotationController
     /// The name of what Record records, such as "Studio Display".
     let sourceName: String
@@ -17,9 +20,9 @@ struct HUDRecordingBar: View {
     var body: some View {
         let size = HUDAccessory.size
         HStack(spacing: size.scaled(4)) {
-            // A clip keeps its source until Stop. No tooltip: it would cover the picker.
+            // A clip keeps its source until Stop. No tooltip: it would cover the dropdown or the picker.
             HUDButton(
-                image: sourceImage(size), title: sourceName, opensBelow: true, width: 200, isActive: controller.isPickingWindow,
+                image: sourceImage(size), title: sourceName, opensBelow: true, width: Self.sourceWidth, isActive: controller.isPickingWindow,
                 showsTooltip: false, help: "Choose source"
             ) {
                 controller.dispatch(.pickSource)
@@ -69,5 +72,41 @@ struct HUDRecordingBar: View {
         case .window: return Image(systemName: "macwindow")
         case .phone: return Image(systemName: "iphone")
         }
+    }
+}
+
+/// While a click on screen chooses the source: a dropdown under the source button with the two
+/// ways to choose. "Select on screen" has the check mark; "Use window picker" opens the source
+/// picker in its place. Esc, the source button and a choice close it.
+struct HUDSourceDropdown: View {
+    /// From the recording bar's leading end to the dropdown, so its rows line up with the
+    /// source button above them.
+    static let leadingInset = HUDAccessory.size.endInset - padding
+    private static let padding = HUDAccessory.size.scaled(4)
+
+    let onUsePicker: () -> Void
+
+    var body: some View {
+        let size = HUDAccessory.size
+        VStack(spacing: size.scaled(2)) {
+            // The current way to choose: selected, with nothing to do.
+            HStack(spacing: size.scaled(4)) {
+                HUDButtonLabel(image: Image(systemName: "cursorarrow"), title: "Select on screen", fillsWidth: true)
+                Image(systemName: "checkmark")
+                    .font(.system(size: size.font(10.5), weight: .semibold))
+            }
+            .modifier(HUDButtonChrome(width: HUDRecordingBar.sourceWidth, isOn: true, padding: 10))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Select on screen")
+            .accessibilityAddTraits(.isSelected)
+
+            HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", width: HUDRecordingBar.sourceWidth, help: "Show screens and windows") {
+                onUsePicker()
+            }
+        }
+        .padding(Self.padding)
+        .hudCard(cornerRadius: size.scaled(12))
+        .environment(\.pillSize, size)
+        .environment(\.colorScheme, .dark)
     }
 }

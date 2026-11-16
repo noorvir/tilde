@@ -35,8 +35,8 @@ final class AnnotationController: ObservableObject {
     var isPickingWindow: Bool { flow.isPicking }
     /// Recording mode, also while choosing its next clip's source.
     var isRecordMode: Bool { flow.isRecordMode }
-    /// While choosing, the source picker is open in full in place of its "Use window picker"
-    /// button, and clicks on screen choose nothing.
+    /// While choosing, the source picker is open in place of the source dropdown, and clicks
+    /// on screen choose nothing.
     var isSourcePickerOpen: Bool {
         if case .picking(isPickerOpen: true) = flow.session?.activity {
             return true
