@@ -69,9 +69,17 @@ struct HUDView: View {
                     .transition(.opacity)
             }
             if controller.isRecordMode {
-                recordingAccessoryBar
-                    .fixedSize()
-                    .transition(.opacity)
+                // The dropdown hangs from the source button, at the bar's leading end.
+                VStack(alignment: .leading, spacing: HUDAccessory.gap) {
+                    recordingAccessoryBar
+                        .fixedSize()
+                    if hud.isShown, controller.isPickingWindow, !controller.isSourcePickerOpen {
+                        HUDSourceDropdown { controller.dispatch(.openPicker) }
+                            .padding(.leading, HUDSourceDropdown.leadingInset)
+                            .transition(.scale(scale: 0.5, anchor: .topLeading).combined(with: .opacity))
+                    }
+                }
+                .transition(.opacity)
             }
             if hud.isShown, controller.showsBrowserAccessory {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: browserOffer.dismiss)
@@ -85,11 +93,9 @@ struct HUDView: View {
                 AnnotationList(controller: controller)
                     .transition(Self.zoom)
             }
-            if hud.isShown, controller.isPickingWindow {
+            if hud.isShown, controller.isSourcePickerOpen {
                 HUDAccessoryPicker(
-                    model: controller.sourcePicker, isOpen: controller.isSourcePickerOpen,
-                    selectedID: controller.clipSource.id,
-                    onOpen: { controller.dispatch(.openPicker) }, onBack: controller.escapePressed, onChoose: controller.choose
+                    model: controller.sourcePicker, selectedID: controller.clipSource.id, onBack: controller.escapePressed, onChoose: controller.choose
                 )
                     .transition(Self.zoom)
             }
@@ -644,8 +650,8 @@ private struct SubtitleLine: View {
 }
 
 /// The browser accessory bar: under the HUD after the first click in another browser in a
-/// session, it opens its page in Tilde's browser. The pill's buttons in an accessory bar, like
-/// "Use window picker", that stays until it is used or dismissed.
+/// session, it opens its page in Tilde's browser. The pill's buttons in an accessory bar, that
+/// stays until it is used or dismissed.
 struct HUDAccessoryBrowserBar: View {
     let onOpen: () -> Void
     let onDismiss: () -> Void

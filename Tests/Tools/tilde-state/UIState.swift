@@ -170,8 +170,8 @@ struct UIState: Decodable {
     /// The name of the screen that Record records; "Studio Display" when absent.
     var screenName: String?
     /// The source picker's page when it is open in full while choosing (`pickingWindow`):
-    /// "screens", "windows", or "app" for Safari's windows. Without it the picker is its
-    /// "Use window picker" button.
+    /// "screens", "windows", or "app" for Safari's windows. Without it the source dropdown
+    /// shows under the source button.
     var sourcePicker: SourcePicker?
     var sentStatus: SentStatus?
     var drawingColor: String?

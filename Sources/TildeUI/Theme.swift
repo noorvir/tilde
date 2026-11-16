@@ -82,9 +82,9 @@ enum PillEnd {
     case text
 }
 
-/// An accessory bar: a compact pill attached under the HUD, such as the drawing bar, the
-/// browser accessory bar and "Use window picker" (with the picker it grows into). It is
-/// compact so the HUD stays the main surface.
+/// An accessory bar: a compact pill attached under the HUD, such as the drawing bar and the
+/// browser accessory bar, and the cards under it, such as the source dropdown and the source
+/// picker. It is compact so the HUD stays the main surface.
 enum HUDAccessory {
     static let size = PillSize.compact
     /// Between the HUD and an accessory bar or card under it.

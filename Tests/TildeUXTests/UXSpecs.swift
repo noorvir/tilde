@@ -513,6 +513,14 @@ struct UXSpecs {
             // the next clip, and the source button names it.
             try await app.press("Record screen")
             try await app.waitToSee("Choose a window")
+            // The source dropdown under the source button opens the window picker in its
+            // place, and Esc goes back to clicking on screen with the dropdown.
+            try await app.press("Use window picker")
+            try await app.waitToSee("Screens")
+            try await app.waitNotToSee("Use window picker")
+            try await app.key(.escape)
+            try await app.waitToSee("Use window picker")
+            try await app.waitNotToSee("Screens")
             let frame = ChangingWindow.frame
             try await app.click(at: CGPoint(x: frame.minX + 20, y: frame.maxY - 20))
             try await app.waitToSeeText(containing: "Ready to record")

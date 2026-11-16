@@ -79,8 +79,8 @@ struct SessionFlow: Equatable {
         case annotating
         case recording(Clip)
         /// Choosing what to record, in recording mode with no clip in progress; the session
-        /// goes back there after the choice. The picker is open in full, or only its "Use
-        /// window picker" button shows.
+        /// goes back there after the choice. The picker is open, or a click on screen chooses
+        /// and the source dropdown under the source button offers the picker.
         case picking(isPickerOpen: Bool)
     }
 
@@ -198,7 +198,8 @@ struct SessionFlow: Equatable {
         /// The window that the session is limited to closed.
         case windowClosed
         /// A click on the recording bar's source button, and the menu's Record a Specific Window:
-        /// choosing what to record starts, or ends with no change. Then the picker's button.
+        /// choosing what to record starts, or ends with no change. Then "Use window picker" in
+        /// the source dropdown.
         case pickSource, openPicker
         /// A window, a screen or a phone was chosen to record.
         case choose
