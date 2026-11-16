@@ -484,6 +484,8 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
     static let scale = 2
     private let lock = NSLock()
     private var rows: [Data] = []
+    /// The row as the screen shows it now: a frame brings new pixels only in its dirty rects.
+    private var current: Data?
 
     static func record(x: Double, y: Double, width: Double, seconds: Double) async -> [Data] {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
@@ -521,8 +523,23 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
         guard let base = CVPixelBufferGetBaseAddress(pixels) else {
             return
         }
-        let row = Data(bytes: base, count: CVPixelBufferGetWidth(pixels) * 4)
+        // Only a complete frame brings new pixels; an idle or blank one brings none.
+        let info = (CMSampleBufferGetSampleAttachmentsArray(buffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]])?.first
+        guard (info?[.status] as? Int).flatMap(SCFrameStatus.init) == .complete else {
+            return
+        }
+        let frame = Data(bytes: base, count: CVPixelBufferGetWidth(pixels) * 4)
+        let dirty = (info?[.dirtyRects] as? [NSDictionary])?.compactMap { CGRect(dictionaryRepresentation: $0) }
         lock.withLock {
+            var row = frame
+            if let current, let dirty {
+                row = current
+                for rect in dirty where rect.minY <= 0 && rect.maxY > 0 {
+                    let columns = (max(Int(rect.minX), 0) * 4)..<(min(Int(rect.maxX) * 4, frame.count))
+                    row.replaceSubrange(columns, with: frame[columns])
+                }
+            }
+            current = row
             if rows.last != row {
                 rows.append(row)
             }

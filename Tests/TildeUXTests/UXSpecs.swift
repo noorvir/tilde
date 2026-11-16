@@ -826,6 +826,9 @@ struct UXSpecs {
             }
             // A strip through the button's middle, from left of the window to past where it ends.
             let strip = CGRect(x: frame.minX - 50, y: middle - 1, width: frame.width + 400, height: 2)
+            // The pictures show the pointer: it stays on the button but below the strip, so that
+            // it covers no part of the strip, also when the mark glides under it.
+            try await app.hover(over: CGPoint(x: grab.x, y: middle + 12))
             var resting: (mark: Double, button: Double)?
             for _ in 0..<20 where resting == nil {
                 resting = try await place(on: app.screen(in: strip))
@@ -848,7 +851,9 @@ struct UXSpecs {
             #expect(offsets.reduce(0, +) / Double(max(offsets.count, 1)) <= 2.5, "The button lags the window: \(moving)")
             let after = try #require(places.last)
             #expect(after.mark >= before.mark + 178)
-            #expect(abs(after.button - before.button) <= 1)
+            // At rest the button is back in its place to 2 pixels, 1 pt on a 2x screen.
+            let pixel = 1 / (NSScreen.main?.backingScaleFactor ?? 2)
+            #expect(abs(after.button - before.button) <= 2 * pixel)
             step("button kept to the window in \(moving.count) frames: \(moving.map { String(format: "%.0f", $0.button - before.button) }.joined(separator: " "))")
 
             // The comment is the button's own: its chip's Comment button opens a box for it,
@@ -902,7 +907,8 @@ struct UXSpecs {
             let closeUp = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1.png")), width: bounds.width)
             let context = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1-context.png")), width: bounds.width)
             let inside = rect.insetBy(dx: 10, dy: 8)
-            let samples = Int(inside.width * inside.height)
+            // The pixels sampled, at the picture's own scale.
+            let samples = closeUp.count(in: inside) { _ in true }
             #expect(abs(closeUp.size.height - bounds.height) <= 1 && abs(context.size.height - bounds.height) <= 1, "\(closeUp.size), \(context.size), window \(bounds.size)")
             #expect(closeUp.count(in: inside, where: Picture.isWireframe) > samples / 2)
             #expect(context.count(in: inside, where: Picture.isWireframe) == 0)
@@ -946,7 +952,7 @@ struct UXSpecs {
             // The fixture's window can be in front of Settings, which stays open meanwhile.
             try await app.menu("Settings")
             try await app.accessibilityPress("Appearance")
-            try await app.waitToSee("Dragged, snapping")
+            try await app.waitToSee("Blueprint")
             try await app.accessibilityPress("Blueprint")
             step("blueprint chosen")
 
@@ -977,6 +983,42 @@ struct UXSpecs {
             try await waitFor(app, at: inside, Picture.isWireframeBlue, atLeast: 200)
             try await waitFor(app, at: inside, Picture.isWireframeOrange, atMost: 0)
             step("one colour shown")
+        }
+    }
+
+    /// Reset on the Appearance page puts the colours and the strengths back to their defaults;
+    /// the style stays as chosen.
+    @Test func resetPutsTheColoursAndStrengthsBack() async throws {
+        try await withApp(defaults: ["wireframes": "true"]) { app in
+            // The Fill value as Settings shows it, "6 %" or "6%" by the locale.
+            func waitToSeeFill(_ percent: Int) async throws {
+                let end = Date().addingTimeInterval(10)
+                while Date() < end {
+                    let names = try await app.seen().compactMap(\.name)
+                    if names.contains(where: { $0.replacingOccurrences(of: " ", with: "") == "\(percent)%" }) {
+                        return
+                    }
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+                throw UXFailure(description: "Fill \(percent) % is not on screen")
+            }
+
+            try await app.menu("Settings")
+            try await app.accessibilityPress("Appearance")
+            try await app.waitToSee("Blueprint")
+            try await app.accessibilityPress("Blueprint")
+            try await waitToSeeFill(6)
+
+            let fill = try await app.waitToSee("Fill", role: "AXSlider").frame
+            try await app.click(at: CGPoint(x: fill.maxX - 2, y: fill.midY))
+            try await waitToSeeFill(60)
+            step("fill changed")
+
+            try await app.accessibilityPress("Reset")
+            try await waitToSeeFill(6)
+            #expect(try readDefault("wireframeFill") == "0.06")
+            #expect(try readDefault("wireframeStyle") == "blueprint")
+            step("reset")
         }
     }
 

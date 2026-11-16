@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// The look of wireframe components: a tile for each style, the components of the chosen style
-/// in each state, the colours, and three strengths. The pictures and an open wireframe change
-/// at once.
+/// The look of wireframe components: a tile for each style, the colours, and three strengths.
+/// The pictures and an open wireframe change at once.
 struct AppearanceSettings: View {
     private typealias Key = WireframeLook.Key
 
@@ -40,23 +39,6 @@ struct AppearanceSettings: View {
                 .padding(16)
             }
 
-            SettingsSection("States") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 14)], alignment: .leading, spacing: 14) {
-                    ForEach(WireframePreviews.State.allCases) { state in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Preview(image: previews.states[state], size: WireframePreviews.stateSize)
-                            Text(state.caption)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(state.caption)
-                    }
-                }
-                .padding(16)
-            }
-
             SettingsSection("Colours and strength") {
                 SettingsRow(title: "Colours", subtitle: "Blue, teal and orange by kind, or all blue") {
                     HStack(spacing: 12) {
@@ -78,6 +60,11 @@ struct AppearanceSettings: View {
                             .frame(width: 234)
                     }
                 }
+            } accessory: {
+                Button("Reset") {
+                    WireframeLook.resetColoursAndStrengths()
+                }
+                .controlSize(.small)
             }
         }
         .task(id: look) {

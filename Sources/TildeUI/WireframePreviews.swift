@@ -2,33 +2,14 @@ import AppKit
 import SwiftUI
 import WebKit
 
-/// Pictures of wireframe components for Settings: a tile for each style, and one component in
-/// each state in the chosen style. The canvas's own page draws them, so they look as the canvas
-/// does. The page is loaded only while Settings shows them, and draws only when the look
-/// changes.
+/// Pictures of wireframe components for Settings: a tile for each style, with one card drawn in
+/// that style. The canvas's own page draws them, so they look as the canvas does. The page is
+/// loaded only while Settings shows them, and draws only when the look changes.
 @MainActor
 final class WireframePreviews: ObservableObject {
-    enum State: String, CaseIterable, Identifiable {
-        case normal, hovered, selected, dragging, bordersOff
-
-        var id: String { rawValue }
-
-        var caption: String {
-            switch self {
-            case .normal: "Normal"
-            case .hovered: "Pointer over it"
-            case .selected: "Selected"
-            case .dragging: "Dragged, snapping"
-            case .bordersOff: "Some borders off"
-            }
-        }
-    }
-
     @Published private(set) var tiles: [WireframeLook.Style: NSImage] = [:]
-    @Published private(set) var states: [State: NSImage] = [:]
 
     static let tileSize = CGSize(width: 240, height: 150)
-    static let stateSize = CGSize(width: 176, height: 120)
 
     private let html: () -> String?
     private var page: WireframePicturePage?
@@ -84,97 +65,37 @@ final class WireframePreviews: ObservableObject {
         guard let page else {
             return
         }
-        let tileApp = Self.sampleApp(size: Self.tileSize)
-        let stateApp = Self.sampleApp(size: Self.stateSize)
         var tiles: [WireframeLook.Style: NSImage] = [:]
         for style in WireframeLook.Style.allCases {
             var tileLook = look
             tileLook.style = style
-            let picture = try await page.picture(of: Self.tileShapes, look: tileLook, state: "normal", over: tileApp, size: Self.tileSize)
+            let picture = try await page.picture(of: [Self.card], look: tileLook, state: "normal", over: Self.background, size: Self.tileSize)
             tiles[style] = NSImage(cgImage: picture, size: Self.tileSize)
-        }
-        var states: [State: NSImage] = [:]
-        for state in State.allCases {
-            var card: [String: Any] = ["type": "card", "rect": [16, 24, 104, 44], "label": "Card", "borders": ["top", "right", "bottom", "left"]]
-            if state == .bordersOff {
-                card["borders"] = ["bottom", "left"]
-            }
-            let pageState = state == .bordersOff ? "normal" : state.rawValue
-            let picture = try await page.picture(of: [card], look: look, state: pageState, over: stateApp, size: Self.stateSize)
-            states[state] = NSImage(cgImage: picture, size: Self.stateSize)
         }
         if Task.isCancelled {
             return
         }
         self.tiles = tiles
-        self.states = states
         drawn = look
     }
 
-    /// A card, a table, a button and a dropdown with their labels.
-    private static let tileShapes: [[String: Any]] = {
-        let borders = ["top", "right", "bottom", "left"]
-        return [
-            ["type": "card", "rect": [12, 30, 112, 50], "label": "Card", "borders": borders],
-            ["type": "dropdown", "rect": [140, 40, 88, 24], "label": "Menu", "borders": borders],
-            ["type": "table", "rect": [12, 100, 132, 42], "label": "Table", "borders": borders, "rows": 2, "columns": 2],
-            ["type": "button", "rect": [160, 108, 68, 28], "label": "Save", "borders": borders],
-        ]
+    /// One card with its label, in the middle of the tile.
+    private static let card: [String: Any] = [
+        "type": "card", "rect": [52, 51, 136, 64], "label": "Card", "borders": ["top", "right", "bottom", "left"],
+    ]
+
+    /// A plain white tile for the card to stand on.
+    private static let background: CGImage = {
+        let width = Int(tileSize.width * 2)
+        let height = Int(tileSize.height * 2)
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        context.setFillColor(.white)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()!
     }()
-
-    /// A small app for the components to stand over, so that the blur and the fade show.
-    static func sampleApp(size: CGSize) -> CGImage {
-        let renderer = ImageRenderer(content: SampleApp().frame(width: size.width, height: size.height))
-        renderer.scale = 2
-        return renderer.cgImage ?? NSImage(size: size).cgImage(forProposedRect: nil, context: nil, hints: nil)!
-    }
-}
-
-/// An app's window in a few blocks and lines of text, in light colours whatever the appearance.
-private struct SampleApp: View {
-    private let ink = Color(red: 0.12, green: 0.12, blue: 0.11)
-    private let muted = Color(red: 0.62, green: 0.62, blue: 0.6)
-    private let accent = Color(red: 0.23, green: 0.13, blue: 0.79)
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Circle().fill(ink).frame(width: 8, height: 8)
-                Capsule().fill(ink).frame(width: 40, height: 5)
-                Spacer()
-                Capsule().fill(muted).frame(width: 22, height: 4)
-                Capsule().fill(muted).frame(width: 22, height: 4)
-                RoundedRectangle(cornerRadius: 3).fill(ink).frame(width: 30, height: 12)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 22)
-            .background(Color.white)
-            Rectangle().fill(Color(white: 0.88)).frame(height: 1)
-            VStack(alignment: .leading, spacing: 7) {
-                Text("Plans for your team").font(.system(size: 12, weight: .semibold)).foregroundStyle(ink)
-                HStack(spacing: 8) {
-                    RoundedRectangle(cornerRadius: 4).fill(accent).overlay(alignment: .topLeading) {
-                        Text("Pro").font(.system(size: 9)).foregroundStyle(.white).padding(5)
-                    }
-                    RoundedRectangle(cornerRadius: 4).fill(Color.white).overlay(alignment: .topLeading) {
-                        Text("Free").font(.system(size: 9)).foregroundStyle(ink).padding(5)
-                    }
-                }
-                .frame(height: 34)
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(["Starter  $9", "Team  $29", "Scale  $99"], id: \.self) { row in
-                        Text(row).font(.system(size: 9)).foregroundStyle(ink)
-                    }
-                }
-                .padding(6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white))
-            }
-            .padding(10)
-            Spacer(minLength: 0)
-        }
-        .background(Color(red: 0.96, green: 0.96, blue: 0.95))
-    }
 }
 
 /// The canvas's page in a web view that is in no window on the screen, drawing still pictures
