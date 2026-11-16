@@ -93,6 +93,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         CursorDebug.install()
+        DispatchQueue.global(qos: .utility).async {
+            PhoneCapture.allowPhones()
+        }
         // Before the controller reads the switch.
         WireframeSwitch.migrate(defaults: .standard) {
             SessionArchive().all().contains { $0.notes.contains { $0.chip == WireframeMode.chip } }

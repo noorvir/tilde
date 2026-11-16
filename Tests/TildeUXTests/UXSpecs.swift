@@ -567,6 +567,34 @@ struct UXSpecs {
     /// the tool down, and a click goes through the canvas to the window behind. When that
     /// window's app goes to full screen, in a Space of its own, Tilde keeps the keyboard: Esc
     /// does not take the app out of full screen, and ⌘↩ ends Draw.
+    /// The first open after a launch, when the frameworks that list phones and windows load:
+    /// the app's log has the time of each step ("picker loaded") and any stall of the main
+    /// thread.
+    @Test func theSourcePickerListsTheScreensAndWindowsOnTheFirstOpen() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            let agent = try await MCPAgent(port: app.port, name: "Codex")
+            _ = try await agent.call("start_annotation", ["wait_seconds": 0])
+            try await app.waitToSee("Annotating")
+
+            try await app.key(.r)
+            try await app.press("Use window picker")
+            try await app.waitToSee("Select on screen")
+            try await app.waitToSee("Windows")
+            step("picker open")
+
+            try await app.press("Windows")
+            try await app.waitToSee("tilde-ux-fixture")
+            step("windows listed")
+
+            try await app.key(.escape)
+            try await app.waitToSee("Use window picker")
+            try await app.key(.escape)
+            try await app.waitNotToSee("Use window picker")
+        }
+    }
+
     @Test func escTwiceOnAShapesCommentKeepsTypingInTheBox() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
