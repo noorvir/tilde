@@ -902,7 +902,8 @@ struct UXSpecs {
             let closeUp = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1.png")), width: bounds.width)
             let context = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1-context.png")), width: bounds.width)
             let inside = rect.insetBy(dx: 10, dy: 8)
-            let samples = Int(inside.width * inside.height)
+            // The pixels sampled, at the picture's own scale.
+            let samples = closeUp.count(in: inside) { _ in true }
             #expect(abs(closeUp.size.height - bounds.height) <= 1 && abs(context.size.height - bounds.height) <= 1, "\(closeUp.size), \(context.size), window \(bounds.size)")
             #expect(closeUp.count(in: inside, where: Picture.isWireframe) > samples / 2)
             #expect(context.count(in: inside, where: Picture.isWireframe) == 0)
