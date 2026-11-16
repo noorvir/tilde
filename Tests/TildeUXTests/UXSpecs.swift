@@ -826,6 +826,9 @@ struct UXSpecs {
             }
             // A strip through the button's middle, from left of the window to past where it ends.
             let strip = CGRect(x: frame.minX - 50, y: middle - 1, width: frame.width + 400, height: 2)
+            // The pictures show the pointer: it stays on the button but below the strip, so that
+            // it covers no part of the strip, also when the mark glides under it.
+            try await app.hover(over: CGPoint(x: grab.x, y: middle + 12))
             var resting: (mark: Double, button: Double)?
             for _ in 0..<20 where resting == nil {
                 resting = try await place(on: app.screen(in: strip))
@@ -848,7 +851,9 @@ struct UXSpecs {
             #expect(offsets.reduce(0, +) / Double(max(offsets.count, 1)) <= 2.5, "The button lags the window: \(moving)")
             let after = try #require(places.last)
             #expect(after.mark >= before.mark + 178)
-            #expect(abs(after.button - before.button) <= 1)
+            // At rest the button is back in its place to 2 pixels, 1 pt on a 2x screen.
+            let pixel = 1 / (NSScreen.main?.backingScaleFactor ?? 2)
+            #expect(abs(after.button - before.button) <= 2 * pixel)
             step("button kept to the window in \(moving.count) frames: \(moving.map { String(format: "%.0f", $0.button - before.button) }.joined(separator: " "))")
 
             // The comment is the button's own: its chip's Comment button opens a box for it,
