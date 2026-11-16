@@ -95,8 +95,6 @@ final class SourcePickerModel: ObservableObject {
 
     private func reload(browserWindow: Int?) async {
         var steps = StepTimer()
-        PhoneCapture.allowPhones()
-        steps.mark("allowPhones")
         let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         steps.mark("content")
         guard !Task.isCancelled else {
@@ -112,16 +110,15 @@ final class SourcePickerModel: ObservableObject {
         let displays = content.displays.map { display in
             Tile(source: .screen(display.displayID), title: Self.name(of: display.displayID), detail: Self.pixelSize(of: display.displayID))
         }
-        // A phone's picture needs the Camera permission, which is asked for only when the user
-        // chooses the phone to record.
         steps.mark("displays")
-        let mayFilmPhones = PhoneCapture.hasCameraAccess
-        steps.mark("cameraAccess")
-        let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: mayFilmPhones ? "Cable" : "Needs Camera access") }
-        steps.mark("phones")
-        screens = displays + phones
-        apps = Self.apps(of: content.windows, browserWindow: browserWindow)
-        steps.mark("apps")
+        let listed = await Self.list(content.windows, browserWindow: browserWindow)
+        steps.mark("phones and apps")
+        guard !Task.isCancelled else {
+            return
+        }
+        let mayFilmPhones = listed.mayFilmPhones
+        screens = displays + listed.phones
+        apps = listed.apps
 
         // Tilde's browser is a window like any other; its other windows are left out.
         let tilde = content.applications.filter { $0.processID == getpid() }
@@ -172,9 +169,19 @@ final class SourcePickerModel: ObservableObject {
         }
     }
 
+    /// The phones on a cable and the apps' windows. It runs off the main thread: the first
+    /// time, listing phones loads AVFoundation's devices, and each app's icon is read from disk.
+    nonisolated private static func list(_ windows: [SCWindow], browserWindow: Int?) async -> (phones: [Tile], mayFilmPhones: Bool, apps: [App]) {
+        // A phone's picture needs the Camera permission, which is asked for only when the user
+        // chooses the phone to record.
+        let mayFilmPhones = PhoneCapture.hasCameraAccess
+        let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: mayFilmPhones ? "Cable" : "Needs Camera access") }
+        return (phones, mayFilmPhones, apps(of: windows, browserWindow: browserWindow))
+    }
+
     /// Apps with normal or floating windows on screen, front to back; Tilde's only with its
     /// browser.
-    private static func apps(of windows: [SCWindow], browserWindow: Int?) -> [App] {
+    nonisolated private static func apps(of windows: [SCWindow], browserWindow: Int?) -> [App] {
         let order = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
             .compactMap { $0[kCGWindowNumber as String] as? Int }
         let shown = windows

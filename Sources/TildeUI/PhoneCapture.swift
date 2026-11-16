@@ -14,7 +14,8 @@ struct Phone: Equatable, Sendable {
 /// permission.
 enum PhoneCapture {
     /// Lets macOS offer the screens of iPhones and iPads on a cable as capture devices. They
-    /// appear a moment after the first call.
+    /// appear a moment after the call. Call it once, at launch and off the main thread: it
+    /// starts CoreMediaIO, which takes from 0.1 s to seconds.
     static func allowPhones() {
         var address = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyAllowScreenCaptureDevices),
