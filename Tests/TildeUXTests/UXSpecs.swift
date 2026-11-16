@@ -984,20 +984,33 @@ struct UXSpecs {
     /// the style stays as chosen.
     @Test func resetPutsTheColoursAndStrengthsBack() async throws {
         try await withApp(defaults: ["wireframes": "true"]) { app in
+            // The Fill value as Settings shows it, "6 %" or "6%" by the locale.
+            func waitToSeeFill(_ percent: Int) async throws {
+                let end = Date().addingTimeInterval(10)
+                while Date() < end {
+                    let names = try await app.seen().compactMap(\.name)
+                    if names.contains(where: { $0.replacingOccurrences(of: " ", with: "") == "\(percent)%" }) {
+                        return
+                    }
+                    try await Task.sleep(for: .milliseconds(50))
+                }
+                throw UXFailure(description: "Fill \(percent) % is not on screen")
+            }
+
             try await app.menu("Settings")
             try await app.accessibilityPress("Appearance")
             try await app.waitToSee("Blueprint")
             try await app.accessibilityPress("Blueprint")
-            try await app.waitToSee("6 %")
+            try await waitToSeeFill(6)
 
             let fill = try await app.waitToSee("Fill", role: "AXSlider").frame
             try await app.click(at: CGPoint(x: fill.maxX - 2, y: fill.midY))
-            try await app.waitToSee("60 %")
+            try await waitToSeeFill(60)
             step("fill changed")
 
             try await app.accessibilityPress("Reset")
-            try await app.waitToSee("6 %")
-            try await app.waitNotToSee("60 %")
+            try await waitToSeeFill(6)
+            #expect(try readDefault("wireframeFill") == "0.06")
             #expect(try readDefault("wireframeStyle") == "blueprint")
             step("reset")
         }
