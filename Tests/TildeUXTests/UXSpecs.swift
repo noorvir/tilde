@@ -7,7 +7,7 @@ import Testing
 /// What a user sees and does, one story per spec.
 @Suite(.serialized, .enabled(if: uxEnabled))
 struct UXSpecs {
-    private func withApp(defaults: [String: String] = [:], _ body: (TildeApp) async throws -> Void) async throws {
+    func withApp(defaults: [String: String] = [:], _ body: (TildeApp) async throws -> Void) async throws {
         let app = try await TildeApp.launched(defaults: defaults)
         defer { app.quit() }
         try await body(app)
