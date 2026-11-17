@@ -496,6 +496,7 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
     private var rows: [Data] = []
     /// The row as the screen shows it now: a frame brings new pixels only in its dirty rects.
     private var current: Data?
+    private var isStopped = false
 
     static func record(x: Double, y: Double, width: Double, seconds: Double) async -> [Data] {
         firstFrame.withLock { $0 = false }
@@ -522,7 +523,12 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
         }
         try? await Task.sleep(for: .seconds(seconds))
         try? await stream.stopCapture()
-        return recorder.lock.withLock { recorder.rows }
+        return recorder.lock.withLock {
+            // A late frame is not in the row, and the next recording waits for its own first.
+            recorder.isStopped = true
+            firstFrame.withLock { $0 = false }
+            return recorder.rows
+        }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -542,6 +548,9 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
         let frame = Data(bytes: base, count: CVPixelBufferGetWidth(pixels) * 4)
         let dirty = (info?[.dirtyRects] as? [NSDictionary])?.compactMap { CGRect(dictionaryRepresentation: $0) }
         lock.withLock {
+            guard !isStopped else {
+                return
+            }
             var row = frame
             if let current, let dirty {
                 row = current
@@ -554,7 +563,7 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
             if rows.last != row {
                 rows.append(row)
             }
+            Self.firstFrame.withLock { $0 = true }
         }
-        Self.firstFrame.withLock { $0 = true }
     }
 }
