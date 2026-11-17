@@ -554,8 +554,13 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
             var row = frame
             if let current, let dirty {
                 row = current
-                for rect in dirty where rect.minY <= 0 && rect.maxY > 0 {
-                    let columns = (max(Int(rect.minX), 0) * 4)..<(min(Int(rect.maxX) * 4, frame.count))
+                // The rects are in the frame's pixels, not always whole ones: a rect that covers
+                // any part of the first row of pixels, and every pixel it touches.
+                for rect in dirty where rect.minY < 1 && rect.maxY > 0 {
+                    let columns = (max(Int(rect.minX.rounded(.down)), 0) * 4)..<min(Int(rect.maxX.rounded(.up)) * 4, frame.count)
+                    guard !columns.isEmpty else {
+                        continue
+                    }
                     row.replaceSubrange(columns, with: frame[columns])
                 }
             }
