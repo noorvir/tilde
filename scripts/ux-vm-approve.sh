@@ -10,8 +10,8 @@ if [ "$(whoami)" != admin ] || [ "$(sysctl -n kern.hv_vmm_present)" != 1 ]; then
     exit 2
 fi
 
-# The dates say it was just asked. macOS 26.6 asks again for dates in the future, and it
-# asked again even with a date 3 months ahead, so each run sets them. Both are replaced, as
+# The dates say it was just asked. macOS 26.6 asks again for dates in the future, and it asked
+# again 6 days after the last question, so each run sets them. Both are replaced, as
 # replayd writes the real date when it asks. A managed preference
 # (forceBypassScreenCaptureAlert) does not work: without a profile, macOS removes it.
 approvals="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
@@ -25,7 +25,8 @@ for app in TildeDriver TildeUX Tilde; do
         /usr/libexec/PlistBuddy -c "Add $entry:$key date $now" "$approvals"
     done
 done
-killall replayd 2>/dev/null || true
+# replayd reads the file only when it starts, and it outlives killall: launchd starts it again.
+launchctl kickstart -k "gui/$(id -u)/com.apple.replayd"
 killall "System Settings" 2>/dev/null || true
 
 # A question that is up already would take the specs' clicks: the run stops instead. The specs
