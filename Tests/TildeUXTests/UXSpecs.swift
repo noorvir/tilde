@@ -1127,10 +1127,10 @@ struct UXSpecs {
     }
 
     /// Each corner of a part resizes it from that corner: the opposite sides stay, and the two
-    /// sides of the corner follow the pointer. The grip on its top edge moves it whole. Lines
-    /// on the window behind can snap a side by a few points, so the sides are found on the
-    /// screen.
-    @Test func eachCornerResizesAPartAndTheTopGripMovesIt() async throws {
+    /// sides of the corner follow the pointer. The grip on its top edge moves it whole, and a
+    /// drag starts where it was pressed. Lines on the window behind can snap a side by a few
+    /// points, so the sides are found on the screen.
+    @Test func eachCornerResizesAPartTheTopGripMovesItAndADragStartsWhereItWasPressed() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         let frame = ChangingWindow.frame
@@ -1174,21 +1174,12 @@ struct UXSpecs {
             #expect(abs(moved.width - part.width) <= 1 && abs(moved.height - part.height) <= 1, "\(part) became \(moved)")
             #expect((21...39).contains(moved.minX - part.minX) && (21...39).contains(moved.minY - part.minY), "\(part) became \(moved)")
             step("moved by the grip")
-        }
-    }
 
-    /// A drag starts where it was pressed. The pointer leaves a part at its right, clicks the
-    /// window behind, and comes back to drag the part to the left at once: in every frame of the
-    /// screen, the part is where it was or left of it, never on the side where the pointer left.
-    @Test func aDragStartsWhereItWasPressed() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        let frame = ChangingWindow.frame
-        let drawn = CGRect(x: frame.minX + 120, y: frame.minY + 120, width: 200, height: 100)
-        try await withApp(defaults: ["wireframes": "true"]) { app in
-            try await drawCard(app, in: drawn)
-            try await app.key(.escape)
-            let part = try await sides(app, near: drawn)
+            // A drag starts where it was pressed. The pointer leaves the part at its right,
+            // clicks the window behind, and comes back to drag the part to the left at once: in
+            // every frame of the screen, the part is where it was or left of it, never on the
+            // side where the pointer left.
+            part = moved
             try await app.hover(over: CGPoint(x: part.maxX - 10, y: part.midY))
             try await Task.sleep(for: .milliseconds(200))
             try await app.hover(over: CGPoint(x: part.maxX + 120, y: part.midY))
