@@ -1192,7 +1192,7 @@ struct UXSpecs {
             let start = try #require(try await app.screen().firstX(onRow: row, from: card.minX - 100, to: card.maxX, where: Picture.isWireframe))
             let width = card.width + 300
             async let recorded = app.recordRow(at: row, from: card.minX - 100, width: width, seconds: 2)
-            try await Task.sleep(for: .milliseconds(150))
+            try await app.waitForRowRecording()
             let press = CGPoint(x: card.minX + 30, y: card.midY)
             try await app.mouseDown(at: press)
             for step in 1...8 {

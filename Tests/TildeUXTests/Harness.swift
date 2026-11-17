@@ -568,6 +568,20 @@ final class TildeApp {
         return try frames.compactMap { Data(base64Encoded: $0) }.map { try Picture(row: $0, width: width, origin: CGPoint(x: x, y: y)) }
     }
 
+    /// Waits until the row that `recordRow` records has its first frame, so that input sent
+    /// after this shows in it.
+    func waitForRowRecording() async throws {
+        let end = Date().addingTimeInterval(5)
+        while Date() < end {
+            let (data, _) = try await URLSession.shared.data(from: Self.driver.appendingPathComponent("row/started"))
+            if (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["started"] as? Bool == true {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        throw UXFailure(description: "The row recording did not start")
+    }
+
     /// An area of the screen now, the part of it on the screen, quicker to take than the whole
     /// screen: a 2x screen has four times the pixels to take and read.
     func screen(in area: CGRect) async throws -> Picture {
