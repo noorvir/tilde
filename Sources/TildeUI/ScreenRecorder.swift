@@ -37,6 +37,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// for a phone. Set once, right after the recorder exists, as the stream needs it as its
     /// delegate.
     private var endCapture: () async -> Void = {}
+    /// For a window's clip, which captures an area of its display: moves that area to where the
+    /// window is now, a frame in Quartz coordinates.
+    private var moveArea: (CGRect) -> Void = { _ in }
     /// Takes a picture of what a stream records, at Resume; a phone streams all the time.
     private var takeStill: (@Sendable () async -> CMSampleBuffer?)?
     /// The clock of the frame times, which pauses are measured on.
@@ -69,7 +72,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     ) async throws -> ScreenRecorder {
         let filter: SCContentFilter
         let size: CGSize
-        var sourceRect: CGRect?
+        /// A window's place on its display, and the display's frame.
+        var windowArea: (rect: CGRect, display: CGRect, offset: CGVector)?
         switch source {
         case .phone(let phone):
             return try await start(phone, to: video, onSourceEnded: onSourceEnded)
@@ -83,7 +87,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             let area = shared.frame.intersection(display)
             filter = showing
             size = area.size
-            sourceRect = area.offsetBy(dx: -display.minX, dy: -display.minY)
+            windowArea = (area, display, CGVector(dx: area.minX - shared.frame.minX, dy: area.minY - shared.frame.minY))
         case .screen(let display):
             let content = try await shareableContent()
             guard let shared = content.displays.first(where: { $0.displayID == display }) else {
@@ -104,8 +108,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         configuration.showsCursor = true
         configuration.ignoreShadowsSingleWindow = true
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        if let sourceRect {
-            configuration.sourceRect = sourceRect
+        if let windowArea {
+            configuration.sourceRect = windowArea.rect.offsetBy(dx: -windowArea.display.minX, dy: -windowArea.display.minY)
         }
 
         let (writer, input) = try makeWriter(width: width, height: height, to: video)
@@ -113,6 +117,19 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         let stream = SCStream(filter: filter, configuration: configuration, delegate: recorder)
         recorder.endCapture = {
             try? await stream.stopCapture()
+        }
+        if let windowArea {
+            recorder.moveArea = { [stream] frame in
+                let origin = CGPoint(x: frame.minX + windowArea.offset.dx - windowArea.display.minX, y: frame.minY + windowArea.offset.dy - windowArea.display.minY)
+                let moved = SCStreamConfiguration()
+                moved.width = configuration.width
+                moved.height = configuration.height
+                moved.minimumFrameInterval = configuration.minimumFrameInterval
+                moved.showsCursor = true
+                moved.pixelFormat = configuration.pixelFormat
+                moved.sourceRect = CGRect(origin: origin, size: windowArea.rect.size)
+                stream.updateConfiguration(moved) { _ in }
+            }
         }
         recorder.takeStill = { [filter, configuration] in
             try? await SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: configuration)
@@ -222,6 +239,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     private func stopCapture() async {
         writerWatch.cancel()
         await endCapture()
+    }
+
+    /// A window's clip keeps to the window where it moved, `frame` in Quartz coordinates, on
+    /// the display that it started on.
+    func follow(windowFrame frame: CGRect) {
+        moveArea(frame)
     }
 
     func pause() {

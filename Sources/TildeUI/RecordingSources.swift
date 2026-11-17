@@ -131,11 +131,14 @@ final class SourcePickerModel: ObservableObject {
                 case .screen(let id):
                     if let display = content.displays.first(where: { $0.displayID == id }) {
                         let filter = SCContentFilter(display: display, excludingApplications: tilde, exceptingWindows: browser)
-                        group.addTask { await (tile.id, Self.picture(of: filter, size: display.frame.size)) }
+                        group.addTask { await (tile.id, Self.picture(of: filter, area: CGRect(origin: .zero, size: display.frame.size))) }
                     }
                 case .window(let info):
-                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }) {
-                        group.addTask { await (tile.id, Self.picture(of: SCContentFilter(desktopIndependentWindow: window), size: window.frame.size)) }
+                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }),
+                       let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: window.frame, content: content)
+                    {
+                        let area = window.frame.intersection(display).offsetBy(dx: -display.minX, dy: -display.minY)
+                        group.addTask { await (tile.id, Self.picture(of: filter, area: area)) }
                     }
                 case .phone(let phone):
                     if mayFilmPhones {
@@ -211,11 +214,14 @@ final class SourcePickerModel: ObservableObject {
         return apps
     }
 
-    nonisolated private static func picture(of filter: SCContentFilter, size: CGSize) async -> CGImage? {
+    /// A small picture of `area` of what the filter shows, in the display's points.
+    nonisolated private static func picture(of filter: SCContentFilter, area: CGRect) async -> CGImage? {
+        let size = area.size
         guard size.width > 0, size.height > 0 else {
             return nil
         }
         let configuration = SCStreamConfiguration()
+        configuration.sourceRect = area
         // Twice a tile's width, for Retina screens.
         let scale = min(1, 360 / max(size.width, size.height * 1.6))
         configuration.width = Int(size.width * scale)

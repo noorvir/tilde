@@ -49,7 +49,7 @@ extension UXSpecs {
             let length = Date().timeIntervalSince(started)
             try await app.waitToSeeText(containing: "1 note")
 
-            let seconds = try await clipSeconds(in: app)
+            let seconds = try await savedClip(in: app).load(.duration).seconds
             step("full-screen clip: \(seconds) s of \(length) s")
             #expect(seconds >= 3 && seconds <= length)
             // The capture leaves the recorded app as it is: macOS put no window of its window
@@ -61,7 +61,7 @@ extension UXSpecs {
     }
 
     /// While a window records, the user works in it as usual: a click puts the keyboard in its
-    /// text field, and what they type arrives there.
+    /// text field, and what they type arrives there. The clip keeps to the window when it moves.
     @Test func typingReachesTheRecordedWindow() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -93,8 +93,28 @@ extension UXSpecs {
             let focus = try await app.focus()
             #expect(focus.app == window.pid)
             #expect(focus.value == "hello")
-            #expect(window.sharingWindows == [])
             try await app.waitToSeeText(containing: "Recording 0:0")
+
+            try window.show("moved typing")
+            for _ in 0..<40 where (window.bounds?.minX ?? 0) < frame.minX + 200 {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try await Task.sleep(for: .milliseconds(500))
+            try await app.press("Stop recording")
+            try await app.waitToSeeText(containing: "1 note")
+            // The clip's last frame is the window: its white page, not the dark of what the clip
+            // leaves out where the window was.
+            let clip = try await savedClip(in: app)
+            let generator = AVAssetImageGenerator(asset: clip)
+            generator.requestedTimeToleranceBefore = .positiveInfinity
+            let duration = try await clip.load(.duration)
+            let (image, _) = try await generator.image(at: CMTime(seconds: duration.seconds - 0.05, preferredTimescale: 600))
+            let picture = try Picture(try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])), width: Double(image.width))
+            let whole = CGRect(origin: .zero, size: picture.size)
+            let white = Double(picture.count(in: whole, every: 8) { min($0.red, $0.green, $0.blue) > 0.9 }) / Double(picture.count(in: whole, every: 8) { _ in true })
+            step("moved window's clip: \(Int(white * 100))% white")
+            #expect(white > 0.7)
+            #expect(window.sharingWindows == [])
         }
     }
 
@@ -129,15 +149,15 @@ extension UXSpecs {
         Issue.record("\"\(name)\" is in the accessibility tree but not drawn on screen (\(drawn) places)", sourceLocation: sourceLocation)
     }
 
-    /// The length of the session's one clip, once it is saved.
-    private func clipSeconds(in app: TildeApp) async throws -> Double {
+    /// The session's one clip, once it is saved.
+    private func savedClip(in app: TildeApp) async throws -> AVURLAsset {
         let end = Date().addingTimeInterval(10)
         while Date() < end {
             let files = FileManager.default.enumerator(at: app.sessions, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL } ?? []
-            if let clip = files.first(where: { $0.pathExtension == "mp4" }),
-               let seconds = try? await AVURLAsset(url: clip).load(.duration).seconds, seconds > 0
+            if let file = files.first(where: { $0.pathExtension == "mp4" }),
+               let seconds = try? await AVURLAsset(url: file).load(.duration).seconds, seconds > 0
             {
-                return seconds
+                return AVURLAsset(url: file)
             }
             try await Task.sleep(for: .milliseconds(100))
         }

@@ -86,7 +86,7 @@ enum ScreenCapture {
         }
     }
 
-    /// Captures `area` of one window without the windows in front of it, with a blue outline
+    /// Captures `area` of one window without other apps' windows in front of it, with a blue outline
     /// around `outline`. Both rects are Quartz coordinates. The long side is at most `maxSide`
     /// pixels.
     static func png(ofWindow windowID: CGWindowID, area: CGRect, outline: CGRect, maxSide: Double) async -> Data? {
@@ -100,18 +100,19 @@ enum ScreenCapture {
                 return nil
             }
 
-            let area = area.intersection(window.frame)
+            guard let (filter, display) = filter(showingAppOf: window, at: window.frame, content: content) else {
+                return nil
+            }
+            let area = area.intersection(window.frame).intersection(display)
             guard !area.isNull, area.width >= 1, area.height >= 1 else {
                 return nil
             }
 
-            let filter = SCContentFilter(desktopIndependentWindow: window)
             let scale = CGFloat(filter.pointPixelScale)
             let configuration = SCStreamConfiguration()
-            configuration.sourceRect = area.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY)
+            configuration.sourceRect = area.offsetBy(dx: -display.minX, dy: -display.minY)
             configuration.width = Int(area.width * scale)
             configuration.height = Int(area.height * scale)
-            configuration.ignoreShadowsSingleWindow = true
             configuration.showsCursor = false
             configuration.captureResolution = .best
 

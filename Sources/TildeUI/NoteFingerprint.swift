@@ -85,7 +85,7 @@ struct NoteFingerprint: Equatable, Sendable {
         CGRect(x: point.x - 80, y: point.y - 50, width: 160, height: 100)
     }
 
-    /// The area of a window, without anything in front of it. Nil without Screen Recording or
+    /// The area of a window, without other apps' windows in front of it. Nil without Screen Recording or
     /// when the window is gone.
     /// `windowFrame`: where the window is now, if known; its description can be from earlier.
     static func capture(window windowID: CGWindowID, area: CGRect, windowFrame: CGRect? = nil) async -> NoteFingerprint? {
@@ -97,7 +97,7 @@ struct NoteFingerprint: Equatable, Sendable {
     /// others: each is cut from a screenshot at 2 pixels a point, then scaled down.
     static func capture(window windowID: CGWindowID, areas: [CGRect], windowFrame: CGRect? = nil) async -> [NoteFingerprint?] {
         let none = [NoteFingerprint?](repeating: nil, count: areas.count)
-        guard let window = await CapturableWindows.shared.window(windowID) else {
+        guard let (window, content) = await CapturableWindows.shared.window(windowID) else {
             return none
         }
         let frame = windowFrame ?? window.frame
@@ -109,13 +109,16 @@ struct NoteFingerprint: Equatable, Sendable {
             return none
         }
 
+        guard let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: frame, content: content) else {
+            return none
+        }
+
         let scale: CGFloat = 2
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = union.offsetBy(dx: -frame.minX, dy: -frame.minY)
+        configuration.sourceRect = union.offsetBy(dx: -display.minX, dy: -display.minY)
         configuration.width = Int((union.width * scale).rounded())
         configuration.height = Int((union.height * scale).rounded())
         configuration.showsCursor = false
-        let filter = SCContentFilter(desktopIndependentWindow: window)
         guard let image = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) else {
             await CapturableWindows.shared.forget(windowID)
             return none
@@ -182,20 +185,22 @@ struct NoteVisibility: Equatable, Codable {
 /// Remembers window descriptions: asking for all of them on every check is heavy for the system.
 private actor CapturableWindows {
     static let shared = CapturableWindows()
-    private var windows: [CGWindowID: SCWindow] = [:]
+    private var content: SCShareableContent?
 
-    func window(_ id: CGWindowID) async -> SCWindow? {
-        if let window = windows[id] {
-            return window
+    /// The window, with the apps and displays on screen when it was listed.
+    func window(_ id: CGWindowID) async -> (window: SCWindow, content: SCShareableContent)? {
+        if let content, let window = content.windows.first(where: { $0.windowID == id }) {
+            return (window, content)
         }
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+        guard let fresh = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
             return nil
         }
-        windows = Dictionary(content.windows.map { ($0.windowID, $0) }, uniquingKeysWith: { first, _ in first })
-        return windows[id]
+        content = fresh
+        return fresh.windows.first { $0.windowID == id }.map { ($0, fresh) }
     }
 
+    /// The window could not be captured: the next capture lists the windows again.
     func forget(_ id: CGWindowID) {
-        windows[id] = nil
+        content = nil
     }
 }

@@ -435,6 +435,9 @@ struct UXSpecs {
         // Above the phone of Device Hub, which is blue too.
         let beside = CGRect(x: frame.maxX + 5, y: frame.minY, width: 170, height: 170)
         try await first.waitForBlue(in: beside, atLeast: 20)
+        // The page checks capture the window, and leave its app as it is: no window of macOS's
+        // window sharing, on which AppKit asserts in some apps, and they crash.
+        #expect(window.sharingWindows == [])
         step("window moved")
 
         // A crash: the note and its images come back, with no shape, and no label that nothing confirms.
@@ -563,6 +566,8 @@ struct UXSpecs {
             let bounds = try #require(window.bounds)
             step("window clip \(size.width) × \(size.height), window \(bounds.width) × \(bounds.height)")
             #expect(abs(size.width / size.height - bounds.width / bounds.height) < 0.02)
+            // The picker's pictures of the windows and the window's clip leave its app as it is.
+            #expect(window.sharingWindows == [])
         }
     }
 
