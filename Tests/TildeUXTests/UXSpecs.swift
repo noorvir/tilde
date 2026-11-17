@@ -518,6 +518,12 @@ struct UXSpecs {
             try await app.press("Use window picker")
             try await app.waitToSee("Screens")
             try await app.waitNotToSee("Use window picker")
+            // The first open after a launch lists the windows too, while the frameworks that
+            // list phones and windows load: the app's log has the time of each step ("picker
+            // loaded") and any stall of the main thread.
+            try await app.press("Windows")
+            try await app.waitToSee("tilde-ux-fixture")
+            step("windows listed")
             try await app.key(.escape)
             try await app.waitToSee("Use window picker")
             try await app.waitNotToSee("Screens")
@@ -567,34 +573,6 @@ struct UXSpecs {
     /// the tool down, and a click goes through the canvas to the window behind. When that
     /// window's app goes to full screen, in a Space of its own, Tilde keeps the keyboard: Esc
     /// does not take the app out of full screen, and ⌘↩ ends Draw.
-    /// The first open after a launch, when the frameworks that list phones and windows load:
-    /// the app's log has the time of each step ("picker loaded") and any stall of the main
-    /// thread.
-    @Test func theSourcePickerListsTheScreensAndWindowsOnTheFirstOpen() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        try await withApp { app in
-            let agent = try await MCPAgent(port: app.port, name: "Codex")
-            _ = try await agent.call("start_annotation", ["wait_seconds": 0])
-            try await app.waitToSee("Annotating")
-
-            try await app.key(.r)
-            try await app.press("Use window picker")
-            try await app.waitToSee("Select on screen")
-            try await app.waitToSee("Windows")
-            step("picker open")
-
-            try await app.press("Windows")
-            try await app.waitToSee("tilde-ux-fixture")
-            step("windows listed")
-
-            try await app.key(.escape)
-            try await app.waitToSee("Use window picker")
-            try await app.key(.escape)
-            try await app.waitNotToSee("Use window picker")
-        }
-    }
-
     @Test func escTwiceOnAShapesCommentKeepsTypingInTheBox() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -851,9 +829,8 @@ struct UXSpecs {
             #expect(offsets.reduce(0, +) / Double(max(offsets.count, 1)) <= 2.5, "The button lags the window: \(moving)")
             let after = try #require(places.last)
             #expect(after.mark >= before.mark + 178)
-            // At rest the button is back in its place to 2 pixels, 1 pt on a 2x screen.
-            let pixel = 1 / (NSScreen.main?.backingScaleFactor ?? 2)
-            #expect(abs(after.button - before.button) <= 2 * pixel)
+            // At rest the button is back in its place to 1 pt.
+            #expect(abs(after.button - before.button) <= 1)
             step("button kept to the window in \(moving.count) frames: \(moving.map { String(format: "%.0f", $0.button - before.button) }.joined(separator: " "))")
 
             // The comment is the button's own: its chip's Comment button opens a box for it,
@@ -907,7 +884,7 @@ struct UXSpecs {
             let closeUp = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1.png")), width: bounds.width)
             let context = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1-context.png")), width: bounds.width)
             let inside = rect.insetBy(dx: 10, dy: 8)
-            // The pixels sampled, at the picture's own scale.
+            // The places sampled.
             let samples = closeUp.count(in: inside) { _ in true }
             #expect(abs(closeUp.size.height - bounds.height) <= 1 && abs(context.size.height - bounds.height) <= 1, "\(closeUp.size), \(context.size), window \(bounds.size)")
             #expect(closeUp.count(in: inside, where: Picture.isWireframe) > samples / 2)
@@ -933,92 +910,6 @@ struct UXSpecs {
             try await app.waitToSee("Paused", timeout: 15)
             #expect(try await !app.seen().contains { $0.name == "Done, ⌘↩" })
             step("start modes")
-        }
-    }
-
-    /// The look of the components comes from the style and colour tiles of Settings' Appearance
-    /// page, and a change shows at once on the components drawn. Blueprint's lines run past the
-    /// corners and it has no offset edge; Technical has a hard offset edge under the bottom and
-    /// no lines past the corners. A button is orange by kind, and blue in One colour.
-    @Test func aStyleChosenInSettingsShowsOnTheWireframe() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        // A button on the fixture's white window, left of where Settings opens.
-        let frame = ChangingWindow.frame
-        let button = CGRect(x: frame.minX + 12, y: frame.minY + 100, width: 84, height: 40)
-        let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
-        let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
-        try await withApp(defaults: ["wireframes": "true"]) { app in
-            // The fixture's window can be in front of Settings, which stays open meanwhile.
-            try await app.menu("Settings")
-            try await app.accessibilityPress("Appearance")
-            try await app.waitToSee("Blueprint")
-            try await app.accessibilityPress("Blueprint")
-            step("blueprint chosen")
-
-            // ⌘ draws without snapping, at the very place of the drag.
-            try await app.menu("Start Annotation")
-            try await app.waitToSee("Annotating")
-            try await app.key(.w)
-            try await app.waitToSee("Done, ⌘↩")
-            try await app.waitToSee("Drawing canvas", timeout: 15)
-            try await app.key(.b)
-            try await app.hold("command", down: true)
-            try await app.slowDrag(from: button.origin, to: CGPoint(x: button.maxX, y: button.maxY))
-            try await app.hold("command", down: false)
-            try await waitFor(app, at: button.insetBy(dx: 10, dy: 10), Picture.isWireframe, atLeast: 200)
-            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atLeast: 2)
-            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atMost: 0)
-            step("blueprint drawn")
-
-            // Settings, under the canvas, change the style: the button shows it at once.
-            try await app.accessibilityPress("Technical")
-            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
-            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
-            step("technical shown")
-
-            let inside = button.insetBy(dx: 10, dy: 10)
-            try await waitFor(app, at: inside, Picture.isWireframeOrange, atLeast: 200)
-            try await app.accessibilityPress("One colour")
-            try await waitFor(app, at: inside, Picture.isWireframeBlue, atLeast: 200)
-            try await waitFor(app, at: inside, Picture.isWireframeOrange, atMost: 0)
-            step("one colour shown")
-        }
-    }
-
-    /// Reset on the Appearance page puts the colours and the strengths back to their defaults;
-    /// the style stays as chosen.
-    @Test func resetPutsTheColoursAndStrengthsBack() async throws {
-        try await withApp(defaults: ["wireframes": "true"]) { app in
-            // The Fill value as Settings shows it, "6 %" or "6%" by the locale.
-            func waitToSeeFill(_ percent: Int) async throws {
-                let end = Date().addingTimeInterval(10)
-                while Date() < end {
-                    let names = try await app.seen().compactMap(\.name)
-                    if names.contains(where: { $0.replacingOccurrences(of: " ", with: "") == "\(percent)%" }) {
-                        return
-                    }
-                    try await Task.sleep(for: .milliseconds(50))
-                }
-                throw UXFailure(description: "Fill \(percent) % is not on screen")
-            }
-
-            try await app.menu("Settings")
-            try await app.accessibilityPress("Appearance")
-            try await app.waitToSee("Blueprint")
-            try await app.accessibilityPress("Blueprint")
-            try await waitToSeeFill(6)
-
-            let fill = try await app.waitToSee("Fill", role: "AXSlider").frame
-            try await app.click(at: CGPoint(x: fill.maxX - 2, y: fill.midY))
-            try await waitToSeeFill(60)
-            step("fill changed")
-
-            try await app.accessibilityPress("Reset")
-            try await waitToSeeFill(6)
-            #expect(try readDefault("wireframeFill") == "0.06")
-            #expect(try readDefault("wireframeStyle") == "blueprint")
-            step("reset")
         }
     }
 

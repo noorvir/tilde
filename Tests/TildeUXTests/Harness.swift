@@ -105,13 +105,15 @@ struct Picture {
         return (Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent))
     }
 
-    /// How many pixels in the area match, of every `step`th pixel in each direction.
+    /// How many places in the area match, on a grid of every `step` half points in each
+    /// direction: the pixels of a 2x screen, so a count is the same whatever the screen's scale.
     func count(in area: CGRect, every step: Int = 2, where matches: (Color) -> Bool) -> Int {
         var count = 0
         let area = area.offsetBy(dx: -origin.x, dy: -origin.y)
-        for y in stride(from: Int(area.minY * scale), to: Int(area.maxY * scale), by: step) {
-            for x in stride(from: Int(area.minX * scale), to: Int(area.maxX * scale), by: step) {
-                if let color = pixel(x: x, y: y), matches(color) {
+        let half = scale / 2
+        for y in stride(from: Int(area.minY * 2), to: Int(area.maxY * 2), by: step) {
+            for x in stride(from: Int(area.minX * 2), to: Int(area.maxX * 2), by: step) {
+                if let color = pixel(x: Int(Double(x) * half), y: Int(Double(y) * half)), matches(color) {
                     count += 1
                 }
             }
@@ -223,6 +225,11 @@ final class TildeApp {
 
     /// Fresh settings and sessions, as on a new Mac, with `defaults` set.
     static func launched(defaults: [String: String] = [:]) async throws -> TildeApp {
+        // A macOS question, such as the screen capture one, would take the spec's clicks; the
+        // specs never answer it.
+        if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.UserNotificationCenter").isEmpty {
+            throw UXFailure(description: "A macOS question is on the screen (UserNotificationCenter), such as the screen capture one: answer it, then run again")
+        }
         resetSettings()
         for (key, value) in defaults {
             let task = Process()
