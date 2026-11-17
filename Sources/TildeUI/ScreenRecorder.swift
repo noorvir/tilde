@@ -69,16 +69,21 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     ) async throws -> ScreenRecorder {
         let filter: SCContentFilter
         let size: CGSize
+        var sourceRect: CGRect?
         switch source {
         case .phone(let phone):
             return try await start(phone, to: video, onSourceEnded: onSourceEnded)
         case .window(let window):
             let content = try await shareableContent()
-            guard let shared = content.windows.first(where: { $0.windowID == CGWindowID(window.number) }) else {
+            guard let shared = content.windows.first(where: { $0.windowID == CGWindowID(window.number) }),
+                  let (showing, display) = ScreenCapture.filter(showingAppOf: shared, at: shared.frame, content: content)
+            else {
                 throw Failure.noSource
             }
-            filter = SCContentFilter(desktopIndependentWindow: shared)
-            size = shared.frame.size
+            let area = shared.frame.intersection(display)
+            filter = showing
+            size = area.size
+            sourceRect = area.offsetBy(dx: -display.minX, dy: -display.minY)
         case .screen(let display):
             let content = try await shareableContent()
             guard let shared = content.displays.first(where: { $0.displayID == display }) else {
@@ -99,6 +104,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         configuration.showsCursor = true
         configuration.ignoreShadowsSingleWindow = true
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        if let sourceRect {
+            configuration.sourceRect = sourceRect
+        }
 
         let (writer, input) = try makeWriter(width: width, height: height, to: video)
         let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: onSourceEnded)

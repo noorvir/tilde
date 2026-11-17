@@ -26,7 +26,7 @@ extension UXSpecs {
     }
 
     /// A clip of a window in full screen records until the user stops it: the HUD stays on that
-    /// Space, counting, and the video is as long as the clip.
+    /// Space, counting, the app keeps its window, and the video is as long as the clip.
     @Test func aWindowInFullScreenRecordsUntilStop() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -52,6 +52,9 @@ extension UXSpecs {
             let seconds = try await clipSeconds(in: app)
             step("full-screen clip: \(seconds) s of \(length) s")
             #expect(seconds >= 3 && seconds <= length)
+            // The capture leaves the recorded app as it is: macOS put no window of its window
+            // sharing in it, on which AppKit asserts in some apps, and they crash.
+            #expect(window.sharingWindows == [])
             #expect(window.fullScreen?.isOn == true)
             #expect(window.fullScreen?.exits == 0)
         }
@@ -90,6 +93,7 @@ extension UXSpecs {
             let focus = try await app.focus()
             #expect(focus.app == window.pid)
             #expect(focus.value == "hello")
+            #expect(window.sharingWindows == [])
             try await app.waitToSeeText(containing: "Recording 0:0")
         }
     }

@@ -719,6 +719,13 @@ final class ChangingWindow {
         return (state.contains("fullscreen=true"), exits)
     }
 
+    /// The classes of the window sharing windows that macOS put in the app, such as
+    /// NSLocalWindowSharingWindow, while another app captured its window.
+    var sharingWindows: [String] {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: file.path + ".sharing"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").map(String.init)
+    }
+
     /// The process's id: the app whose text field has the keyboard on the page "typing".
     var pid: Int { Int(process.processIdentifier) }
 

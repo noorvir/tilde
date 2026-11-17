@@ -159,6 +159,16 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     if page.hasPrefix("moved"), window.frame.minX < 400 {
         window.setFrameOrigin(NSPoint(x: window.frame.minX + 200, y: window.frame.minY))
     }
+    // A capture of this app's window by another app must not put a window of macOS's window
+    // sharing in it, such as NSLocalWindowSharingWindow: AppKit asserts on it in some apps.
+    // "<file>.sharing" lists the class of each such window seen.
+    for shared in app.windows where String(describing: type(of: shared)).contains("Sharing") {
+        let name = String(describing: type(of: shared))
+        let seen = (try? String(contentsOfFile: file + ".sharing", encoding: .utf8)) ?? ""
+        if !seen.contains(name) {
+            try? (seen + name + "\n").write(toFile: file + ".sharing", atomically: true, encoding: .utf8)
+        }
+    }
     for (row, text) in zip(rows, words) where row.stringValue != text {
         row.stringValue = text
     }
