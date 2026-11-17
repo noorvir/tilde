@@ -1244,7 +1244,8 @@ struct UXSpecs {
         let end = Date().addingTimeInterval(4)
         while true {
             try await Task.sleep(for: .milliseconds(300))
-            let picture = try await app.screen()
+            // The lines within 12 points of each side, and the strips' widths.
+            let picture = try await app.screen(in: rect.insetBy(dx: -13, dy: -13))
             func line(_ around: Double, _ strip: (Double) -> CGRect) -> Double? {
                 let scored = offsets.map { (around + $0, picture.count(in: strip(around + $0), every: 1, where: Picture.isWireframe)) }
                 guard let best = scored.max(by: { $0.1 < $1.1 }), best.1 >= 10 else {
@@ -1269,7 +1270,7 @@ struct UXSpecs {
         let end = Date().addingTimeInterval(6)
         var last = 0
         while Date() < end {
-            last = try await app.screen().count(in: area, every: step, where: matches)
+            last = try await app.screen(in: area).count(in: area, every: step, where: matches)
             if last >= atLeast, last <= atMost {
                 return
             }

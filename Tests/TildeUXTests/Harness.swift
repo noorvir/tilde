@@ -99,7 +99,7 @@ struct Picture {
     }
 
     private func pixel(x: Int, y: Int) -> Color? {
-        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+        guard x >= 0, y >= 0, x < bitmap.pixelsWide, y < bitmap.pixelsHigh, let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
             return nil
         }
         return (Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent))
@@ -568,8 +568,16 @@ final class TildeApp {
         return try frames.compactMap { Data(base64Encoded: $0) }.map { try Picture(row: $0, width: width, origin: CGPoint(x: x, y: y)) }
     }
 
-    /// An area of the screen now, quicker to take than the whole screen.
+    /// An area of the screen now, the part of it on the screen, quicker to take than the whole
+    /// screen: a 2x screen has four times the pixels to take and read.
     func screen(in area: CGRect) async throws -> Picture {
+        guard let screen = NSScreen.screens.first else {
+            throw UXFailure(description: "no screen")
+        }
+        let area = area.intersection(screen.frame)
+        guard !area.isEmpty else {
+            throw UXFailure(description: "\(area) is off the screen")
+        }
         let data = try await drivePicture("strip", ["x": area.minX, "y": area.minY, "width": area.width, "height": area.height])
         return try Picture(data, width: area.width, origin: area.origin)
     }
@@ -577,7 +585,7 @@ final class TildeApp {
     /// How many Tilde-blue pixels are on screen in this area: notes are drawn, so they have no
     /// accessibility elements to read.
     func bluePixels(in area: CGRect) async throws -> Int {
-        try await screen().count(in: area, where: Picture.isTildeBlue)
+        try await screen(in: area).count(in: area, where: Picture.isTildeBlue)
     }
 
     /// Waits until the area has at least, or at most, this many blue pixels.
