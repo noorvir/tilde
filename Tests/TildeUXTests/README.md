@@ -13,8 +13,8 @@ First VM (`tilde-ux`):
 | Spec | What only the real app proves |
 | --- | --- |
 | `anAgentOpensAPageTheUserNotesItAndTheAgentGetsAReportWithImages` | An MCP agent opens Tilde's browser; a note reaches it with images. |
-| `aRectangleLeavesALabelThatHidesOnAnotherPageAndACrashLeavesOnlyItsNote` | A label follows another app's window and page; a crash restores only the note. |
-| `twoClipsReachTheAgentAsVideos` | Screen and window clips, the window picker's first open, and pause, Esc and send. |
+| `aRectangleLeavesALabelThatHidesOnAnotherPageAndACrashLeavesOnlyItsNote` | A label follows another app's window and page, and its checks put no window sharing window in that app; a crash restores only the note. |
+| `twoClipsReachTheAgentAsVideos` | Screen and window clips, the window picker's first open, and pause, Esc and send; a window's clip keeps to the window when it moves; the window's app gets no window sharing window. |
 | `escTwiceOnAShapesCommentKeepsTypingInTheBox` | The keyboard stays in the comment box; Draw keeps it over a full-screen app. |
 | `doubleControlInATextFieldGivesTheHUDTheKeys` | Double Ctrl takes the keys from another app's text field, also in full screen. |
 | `aWireframeOnAWindowReachesTheAgentWithItsTwoPictures` | Snapping, the window behind, components that keep to a moving window, the report. |
@@ -23,6 +23,7 @@ First VM (`tilde-ux`):
 | `theStyleControlsInTheBarChangeTheLookAtOnce` | The bar's style controls change the components on screen at once. |
 | `eachCornerResizesAPartTheTopGripMovesItAndADragStartsWhereItWasPressed` | Real drags resize and move a part; no frame of a drag shows it on the wrong side. |
 | `anUpdateInstallsWhenTildeQuitsAndTildeOpensAsTheNewVersion` | Sparkle installs on quit; the new version keeps its permissions. |
+| `aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter` | A dictation app's paste lands in the focused text; focus goes back after. |
 
 Second VM (`tilde-ux-2`):
 
@@ -32,7 +33,7 @@ Second VM (`tilde-ux-2`):
 | `aNodeIsInstalledFromSettingsAndLinkedByItsSocket` | A remote machine over ssh: install, socket, drops and the report. |
 | `anUpdateInstallsByItselfWhenTildeIsNotInUseAndNeverDuringASession` | Sparkle downloads and installs by itself, never during a session. |
 | `aCopiedReportGoesToTheRemoteMachineWithItsImages` | A copied report's images go to the machine over ssh. |
-| `aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter` | A dictation app's paste lands in the focused text; focus goes back after. |
+| `theHUDShowsOverAnAppInFullScreenWhoseWindowRecordsWhileTheUserTypesInIt` | Over a full-screen app the HUD is drawn on its Space and takes the keys; its window records until Stop while the user types in it; the app gets no window sharing window, on which AppKit asserts in some apps, and they crash. |
 
 ## Dropped
 

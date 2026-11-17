@@ -468,8 +468,8 @@ struct UXSpecs {
     // MARK: - Recording
 
     /// Two clips reach the agent as videos: the first of the screen without its 2 s pause, kept
-    /// when Annotate stops it, and the second of a chosen window, sent while it records. Esc
-    /// asks before it drops a clip that is not stopped.
+    /// when Annotate stops it, and the second of a chosen window, which keeps to the window when
+    /// it moves, sent while it records. Esc asks before it drops a clip that is not stopped.
     @Test func twoClipsReachTheAgentAsVideos() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -539,6 +539,11 @@ struct UXSpecs {
             // discard the clip, and Esc again keeps it.
             try await app.press("Record")
             try await app.waitToSeeText(containing: "Recording 0:0")
+            // The clip keeps to the window when it moves.
+            try window.show("moved")
+            for _ in 0..<40 where (window.bounds?.minX ?? 0) < frame.minX + 200 {
+                try await Task.sleep(for: .milliseconds(50))
+            }
             try await app.key(.escape)
             try await app.waitToSee("Discard the recording?")
             try await app.key(.escape)
@@ -566,6 +571,17 @@ struct UXSpecs {
             let bounds = try #require(window.bounds)
             step("window clip \(size.width) × \(size.height), window \(bounds.width) × \(bounds.height)")
             #expect(abs(size.width / size.height - bounds.width / bounds.height) < 0.02)
+            // Its last frame is the window where it moved: its white page, not the dark of what
+            // the clip leaves out where the window was.
+            let generator = AVAssetImageGenerator(asset: windowClip)
+            generator.requestedTimeToleranceBefore = .positiveInfinity
+            let duration = try await windowClip.load(.duration)
+            let (image, _) = try await generator.image(at: CMTime(seconds: duration.seconds - 0.05, preferredTimescale: 600))
+            let picture = try Picture(try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])), width: Double(image.width))
+            let whole = CGRect(origin: .zero, size: picture.size)
+            let white = Double(picture.count(in: whole, every: 8) { min($0.red, $0.green, $0.blue) > 0.9 }) / Double(picture.count(in: whole, every: 8) { _ in true })
+            step("moved window's clip: \(Int(white * 100))% white")
+            #expect(white > 0.7)
             // The picker's pictures of the windows and the window's clip leave its app as it is.
             #expect(window.sharingWindows == [])
         }
