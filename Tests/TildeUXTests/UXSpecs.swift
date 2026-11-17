@@ -1179,27 +1179,29 @@ struct UXSpecs {
             // clicks the window behind, and comes back to drag the part to the left at once: in
             // every frame of the screen, the part is where it was or left of it, never on the
             // side where the pointer left.
-            part = moved
-            try await app.hover(over: CGPoint(x: part.maxX - 10, y: part.midY))
+            let card = moved
+            try await app.hover(over: CGPoint(x: card.maxX - 10, y: card.midY))
             try await Task.sleep(for: .milliseconds(200))
-            try await app.hover(over: CGPoint(x: part.maxX + 120, y: part.midY))
+            try await app.hover(over: CGPoint(x: card.maxX + 120, y: card.midY))
             try await Task.sleep(for: .milliseconds(200))
-            try await app.click(at: CGPoint(x: part.maxX + 120, y: part.maxY + 60))
+            try await app.click(at: CGPoint(x: card.maxX + 120, y: card.maxY + 60))
             step("pointer left at the right")
 
             // A row through the part's label tag, which is solid from the part's left side.
-            let row = part.minY - 10
-            let start = try #require(try await app.screen().firstX(onRow: row, from: part.minX - 100, to: part.maxX, where: Picture.isWireframe))
-            async let recorded = app.recordRow(at: row, from: part.minX - 100, width: part.width + 300, seconds: 2)
+            let row = card.minY - 10
+            let start = try #require(try await app.screen().firstX(onRow: row, from: card.minX - 100, to: card.maxX, where: Picture.isWireframe))
+            let width = card.width + 300
+            async let recorded = app.recordRow(at: row, from: card.minX - 100, width: width, seconds: 2)
             try await Task.sleep(for: .milliseconds(150))
-            let press = CGPoint(x: part.minX + 30, y: part.midY)
+            let press = CGPoint(x: card.minX + 30, y: card.midY)
             try await app.mouseDown(at: press)
             for step in 1...8 {
                 try await app.mouseDragged(to: CGPoint(x: press.x - CGFloat(step) * 5, y: press.y))
             }
             try await app.mouseUp(at: CGPoint(x: press.x - 40, y: press.y))
             let frames = try await recorded
-            let lefts = frames.compactMap { $0.firstX(onRow: row, from: part.minX - 100, to: part.maxX + 200, where: Picture.isWireframe) }
+            let (from, to) = (card.minX - 100, card.maxX + 200)
+            let lefts = frames.compactMap { $0.firstX(onRow: row, from: from, to: to, where: Picture.isWireframe) }
             #expect(lefts.count >= 10, "Too few frames: \(lefts)")
             #expect(lefts.allSatisfy { $0 <= start + 1 }, "The part went right of \(start): \(lefts)")
             #expect(lefts.contains { $0 <= start - 30 }, "The part did not move left of \(start): \(lefts)")
