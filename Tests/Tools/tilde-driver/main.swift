@@ -96,8 +96,8 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
         return json(["ok": true])
 
     case ("POST", "/tap"):
-        await tap(body["key"] as? String ?? "")
-        return json(["ok": true])
+        let onTime = await tap(body["key"] as? String ?? "", count: body["count"] as? Int ?? 1)
+        return json(["ok": true, "onTime": onTime])
 
     case ("POST", "/ax"):
         let pid = pid_t(body["pid"] as? Int ?? 0)
@@ -197,21 +197,39 @@ func modifier(_ name: String, down: Bool) {
     event?.post(tap: .cghidEventTap)
 }
 
-func tap(_ name: String) async {
+/// Taps a modifier `count` times: each press 40 ms, 80 ms apart. Returns whether every event
+/// went out within 30 ms of its time: for about half a second after a window closes, macOS can
+/// take posted events late and stamp them with that later time, so a tap reads as a long press.
+@discardableResult
+func tap(_ name: String, count: Int = 1) async -> Bool {
     let keys: [String: (CGKeyCode, CGEventFlags)] = [
         "control": (59, .maskControl), "option": (58, .maskAlternate), "shift": (56, .maskShift),
         "command": (55, .maskCommand), "function": (63, .maskSecondaryFn),
     ]
     guard let (code, flag) = keys[name] else {
-        return
+        return false
     }
-    let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true)
-    down?.flags = flag
-    down?.post(tap: .cghidEventTap)
-    try? await Task.sleep(for: .milliseconds(40))
-    let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false)
-    up?.flags = []
-    up?.post(tap: .cghidEventTap)
+    // In nanoseconds since the Mac started, as AppKit reads an event's time.
+    let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+    var onTime = true
+    let millisecond: UInt64 = 1_000_000
+    for index in 0..<UInt64(max(count, 1)) {
+        let pressed = start + index * 120 * millisecond
+        for (isDown, time) in [(true, pressed), (false, pressed + 40 * millisecond)] {
+            let wait = Int64(time) - Int64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW))
+            if wait > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(wait))
+            }
+            let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: isDown)
+            event?.flags = isDown ? flag : []
+            event?.timestamp = time
+            event?.post(tap: .cghidEventTap)
+            if clock_gettime_nsec_np(CLOCK_UPTIME_RAW) > time + 30 * millisecond {
+                onTime = false
+            }
+        }
+    }
+    return onTime
 }
 
 func roots(of pid: pid_t) -> [AXUIElement] {
