@@ -210,7 +210,8 @@ final class TildeApp {
             Darwin.kill(app.processIdentifier, SIGSTOP)
         }
         if !running.isEmpty {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            // Not the run loop: on a test's thread it has no sources and returns at once.
+            Thread.sleep(forTimeInterval: 0.2)
         }
         for app in running {
             Darwin.kill(app.processIdentifier, SIGKILL)
@@ -806,7 +807,7 @@ final class SecondDisplay {
         self.frame = CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
         // AppKit learns of the new screen a moment after the window server.
         for _ in 0..<50 where NSScreen.screens.count < 2 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            Thread.sleep(forTimeInterval: 0.1)
         }
     }
 
@@ -817,7 +818,7 @@ final class SecondDisplay {
         process.terminate()
         waitForExit(process)
         for _ in 0..<50 where NSScreen.screens.count > 1 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            Thread.sleep(forTimeInterval: 0.1)
         }
     }
 }
