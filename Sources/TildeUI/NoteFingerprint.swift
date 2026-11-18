@@ -192,7 +192,10 @@ private actor CapturableWindows {
         if let content, let window = content.windows.first(where: { $0.windowID == id }) {
             return (window, content)
         }
-        guard let fresh = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+        // All apps with windows, not only those on screen now: a capture leaves out the apps of
+        // this list, and an app with no window on screen yet, such as Tilde before its first
+        // label, would show in later captures.
+        guard let fresh = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false) else {
             return nil
         }
         content = fresh

@@ -185,7 +185,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         guard ScreenCapture.isAllowed else {
             throw Failure.notAllowed
         }
-        return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        // All apps with windows: a window clip leaves out the apps of this list for as long as
+        // it records, also those with no window on screen when it starts.
+        return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
     }
 
     /// The video's size for a source of these pixels: at most `maxSide` on the long side, in
