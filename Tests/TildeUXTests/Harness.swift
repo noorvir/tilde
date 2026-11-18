@@ -390,10 +390,10 @@ final class TildeApp {
     }
 
     /// A double tap as a hand makes it. For about half a second after a window closes, macOS
-    /// can take posted events late, so that the taps read as a long press: the driver says so,
-    /// and when nothing on screen changed, the double tap is made again, as a user would.
+    /// can hold keys on their way to the apps and stamp them late, so that the taps reach the
+    /// apps as a long press: the driver says so, and the double tap is made again once that
+    /// time is over, as a user would.
     func doubleTap(_ modifier: String) async throws {
-        let before = Set(try await seen().compactMap(\.name))
         for _ in 0..<3 {
             let result = try await drive("tap", ["key": modifier, "count": 2])
             try await Task.sleep(for: .milliseconds(80))
@@ -401,9 +401,6 @@ final class TildeApp {
                 return
             }
             try await Task.sleep(for: .milliseconds(400))
-            if Set(try await seen().compactMap(\.name)) != before {
-                return
-            }
         }
     }
 

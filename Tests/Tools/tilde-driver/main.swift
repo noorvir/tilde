@@ -198,9 +198,9 @@ func modifier(_ name: String, down: Bool) {
 }
 
 /// Taps a modifier `count` times: each press 40 ms, 80 ms apart. Returns whether every event
-/// went out within 30 ms of its time and reached the apps with that time: for about half a
-/// second after a window closes, macOS can take posted events late, or hold them on their way
-/// to the apps, and stamp them with that later time, so a tap reads as a long press.
+/// reached the apps as taps: for about half a second after a window closes, macOS can take
+/// posted events late, or hold them on their way to the apps, and stamp them with that later
+/// time, so a tap reads as a long press.
 @discardableResult
 func tap(_ name: String, count: Int = 1) async -> Bool {
     let keys: [String: (CGKeyCode, CGEventFlags)] = [
@@ -249,8 +249,13 @@ func tap(_ name: String, count: Int = 1) async -> Bool {
         await MainActor.run { NSEvent.removeMonitor(monitor) }
     }
     let times = delivered.withLock { $0 }
+    guard times.count == planned.count else {
+        return false
+    }
     let stamped = zip(planned, times).allSatisfy { abs($1 * 1e9 - Double($0)) < Double(30 * millisecond) }
-    return onTime && times.count == planned.count && stamped
+    // Late, but still taps: each press and each pause between them under 0.3 s.
+    let steps = zip(times, times.dropFirst()).map { $1 - $0 }
+    return (onTime && stamped) || steps.allSatisfy { $0 < 0.3 }
 }
 
 func roots(of pid: pid_t) -> [AXUIElement] {
