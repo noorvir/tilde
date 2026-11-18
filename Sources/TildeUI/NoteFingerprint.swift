@@ -85,8 +85,8 @@ struct NoteFingerprint: Equatable, Sendable {
         CGRect(x: point.x - 80, y: point.y - 50, width: 160, height: 100)
     }
 
-    /// The area of a window, without other apps' windows in front of it. Nil without Screen Recording or
-    /// when the window is gone.
+    /// The area of a window, without other apps' windows in front of it. Nil without Screen
+    /// Recording or when the window is gone.
     /// `windowFrame`: where the window is now, if known; its description can be from earlier.
     static func capture(window windowID: CGWindowID, area: CGRect, windowFrame: CGRect? = nil) async -> NoteFingerprint? {
         await capture(window: windowID, areas: [area], windowFrame: windowFrame)[0]
@@ -109,13 +109,17 @@ struct NoteFingerprint: Equatable, Sendable {
             return none
         }
 
-        guard let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: frame, content: content) else {
+        // The capture is of the screen, so it takes the areas where the window is at this
+        // moment: `frame` and the areas can be from before a move, together.
+        let now = currentFrame(of: windowID) ?? frame
+        let placed = union.offsetBy(dx: now.minX - frame.minX, dy: now.minY - frame.minY)
+        guard let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: now, content: content) else {
             return none
         }
 
         let scale: CGFloat = 2
         let configuration = SCStreamConfiguration()
-        configuration.sourceRect = union.offsetBy(dx: -display.minX, dy: -display.minY)
+        configuration.sourceRect = placed.offsetBy(dx: -display.minX, dy: -display.minY)
         configuration.width = Int((union.width * scale).rounded())
         configuration.height = Int((union.height * scale).rounded())
         configuration.showsCursor = false
@@ -126,6 +130,15 @@ struct NoteFingerprint: Equatable, Sendable {
         return rects.map { rect in
             rect.flatMap { cut(rect: $0, from: image, of: union, scale: scale) }
         }
+    }
+
+    /// The window's frame in Quartz coordinates now, from the window server.
+    private static func currentFrame(of windowID: CGWindowID) -> CGRect? {
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]] ?? []
+        guard let bounds = list.first?[kCGWindowBounds as String] as? NSDictionary else {
+            return nil
+        }
+        return CGRect(dictionaryRepresentation: bounds)
     }
 
     /// The fingerprint of `rect` in a screenshot of `union` taken at `scale` pixels a point.
