@@ -198,8 +198,9 @@ func modifier(_ name: String, down: Bool) {
 }
 
 /// Taps a modifier `count` times: each press 40 ms, 80 ms apart. Returns whether every event
-/// went out within 30 ms of its time: for about half a second after a window closes, macOS can
-/// take posted events late and stamp them with that later time, so a tap reads as a long press.
+/// went out within 30 ms of its time and reached the apps with that time: for about half a
+/// second after a window closes, macOS can take posted events late, or hold them on their way
+/// to the apps, and stamp them with that later time, so a tap reads as a long press.
 @discardableResult
 func tap(_ name: String, count: Int = 1) async -> Bool {
     let keys: [String: (CGKeyCode, CGEventFlags)] = [
@@ -213,6 +214,17 @@ func tap(_ name: String, count: Int = 1) async -> Bool {
     let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
     var onTime = true
     let millisecond: UInt64 = 1_000_000
+    // The times the apps get, as another app's events come to the driver the same way.
+    let delivered = OSAllocatedUnfairLock(initialState: [TimeInterval]())
+    let monitor = await MainActor.run {
+        NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { event in
+            let time = event.timestamp
+            if event.keyCode == code {
+                delivered.withLock { $0.append(time) }
+            }
+        }
+    }
+    var planned: [UInt64] = []
     for index in 0..<UInt64(max(count, 1)) {
         let pressed = start + index * 120 * millisecond
         for (isDown, time) in [(true, pressed), (false, pressed + 40 * millisecond)] {
@@ -224,12 +236,21 @@ func tap(_ name: String, count: Int = 1) async -> Bool {
             event?.flags = isDown ? flag : []
             event?.timestamp = time
             event?.post(tap: .cghidEventTap)
+            planned.append(time)
             if clock_gettime_nsec_np(CLOCK_UPTIME_RAW) > time + 30 * millisecond {
                 onTime = false
             }
         }
     }
-    return onTime
+    for _ in 0..<50 where delivered.withLock({ $0.count }) < planned.count {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    if let monitor {
+        await MainActor.run { NSEvent.removeMonitor(monitor) }
+    }
+    let times = delivered.withLock { $0 }
+    let stamped = zip(planned, times).allSatisfy { abs($1 * 1e9 - Double($0)) < Double(30 * millisecond) }
+    return onTime && times.count == planned.count && stamped
 }
 
 func roots(of pid: pid_t) -> [AXUIElement] {
