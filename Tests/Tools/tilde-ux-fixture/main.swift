@@ -126,13 +126,21 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
     if page.hasPrefix("almost") {
         words[9] = "The final match ends in a win after all"
     }
+    // "second": the window goes to the second display, at the same place on it, before
+    // anything else on the page, such as full screen.
+    if page.contains("second"), NSScreen.screens.count > 1, !window.styleMask.contains(.fullScreen),
+       !NSScreen.screens[1].frame.contains(window.frame.origin)
+    {
+        let other = NSScreen.screens[1].frame
+        window.setFrameTopLeftPoint(NSPoint(x: other.minX + 300, y: other.maxY - 200))
+    }
     // "fullscreen": the window goes to full screen, in a Space of its own, as a user's app can,
     // and again after it left. "<file>.state" says whether it is, and how many times it left.
-    if page.hasPrefix("fullscreen") {
+    if page.contains("fullscreen") {
         let state = "fullscreen=\(window.styleMask.contains(.fullScreen)) exits=\(fullScreenExits)"
         try? state.write(toFile: file + ".state", atomically: true, encoding: .utf8)
     }
-    if page.hasPrefix("fullscreen"), !window.styleMask.contains(.fullScreen), Date().timeIntervalSince(lastToggle) > 3 {
+    if page.contains("fullscreen"), !window.styleMask.contains(.fullScreen), Date().timeIntervalSince(lastToggle) > 3 {
         lastToggle = Date()
         window.level = .normal
         window.styleMask.insert(.resizable)

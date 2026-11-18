@@ -368,10 +368,14 @@ func key(_ code: CGKeyCode, command: Bool, shift: Bool, option: Bool) {
 }
 
 /// The screen, or `area` of it in points.
+/// A picture of the main display, or of `area` on the display that has it, in Quartz points.
 func screenshot(of area: CGRect? = nil) async -> Data? {
-    guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
-          let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
-    else {
+    guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
+        return nil
+    }
+    let main = content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first
+    let display = area.flatMap { area in content.displays.first { $0.frame.contains(CGPoint(x: area.midX, y: area.midY)) } } ?? main
+    guard let display else {
         return nil
     }
 
@@ -381,7 +385,7 @@ func screenshot(of area: CGRect? = nil) async -> Data? {
     configuration.width = Int(size.width * CGFloat(filter.pointPixelScale))
     configuration.height = Int(size.height * CGFloat(filter.pointPixelScale))
     if let area {
-        configuration.sourceRect = area
+        configuration.sourceRect = area.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
     }
     configuration.showsCursor = true
 

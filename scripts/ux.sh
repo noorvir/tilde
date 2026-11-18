@@ -37,6 +37,7 @@ fi
 
 scripts/build-app.sh >/dev/null
 swift build --product tilde-ux-fixture >/dev/null
+swift build --product tilde-ux-display >/dev/null
 scripts/build-driver.sh >/dev/null
 
 # A copy with its own identity: its own user defaults and permissions.
