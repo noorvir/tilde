@@ -693,6 +693,53 @@ struct UXSpecs {
         }
     }
 
+    /// A click on another app outside a text field gives that app the keyboard, and the
+    /// session's single keys still work: A annotates, Space pauses. In the app's text field the
+    /// keys are the field's.
+    @Test func aClickOnAnotherAppKeepsTheSessionsKeysOutsideItsTextField() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try window.show("typing")
+            for _ in 0..<60 where try await app.focus().app != window.pid {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await app.key(.escape)
+            try await app.waitToSee("Paused", timeout: 5)
+
+            // Paused, the click goes through to the window, right of its rows of text.
+            let frame = ChangingWindow.frame
+            try await app.click(at: CGPoint(x: frame.maxX - 20, y: frame.midY))
+            for _ in 0..<40 where try await app.focus().app != window.pid {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            let outside = try await app.focus()
+            try #require(outside.app == window.pid)
+            #expect(!outside.isEditable)
+            try await app.key(.a)
+            try await app.waitToSee("Annotating", timeout: 5)
+            try await app.key(.space)
+            try await app.waitToSee("Paused", timeout: 5)
+            #expect(window.keys == [])
+
+            let field = try #require(window.field)
+            try await app.click(at: field)
+            for _ in 0..<40 where try await app.focus().role != "AXTextField" {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            try #require(try await app.focus().role == "AXTextField")
+            try await app.key(.a)
+            for _ in 0..<40 where try await app.focus().value != "a" {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            #expect(try await app.focus().value == "a")
+            #expect(window.keys == [Key.a.rawValue])
+            try await app.waitToSee("Paused")
+        }
+    }
+
     /// With the keyboard in the window's text field, double Ctrl opens the HUD, as `opensAs`
     /// says; ↩, B, D (Draw) and ⌘↩ (Done, which pauses) work in Tilde, and Esc closes the HUD.
     /// Opened again, paused as it ended, Esc closes it at once. Opened once more, Esc still
