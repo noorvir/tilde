@@ -33,7 +33,7 @@ Second VM (`tilde-ux-2`):
 | `anUpdateInstallsByItselfWhenTildeIsNotInUseAndNeverDuringASession` | Sparkle downloads and installs by itself, never during a session. |
 | `aCopiedReportGoesToTheRemoteMachineWithItsImages` | A copied report's images go to the machine over ssh. |
 | `aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter` | A dictation app's paste lands in the focused text; focus goes back after. |
-| `theHUDShowsOverAnAppInFullScreenWhoseWindowRecordsWhileTheUserTypesInIt` | Over a full-screen app the HUD is drawn on its Space and takes the keys; its window records until Stop while the user types in it; the app gets no window sharing window, on which AppKit asserts in some apps, and they crash. |
+| `theHUDShowsOverAFullScreenAppOnASecondDisplayWhoseWindowRecordsWhileTheUserTypesInIt` | On a second display (`tilde-ux-display`, a virtual one) above right of the main one, over a full-screen app, the HUD is drawn where the pointer is and takes the keys; the app's window records until Stop while the user types in it; the app gets no window sharing window, on which AppKit asserts in some apps, and they crash. |
 
 ## Dropped
 

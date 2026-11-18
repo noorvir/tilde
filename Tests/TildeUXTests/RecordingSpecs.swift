@@ -6,24 +6,28 @@ import Testing
 extension UXSpecs {
     // MARK: - Recording over other apps
 
-    /// Over an app in full screen, with the keyboard in its text field, double Ctrl shows the HUD
-    /// on that Space, in front of the app, and the HUD takes the keys: R starts recording mode,
-    /// whose choosing shows there too. While the app's window records, the user works in it as
-    /// usual: a click puts the keyboard in its text field, and what they type arrives there. The
-    /// HUD stays on that Space, the app keeps its window and its full screen, and the clip lasts
-    /// until Stop.
-    @Test func theHUDShowsOverAnAppInFullScreenWhoseWindowRecordsWhileTheUserTypesInIt() async throws {
+    /// On a second display, above and to the right of the main one as a user's monitor can be,
+    /// over an app in full screen with the keyboard in its text field: double Ctrl shows the HUD
+    /// on that display's Space, where the pointer is, in front of the app, and the HUD takes the
+    /// keys: R starts recording mode, whose choosing shows there too. While the app's window
+    /// records, the user works in it as usual: a click puts the keyboard in its text field, and
+    /// what they type arrives there. The HUD stays on that Space, the app keeps its window and
+    /// its full screen, and the clip lasts until Stop.
+    @Test func theHUDShowsOverAFullScreenAppOnASecondDisplayWhoseWindowRecordsWhileTheUserTypesInIt() async throws {
+        let display = try SecondDisplay(CGRect(x: 1728, y: -271, width: 1920, height: 1080))
+        defer { display.remove() }
         let window = try ChangingWindow()
         defer { window.close() }
         try await withApp { app in
-            try await goFullScreen(window, page: "fullscreen typing", app: app)
+            try await goFullScreen(window, page: "second fullscreen typing", app: app)
+            try await app.hover(over: CGPoint(x: display.frame.midX, y: display.frame.midY))
 
             try await app.doubleTap("control")
-            try await waitToShow(app, "Annotating")
+            let hud = try await waitToShow(app, "Annotating")
+            #expect(display.frame.contains(hud.frame), "The HUD is at \(hud.frame), not on the display at \(display.frame)")
             try await app.key(.r)
             try await waitToShow(app, "Choose a window")
-            let screen = try #require(NSScreen.screens.first?.frame)
-            try await app.click(at: CGPoint(x: screen.midX, y: screen.midY))
+            try await app.click(at: CGPoint(x: display.frame.midX, y: display.frame.midY))
             try await app.waitToSeeText(containing: "tilde-ux-fixture")
             #expect(window.keys == [])
             step("full-screen window chosen")
@@ -60,7 +64,8 @@ extension UXSpecs {
         }
     }
 
-    /// Puts the window in full screen, in a Space of its own, and waits until that Space shows.
+    /// Puts the window in full screen, in a Space of its own on its display, and waits until
+    /// that Space shows.
     private func goFullScreen(_ window: ChangingWindow, page: String, app: TildeApp) async throws {
         try window.show(page)
         for _ in 0..<60 where window.fullScreen?.isOn != true {
@@ -73,9 +78,10 @@ extension UXSpecs {
         }
     }
 
-    /// Waits until the element with this name is on screen and drawn there, in front of the
-    /// window in full screen: its frame shows more than that window's white.
-    private func waitToShow(_ app: TildeApp, _ name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+    /// Waits until the element with this name is on screen and drawn there, on whichever display,
+    /// in front of the window in full screen: its frame shows more than that window's white.
+    @discardableResult
+    private func waitToShow(_ app: TildeApp, _ name: String, sourceLocation: SourceLocation = #_sourceLocation) async throws -> Seen {
         let element = try await app.waitToSee(name, sourceLocation: sourceLocation)
         let end = Date().addingTimeInterval(5)
         var drawn = 0
@@ -83,12 +89,13 @@ extension UXSpecs {
             let area = try await app.screen(in: element.frame)
             drawn = area.count(in: element.frame) { min($0.red, $0.green, $0.blue) < 0.8 }
             if drawn >= 20 {
-                return
+                return element
             }
             try await Task.sleep(for: .milliseconds(50))
         }
         await app.saveFailure(named: "not-drawn-\(sourceLocation.line)")
         Issue.record("\"\(name)\" is in the accessibility tree but not drawn on screen (\(drawn) places)", sourceLocation: sourceLocation)
+        return element
     }
 
     /// The session's one clip, once it is saved.
