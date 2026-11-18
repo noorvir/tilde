@@ -1,4 +1,5 @@
-import Foundation
+import AppKit
+import os
 
 /// Where an update is, as the Configuration page and the toast show it.
 enum UpdateStatus: Equatable {
@@ -59,7 +60,8 @@ final class Updates: ObservableObject {
     }
     /// Shows the toast for a ready version; it is called once for each version.
     var onReady: (String) -> Void = { _ in }
-    /// Whether Tilde shows a window, such as Settings or its browser.
+    /// Whether Tilde shows a window that the user uses, such as Settings or its browser: one
+    /// for which `isInUse` is true.
     var showsWindow: () -> Bool = { false }
     /// This launch is the new version that a silent install opened: nothing asks the user.
     let isSilentRelaunch: Bool
@@ -69,6 +71,7 @@ final class Updates: ObservableObject {
     private let defaults: UserDefaults
     private let now: () -> Date
     private let after: (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    private let log = Logger(subsystem: "dev.tilde.app", category: "update")
     private var announced: String?
     private var lastUse: Date
     /// A check for idleness is due.
@@ -192,12 +195,20 @@ final class Updates: ObservableObject {
             return
         }
         guard isIdle else {
+            let idleFor = Int(now().timeIntervalSince(lastUse))
+            log.notice("Update waits: session \(self.isSessionActive), window \(self.showsWindow()), no input for \(idleFor) s")
             waitForIdle()
             return
         }
+        log.notice("Update installs silently")
         installsSilently = true
         defaults.set(now(), forKey: "silentUpdateAt")
         engine.restart()
+        // The install quits Tilde. If Tilde still runs after the idle time, it tries again.
+        isWaiting = true
+        after(idleTime) { [weak self] in
+            self?.installIfIdle()
+        }
     }
 
     /// Sparkle is about to quit Tilde: the install waits if a session started meanwhile, or,
@@ -209,5 +220,15 @@ final class Updates: ObservableObject {
         defaults.removeObject(forKey: "silentUpdateAt")
         waitForIdle()
         return false
+    }
+}
+
+extension NSWindow {
+    /// A window that the user sees and uses, such as Settings, the browser or a prompt: on
+    /// screen, with a title bar. Tilde's borderless panels do not count: those of a session
+    /// show only while it is on screen, and the toasts and outlines need no answer before an
+    /// update.
+    var isInUse: Bool {
+        isVisible && styleMask.contains(.titled)
     }
 }

@@ -1,5 +1,6 @@
 @testable import TildeUI
 import TildeCore
+import AppKit
 import Foundation
 import os
 import Testing
@@ -157,7 +158,7 @@ struct SilentUpdateTests {
         updates.isSessionActive = false
         clock.passes(299)
         #expect(engine.calls.isEmpty)
-        clock.passes(301)
+        clock.passes(1)
 
         #expect(engine.calls == ["restart"])
     }
@@ -179,6 +180,38 @@ struct SilentUpdateTests {
         #expect(engine.calls == ["restart"])
     }
 
+    @Test func aSilentInstallThatLeavesTildeRunningIsTriedAgain() {
+        let clock = IdleClock()
+        let engine = FakeUpdateEngine()
+        let updates = clock.updates(engine)
+        updates.start()
+
+        engine.send(.ready(version: "0.3.0"))
+        clock.passes(300)
+        #expect(engine.calls == ["restart"])
+        clock.passes(300)
+
+        #expect(engine.calls == ["restart", "restart"])
+    }
+
+    /// Only a window with a title bar, such as Settings or the browser, is one the user uses.
+    /// A borderless panel left on screen, such as a toast or an outline, or the menu bar
+    /// item's own window, does not keep the update waiting.
+    @Test func onlyAWindowWithATitleBarIsInUse() {
+        final class Window: NSWindow {
+            var isOnScreen = true
+            override var isVisible: Bool { isOnScreen }
+        }
+        let settings = Window(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: true)
+        let toast = Window(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        let closed = Window(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: true)
+        closed.isOnScreen = false
+
+        #expect(settings.isInUse)
+        #expect(!toast.isInUse)
+        #expect(!closed.isInUse)
+    }
+
     @Test func aSessionThatStartsAsTheInstallBeginsMakesItWait() {
         let clock = IdleClock()
         let engine = FakeUpdateEngine()
@@ -194,7 +227,7 @@ struct SilentUpdateTests {
         #expect(engine.calls == ["restart"])
 
         updates.isSessionActive = false
-        clock.passes(600)
+        clock.passes(300)
         #expect(engine.calls == ["restart", "restart"])
         #expect(engine.asksToRelaunch())
     }

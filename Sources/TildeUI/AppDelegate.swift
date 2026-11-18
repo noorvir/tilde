@@ -149,7 +149,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let feed = UserDefaults.standard.string(forKey: "updateFeedURL") ?? SparkleUpdates.feedURL
         let idleTime = UserDefaults.standard.double(forKey: "updateIdleSeconds")
         let updates = Updates(engine: SparkleUpdates(feed: feed), idleTime: idleTime > 0 ? idleTime : 300)
-        updates.showsWindow = { NSApp.windows.contains { $0.isVisible && $0.className != "NSStatusBarWindow" } }
+        updates.showsWindow = { NSApp.windows.contains(where: \.isInUse) }
         updateUse = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .scrollWheel]) { [updates] event in
             updates.noteUse()
             return event
