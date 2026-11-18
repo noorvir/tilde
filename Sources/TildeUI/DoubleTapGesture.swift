@@ -1,4 +1,7 @@
 import AppKit
+import os
+
+private let keysLog = Logger(subsystem: "dev.tilde.app", category: "keys")
 
 /// A modifier key that can be a shortcut by tapping it twice alone.
 enum DoubleTapKey: String, CaseIterable, Identifiable, Codable {
@@ -166,6 +169,13 @@ final class DoubleTapMonitor {
     }
 
     private func handle(_ event: NSEvent) {
+        if event.type == .flagsChanged {
+            // Modifiers only, never other keys: a missed double tap shows which modifier was
+            // also down, in the event or in the system's state.
+            let session = CGEventSource.flagsState(.combinedSessionState).rawValue
+            let hardware = CGEventSource.flagsState(.hidSystemState).rawValue
+            keysLog.notice("modifiers \(event.modifierFlags.rawValue, format: .hex) at \(event.timestamp, format: .fixed(precision: 3)), session \(session, format: .hex), hardware \(hardware, format: .hex)")
+        }
         if let key = detector.handle(isFlagsChanged: event.type == .flagsChanged, flags: event.modifierFlags, at: event.timestamp, watching: keys()) {
             onDoubleTap(key)
         }
