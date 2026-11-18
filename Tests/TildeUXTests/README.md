@@ -17,7 +17,6 @@ First VM (`tilde-ux`):
 | `twoClipsReachTheAgentAsVideos` | Screen and window clips, the window picker's first open, and pause, Esc and send; a window's clip keeps to the window when it moves; the window's app gets no window sharing window. |
 | `escTwiceOnAShapesCommentKeepsTypingInTheBox` | The keyboard stays in the comment box; Draw keeps it over a full-screen app. |
 | `doubleControlInATextFieldGivesTheHUDTheKeys` | Double Ctrl takes the keys from another app's text field, also in full screen. |
-| `aWireframeOnAWindowReachesTheAgentWithItsTwoPictures` | Snapping, the window behind, components that keep to a moving window, the report. |
 | `settingsOpenWithNoFieldFocused` | Settings takes no field focus when it opens. |
 | `settingsWorkAsUsualDuringASession` | Settings is a window, never annotated, during a session. |
 | `theStyleControlsInTheBarChangeTheLookAtOnce` | The bar's style controls change the components on screen at once. |
@@ -34,6 +33,7 @@ Second VM (`tilde-ux-2`):
 | `aCopiedReportGoesToTheRemoteMachineWithItsImages` | A copied report's images go to the machine over ssh. |
 | `aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter` | A dictation app's paste lands in the focused text; focus goes back after. |
 | `theHUDShowsOverAFullScreenAppOnASecondDisplayWhoseWindowRecordsWhileTheUserTypesInIt` | On a second display (`tilde-ux-display`, a virtual one) above right of the main one, over a full-screen app, the HUD is drawn where the pointer is and takes the keys; the app's window records until Stop while the user types in it; the app gets no window sharing window, on which AppKit asserts in some apps, and they crash. |
+| `aWireframeOnAWindowReachesTheAgentWithItsTwoPictures` | Snapping, the window behind, components that keep to a moving window, the report. |
 
 ## Dropped
 
