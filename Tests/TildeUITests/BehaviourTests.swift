@@ -1044,6 +1044,49 @@ struct BehaviourTests {
         #expect(action(.control, nil, nil, false, false) == nil)
     }
 
+    // MARK: - Keys typed in other apps
+
+    private func keyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil,
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode
+        ))
+    }
+
+    /// After a click in another app, the session's single keys still work there, unless the
+    /// app's focused element takes text.
+    @Test func aSessionKeyTypedInAnotherAppWorksUnlessItsFocusTakesText() throws {
+        let a = try keyDown("a", keyCode: 0)
+        open(pauses: [.user])
+
+        for focus in [KeyFocus.text, .tilde, .unknown] {
+            #expect(!controller.handleOtherAppKey(a, focus: focus))
+        }
+        #expect(controller.pauses == [.user])
+
+        // ⌘, ⌃ and ⌥ make it the app's shortcut.
+        for modifier in [NSEvent.ModifierFlags.command, .control, .option] {
+            #expect(!controller.handleOtherAppKey(try keyDown("a", keyCode: 0, modifiers: modifier), focus: .other))
+        }
+        // A key of no button stays the app's.
+        #expect(!controller.handleOtherAppKey(try keyDown("z", keyCode: 6), focus: .other))
+        #expect(controller.pauses == [.user])
+
+        #expect(controller.handleOtherAppKey(a, focus: .other))
+        #expect(controller.pauses.isEmpty)
+        #expect(HUDView.status(of: controller).title == "Annotating")
+    }
+
+    @Test func noSessionOrAQuestionLeavesAKeyToTheOtherApp() throws {
+        let a = try keyDown("a", keyCode: 0)
+        #expect(controller.session == nil)
+        #expect(!controller.handleOtherAppKey(a, focus: .other))
+
+        open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)
+        #expect(!controller.handleOtherAppKey(a, focus: .other))
+        #expect(controller.confirmation == .clearAll)
+    }
+
     // MARK: - Esc
 
     @Test func escPausesThenAsksToDiscardThenDismissesTheQuestion() async throws {
