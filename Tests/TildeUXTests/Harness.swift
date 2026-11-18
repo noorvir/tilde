@@ -202,7 +202,17 @@ final class TildeApp {
     /// Stops every copy of the test app and waits until they are gone, so the next launch is
     /// the only one that answers.
     private static func stopAll() {
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: "dev.tilde.ux") {
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.tilde.ux")
+        // A screen capture that reaches replayd from a process that is gone counts as denied,
+        // and macOS asks its screen capture question again. Stopped first, the app sends no
+        // more, and replayd answers the ones under way while the process is still there.
+        for app in running {
+            Darwin.kill(app.processIdentifier, SIGSTOP)
+        }
+        if !running.isEmpty {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        for app in running {
             Darwin.kill(app.processIdentifier, SIGKILL)
         }
         for _ in 0..<50 where !NSRunningApplication.runningApplications(withBundleIdentifier: "dev.tilde.ux").filter({ !$0.isTerminated }).isEmpty {
