@@ -5,6 +5,8 @@ public protocol InstallFiles: Sendable {
     /// Throws when the files cannot be asked, such as on a machine that does not answer: that
     /// is not "no file".
     func exists(_ file: URL) throws -> Bool
+    /// The first of the files that is there; nil when none is.
+    func firstExisting(_ files: [URL]) throws -> URL?
     func read(_ file: URL) throws -> String
     /// Writes through symbolic links, creating the folders on the way. A file it replaces is
     /// for its owner only (0600): agents' configs hold tokens, such as Tilde's on a machine.
@@ -22,6 +24,12 @@ public protocol InstallFiles: Sendable {
     /// The path with its links followed, to tell whether two paths are one file, such as
     /// `~/.claude/skills` linked to `~/.agents/skills`. As given when it cannot be told.
     func resolved(_ file: URL) -> URL
+}
+
+extension InstallFiles {
+    public func firstExisting(_ files: [URL]) throws -> URL? {
+        try files.first { try exists($0) }
+    }
 }
 
 public struct LocalFiles: InstallFiles {
@@ -102,6 +110,17 @@ public struct ShellFiles: InstallFiles {
     public func exists(_ file: URL) throws -> Bool {
         let answer = try run("if [ -e \(quoted(file)) ]; then echo yes; else echo no; fi", nil)
         return answer.trimmingCharacters(in: .whitespacesAndNewlines) == "yes"
+    }
+
+    /// In one command, as each command is a round trip: an app is looked for in each folder
+    /// of the machine's PATH.
+    public func firstExisting(_ files: [URL]) throws -> URL? {
+        guard !files.isEmpty else {
+            return nil
+        }
+        let list = files.map(quoted).joined(separator: " ")
+        let answer = try run("for file in \(list); do if [ -e \"$file\" ]; then printf '%s' \"$file\"; break; fi; done; true", nil)
+        return files.first { $0.path == answer.trimmingCharacters(in: .newlines) }
     }
 
     public func read(_ file: URL) throws -> String {
