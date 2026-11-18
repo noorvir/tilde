@@ -17,6 +17,7 @@ First VM (`tilde-ux`):
 | `twoClipsReachTheAgentAsVideos` | Screen and window clips, the window picker's first open, and pause, Esc and send; a window's clip keeps to the window when it moves; the window's app gets no window sharing window. |
 | `escTwiceOnAShapesCommentKeepsTypingInTheBox` | The keyboard stays in the comment box; Draw keeps it over a full-screen app. |
 | `doubleControlInATextFieldGivesTheHUDTheKeys` | Double Ctrl takes the keys from another app's text field, also in full screen. |
+| `aClickOnAnotherAppKeepsTheSessionsKeysOutsideItsTextField` | After a click gives another app the keyboard, the session's single keys still work there; in its text field the keys are the field's. |
 | `settingsOpenWithNoFieldFocused` | Settings takes no field focus when it opens. |
 | `settingsWorkAsUsualDuringASession` | Settings is a window, never annotated, during a session. |
 | `theStyleControlsInTheBarChangeTheLookAtOnce` | The bar's style controls change the components on screen at once. |

@@ -35,6 +35,12 @@ enum WireframeKey: Equatable {
     }
 }
 
+/// A single key of the session.
+enum SessionKey {
+    case wireframe(WireframeKey)
+    case action(ShortcutStore.Action)
+}
+
 /// What a key does in the session's windows. Each window gives its key to `handleKey` first
 /// and keeps only keys of its own: back and forward in the browser, the end of editing in the
 /// preview. The canvas has keys of its own too: in a text field, and in wireframe mode ⌘Z, ⇧⌘Z,
@@ -155,32 +161,55 @@ extension AnnotationController {
     /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that
     /// enables that button. True when the key is one of them, whether it did anything or not.
     func performShortcut(_ event: NSEvent) -> Bool {
-        if let key = wireframeKey(of: event) {
-            if case .tool(let tool) = key {
-                setWireframeTool(tool)
-            }
-            if let next = key.event, !event.isARepeat {
-                dispatch(next)
-            }
-            return true
-        }
-        guard session != nil, confirmation == nil,
-              let action = shortcuts.inAppAction(keyCode: event.keyCode, modifiers: event.modifierFlags, isDrawing: isDrawing)
-        else {
+        guard let key = sessionKey(of: event) else {
             return false
         }
         if event.isARepeat {
             return true
         }
-        if let tool = action.drawingTool {
-            setDrawingTool(tool)
-        } else if let color = action.drawingColor {
-            setDrawingColor(color.hex)
-        }
-        for next in flow.events(forKey: action) {
-            dispatch(next)
+        switch key {
+        case .wireframe(let key):
+            if case .tool(let tool) = key {
+                setWireframeTool(tool)
+            }
+            if let next = key.event {
+                dispatch(next)
+            }
+        case .action(let action):
+            if let tool = action.drawingTool {
+                setDrawingTool(tool)
+            } else if let color = action.drawingColor {
+                setDrawingColor(color.hex)
+            }
+            for next in flow.events(forKey: action) {
+                dispatch(next)
+            }
         }
         return true
+    }
+
+    /// A key typed in another app while a session is on screen, such as after a click there
+    /// gave that app the keyboard. The session takes its single keys, without ⌘, ⌃ or ⌥, unless
+    /// the app's focused element takes text. True when the session took the key.
+    func handleOtherAppKey(_ event: NSEvent, focus: KeyFocus) -> Bool {
+        guard focus == .other, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+            return false
+        }
+        return performShortcut(event)
+    }
+
+    /// What a key does in the session: a key of wireframe mode first, then a key of the HUD's
+    /// buttons. Nil when it is neither, also with no session or under a question.
+    private func sessionKey(of event: NSEvent) -> SessionKey? {
+        if let key = wireframeKey(of: event) {
+            return .wireframe(key)
+        }
+        guard session != nil, confirmation == nil,
+              let action = shortcuts.inAppAction(keyCode: event.keyCode, modifiers: event.modifierFlags, isDrawing: isDrawing)
+        else {
+            return nil
+        }
+        return .action(action)
     }
 
     /// What a key does for wireframe mode, before the keys of the HUD's buttons; nil when the

@@ -16,9 +16,14 @@ window.level = .floating
 window.backgroundColor = .white
 
 /// The window's content, which knows when a press reached it, also the first press while
-/// another app is in front. "<file>.pointer" is there once the pointer moved over it.
+/// another app is in front. "<file>.pointer" is there once the pointer moved over it. A press
+/// takes the keyboard from the text field, as a click outside a field does in most apps.
 final class PressedView: NSView {
     private(set) var isPressed = false
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
@@ -36,6 +41,7 @@ final class PressedView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         isPressed = true
+        window?.makeFirstResponder(self)
     }
 }
 let content = PressedView()

@@ -148,6 +148,8 @@ final class AnnotationController: ObservableObject {
     private let typedComments = TypedComments()
     /// The double tap, the hold key and the answers to a question.
     private let keyMonitors: KeyMonitors
+    /// The session's single keys typed in other apps, while a session is on screen.
+    private var sessionKeyTap: SessionKeyTap?
     let picker: ElementPicker
 
     // The session's windows show the session: a part that has one makes it with the
@@ -525,6 +527,7 @@ final class AnnotationController: ObservableObject {
         }
         saver.start(created: created)
         keyMonitors.startHold()
+        startSessionKeyTap()
         picker.windows.start()
         MainThreadWatch.start()
         stayAwake()
@@ -556,6 +559,32 @@ final class AnnotationController: ObservableObject {
             // when another app was in front. A click in another app gives that app the keyboard.
             overlays.makeKey()
         }
+    }
+
+    /// Takes the session's single keys from other apps. A key waits for the main thread only
+    /// when the focused element of another app takes no text.
+    private func startSessionKeyTap() {
+        let tap = SessionKeyTap { [weak self] event in
+            let modifiers = event.flags.intersection([.maskCommand, .maskControl, .maskAlternate])
+            guard modifiers.isEmpty else {
+                return false
+            }
+            let focus = KeyFocus.current()
+            guard focus == .other else {
+                return false
+            }
+            nonisolated(unsafe) let event = event
+            return DispatchQueue.main.sync {
+                MainActor.assumeIsolated {
+                    guard let self, let key = NSEvent(cgEvent: event) else {
+                        return false
+                    }
+                    return self.handleOtherAppKey(key, focus: focus)
+                }
+            }
+        }
+        tap.start()
+        sessionKeyTap = tap
     }
 
     /// While a session is on screen, macOS must not slow Tilde down as an app that is not in
@@ -603,6 +632,8 @@ final class AnnotationController: ObservableObject {
     private func stopAnnotating() {
         clips.discard()
         keyMonitors.stopHold()
+        sessionKeyTap?.stop()
+        sessionKeyTap = nil
         PlainClickTap.stop()
         dispatch(.holdEnded)
         picker.windows.stop()
