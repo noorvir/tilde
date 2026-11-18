@@ -67,6 +67,11 @@ final class ClipRecorder {
         }
     }
 
+    /// The recorded window moved to `frame`, in Quartz coordinates.
+    func follow(windowFrame frame: CGRect) {
+        recorder?.follow(windowFrame: frame)
+    }
+
     func pause() {
         recorder?.pause()
         clock = (Date(), clock.before + Date().timeIntervalSince(clock.since))

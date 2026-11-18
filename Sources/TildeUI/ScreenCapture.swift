@@ -9,6 +9,30 @@ enum ScreenCapture {
         CGPreflightScreenCaptureAccess()
     }
 
+    /// A filter of the display that `frame`, a window's frame in Quartz coordinates, is most
+    /// on, which shows only the windows of that window's app; and the display's frame, which a
+    /// capture's `sourceRect` is relative to. Nil when the window is on no display.
+    ///
+    /// The filter leaves the other apps out, as a capture of the screen does, and names no
+    /// window: for a filter of one window (`desktopIndependentWindow`, or a display filter that
+    /// includes it) macOS puts a window of its window sharing (NSLocalWindowSharingWindow) in
+    /// that window's app, and AppKit asserts on it in some apps, such as Electron ones, which
+    /// crash.
+    static func filter(showingAppOf window: SCWindow, at frame: CGRect, content: SCShareableContent) -> (filter: SCContentFilter, display: CGRect)? {
+        let display = content.displays.max { first, second in
+            area(of: first.frame.intersection(frame)) < area(of: second.frame.intersection(frame))
+        }
+        guard let display, display.frame.intersects(frame), let owner = window.owningApplication else {
+            return nil
+        }
+        let others = content.applications.filter { $0.processID != owner.processID }
+        return (SCContentFilter(display: display, excludingApplications: others, exceptingWindows: []), display.frame)
+    }
+
+    private static func area(of rect: CGRect) -> CGFloat {
+        rect.isNull ? 0 : rect.width * rect.height
+    }
+
     /// Captures `rect` of the screen (Quartz coordinates) without Tilde's windows, except the
     /// ones in `keeping`. When `outline` is given, the image gets a blue outline around that
     /// rect so the agent sees which element was meant. The long side is at most `maxSide`
@@ -62,7 +86,7 @@ enum ScreenCapture {
         }
     }
 
-    /// Captures `area` of one window without the windows in front of it, with a blue outline
+    /// Captures `area` of one window without other apps' windows in front of it, with a blue outline
     /// around `outline`. Both rects are Quartz coordinates. The long side is at most `maxSide`
     /// pixels.
     static func png(ofWindow windowID: CGWindowID, area: CGRect, outline: CGRect, maxSide: Double) async -> Data? {
@@ -76,18 +100,19 @@ enum ScreenCapture {
                 return nil
             }
 
-            let area = area.intersection(window.frame)
+            guard let (filter, display) = filter(showingAppOf: window, at: window.frame, content: content) else {
+                return nil
+            }
+            let area = area.intersection(window.frame).intersection(display)
             guard !area.isNull, area.width >= 1, area.height >= 1 else {
                 return nil
             }
 
-            let filter = SCContentFilter(desktopIndependentWindow: window)
             let scale = CGFloat(filter.pointPixelScale)
             let configuration = SCStreamConfiguration()
-            configuration.sourceRect = area.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY)
+            configuration.sourceRect = area.offsetBy(dx: -display.minX, dy: -display.minY)
             configuration.width = Int(area.width * scale)
             configuration.height = Int(area.height * scale)
-            configuration.ignoreShadowsSingleWindow = true
             configuration.showsCursor = false
             configuration.captureResolution = .best
 

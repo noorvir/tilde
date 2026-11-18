@@ -949,6 +949,7 @@ final class AnnotationController: ObservableObject {
         overlays.follow(window)
         if delta != nil {
             tracker.windowMoved()
+            clips.follow(windowFrame: window.frame)
         }
     }
 

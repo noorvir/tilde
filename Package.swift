@@ -38,6 +38,8 @@ let package = Package(
         // A window whose whole content changes, for the UX specs: stands in for an app that
         // does not describe its contents, such as the iOS Simulator.
         .executableTarget(name: "tilde-ux-fixture", path: "Tests/Tools/tilde-ux-fixture", swiftSettings: strict),
+        // A second display for the UX specs, while it runs, where the VM has one.
+        .executableTarget(name: "tilde-ux-display", path: "Tests/Tools/tilde-ux-display", linkerSettings: [.linkedFramework("CoreGraphics")]),
         // The contract tests: tilde-state draws a state file with the real views, and
         // tilde-ui-check, which uses no code of Tilde, compares the pictures. See Tests/Contract.
         .executableTarget(

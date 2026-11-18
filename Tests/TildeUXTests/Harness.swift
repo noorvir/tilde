@@ -202,7 +202,18 @@ final class TildeApp {
     /// Stops every copy of the test app and waits until they are gone, so the next launch is
     /// the only one that answers.
     private static func stopAll() {
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: "dev.tilde.ux") {
+        let running = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.tilde.ux")
+        // A screen capture that reaches replayd from a process that is gone counts as denied,
+        // and macOS asks its screen capture question again. Stopped first, the app sends no
+        // more, and replayd answers the ones under way while the process is still there.
+        for app in running {
+            Darwin.kill(app.processIdentifier, SIGSTOP)
+        }
+        if !running.isEmpty {
+            // Not the run loop: on a test's thread it has no sources and returns at once.
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        for app in running {
             Darwin.kill(app.processIdentifier, SIGKILL)
         }
         for _ in 0..<50 where !NSRunningApplication.runningApplications(withBundleIdentifier: "dev.tilde.ux").filter({ !$0.isTerminated }).isEmpty {
@@ -585,15 +596,27 @@ final class TildeApp {
     /// An area of the screen now, the part of it on the screen, quicker to take than the whole
     /// screen: a 2x screen has four times the pixels to take and read.
     func screen(in area: CGRect) async throws -> Picture {
-        guard let screen = NSScreen.screens.first else {
+        let screens = Self.screenFrames
+        guard let screen = screens.first(where: { $0.contains(CGPoint(x: area.midX, y: area.midY)) }) ?? screens.first else {
             throw UXFailure(description: "no screen")
         }
-        let area = area.intersection(screen.frame)
+        let area = area.intersection(screen)
         guard !area.isEmpty else {
             throw UXFailure(description: "\(area) is off the screen")
         }
         let data = try await drivePicture("strip", ["x": area.minX, "y": area.minY, "width": area.width, "height": area.height])
         return try Picture(data, width: area.width, origin: area.origin)
+    }
+
+    /// The frames of the displays in Quartz points, from the main one's top left; the main one
+    /// first. From the window server: AppKit's list in this process can lag behind it.
+    static var screenFrames: [CGRect] {
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &displays, &count)
+        let main = CGMainDisplayID()
+        return displays.sorted { first, _ in first == main }.map(CGDisplayBounds)
     }
 
     /// How many Tilde-blue pixels are on screen in this area: notes are drawn, so they have no
@@ -719,6 +742,13 @@ final class ChangingWindow {
         return (state.contains("fullscreen=true"), exits)
     }
 
+    /// The classes of the window sharing windows that macOS put in the app, such as
+    /// NSLocalWindowSharingWindow, while another app captured its window.
+    var sharingWindows: [String] {
+        let text = (try? String(contentsOf: URL(fileURLWithPath: file.path + ".sharing"), encoding: .utf8)) ?? ""
+        return text.split(separator: "\n").map(String.init)
+    }
+
     /// The process's id: the app whose text field has the keyboard on the page "typing".
     var pid: Int { Int(process.processIdentifier) }
 
@@ -754,6 +784,44 @@ final class ChangingWindow {
         }
         process.terminate()
         waitForExit(process)
+    }
+}
+
+/// A second display, as a user's external monitor, while it exists: the VM has one display.
+final class SecondDisplay {
+    /// Its frame in Quartz points, from the main display's top left.
+    let frame: CGRect
+    private let process = Process()
+
+    /// `frame`: where it goes, in Quartz points, such as above and to the right of the main one.
+    init(_ frame: CGRect) throws {
+        let fixture = URL(fileURLWithPath: ProcessInfo.processInfo.environment["TILDE_UX_FIXTURE"] ?? "")
+        process.executableURL = fixture.deletingLastPathComponent().appendingPathComponent("tilde-ux-display")
+        process.arguments = [frame.width, frame.height, frame.minX, frame.minY].map { String(Int($0)) }
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        let line = String(decoding: output.fileHandleForReading.availableData, as: UTF8.self)
+        let numbers = line.split(separator: " ").dropFirst(2).compactMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        guard line.hasPrefix("ready"), numbers.count == 4 else {
+            process.terminate()
+            throw UXFailure(description: "No second display: \(line)")
+        }
+        self.frame = CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
+        for _ in 0..<50 where TildeApp.screenFrames.count < 2 {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+    }
+
+    func remove() {
+        guard process.isRunning else {
+            return
+        }
+        process.terminate()
+        waitForExit(process)
+        for _ in 0..<50 where TildeApp.screenFrames.count > 1 {
+            Thread.sleep(forTimeInterval: 0.1)
+        }
     }
 }
 

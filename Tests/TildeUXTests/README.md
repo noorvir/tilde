@@ -13,8 +13,8 @@ First VM (`tilde-ux`):
 | Spec | What only the real app proves |
 | --- | --- |
 | `anAgentOpensAPageTheUserNotesItAndTheAgentGetsAReportWithImages` | An MCP agent opens Tilde's browser; a note reaches it with images. |
-| `aRectangleLeavesALabelThatHidesOnAnotherPageAndACrashLeavesOnlyItsNote` | A label follows another app's window and page; a crash restores only the note. |
-| `twoClipsReachTheAgentAsVideos` | Screen and window clips, the window picker's first open, and pause, Esc and send. |
+| `aRectangleLeavesALabelThatHidesOnAnotherPageAndACrashLeavesOnlyItsNote` | A label follows another app's window and page, and its checks put no window sharing window in that app; a crash restores only the note. |
+| `twoClipsReachTheAgentAsVideos` | Screen and window clips, the window picker's first open, and pause, Esc and send; a window's clip keeps to the window when it moves; the window's app gets no window sharing window. |
 | `escTwiceOnAShapesCommentKeepsTypingInTheBox` | The keyboard stays in the comment box; Draw keeps it over a full-screen app. |
 | `doubleControlInATextFieldGivesTheHUDTheKeys` | Double Ctrl takes the keys from another app's text field, also in full screen. |
 | `aWireframeOnAWindowReachesTheAgentWithItsTwoPictures` | Snapping, the window behind, components that keep to a moving window, the report. |
@@ -33,6 +33,7 @@ Second VM (`tilde-ux-2`):
 | `anUpdateInstallsByItselfWhenTildeIsNotInUseAndNeverDuringASession` | Sparkle downloads and installs by itself, never during a session. |
 | `aCopiedReportGoesToTheRemoteMachineWithItsImages` | A copied report's images go to the machine over ssh. |
 | `aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter` | A dictation app's paste lands in the focused text; focus goes back after. |
+| `theHUDShowsOverAFullScreenAppOnASecondDisplayWhoseWindowRecordsWhileTheUserTypesInIt` | On a second display (`tilde-ux-display`, a virtual one) above right of the main one, over a full-screen app, the HUD is drawn where the pointer is and takes the keys; the app's window records until Stop while the user types in it; the app gets no window sharing window, on which AppKit asserts in some apps, and they crash. |
 
 ## Dropped
 
