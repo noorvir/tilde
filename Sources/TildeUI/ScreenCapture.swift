@@ -13,11 +13,11 @@ enum ScreenCapture {
     /// on, which shows only the windows of that window's app; and the display's frame, which a
     /// capture's `sourceRect` is relative to. Nil when the window is on no display.
     ///
-    /// The filter leaves the other apps out, as a capture of the screen does, and names no
-    /// window: for a filter of one window (`desktopIndependentWindow`, or a display filter that
-    /// includes it) macOS puts a window of its window sharing (NSLocalWindowSharingWindow) in
+    /// The filter includes the app, not the window: for a filter of one window
+    /// (`desktopIndependentWindow`, or a display filter that includes it) macOS puts a window of its window sharing (NSLocalWindowSharingWindow) in
     /// that window's app, and AppKit asserts on it in some apps, such as Electron ones, which
-    /// crash.
+    /// crash. It includes the app rather than leave the others out, as a list of the others
+    /// can be from before an app, such as Tilde with its labels, put a window on screen.
     static func filter(showingAppOf window: SCWindow, at frame: CGRect, content: SCShareableContent) -> (filter: SCContentFilter, display: CGRect)? {
         let display = content.displays.max { first, second in
             area(of: first.frame.intersection(frame)) < area(of: second.frame.intersection(frame))
@@ -25,8 +25,7 @@ enum ScreenCapture {
         guard let display, display.frame.intersects(frame), let owner = window.owningApplication else {
             return nil
         }
-        let others = content.applications.filter { $0.processID != owner.processID }
-        return (SCContentFilter(display: display, excludingApplications: others, exceptingWindows: []), display.frame)
+        return (SCContentFilter(display: display, including: [owner], exceptingWindows: []), display.frame)
     }
 
     private static func area(of rect: CGRect) -> CGFloat {
