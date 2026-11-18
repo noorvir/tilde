@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import TildeInstaller
 
@@ -46,6 +47,23 @@ struct RemoteInstallerTests {
 
     private func installer(_ home: URL, variables: [String: String] = [:]) throws -> Installer {
         try Installer.remote(mcpURL: "http://127.0.0.1:7319/mcp", authorization: "Bearer secret", run: run(home: home, variables: variables))
+    }
+
+    @Test func anAppIsLookedForInAllItsPlacesWithOneCommand() throws {
+        let home = try home()
+        try make(home, "it's here")
+        try make(home, "also here")
+        let commands = OSAllocatedUnfairLock(initialState: 0)
+        let shell = run(home: home)
+        let files = ShellFiles { command, input in
+            commands.withLock { $0 += 1 }
+            return try shell(command, input)
+        }
+        let places = ["not here", "it's here", "also here"].map { home.appendingPathComponent($0) }
+
+        #expect(try files.firstExisting(places) == places[1])
+        #expect(try files.firstExisting([places[0]]) == nil)
+        #expect(commands.withLock { $0 } == 2)
     }
 
     @Test func itFindsAgentsInstallsAndRemovesThemLikeOnThisMac() throws {

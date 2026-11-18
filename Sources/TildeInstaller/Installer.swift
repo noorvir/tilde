@@ -247,7 +247,7 @@ public struct Installer: Sendable {
         let paths = target.detect.paths.map { environment.home.appendingPathComponent($0) } + target.detect.files
         let apps = environment.applications.flatMap { folder in target.detect.apps.map { folder.appendingPathComponent($0) } }
         let tools = environment.binaries.flatMap { folder in target.detect.binaries.map { folder.appendingPathComponent($0) } }
-        return (paths + apps + tools).contains { (try? files.exists($0)) == true }
+        return (try? files.firstExisting(paths + apps + tools)) != nil
     }
 
     /// The MCP config file that Tilde writes for the app.

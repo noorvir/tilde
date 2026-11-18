@@ -389,11 +389,19 @@ final class TildeApp {
         )
     }
 
+    /// A double tap as a hand makes it. For about half a second after a window closes, macOS
+    /// can hold keys on their way to the apps and stamp them late, so that the taps reach the
+    /// apps as a long press: the driver says so, and the double tap is made again once that
+    /// time is over, as a user would.
     func doubleTap(_ modifier: String) async throws {
-        try await drive("tap", ["key": modifier])
-        try await Task.sleep(for: .milliseconds(80))
-        try await drive("tap", ["key": modifier])
-        try await Task.sleep(for: .milliseconds(80))
+        for _ in 0..<3 {
+            let result = try await drive("tap", ["key": modifier, "count": 2])
+            try await Task.sleep(for: .milliseconds(80))
+            if result["onTime"] as? Bool != false {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(400))
+        }
     }
 
     func hold(_ modifier: String, down: Bool) async throws {
@@ -931,14 +939,17 @@ final class Safari {
         return Safari(app: app)
     }
 
-    /// Quits it and waits until it is gone, so that its pages run no more.
+    /// Quits it and waits until it is gone, so that its pages run no more. It asks the
+    /// process, as `isTerminated` changes only on the main thread's run loop, not on a test's.
     func quit() {
+        let pid = app.processIdentifier
+        let isGone = { Darwin.kill(pid, 0) != 0 && errno == ESRCH }
         app.terminate()
         let end = Date().addingTimeInterval(10)
-        while !app.isTerminated, Date() < end {
+        while !isGone(), Date() < end {
             Thread.sleep(forTimeInterval: 0.1)
         }
-        if !app.isTerminated {
+        if !isGone() {
             app.forceTerminate()
         }
     }
