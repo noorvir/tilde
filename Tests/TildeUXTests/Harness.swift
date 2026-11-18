@@ -608,12 +608,15 @@ final class TildeApp {
         return try Picture(data, width: area.width, origin: area.origin)
     }
 
-    /// The frames of the screens in Quartz points, from the main one's top left; the main one first.
+    /// The frames of the displays in Quartz points, from the main one's top left; the main one
+    /// first. From the window server: AppKit's list in this process can lag behind it.
     static var screenFrames: [CGRect] {
-        guard let main = NSScreen.screens.first?.frame else {
-            return []
-        }
-        return NSScreen.screens.map { CGRect(x: $0.frame.minX, y: main.maxY - $0.frame.maxY, width: $0.frame.width, height: $0.frame.height) }
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &displays, &count)
+        let main = CGMainDisplayID()
+        return displays.sorted { first, _ in first == main }.map(CGDisplayBounds)
     }
 
     /// How many Tilde-blue pixels are on screen in this area: notes are drawn, so they have no
@@ -805,8 +808,7 @@ final class SecondDisplay {
             throw UXFailure(description: "No second display: \(line)")
         }
         self.frame = CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
-        // AppKit learns of the new screen a moment after the window server.
-        for _ in 0..<50 where NSScreen.screens.count < 2 {
+        for _ in 0..<50 where TildeApp.screenFrames.count < 2 {
             Thread.sleep(forTimeInterval: 0.1)
         }
     }
@@ -817,7 +819,7 @@ final class SecondDisplay {
         }
         process.terminate()
         waitForExit(process)
-        for _ in 0..<50 where NSScreen.screens.count > 1 {
+        for _ in 0..<50 where TildeApp.screenFrames.count > 1 {
             Thread.sleep(forTimeInterval: 0.1)
         }
     }
