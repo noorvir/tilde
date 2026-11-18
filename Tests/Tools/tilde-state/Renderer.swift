@@ -56,8 +56,10 @@ enum Renderer {
 
 }
 
-/// Draws as the window in front does, with active controls and placeholders.
+/// Draws as the window in front does, with active controls and placeholders, at the fixed
+/// scale whatever the screen's: the layers draw their contents at the window's scale.
 private final class ActiveWindow: NSWindow {
+    override var backingScaleFactor: CGFloat { CGFloat(Renderer.scale) }
     override var isKeyWindow: Bool { true }
     override var isMainWindow: Bool { true }
 }

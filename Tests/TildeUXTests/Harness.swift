@@ -99,19 +99,21 @@ struct Picture {
     }
 
     private func pixel(x: Int, y: Int) -> Color? {
-        guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+        guard x >= 0, y >= 0, x < bitmap.pixelsWide, y < bitmap.pixelsHigh, let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
             return nil
         }
         return (Double(color.redComponent), Double(color.greenComponent), Double(color.blueComponent))
     }
 
-    /// How many pixels in the area match, of every `step`th pixel in each direction.
+    /// How many places in the area match, on a grid of every `step` half points in each
+    /// direction: the pixels of a 2x screen, so a count is the same whatever the screen's scale.
     func count(in area: CGRect, every step: Int = 2, where matches: (Color) -> Bool) -> Int {
         var count = 0
         let area = area.offsetBy(dx: -origin.x, dy: -origin.y)
-        for y in stride(from: Int(area.minY * scale), to: Int(area.maxY * scale), by: step) {
-            for x in stride(from: Int(area.minX * scale), to: Int(area.maxX * scale), by: step) {
-                if let color = pixel(x: x, y: y), matches(color) {
+        let half = scale / 2
+        for y in stride(from: Int(area.minY * 2), to: Int(area.maxY * 2), by: step) {
+            for x in stride(from: Int(area.minX * 2), to: Int(area.maxX * 2), by: step) {
+                if let color = pixel(x: Int(Double(x) * half), y: Int(Double(y) * half)), matches(color) {
                     count += 1
                 }
             }
@@ -223,6 +225,11 @@ final class TildeApp {
 
     /// Fresh settings and sessions, as on a new Mac, with `defaults` set.
     static func launched(defaults: [String: String] = [:]) async throws -> TildeApp {
+        // A macOS question, such as the screen capture one, would take the spec's clicks; the
+        // specs never answer it.
+        if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.UserNotificationCenter").isEmpty {
+            throw UXFailure(description: "A macOS question is on the screen (UserNotificationCenter), such as the screen capture one: answer it, then run again")
+        }
         resetSettings()
         for (key, value) in defaults {
             let task = Process()
@@ -561,8 +568,30 @@ final class TildeApp {
         return try frames.compactMap { Data(base64Encoded: $0) }.map { try Picture(row: $0, width: width, origin: CGPoint(x: x, y: y)) }
     }
 
-    /// An area of the screen now, quicker to take than the whole screen.
+    /// Waits until the row that `recordRow` records has its first frame, so that input sent
+    /// after this shows in it.
+    func waitForRowRecording() async throws {
+        let end = Date().addingTimeInterval(5)
+        while Date() < end {
+            let (data, _) = try await URLSession.shared.data(from: Self.driver.appendingPathComponent("row/started"))
+            if (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["started"] as? Bool == true {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        throw UXFailure(description: "The row recording did not start")
+    }
+
+    /// An area of the screen now, the part of it on the screen, quicker to take than the whole
+    /// screen: a 2x screen has four times the pixels to take and read.
     func screen(in area: CGRect) async throws -> Picture {
+        guard let screen = NSScreen.screens.first else {
+            throw UXFailure(description: "no screen")
+        }
+        let area = area.intersection(screen.frame)
+        guard !area.isEmpty else {
+            throw UXFailure(description: "\(area) is off the screen")
+        }
         let data = try await drivePicture("strip", ["x": area.minX, "y": area.minY, "width": area.width, "height": area.height])
         return try Picture(data, width: area.width, origin: area.origin)
     }
@@ -570,7 +599,7 @@ final class TildeApp {
     /// How many Tilde-blue pixels are on screen in this area: notes are drawn, so they have no
     /// accessibility elements to read.
     func bluePixels(in area: CGRect) async throws -> Int {
-        try await screen().count(in: area, where: Picture.isTildeBlue)
+        try await screen(in: area).count(in: area, where: Picture.isTildeBlue)
     }
 
     /// Waits until the area has at least, or at most, this many blue pixels.

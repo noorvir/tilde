@@ -127,7 +127,7 @@ final class WireframePicturePage {
         configuration.userContentController.add(messages, name: "tilde")
         let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
         webView = WKWebView(frame: screen, configuration: configuration)
-        window = NSWindow(contentRect: screen, styleMask: [.borderless], backing: .buffered, defer: false)
+        window = FixedScaleWindow(contentRect: screen, styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = webView
     }
 
@@ -185,4 +185,10 @@ final class WireframePicturePage {
         }
         return picture
     }
+}
+
+/// A window at two pixels per point whatever the screen's scale: the web view draws at its
+/// window's scale, so the pictures are the same on every Mac.
+private final class FixedScaleWindow: NSWindow {
+    override var backingScaleFactor: CGFloat { 2 }
 }

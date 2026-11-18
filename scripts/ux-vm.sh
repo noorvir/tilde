@@ -35,6 +35,8 @@ until in_vm true 2>/dev/null; do sleep 3; done
 [ "${TILDE_UX_PROXY_BUILT:-}" = 1 ] || proxy/build.sh
 in_vm "mkdir -p tilde && find tilde -mindepth 1 -maxdepth 1 ! -name .build ! -name build -exec rm -rf {} +"
 (git ls-files; git ls-files -o --exclude-standard; ls proxy/dist/* 2>/dev/null) | COPYFILE_DISABLE=1 tar czf - -T - | in_vm "tar xzf - -C tilde"
+# No screen capture question during the run, and none up before it: the specs never click one.
+in_vm "tilde/scripts/ux-vm-approve.sh"
 
 # The specs need the logged-in GUI session, which ssh does not give: launchd runs them there.
 in_vm "rm -f \$(getconf DARWIN_USER_TEMP_DIR)/tilde-ux-failure-*(N) /tmp/tilde-ux.log; cat > /tmp/dev.tilde.ux.plist" <<PLIST

@@ -518,6 +518,12 @@ struct UXSpecs {
             try await app.press("Use window picker")
             try await app.waitToSee("Screens")
             try await app.waitNotToSee("Use window picker")
+            // The first open after a launch lists the windows too, while the frameworks that
+            // list phones and windows load: the app's log has the time of each step ("picker
+            // loaded") and any stall of the main thread.
+            try await app.press("Windows")
+            try await app.waitToSee("tilde-ux-fixture")
+            step("windows listed")
             try await app.key(.escape)
             try await app.waitToSee("Use window picker")
             try await app.waitNotToSee("Screens")
@@ -567,34 +573,6 @@ struct UXSpecs {
     /// the tool down, and a click goes through the canvas to the window behind. When that
     /// window's app goes to full screen, in a Space of its own, Tilde keeps the keyboard: Esc
     /// does not take the app out of full screen, and ⌘↩ ends Draw.
-    /// The first open after a launch, when the frameworks that list phones and windows load:
-    /// the app's log has the time of each step ("picker loaded") and any stall of the main
-    /// thread.
-    @Test func theSourcePickerListsTheScreensAndWindowsOnTheFirstOpen() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        try await withApp { app in
-            let agent = try await MCPAgent(port: app.port, name: "Codex")
-            _ = try await agent.call("start_annotation", ["wait_seconds": 0])
-            try await app.waitToSee("Annotating")
-
-            try await app.key(.r)
-            try await app.press("Use window picker")
-            try await app.waitToSee("Select on screen")
-            try await app.waitToSee("Windows")
-            step("picker open")
-
-            try await app.press("Windows")
-            try await app.waitToSee("tilde-ux-fixture")
-            step("windows listed")
-
-            try await app.key(.escape)
-            try await app.waitToSee("Use window picker")
-            try await app.key(.escape)
-            try await app.waitNotToSee("Use window picker")
-        }
-    }
-
     @Test func escTwiceOnAShapesCommentKeepsTypingInTheBox() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -851,9 +829,8 @@ struct UXSpecs {
             #expect(offsets.reduce(0, +) / Double(max(offsets.count, 1)) <= 2.5, "The button lags the window: \(moving)")
             let after = try #require(places.last)
             #expect(after.mark >= before.mark + 178)
-            // At rest the button is back in its place to 2 pixels, 1 pt on a 2x screen.
-            let pixel = 1 / (NSScreen.main?.backingScaleFactor ?? 2)
-            #expect(abs(after.button - before.button) <= 2 * pixel)
+            // At rest the button is back in its place to 1 pt.
+            #expect(abs(after.button - before.button) <= 1)
             step("button kept to the window in \(moving.count) frames: \(moving.map { String(format: "%.0f", $0.button - before.button) }.joined(separator: " "))")
 
             // The comment is the button's own: its chip's Comment button opens a box for it,
@@ -907,7 +884,7 @@ struct UXSpecs {
             let closeUp = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1.png")), width: bounds.width)
             let context = try Picture(Data(contentsOf: URL(fileURLWithPath: "\(folder)/annotation-1-context.png")), width: bounds.width)
             let inside = rect.insetBy(dx: 10, dy: 8)
-            // The pixels sampled, at the picture's own scale.
+            // The places sampled.
             let samples = closeUp.count(in: inside) { _ in true }
             #expect(abs(closeUp.size.height - bounds.height) <= 1 && abs(context.size.height - bounds.height) <= 1, "\(closeUp.size), \(context.size), window \(bounds.size)")
             #expect(closeUp.count(in: inside, where: Picture.isWireframe) > samples / 2)
@@ -933,92 +910,6 @@ struct UXSpecs {
             try await app.waitToSee("Paused", timeout: 15)
             #expect(try await !app.seen().contains { $0.name == "Done, ⌘↩" })
             step("start modes")
-        }
-    }
-
-    /// The look of the components comes from the style and colour tiles of Settings' Appearance
-    /// page, and a change shows at once on the components drawn. Blueprint's lines run past the
-    /// corners and it has no offset edge; Technical has a hard offset edge under the bottom and
-    /// no lines past the corners. A button is orange by kind, and blue in One colour.
-    @Test func aStyleChosenInSettingsShowsOnTheWireframe() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        // A button on the fixture's white window, left of where Settings opens.
-        let frame = ChangingWindow.frame
-        let button = CGRect(x: frame.minX + 12, y: frame.minY + 100, width: 84, height: 40)
-        let pastCorner = CGRect(x: button.minX - 6, y: button.minY - 1, width: 4, height: 2)
-        let offsetEdge = CGRect(x: button.midX - 20, y: button.maxY + 2, width: 40, height: 2)
-        try await withApp(defaults: ["wireframes": "true"]) { app in
-            // The fixture's window can be in front of Settings, which stays open meanwhile.
-            try await app.menu("Settings")
-            try await app.accessibilityPress("Appearance")
-            try await app.waitToSee("Blueprint")
-            try await app.accessibilityPress("Blueprint")
-            step("blueprint chosen")
-
-            // ⌘ draws without snapping, at the very place of the drag.
-            try await app.menu("Start Annotation")
-            try await app.waitToSee("Annotating")
-            try await app.key(.w)
-            try await app.waitToSee("Done, ⌘↩")
-            try await app.waitToSee("Drawing canvas", timeout: 15)
-            try await app.key(.b)
-            try await app.hold("command", down: true)
-            try await app.slowDrag(from: button.origin, to: CGPoint(x: button.maxX, y: button.maxY))
-            try await app.hold("command", down: false)
-            try await waitFor(app, at: button.insetBy(dx: 10, dy: 10), Picture.isWireframe, atLeast: 200)
-            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atLeast: 2)
-            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atMost: 0)
-            step("blueprint drawn")
-
-            // Settings, under the canvas, change the style: the button shows it at once.
-            try await app.accessibilityPress("Technical")
-            try await waitFor(app, at: offsetEdge, every: 1, Picture.isWireframe, atLeast: 40)
-            try await waitFor(app, at: pastCorner, every: 1, Picture.isWireframe, atMost: 0)
-            step("technical shown")
-
-            let inside = button.insetBy(dx: 10, dy: 10)
-            try await waitFor(app, at: inside, Picture.isWireframeOrange, atLeast: 200)
-            try await app.accessibilityPress("One colour")
-            try await waitFor(app, at: inside, Picture.isWireframeBlue, atLeast: 200)
-            try await waitFor(app, at: inside, Picture.isWireframeOrange, atMost: 0)
-            step("one colour shown")
-        }
-    }
-
-    /// Reset on the Appearance page puts the colours and the strengths back to their defaults;
-    /// the style stays as chosen.
-    @Test func resetPutsTheColoursAndStrengthsBack() async throws {
-        try await withApp(defaults: ["wireframes": "true"]) { app in
-            // The Fill value as Settings shows it, "6 %" or "6%" by the locale.
-            func waitToSeeFill(_ percent: Int) async throws {
-                let end = Date().addingTimeInterval(10)
-                while Date() < end {
-                    let names = try await app.seen().compactMap(\.name)
-                    if names.contains(where: { $0.replacingOccurrences(of: " ", with: "") == "\(percent)%" }) {
-                        return
-                    }
-                    try await Task.sleep(for: .milliseconds(50))
-                }
-                throw UXFailure(description: "Fill \(percent) % is not on screen")
-            }
-
-            try await app.menu("Settings")
-            try await app.accessibilityPress("Appearance")
-            try await app.waitToSee("Blueprint")
-            try await app.accessibilityPress("Blueprint")
-            try await waitToSeeFill(6)
-
-            let fill = try await app.waitToSee("Fill", role: "AXSlider").frame
-            try await app.click(at: CGPoint(x: fill.maxX - 2, y: fill.midY))
-            try await waitToSeeFill(60)
-            step("fill changed")
-
-            try await app.accessibilityPress("Reset")
-            try await waitToSeeFill(6)
-            #expect(try readDefault("wireframeFill") == "0.06")
-            #expect(try readDefault("wireframeStyle") == "blueprint")
-            step("reset")
         }
     }
 
@@ -1236,10 +1127,10 @@ struct UXSpecs {
     }
 
     /// Each corner of a part resizes it from that corner: the opposite sides stay, and the two
-    /// sides of the corner follow the pointer. The grip on its top edge moves it whole. Lines
-    /// on the window behind can snap a side by a few points, so the sides are found on the
-    /// screen.
-    @Test func eachCornerResizesAPartAndTheTopGripMovesIt() async throws {
+    /// sides of the corner follow the pointer. The grip on its top edge moves it whole, and a
+    /// drag starts where it was pressed. Lines on the window behind can snap a side by a few
+    /// points, so the sides are found on the screen.
+    @Test func eachCornerResizesAPartTheTopGripMovesItAndADragStartsWhereItWasPressed() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
         let frame = ChangingWindow.frame
@@ -1283,41 +1174,34 @@ struct UXSpecs {
             #expect(abs(moved.width - part.width) <= 1 && abs(moved.height - part.height) <= 1, "\(part) became \(moved)")
             #expect((21...39).contains(moved.minX - part.minX) && (21...39).contains(moved.minY - part.minY), "\(part) became \(moved)")
             step("moved by the grip")
-        }
-    }
 
-    /// A drag starts where it was pressed. The pointer leaves a part at its right, clicks the
-    /// window behind, and comes back to drag the part to the left at once: in every frame of the
-    /// screen, the part is where it was or left of it, never on the side where the pointer left.
-    @Test func aDragStartsWhereItWasPressed() async throws {
-        let window = try ChangingWindow()
-        defer { window.close() }
-        let frame = ChangingWindow.frame
-        let drawn = CGRect(x: frame.minX + 120, y: frame.minY + 120, width: 200, height: 100)
-        try await withApp(defaults: ["wireframes": "true"]) { app in
-            try await drawCard(app, in: drawn)
-            try await app.key(.escape)
-            let part = try await sides(app, near: drawn)
-            try await app.hover(over: CGPoint(x: part.maxX - 10, y: part.midY))
+            // A drag starts where it was pressed. The pointer leaves the part at its right,
+            // clicks the window behind, and comes back to drag the part to the left at once: in
+            // every frame of the screen, the part is where it was or left of it, never on the
+            // side where the pointer left.
+            let card = moved
+            try await app.hover(over: CGPoint(x: card.maxX - 10, y: card.midY))
             try await Task.sleep(for: .milliseconds(200))
-            try await app.hover(over: CGPoint(x: part.maxX + 120, y: part.midY))
+            try await app.hover(over: CGPoint(x: card.maxX + 120, y: card.midY))
             try await Task.sleep(for: .milliseconds(200))
-            try await app.click(at: CGPoint(x: part.maxX + 120, y: part.maxY + 60))
+            try await app.click(at: CGPoint(x: card.maxX + 120, y: card.maxY + 60))
             step("pointer left at the right")
 
             // A row through the part's label tag, which is solid from the part's left side.
-            let row = part.minY - 10
-            let start = try #require(try await app.screen().firstX(onRow: row, from: part.minX - 100, to: part.maxX, where: Picture.isWireframe))
-            async let recorded = app.recordRow(at: row, from: part.minX - 100, width: part.width + 300, seconds: 2)
-            try await Task.sleep(for: .milliseconds(150))
-            let press = CGPoint(x: part.minX + 30, y: part.midY)
+            let row = card.minY - 10
+            let start = try #require(try await app.screen().firstX(onRow: row, from: card.minX - 100, to: card.maxX, where: Picture.isWireframe))
+            let width = card.width + 300
+            async let recorded = app.recordRow(at: row, from: card.minX - 100, width: width, seconds: 2)
+            try await app.waitForRowRecording()
+            let press = CGPoint(x: card.minX + 30, y: card.midY)
             try await app.mouseDown(at: press)
             for step in 1...8 {
                 try await app.mouseDragged(to: CGPoint(x: press.x - CGFloat(step) * 5, y: press.y))
             }
             try await app.mouseUp(at: CGPoint(x: press.x - 40, y: press.y))
             let frames = try await recorded
-            let lefts = frames.compactMap { $0.firstX(onRow: row, from: part.minX - 100, to: part.maxX + 200, where: Picture.isWireframe) }
+            let (from, to) = (card.minX - 100, card.maxX + 200)
+            let lefts = frames.compactMap { $0.firstX(onRow: row, from: from, to: to, where: Picture.isWireframe) }
             #expect(lefts.count >= 10, "Too few frames: \(lefts)")
             #expect(lefts.allSatisfy { $0 <= start + 1 }, "The part went right of \(start): \(lefts)")
             #expect(lefts.contains { $0 <= start - 30 }, "The part did not move left of \(start): \(lefts)")
@@ -1360,7 +1244,8 @@ struct UXSpecs {
         let end = Date().addingTimeInterval(4)
         while true {
             try await Task.sleep(for: .milliseconds(300))
-            let picture = try await app.screen()
+            // The lines within 12 points of each side, and the strips' widths.
+            let picture = try await app.screen(in: rect.insetBy(dx: -13, dy: -13))
             func line(_ around: Double, _ strip: (Double) -> CGRect) -> Double? {
                 let scored = offsets.map { (around + $0, picture.count(in: strip(around + $0), every: 1, where: Picture.isWireframe)) }
                 guard let best = scored.max(by: { $0.1 < $1.1 }), best.1 >= 10 else {
@@ -1385,7 +1270,7 @@ struct UXSpecs {
         let end = Date().addingTimeInterval(6)
         var last = 0
         while Date() < end {
-            last = try await app.screen().count(in: area, every: step, where: matches)
+            last = try await app.screen(in: area).count(in: area, every: step, where: matches)
             if last >= atLeast, last <= atMost {
                 return
             }

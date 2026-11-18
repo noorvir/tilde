@@ -51,7 +51,7 @@ let package = Package(
         .testTarget(name: "TildeUITests", dependencies: ["TildeCore", "TildeUI"]),
         // Black-box UX specs: they import nothing of Tilde and drive the built app like a user,
         // so they survive a rewrite. They take over the screen; run them with scripts/ux.sh.
-        .testTarget(name: "TildeUXTests"),
+        .testTarget(name: "TildeUXTests", exclude: ["README.md"]),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -42,21 +42,8 @@ for service in kTCCServiceSystemPolicyAllFiles kTCCServiceSystemPolicyAppData; d
         "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier, flags, last_modified) VALUES ('$service', '/usr/libexec/sshd-keygen-wrapper', 1, 2, 4, 1, 'UNUSED', 0, strftime('%s', 'now'));"
 done
 sudo killall tccd 2>/dev/null || true
-# No "bypass the system private window picker" question for a month: the dates say it was
-# just asked. macOS 26.6 asks again for dates in the future. Both are replaced, as replayd
-# writes the real date when it asks. A managed preference (forceBypassScreenCaptureAlert)
-# does not work: without a profile, macOS removes it. Run this again after a month.
-approvals="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
-here=$(cd "$(dirname "$0")/.." && pwd)
-for app in TildeDriver TildeUX Tilde; do
-    entry=":file\\:///${here#/}/build/$app.app/"
-    /usr/libexec/PlistBuddy -c "Add $entry dict" "$approvals" 2>/dev/null || true
-    for key in kScreenCapturePrivacyHintDate kScreenCaptureApprovalLastAlerted; do
-        /usr/libexec/PlistBuddy -c "Delete $entry:$key" "$approvals" 2>/dev/null || true
-        /usr/libexec/PlistBuddy -c "Add $entry:$key date $(date -u '+%a %b %d %H:%M:%S UTC %Y')" "$approvals"
-    done
-done
-killall replayd 2>/dev/null || true
+# No "bypass the system private window picker" question; ux-vm.sh does this again at each run.
+"$(dirname "$0")/ux-vm-approve.sh"
 # The size of a MacBook screen, in the layout the window baselines were recorded in.
 swift "$(dirname "$0")/ux-vm-display.swift"
 # Nothing left on the screen for the specs to click by mistake.

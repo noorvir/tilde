@@ -22,6 +22,7 @@ import CoreVideo
 import TildeCore
 import AppKit
 import ScreenCaptureKit
+import os
 
 MainActor.assumeIsolated {
     let app = NSApplication.shared
@@ -64,6 +65,10 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
             return HTTPResponse(status: 500)
         }
         return HTTPResponse(status: 200, headers: ["Content-Type": "image/png"], body: png)
+
+    case ("GET", "/row/started"):
+        // Whether the row being recorded has its first frame: input sent after this is in it.
+        return json(["started": ScreenRow.hasFrame])
 
     case ("POST", "/row"):
         let rows = await ScreenRow.record(x: body["x"] as? Double ?? 0, y: body["y"] as? Double ?? 0, width: body["width"] as? Double ?? 0, seconds: body["seconds"] as? Double ?? 1)
@@ -482,12 +487,19 @@ final class WindowEdges: NSObject, SCStreamOutput, @unchecked Sendable {
 /// each frame, as 8-bit BGRA, from `x` for `width` points.
 final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
     static let scale = 2
+    private static let firstFrame = OSAllocatedUnfairLock(initialState: false)
+    /// Whether the row being recorded has had its first frame.
+    static var hasFrame: Bool {
+        firstFrame.withLock { $0 }
+    }
     private let lock = NSLock()
     private var rows: [Data] = []
     /// The row as the screen shows it now: a frame brings new pixels only in its dirty rects.
     private var current: Data?
+    private var isStopped = false
 
     static func record(x: Double, y: Double, width: Double, seconds: Double) async -> [Data] {
+        firstFrame.withLock { $0 = false }
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true),
               let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
         else {
@@ -511,7 +523,12 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
         }
         try? await Task.sleep(for: .seconds(seconds))
         try? await stream.stopCapture()
-        return recorder.lock.withLock { recorder.rows }
+        return recorder.lock.withLock {
+            // A late frame is not in the row, and the next recording waits for its own first.
+            recorder.isStopped = true
+            firstFrame.withLock { $0 = false }
+            return recorder.rows
+        }
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -531,11 +548,19 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
         let frame = Data(bytes: base, count: CVPixelBufferGetWidth(pixels) * 4)
         let dirty = (info?[.dirtyRects] as? [NSDictionary])?.compactMap { CGRect(dictionaryRepresentation: $0) }
         lock.withLock {
+            guard !isStopped else {
+                return
+            }
             var row = frame
             if let current, let dirty {
                 row = current
-                for rect in dirty where rect.minY <= 0 && rect.maxY > 0 {
-                    let columns = (max(Int(rect.minX), 0) * 4)..<(min(Int(rect.maxX) * 4, frame.count))
+                // The rects are in the frame's pixels, not always whole ones: a rect that covers
+                // any part of the first row of pixels, and every pixel it touches.
+                for rect in dirty where rect.minY < 1 && rect.maxY > 0 {
+                    let columns = (max(Int(rect.minX.rounded(.down)), 0) * 4)..<min(Int(rect.maxX.rounded(.up)) * 4, frame.count)
+                    guard !columns.isEmpty else {
+                        continue
+                    }
                     row.replaceSubrange(columns, with: frame[columns])
                 }
             }
@@ -543,6 +568,7 @@ final class ScreenRow: NSObject, SCStreamOutput, @unchecked Sendable {
             if rows.last != row {
                 rows.append(row)
             }
+            Self.firstFrame.withLock { $0 = true }
         }
     }
 }

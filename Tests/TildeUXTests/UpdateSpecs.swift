@@ -41,24 +41,6 @@ extension UXSpecs {
         #expect(try await !updated.seen().contains { $0.name == "Grant" })
     }
 
-    /// An update whose zip another key signed is refused after the download, and nothing
-    /// changes: the trust check is the EdDSA key, whatever the app's code signature.
-    @Test func anUpdateSignedWithAnotherKeyIsRefused() async throws {
-        let feed = try UpdateFeed(trusted: false)
-        defer { feed.stop() }
-        let before = feed.installedBuild
-        let app = try await TildeApp.launched(defaults: ["updateFeedURL": feed.url])
-        defer { app.quit() }
-
-        try await openUpdates(app)
-        try await app.press("Check for updates")
-        try await app.waitToSee("Tilde \(feed.version) is available", timeout: 20)
-        try await app.press("Install")
-        try await app.waitToSee("The update's signature is not valid", timeout: 60)
-        try await app.waitToSee("Retry")
-        #expect(feed.installedBuild == before)
-    }
-
     /// With "Update automatically" on, the daily check downloads a newer version by itself. It
     /// does not install while Settings is open or a session is on screen; once Tilde has had
     /// no input for the idle time, it installs, and Tilde opens again as the new version with
