@@ -230,12 +230,7 @@ final class SourcePickerModel: ObservableObject {
             return true
         }
 
-        // In full screen, a window has its display's width and bottom edge; on a display with a
-        // notch, it can start under the notch.
-        let fillsDisplay = displays.contains { display in
-            display.contains(frame) && frame.width == display.width && frame.maxY == display.maxY && frame.height >= display.height - 50
-        }
-        return layer == 0 && !isAppHidden && fillsDisplay
+        return !isAppHidden && ElementPicker.isInFullScreen(frame: frame, layer: layer, displays: displays)
     }
 
     /// A small picture of `area` of what the filter shows, in the display's points.
