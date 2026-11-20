@@ -65,8 +65,8 @@ extension UXSpecs {
     }
 
     /// An app in full screen is in the window picker when its Space is not the one that shows,
-    /// as when the user opens the picker from the desktop: its window is listed, and its clip
-    /// shows the window once the user goes back to its Space.
+    /// as when the user opens the picker from the desktop: its window is listed with its
+    /// picture, its choice brings its Space forward, and its clip shows the window.
     @Test func theWindowPickerListsAnAppInFullScreenOnASpaceThatDoesNotShowAndItsClipRecordsIt() async throws {
         let window = try ChangingWindow()
         defer { window.close() }
@@ -87,19 +87,38 @@ extension UXSpecs {
             try await app.waitToSee("Choose a window")
             try await app.press("Use window picker")
             try await app.press("Windows")
-            try await app.waitToSee("tilde-ux-fixture")
+            let tile = try await app.waitToSee("tilde-ux-fixture")
+            // The tile has a picture: macOS gives none of a window on a hidden Space, so it is
+            // the app's icon, whose green letters the empty tile does not have.
+            var green = 0
+            for _ in 0..<50 where green < 20 {
+                let area = try await app.screen(in: tile.frame)
+                green = area.count(in: tile.frame) { $0.green > $0.red + 0.2 && $0.green > $0.blue + 0.2 }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            step("tile: \(green) green places")
+            #expect(green >= 20)
             try await app.press("tilde-ux-fixture")
+            // Its Space comes forward, so the clip has the window.
+            for _ in 0..<60 where !isOnScreen(window.pid) {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try #require(isOnScreen(window.pid), "The full-screen Space does not show")
+            // The user records once the Space has slid in: the window's white page fills the screen.
+            let middle = CGRect(x: 600, y: 500, width: 300, height: 200)
+            var shown = 0.0
+            for _ in 0..<50 where shown <= 0.9 {
+                let area = try await app.screen(in: middle)
+                shown = Double(area.count(in: middle) { min($0.red, $0.green, $0.blue) > 0.9 }) / Double(area.count(in: middle) { _ in true })
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try #require(shown > 0.9, "The window does not show: \(Int(shown * 100))% white")
             try await app.waitToSeeText(containing: "Ready to record")
             try await app.waitToSeeText(containing: "tilde-ux-fixture")
             step("full-screen window chosen")
 
             try await app.press("Record")
             try await app.waitToSeeText(containing: "Recording 0:0")
-            try window.show("fullscreen front")
-            for _ in 0..<60 where !isOnScreen(window.pid) {
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            try #require(isOnScreen(window.pid), "The full-screen Space does not show")
             // The clip records its Space for a moment.
             try await Task.sleep(for: .seconds(1))
             try await app.press("Stop recording")
@@ -111,7 +130,8 @@ extension UXSpecs {
             generator.requestedTimeToleranceBefore = .positiveInfinity
             let duration = try await clip.load(.duration)
             let (image, _) = try await generator.image(at: CMTime(seconds: duration.seconds - 0.05, preferredTimescale: 600))
-            let picture = try Picture(try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])), width: Double(image.width))
+            let png = try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+            let picture = try Picture(png, width: Double(image.width))
             let whole = CGRect(origin: .zero, size: picture.size)
             let white = Double(picture.count(in: whole, every: 8) { min($0.red, $0.green, $0.blue) > 0.9 }) / Double(picture.count(in: whole, every: 8) { _ in true })
             step("full-screen clip: \(duration.seconds) s, \(Int(white * 100))% white")

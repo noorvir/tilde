@@ -136,8 +136,20 @@ final class SourcePickerModel: ObservableObject {
                         group.addTask { await (tile.id, Self.picture(of: filter, area: CGRect(origin: .zero, size: display.frame.size))) }
                     }
                 case .window(let info):
-                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }),
-                       let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: window.frame, content: content)
+                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }), !window.isOnScreen {
+                        // A window in full screen on a Space that does not show: a capture of the
+                        // display has only the wallpaper there. One screenshot of the window puts
+                        // no window sharing window in its app, unlike a stream; macOS can give
+                        // none for a hidden Space, and then the tile shows the app's icon.
+                        let filter = SCContentFilter(desktopIndependentWindow: window)
+                        let icon = window.owningApplication.flatMap { NSRunningApplication(processIdentifier: $0.processID)?.icon }
+                        let iconPicture = icon?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                        group.addTask {
+                            let picture = await Self.picture(of: filter, area: CGRect(origin: .zero, size: window.frame.size))
+                            return (tile.id, picture ?? iconPicture)
+                        }
+                    } else if let window = content.windows.first(where: { Int($0.windowID) == info.number }),
+                              let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: window.frame, content: content)
                     {
                         let area = window.frame.intersection(display).offsetBy(dx: -display.minX, dy: -display.minY)
                         group.addTask { await (tile.id, Self.picture(of: filter, area: area)) }

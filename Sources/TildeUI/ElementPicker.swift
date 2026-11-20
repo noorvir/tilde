@@ -173,6 +173,12 @@ final class ElementPicker {
         return WindowInfo(number: number, pid: pid, app: app, title: title, frame: frame)
     }
 
+    /// Whether the window is on screen: not on a Space that does not show.
+    static func isOnScreen(_ number: Int) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(number)) as? [[String: Any]] ?? []
+        return list.first?[kCGWindowIsOnscreen as String] as? Bool == true
+    }
+
     /// The displays' frames in Quartz coordinates.
     private static var displayFrames: [CGRect] {
         var count: UInt32 = 0

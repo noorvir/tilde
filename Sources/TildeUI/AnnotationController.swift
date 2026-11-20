@@ -948,6 +948,18 @@ final class AnnotationController: ObservableObject {
         dispatch(.choose, with: [.applySource: { [self] in
             scope.choose(source)
         }])
+        bringSpaceForward(of: source)
+    }
+
+    /// A window in full screen on a Space that does not show: its app comes forward with that
+    /// Space, so the clip, a capture of the display, has the window.
+    private func bringSpaceForward(of source: RecordingSource) {
+        guard case .window(let window) = source, !ElementPicker.isOnScreen(window.number),
+              let app = NSRunningApplication(processIdentifier: window.pid)
+        else {
+            return
+        }
+        ElementPicker.bringToFront(app)
     }
 
     private func openPicker() {
@@ -1047,6 +1059,8 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
+        // The Record press can have brought the desktop back.
+        bringSpaceForward(of: clipSource)
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
             clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
