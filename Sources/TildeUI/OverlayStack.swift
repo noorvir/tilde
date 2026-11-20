@@ -103,10 +103,32 @@ final class OverlayStack {
         orderAbove(window.number)
     }
 
-    /// Gives the keyboard to the overlay under the pointer.
+    /// Gives the keyboard to the overlay under the pointer. A window's overlay on a Space that
+    /// does not show stays without it: a key window there brings that Space back.
     func makeKey() {
+        moveToShownSpace()
         let pointer = NSEvent.mouseLocation
-        let overlay = overlays.first { $0.frame.contains(pointer) } ?? overlays.first
-        overlay?.makeKey()
+        guard let overlay = overlays.first(where: { $0.frame.contains(pointer) }) ?? overlays.first else {
+            return
+        }
+        if overlay.isWindowSized, !overlay.isOnActiveSpace {
+            return
+        }
+        overlay.makeKey()
+    }
+
+    /// A window's overlay made while another Space showed, as when the user chose a window in
+    /// full screen from the desktop, is on that Space, and Tilde coming forward would bring that
+    /// Space back. A new one takes its place on the Space that shows, when its window is there:
+    /// macOS moves no window of `fullScreenAuxiliary` between Spaces.
+    func moveToShownSpace() {
+        guard let window, let overlay = overlays.first, overlay.isWindowSized, !overlay.isOnActiveSpace, ElementPicker.isOnScreen(window) else {
+            return
+        }
+        let moved = makeOverlay(overlay.frame, overlay.level, true)
+        close()
+        overlays = [moved]
+        moved.takesInput = takesInput
+        orderAbove(window)
     }
 }

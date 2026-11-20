@@ -95,7 +95,9 @@ final class SourcePickerModel: ObservableObject {
 
     private func reload(browserWindow: Int?) async {
         var steps = StepTimer()
-        let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        // Also windows off screen: an app in full screen is on a Space of its own, which is off
+        // screen while another Space shows.
+        let content = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
         steps.mark("content")
         guard !Task.isCancelled else {
             return
@@ -111,7 +113,7 @@ final class SourcePickerModel: ObservableObject {
             Tile(source: .screen(display.displayID), title: Self.name(of: display.displayID), detail: Self.pixelSize(of: display.displayID))
         }
         steps.mark("displays")
-        let listed = await Self.list(content.windows, browserWindow: browserWindow)
+        let listed = await Self.list(content.windows, displays: content.displays.map(\.frame), browserWindow: browserWindow)
         steps.mark("phones and apps")
         guard !Task.isCancelled else {
             return
@@ -134,8 +136,20 @@ final class SourcePickerModel: ObservableObject {
                         group.addTask { await (tile.id, Self.picture(of: filter, area: CGRect(origin: .zero, size: display.frame.size))) }
                     }
                 case .window(let info):
-                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }),
-                       let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: window.frame, content: content)
+                    if let window = content.windows.first(where: { Int($0.windowID) == info.number }), !window.isOnScreen {
+                        // A window in full screen on a Space that does not show: a capture of the
+                        // display has only the wallpaper there. One screenshot of the window puts
+                        // no window sharing window in its app, unlike a stream; macOS can give
+                        // none for a hidden Space, and then the tile shows the app's icon.
+                        let filter = SCContentFilter(desktopIndependentWindow: window)
+                        let icon = window.owningApplication.flatMap { NSRunningApplication(processIdentifier: $0.processID)?.icon }
+                        let iconPicture = icon?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                        group.addTask {
+                            let picture = await Self.picture(of: filter, area: CGRect(origin: .zero, size: window.frame.size))
+                            return (tile.id, picture ?? iconPicture)
+                        }
+                    } else if let window = content.windows.first(where: { Int($0.windowID) == info.number }),
+                              let (filter, display) = ScreenCapture.filter(showingAppOf: window, at: window.frame, content: content)
                     {
                         let area = window.frame.intersection(display).offsetBy(dx: -display.minX, dy: -display.minY)
                         group.addTask { await (tile.id, Self.picture(of: filter, area: area)) }
@@ -174,23 +188,25 @@ final class SourcePickerModel: ObservableObject {
 
     /// The phones on a cable and the apps' windows. It runs off the main thread: the first
     /// time, listing phones loads AVFoundation's devices, and each app's icon is read from disk.
-    nonisolated private static func list(_ windows: [SCWindow], browserWindow: Int?) async -> (phones: [Tile], mayFilmPhones: Bool, apps: [App]) {
+    nonisolated private static func list(_ windows: [SCWindow], displays: [CGRect], browserWindow: Int?) async -> (phones: [Tile], mayFilmPhones: Bool, apps: [App]) {
         // A phone's picture needs the Camera permission, which is asked for only when the user
         // chooses the phone to record.
         let mayFilmPhones = PhoneCapture.hasCameraAccess
         let phones = PhoneCapture.phones().map { Tile(source: .phone($0), title: $0.name, detail: mayFilmPhones ? "Cable" : "Needs Camera access") }
-        return (phones, mayFilmPhones, apps(of: windows, browserWindow: browserWindow))
+        return (phones, mayFilmPhones, apps(of: windows, displays: displays, browserWindow: browserWindow))
     }
 
-    /// Apps with normal or floating windows on screen, front to back; Tilde's only with its
-    /// browser.
-    nonisolated private static func apps(of windows: [SCWindow], browserWindow: Int?) -> [App] {
+    /// Apps with listed windows, front to back, then those in full screen on Spaces that do
+    /// not show; Tilde's only with its browser.
+    nonisolated private static func apps(of windows: [SCWindow], displays: [CGRect], browserWindow: Int?) -> [App] {
         let order = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
             .compactMap { $0[kCGWindowNumber as String] as? Int }
         let shown = windows
             .filter { window in
-                let isOwn = window.owningApplication?.processID == getpid()
-                return (0...Int(CGWindowLevelForKey(.floatingWindow))).contains(window.windowLayer) && window.frame.width >= 100 && window.frame.height >= 60
+                let pid = window.owningApplication?.processID
+                let isOwn = pid == getpid()
+                let isAppHidden = pid.flatMap { NSRunningApplication(processIdentifier: $0)?.isHidden } ?? false
+                return isListed(frame: window.frame, layer: window.windowLayer, isOnScreen: window.isOnScreen, isAppHidden: isAppHidden, displays: displays)
                     && (!isOwn || Int(window.windowID) == browserWindow)
             }
             .sorted { (order.firstIndex(of: Int($0.windowID)) ?? .max) < (order.firstIndex(of: Int($1.windowID)) ?? .max) }
@@ -212,6 +228,21 @@ final class SourcePickerModel: ObservableObject {
             }
         }
         return apps
+    }
+
+    /// Whether the picker lists a window: a normal or floating one on screen, or one in full
+    /// screen on a Space that does not show. Minimized windows and those of hidden apps are off
+    /// screen and not in full screen.
+    nonisolated static func isListed(frame: CGRect, layer: Int, isOnScreen: Bool, isAppHidden: Bool, displays: [CGRect]) -> Bool {
+        guard (0...Int(CGWindowLevelForKey(.floatingWindow))).contains(layer), frame.width >= 100, frame.height >= 60 else {
+            return false
+        }
+
+        if isOnScreen {
+            return true
+        }
+
+        return !isAppHidden && ElementPicker.isInFullScreen(frame: frame, layer: layer, displays: displays)
     }
 
     /// A small picture of `area` of what the filter shows, in the display's points.

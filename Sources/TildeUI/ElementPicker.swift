@@ -133,7 +133,17 @@ final class ElementPicker {
         app.activate()
     }
 
-    /// The window with this number as it is now, or nil when it is closed or hidden.
+    /// Whether a window is in full screen, so on a Space of its own, which is off screen while
+    /// another Space shows: a normal window with its display's width and bottom edge. On a
+    /// display with a notch, it can start under the notch.
+    nonisolated static func isInFullScreen(frame: CGRect, layer: Int, displays: [CGRect]) -> Bool {
+        layer == 0 && displays.contains { display in
+            display.contains(frame) && frame.width == display.width && frame.maxY == display.maxY && frame.height >= display.height - 50
+        }
+    }
+
+    /// The window with this number as it is now, or nil when it is closed, hidden or minimized.
+    /// A window in full screen stays while another Space shows.
     func currentWindow(number: Int) -> WindowInfo? {
         // Tilde's own windows from AppKit, which knows of them before the window list does.
         if let own = NSApp.window(withWindowNumber: number) {
@@ -144,16 +154,38 @@ final class ElementPicker {
             return WindowInfo(number: number, pid: ProcessInfo.processInfo.processIdentifier, app: "Tilde", title: title, frame: own.frame.flipped)
         }
         let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(number)) as? [[String: Any]] ?? []
-        guard let info = list.first, info[kCGWindowIsOnscreen as String] as? Bool == true,
+        guard let info = list.first,
               let bounds = info[kCGWindowBounds as String] as? NSDictionary,
               let frame = CGRect(dictionaryRepresentation: bounds)
         else {
             return nil
         }
         let pid = info[kCGWindowOwnerPID as String] as? pid_t ?? 0
+        if info[kCGWindowIsOnscreen as String] as? Bool != true {
+            let layer = info[kCGWindowLayer as String] as? Int ?? -1
+            let isAppHidden = NSRunningApplication(processIdentifier: pid)?.isHidden ?? true
+            guard !isAppHidden, Self.isInFullScreen(frame: frame, layer: layer, displays: Self.displayFrames) else {
+                return nil
+            }
+        }
         let app = info[kCGWindowOwnerName as String] as? String ?? "App"
         let title = (info[kCGWindowName as String] as? String).flatMap { $0.isEmpty ? nil : $0 }
         return WindowInfo(number: number, pid: pid, app: app, title: title, frame: frame)
+    }
+
+    /// Whether the window is on screen: not on a Space that does not show.
+    static func isOnScreen(_ number: Int) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(number)) as? [[String: Any]] ?? []
+        return list.first?[kCGWindowIsOnscreen as String] as? Bool == true
+    }
+
+    /// The displays' frames in Quartz coordinates.
+    private static var displayFrames: [CGRect] {
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &displays, &count)
+        return displays.map(CGDisplayBounds)
     }
 
     /// The topmost window under a Quartz point that annotate mode can pick from, or `scope`

@@ -885,6 +885,8 @@ final class AnnotationController: ObservableObject {
         guard session != nil else {
             return
         }
+        // Before Tilde comes forward: macOS shows a Space with a window of the app it activates.
+        overlays.moveToShownSpace()
         NSApp.activate(ignoringOtherApps: true)
         if !focusCanvas() {
             overlays.makeKey()
@@ -948,6 +950,18 @@ final class AnnotationController: ObservableObject {
         dispatch(.choose, with: [.applySource: { [self] in
             scope.choose(source)
         }])
+        bringSpaceForward(of: source)
+    }
+
+    /// A window in full screen on a Space that does not show: its app comes forward with that
+    /// Space, so the clip, a capture of the display, has the window.
+    private func bringSpaceForward(of source: RecordingSource) {
+        guard case .window(let window) = source, !ElementPicker.isOnScreen(window.number),
+              let app = NSRunningApplication(processIdentifier: window.pid)
+        else {
+            return
+        }
+        ElementPicker.bringToFront(app)
     }
 
     private func openPicker() {
