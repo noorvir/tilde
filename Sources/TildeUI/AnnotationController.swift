@@ -885,6 +885,8 @@ final class AnnotationController: ObservableObject {
         guard session != nil else {
             return
         }
+        // Before Tilde comes forward: macOS shows a Space with a window of the app it activates.
+        overlays.moveToShownSpace()
         NSApp.activate(ignoringOtherApps: true)
         if !focusCanvas() {
             overlays.makeKey()
@@ -1059,8 +1061,6 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
-        // The Record press can have brought the desktop back.
-        bringSpaceForward(of: clipSource)
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
             clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
