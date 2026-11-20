@@ -117,6 +117,7 @@ let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
 }
 
 var lastToggle = Date.distantPast
+var isBroughtFront = false
 var fullScreenExits = 0
 let exitObserver = NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main) { _ in
     MainActor.assumeIsolated { fullScreenExits += 1 }
@@ -164,6 +165,13 @@ let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
         app.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(field)
+    }
+    // "front": the app comes in front once, as when the user goes back to it; a window in
+    // full screen brings its Space forward.
+    if page.contains("front"), !isBroughtFront {
+        isBroughtFront = true
+        app.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
     // "normal": an ordinary window, which windows of other apps brought forward cover.
     if page.hasPrefix("normal"), window.level != .normal {

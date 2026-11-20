@@ -64,6 +64,69 @@ extension UXSpecs {
         }
     }
 
+    /// An app in full screen is in the window picker when its Space is not the one that shows,
+    /// as when the user opens the picker from the desktop: its window is listed, and its clip
+    /// shows the window once the user goes back to its Space.
+    @Test func theWindowPickerListsAnAppInFullScreenOnASpaceThatDoesNotShowAndItsClipRecordsIt() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        try await withApp { app in
+            try await goFullScreen(window, page: "fullscreen", app: app)
+            // The user goes to the desktop: Finder opens a window there, which is closed again.
+            NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory()))
+            for _ in 0..<60 where isOnScreen(window.pid) {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try #require(!isOnScreen(window.pid), "The full-screen Space still shows")
+            try await app.key(.w, command: true)
+            step("desktop shows")
+
+            try await app.doubleTap("control")
+            try await app.waitToSee("Annotating")
+            try await app.key(.r)
+            try await app.waitToSee("Choose a window")
+            try await app.press("Use window picker")
+            try await app.press("Windows")
+            try await app.waitToSee("tilde-ux-fixture")
+            try await app.press("tilde-ux-fixture")
+            try await app.waitToSeeText(containing: "Ready to record")
+            try await app.waitToSeeText(containing: "tilde-ux-fixture")
+            step("full-screen window chosen")
+
+            try await app.press("Record")
+            try await app.waitToSeeText(containing: "Recording 0:0")
+            try window.show("fullscreen front")
+            for _ in 0..<60 where !isOnScreen(window.pid) {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            try #require(isOnScreen(window.pid), "The full-screen Space does not show")
+            // The clip records its Space for a moment.
+            try await Task.sleep(for: .seconds(1))
+            try await app.press("Stop recording")
+            try await app.waitToSeeText(containing: "1 note")
+
+            // The clip's last frame is the window: its white page.
+            let clip = try await savedClip(in: app)
+            let generator = AVAssetImageGenerator(asset: clip)
+            generator.requestedTimeToleranceBefore = .positiveInfinity
+            let duration = try await clip.load(.duration)
+            let (image, _) = try await generator.image(at: CMTime(seconds: duration.seconds - 0.05, preferredTimescale: 600))
+            let picture = try Picture(try #require(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])), width: Double(image.width))
+            let whole = CGRect(origin: .zero, size: picture.size)
+            let white = Double(picture.count(in: whole, every: 8) { min($0.red, $0.green, $0.blue) > 0.9 }) / Double(picture.count(in: whole, every: 8) { _ in true })
+            step("full-screen clip: \(duration.seconds) s, \(Int(white * 100))% white")
+            #expect(white > 0.7)
+            #expect(window.sharingWindows == [])
+            #expect(window.fullScreen?.exits == 0)
+        }
+    }
+
+    /// Whether a normal window of the app is on screen: in a Space that shows.
+    private func isOnScreen(_ pid: Int) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        return list.contains { $0[kCGWindowOwnerPID as String] as? Int == pid && $0[kCGWindowLayer as String] as? Int == 0 }
+    }
+
     /// Puts the window in full screen, in a Space of its own on its display, and waits until
     /// that Space shows.
     private func goFullScreen(_ window: ChangingWindow, page: String, app: TildeApp) async throws {
