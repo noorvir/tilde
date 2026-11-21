@@ -295,6 +295,7 @@ final class AnnotationController: ObservableObject {
         facts.commentHasText = commentBox.hasText
         facts.commentIsOnDrawing = commentBox.pending?.drawingIDs.isEmpty == false
         facts.wireframesOn = wireframes.isOn
+        facts.toolIsDown = isToolDown
         return facts
     }
 

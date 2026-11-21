@@ -25,6 +25,8 @@ struct SessionFlow: Equatable {
         var commentIsOnDrawing = false
         /// The wireframes beta is on: see `WireframeSwitch`.
         var wireframesOn = true
+        /// Draw or Wireframe has no tool chosen.
+        var toolIsDown = false
     }
 
     enum Mode: Equatable {
@@ -829,10 +831,16 @@ struct SessionFlow: Equatable {
         if open.panel == .preview {
             return closePreview(&open)
         }
-        // Esc never ends Draw or Wireframe: it puts the tool down, so that nothing draws. Only
-        // the pause command pauses them.
+        // Esc puts the tool down, so that nothing draws; with no tool it ends Draw or Wireframe,
+        // as Done does. Only the pause command pauses them.
         if open.isDrawing {
-            return open.pauses.isEmpty ? [.putToolDown] : []
+            guard open.pauses.isEmpty else {
+                return []
+            }
+            guard facts.toolIsDown else {
+                return [.putToolDown]
+            }
+            return open.canvas == .wireframe ? [.takeWireframe] : leaveDrawing(&open)
         }
         if case .recording = open.activity {
             return leaveRecording(&open)
