@@ -220,6 +220,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             owner?.onClickAway()
         case "typing", "notTyping":
             (panel as? CanvasPanel)?.isTyping = text == "typing"
+            owner?.onTyping(text == "typing")
         case "noTool", "tool":
             hasNoTool = text == "noTool"
         case _ where text.hasPrefix("pointer:"):

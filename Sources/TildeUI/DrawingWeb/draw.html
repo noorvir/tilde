@@ -3,6 +3,8 @@
 <link rel="stylesheet" href="draw.css">
 <style>
 html, body, #root { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+/* Above the wireframe's look layer: text shows on top of the components. */
+#root { position: relative; z-index: 4; }
 .excalidraw { --color-surface-lowest: transparent; background: transparent !important; }
 .excalidraw .layer-ui__wrapper, .excalidraw .welcome-screen-center { display: none !important; }
 </style>

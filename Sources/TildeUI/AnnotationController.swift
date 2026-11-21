@@ -274,6 +274,7 @@ final class AnnotationController: ObservableObject {
         canvas.isOverTildeWindow = { [weak self] point in self?.picker.windows.isOverTildeWindow(point) == true }
         canvas.onEscape = { [weak self] in self?.escapePressed() }
         canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
+        canvas.onTyping = { [weak self] in self?.sessionKeyTap?.isTildeTyping = $0 }
         canvas.onClickAway = { [weak self] in
             self?.dispatch(.clickAway)
             // The click gave the canvas the keyboard; a question in the comment box needs it.
@@ -483,12 +484,19 @@ final class AnnotationController: ObservableObject {
             sourcePicker.openApp = nil
             return
         }
-        // Esc ends a group of shapes and opens its comment.
-        if drawing.panel.hasGroup, accepts(.shapeFinished) {
-            dispatch(.shapeFinished)
+        if endDrawingGroup() {
             return
         }
         dispatch(.escape)
+    }
+
+    /// Ends Draw's group of shapes and opens its one comment. False when there is none to end.
+    func endDrawingGroup() -> Bool {
+        guard drawing.panel.hasGroup, accepts(.shapeFinished) else {
+            return false
+        }
+        dispatch(.shapeFinished)
+        return true
     }
 
     // MARK: - Session lifecycle

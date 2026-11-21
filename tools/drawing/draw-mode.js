@@ -191,6 +191,37 @@ function isOnEditedShape(x, y) {
   });
 }
 
+// Excalidraw puts the text of a click inside the shape under it; a label starts at the click
+// instead. The shapes are out of the scene only while Excalidraw takes the press.
+const containerTypes = new Set(["rectangle", "ellipse", "diamond", "arrow"]);
+let hiddenForText = [];
+
+export function hideShapesForText(event) {
+  const appState = api?.getAppState();
+  if (event.button !== 0 || appState?.activeTool.type !== "text" || appState.editingTextElement || editing) return;
+  hiddenForText = live().filter((element) => containerTypes.has(element.type)).map((element) => element.id);
+  if (!hiddenForText.length) return;
+  changeElements(hiddenForText, () => ({ isDeleted: true }));
+  api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+  // Also when Excalidraw stops the press from going on.
+  setTimeout(showShapesAgain, 0);
+}
+
+export function showShapesAgain() {
+  if (!hiddenForText.length) return;
+  const ids = hiddenForText;
+  hiddenForText = [];
+  changeElements(ids, () => ({ isDeleted: false }));
+}
+
+// ↩ ends the label being typed, as a click away does; ⇧↩ is a new line.
+export function enterEndsText(event) {
+  if (event.key !== "Enter" || event.shiftKey || event.metaKey || !event.target.classList?.contains("excalidraw-wysiwyg")) return;
+  event.stopPropagation();
+  event.preventDefault();
+  event.target.blur();
+}
+
 // A press: beside the shapes that are edited, it is a click away for Tilde.
 export function pointerPressed(event) {
   isPressed = true;

@@ -55,7 +55,8 @@ export function wireframeReleased() {
 // After Excalidraw has finished the rectangle of a drag: it becomes the component of the tool.
 // A click instead selects the component under it, and a double-click edits its label.
 function finishWireframeShape(press) {
-  if (!press || !wireframe) return;
+  // A text tool's click selects nothing.
+  if (!press || !wireframe || api.getAppState().activeTool.type === "text") return;
   const created = live().filter((element) => !press.ids.has(element.id));
   const box = created.find((element) => element.type === "rectangle" && !element.customData);
   const rest = api.getSceneElementsIncludingDeleted().filter((element) => element.id !== box?.id);
@@ -181,7 +182,9 @@ function editWireframe(event) {
   if (!isHandle(event.target)) {
     // A click on a component's tag types its label.
     const tagged = tagAt(event.clientX, event.clientY);
-    if (event.type === "pointerdown" && tagged) {
+    // The text tool starts a label on a tag too.
+    const isText = api?.getAppState().activeTool.type === "text";
+    if (event.type === "pointerdown" && tagged && !isText) {
       event.stopImmediatePropagation();
       event.preventDefault();
       selectGroup(tagged.groupIds[0]);

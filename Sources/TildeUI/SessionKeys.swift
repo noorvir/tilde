@@ -64,6 +64,10 @@ extension AnnotationController {
                 }
                 return true
             }
+            // ↩ ends Draw's group of shapes.
+            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, endDrawingGroup() {
+                return true
+            }
             let isCommand = event.modifierFlags.contains(.command)
             // Back and forward belong to the page under the overlay.
             if isCommand, key == kVK_ANSI_LeftBracket || key == kVK_ANSI_RightBracket {
@@ -147,6 +151,10 @@ extension AnnotationController {
             // Esc closes the wireframe bar's Adjust popover, then its style mode, before it
             // steps back on the canvas. An open menu takes Esc itself.
             if key == kVK_Escape, wireframe.bar.handle(.escape) {
+                return true
+            }
+            // ↩ ends Draw's group of shapes and opens its comment.
+            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, endDrawingGroup() {
                 return true
             }
             // ⌘↩ is Done in Draw and Wireframe.

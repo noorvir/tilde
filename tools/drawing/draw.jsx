@@ -27,7 +27,7 @@ import { createRoot } from "react-dom/client";
 import { post, setAPI } from "./scene.js";
 import { escapePressed, focusChanged, swallowToolKey } from "./bridge.js";
 import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
-import { blockPressWithNoTool, groupChanged, moveToRelease, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
+import { blockPressWithNoTool, enterEndsText, groupChanged, hideShapesForText, moveToRelease, showShapesAgain, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
 import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOutline, typeMenu } from "./wireframe/chip.js";
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
@@ -63,11 +63,15 @@ document.addEventListener("focusout", focusChanged);
 document.addEventListener("keydown", swallowToolKey, true);
 document.addEventListener("keydown", keyPressed, true);
 document.addEventListener("keydown", escapePressed, true);
+document.addEventListener("keydown", enterEndsText, true);
 
 window.addEventListener("pointermove", pointerMoved, true);
 document.addEventListener("pointerleave", pointerLeft);
 window.addEventListener("pointerdown", pointerPressed, true);
 window.addEventListener("pointerup", pointerReleased, true);
+// Last before Excalidraw, which takes the press between these two.
+window.addEventListener("pointerdown", hideShapesForText, true);
+window.addEventListener("pointerdown", showShapesAgain);
 
 const initialData = {
   appState: {
