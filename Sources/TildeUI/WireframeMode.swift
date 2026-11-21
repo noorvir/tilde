@@ -43,10 +43,13 @@ final class WireframeMode: ObservableObject {
     /// Rectangle and Circle stand in for any component not in the list.
     nonisolated static let tools = [
         (tool: "section", symbol: "rectangle.split.3x1", key: "s", help: "Section"),
-        (tool: "rectangle", symbol: "rectangle", key: "r", help: "Rectangle"),
+        (tool: "table", symbol: "tablecells", key: "t", help: "Table"),
         (tool: "button", symbol: "capsule", key: "b", help: "Button"),
+        (tool: "dropdown", symbol: "chevron.down.square", key: "d", help: "Dropdown"),
+        (tool: "list", symbol: "list.bullet.rectangle", key: "l", help: "List"),
+        (tool: "rectangle", symbol: "rectangle", key: "r", help: "Rectangle"),
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
-        (tool: "text", symbol: "textformat", key: "t", help: "Text"),
+        (tool: "text", symbol: "textformat", key: "x", help: "Text"),
     ]
     /// The tool of the first start, before one was chosen.
     nonisolated static let firstTool = "rectangle"

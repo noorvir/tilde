@@ -1,5 +1,5 @@
-// Wireframe mode: components (section, button, plain rectangles and ellipses, and older notes'
-// card, table, dropdown and list) and text over the screen, sent together as one note. Its shapes stay until
+// Wireframe mode: components (section, table, button, dropdown, list, plain rectangles and
+// ellipses, and older notes' cards) and text over the screen, sent together as one note. Its shapes stay until
 // Done takes them all. Each component is one element, which wireframe/look.js draws.
 
 import { moveCursor, setSelectMode } from "../cursor.js";
