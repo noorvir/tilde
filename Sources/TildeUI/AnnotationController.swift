@@ -275,6 +275,7 @@ final class AnnotationController: ObservableObject {
         canvas.onEscape = { [weak self] in self?.escapePressed() }
         canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
         canvas.onTyping = { [weak self] in self?.sessionKeyTap?.isTildeTyping = $0 }
+        canvas.onAddComment = { [weak self] in _ = self?.endDrawingGroup() }
         canvas.onClickAway = { [weak self] in
             self?.dispatch(.clickAway)
             // The click gave the canvas the keyboard; a question in the comment box needs it.

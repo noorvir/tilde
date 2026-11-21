@@ -11,8 +11,6 @@ struct GeneralSettings: View {
         "http://127.0.0.1:\(model.server.port)/mcp"
     }
 
-    @AppStorage("drawingSnaps") private var snapsDrawings = true
-
     var body: some View {
         let permissions = model.permissions()
 
@@ -27,14 +25,6 @@ struct GeneralSettings: View {
                         .onChange(of: launchesAtLogin) { _, isOn in
                             setLaunchAtLogin(isOn)
                         }
-                }
-                SettingsDivider()
-                SettingsRow(title: "Snap drawings to elements", subtitle: "Hold ⌘ while drawing to draw freely") {
-                    Toggle("Snap drawings to elements", isOn: $snapsDrawings)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(Color.tildeBlue)
-                        .labelsHidden()
                 }
                 SettingsDivider()
                 PermissionRow(title: "Screen Recording", subtitle: "Screenshots of any app", isAllowed: permissions.screenRecording) {

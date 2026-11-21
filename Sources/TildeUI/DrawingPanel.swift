@@ -23,6 +23,8 @@ final class DrawingPanel {
     /// A text field of the canvas got the keyboard, or lost it.
     var onTyping: (Bool) -> Void = { _ in }
     var onClickAway: () -> Void = {}
+    /// Add comment in the canvas's context menu.
+    var onAddComment: () -> Void = {}
     /// A press, in Quartz screen coordinates. True: it was for something else, such as a label.
     var onPress: (CGPoint) -> Bool = { _ in false }
     /// The pointer moved, in Quartz screen coordinates.

@@ -17,7 +17,6 @@ final class DrawingNotes: ObservableObject {
     private let picker: ElementPicker
     /// Notes of drawings that Undo took out, for Redo.
     private var undone: [Draft] = []
-    private var isFindingSnapFrame = false
 
     init(picker: ElementPicker) {
         self.picker = picker
@@ -76,7 +75,7 @@ final class DrawingNotes: ObservableObject {
         return NewNote(
             target: .drawing(shapes: DrawingShapes.encode(drawing.shapes, origin: origin, element: link.element)), frame: link.frame,
             marker: link.marker, chip: "Drawing", window: link.window, anchor: link.anchor, tracked: link.tracked,
-            pictureArea: link.pictureArea, captures: captures, drawingIDs: drawing.ids
+            pictureArea: link.pictureArea, captures: captures, drawingIDs: drawing.ids, drawingBounds: drawing.bounds
         )
     }
 
@@ -143,31 +142,12 @@ final class DrawingNotes: ObservableObject {
         undone.popLast()
     }
 
-    // MARK: - Snap
+    // MARK: - Pointer
 
-    /// Shows the element under the pointer as the one a shape snaps to, unless the pointer is
-    /// over a note's label. It reuses the hover lookup, which leaves out apps too slow to ask.
-    func pointerMoved(to point: CGPoint, isOverLabel: Bool) {
+    /// The hand cursor over a note's label. Draw snaps to no element: the ring stays at the
+    /// pointer.
+    func pointerMoved(isOverLabel: Bool) {
         panel.setOverLabel(isOverLabel)
-        if isOverLabel {
-            panel.setSnapFrame(nil)
-            return
-        }
-
-        guard !isFindingSnapFrame, UserDefaults.standard.object(forKey: "drawingSnaps") as? Bool ?? true else {
-            return
-        }
-        isFindingSnapFrame = true
-        Task {
-            let picked = await picker.pick(at: point, isMoving: true, in: scope())
-            isFindingSnapFrame = false
-            guard !panel.isOnLabel(point) else {
-                return
-            }
-
-            // Only the snap ring shows the element: no outline or label, as on hover.
-            panel.setSnapFrame(picked?.chip == "window" ? nil : picked?.frame)
-        }
     }
 }
 

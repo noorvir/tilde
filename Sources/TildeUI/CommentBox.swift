@@ -39,13 +39,23 @@ final class CommentBox: ObservableObject {
     func open(_ pending: Pending) {
         self.pending = pending
         text = ""
-        panel.show(chip: pending.chip, near: pending.marker, below: pending.frame)
+        let place = Self.place(of: pending)
+        panel.show(chip: pending.chip, near: place.marker, below: place.target)
+    }
+
+    /// A drawing's box is at the top right of its shapes; another's at its label.
+    private static func place(of pending: Pending) -> (marker: CGPoint, target: CGRect) {
+        guard let bounds = pending.drawingBounds else {
+            return (pending.marker, pending.frame)
+        }
+        return (CGPoint(x: bounds.maxX, y: bounds.minY), bounds)
     }
 
     /// The new target is somewhere else, as when its shape changed: the box goes along.
     func follow(_ pending: Pending) {
         self.pending = pending
-        panel.follow(near: pending.marker, below: pending.frame)
+        let place = Self.place(of: pending)
+        panel.follow(near: place.marker, below: place.target)
     }
 
     func focus() {

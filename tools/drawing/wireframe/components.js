@@ -89,7 +89,14 @@ export function componentAt(x, y) {
 export function rebuild(group, rect, data) {
   const all = api.getSceneElementsIncludingDeleted();
   const index = all.findIndex((element) => element.groupIds.includes(group));
-  const rest = all.filter((element) => !element.groupIds.includes(group));
+  // Its texts keep their place relative to it.
+  const rest = all.filter((element) => !element.groupIds.includes(group)).map((element) => {
+    const at = element.customData?.tildeOn === group ? element.customData.at : null;
+    if (!at) return element;
+    const x = rect.x + at[0] * rect.width;
+    const y = rect.y + at[1] * rect.height;
+    return { ...element, x, y, version: element.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) };
+  });
   rest.splice(index, 0, ...wireframeElements(data.tildeWireframe, rect, data, [group]));
   api.updateScene({ elements: rest, captureUpdate: "NEVER" });
 }

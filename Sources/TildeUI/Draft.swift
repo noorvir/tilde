@@ -75,6 +75,8 @@ struct NewNote {
     /// Its screenshots when they are taken already, as for a drawing.
     var captures: Captures?
     var drawingIDs: [String] = []
+    /// Where a drawing's shapes are, in Quartz screen coordinates.
+    var drawingBounds: CGRect?
 }
 
 extension NewNote {
@@ -129,7 +131,7 @@ extension Pending {
         self.init(
             target: note.target, frame: note.frame, marker: note.marker, chip: note.chip, capture: capture, anchor: note.anchor,
             tracked: note.tracked, sourceWindow: note.window?.number, fingerprint: fingerprint, page: page, sourcePID: note.window?.pid,
-            pictureArea: note.pictureArea, drawingIDs: note.drawingIDs
+            pictureArea: note.pictureArea, drawingIDs: note.drawingIDs, drawingBounds: note.drawingBounds
         )
     }
 }

@@ -63,7 +63,7 @@ export function resetEditing() {
 
 // Whether Draw has shapes that no comment has taken yet: Esc then ends the group and opens
 // its comment. Tilde gets each change.
-let hasGroup = false;
+export let hasGroup = false;
 
 export function groupChanged() {
   if (!api) return;
@@ -131,7 +131,7 @@ function snapPoint(x, y, event) {
 }
 
 const drawingTools = new Set(["arrow", "rectangle", "ellipse"]);
-const cursorTools = new Set([...drawingTools, "freedraw"]);
+const cursorTools = new Set([...drawingTools, "freedraw", "text"]);
 
 function showCursorRing(event, isSnapping) {
   const tool = api?.getAppState().activeTool.type;

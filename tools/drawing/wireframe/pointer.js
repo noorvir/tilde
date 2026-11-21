@@ -91,6 +91,23 @@ function startAdjusting(event, frame, mode, from, corner = null) {
   showHandles();
 }
 
+// Opens a component's comment. The component is selected while its comment is typed, and as it
+// was after: a comment adds no step to Esc.
+export function openComponentComment(group) {
+  const frame = frameOf(group);
+  if (!frame) return;
+  if (commented) closeComment(true);
+  const selectedBefore = selection.selected;
+  selection.selected = group;
+  selection.menu = "comment";
+  showHandles();
+  openComment(frame, () => {
+    selection.selected = selectedBefore;
+    selection.menu = null;
+    showHandles();
+  });
+}
+
 // The component a press on it moves, or with ⌥ copies. While a tool is chosen a press draws,
 // also on a component, so that one can be drawn in another: a component then moves by its chip.
 function movableAt(event) {
@@ -233,17 +250,7 @@ function editWireframe(event) {
       closeComment(true);
       return true;
     }
-    // The component is selected while its comment is typed, and as it was after: a comment
-    // adds no step to Esc.
-    const selectedBefore = selection.selected;
-    selection.selected = group;
-    selection.menu = "comment";
-    showHandles();
-    openComment(frame, () => {
-      selection.selected = selectedBefore;
-      selection.menu = null;
-      showHandles();
-    });
+    openComponentComment(group);
     return true;
   }
   const action = event.target.closest("[data-action]")?.dataset.action;

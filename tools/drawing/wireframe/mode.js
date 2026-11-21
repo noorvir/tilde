@@ -7,7 +7,7 @@ import { drawColor, useTool } from "../draw-mode.js";
 import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
 import { api, taken, live, changeElements, isTextField } from "../scene.js";
 import { selection, setKindIcons, deleteComponent, hideHandles } from "./chip.js";
-import { kindNames, wireframeElements } from "./components.js";
+import { componentAt, kindNames, wireframeElements } from "./components.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./history.js";
 import { commented, closeComment } from "./comment.js";
 import { labelled, endLabel } from "./labels.js";
@@ -69,6 +69,21 @@ export function restoreWireframe({ shapes, origin: [left, top] }) {
   });
   api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
   clearHistory();
+}
+
+// A text placed on a component is on it: `rebuild` moves it with the component, at the same
+// place relative to it. A text is attached once, when its typing ends.
+export function attachTexts() {
+  if (!wireframe) return;
+  const typing = api.getAppState().editingTextElement?.id;
+  const loose = live().filter((element) => element.type === "text" && element.id !== typing && !taken.has(element.id) && !("tildeOn" in (element.customData ?? {})));
+  if (!loose.length) return;
+  changeElements(loose.map((element) => element.id), (text) => {
+    const component = componentAt(text.x, text.y);
+    if (!component) return { customData: { ...text.customData, tildeOn: null } };
+    const at = [(text.x - component.x) / component.width, (text.y - component.y) / component.height];
+    return { customData: { ...text.customData, tildeOn: component.groupIds[0], at } };
+  });
 }
 
 // Before Done takes the components: the label that is typed is kept, and no handle, guide or

@@ -25,6 +25,7 @@ import { Excalidraw } from "@excalidraw/excalidraw";
 import "./node_modules/@excalidraw/excalidraw/dist/prod/index.css";
 import { createRoot } from "react-dom/client";
 import { post, setAPI } from "./scene.js";
+import { contextMenu, contextMenuKey, contextMenuPointer, contextMenuRequested, contextMenuStyle } from "./context-menu.js";
 import { escapePressed, focusChanged, swallowToolKey } from "./bridge.js";
 import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
 import { blockPressWithNoTool, enterEndsText, groupChanged, hideShapesForText, moveToRelease, showShapesAgain, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
@@ -32,7 +33,7 @@ import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOu
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
 import { drawLook, lookLayer } from "./wireframe/look.js";
-import { keyPressed } from "./wireframe/mode.js";
+import { attachTexts, keyPressed } from "./wireframe/mode.js";
 import { snapPointer } from "./wireframe/pointer.js";
 import { guideLabel, guideX, guideY, snapRing } from "./wireframe/snap.js";
 import { windowOutline } from "./wireframe/window.js";
@@ -41,11 +42,15 @@ document.addEventListener("DOMContentLoaded", () => {
   document.head.appendChild(labelCursor);
   document.body.append(
     lookLayer, labelField, labelStyle, chipStyle, handleOutline, selectionOutline, chip, grip, ...corners, typeMenu, bordersMenu, commentBox, moveCursor, windowOutline,
-    guideX, guideY, guideLabel, snapRing, ring, cursorRing,
+    guideX, guideY, guideLabel, snapRing, ring, cursorRing, contextMenu, contextMenuStyle,
   );
 });
 
 const pointerEvents = ["pointerdown", "pointermove", "pointerup"];
+// Tilde's context menu takes its presses before every other listener.
+for (const type of pointerEvents) window.addEventListener(type, contextMenuPointer, true);
+window.addEventListener("contextmenu", contextMenuRequested);
+document.addEventListener("keydown", contextMenuKey, true);
 // Before every other listener sees the release.
 window.addEventListener("pointerup", moveToRelease, true);
 for (const type of pointerEvents) window.addEventListener(type, blockPressWithNoTool, true);
@@ -91,6 +96,7 @@ createRoot(document.getElementById("root")).render(
     onChange={() => {
       drawLook();
       groupChanged();
+      attachTexts();
     }}
     excalidrawAPI={(value) => {
       setAPI(value);
