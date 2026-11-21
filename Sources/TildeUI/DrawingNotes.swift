@@ -15,8 +15,6 @@ final class DrawingNotes: ObservableObject {
     var scope: () -> ElementPicker.WindowInfo? = { nil }
 
     private let picker: ElementPicker
-    /// Notes of drawings that Undo took out, for Redo.
-    private var undone: [Draft] = []
 
     init(picker: ElementPicker) {
         self.picker = picker
@@ -65,7 +63,6 @@ final class DrawingNotes: ObservableObject {
         guard let drawing = await panel.takeNewShapes(), !drawing.ids.isEmpty else {
             return nil
         }
-        undone = []
         let point = DrawingShapes.linkPoint(of: drawing.shapes)
         let link = await link(at: point, fallback: drawing.bounds)
         let center = CGPoint(x: drawing.bounds.midX, y: drawing.bounds.midY)
@@ -128,18 +125,6 @@ final class DrawingNotes: ObservableObject {
         }
 
         return NoteLink(frame: fallback, marker: point, element: nil, window: picked.window, anchor: nil, tracked: nil, pictureArea: NoteFingerprint.area(around: point))
-    }
-
-    // MARK: - Undo
-
-    /// Keeps a drawing's note that Undo took out of the list.
-    func keepUndone(_ draft: Draft) {
-        undone.append(draft)
-    }
-
-    /// The note that Redo puts back in the list.
-    func takeUndone() -> Draft? {
-        undone.popLast()
     }
 
     // MARK: - Pointer

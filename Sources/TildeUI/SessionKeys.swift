@@ -43,8 +43,8 @@ enum SessionKey {
 
 /// What a key does in the session's windows. Each window gives its key to `handleKey` first
 /// and keeps only keys of its own: back and forward in the browser, the end of editing in the
-/// preview. The canvas has keys of its own too: in a text field, and in wireframe mode ⌘Z, ⇧⌘Z,
-/// Delete and the first Esc on a selected component. The comment box has no key codes: its text view sends ↩ as the event `submitComment`, Esc
+/// preview. The canvas has keys of its own too: in a text field, Delete, and in wireframe mode
+/// the first Esc on a selected component. ⌘Z and ⇧⌘Z undo and redo the canvas's changes. The comment box has no key codes: its text view sends ↩ as the event `submitComment`, Esc
 /// as `escapePressed` and ⌘↩ as Send. A question takes Esc and ↩ before any window, through
 /// `handleConfirmationKey`.
 extension AnnotationController {
@@ -62,6 +62,9 @@ extension AnnotationController {
                 if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
                     dispatch(.confirm)
                 }
+                return true
+            }
+            if undoCanvasKey(event) {
                 return true
             }
             // ↩ ends Draw's group of shapes.
@@ -153,6 +156,9 @@ extension AnnotationController {
             if key == kVK_Escape, wireframe.bar.handle(.escape) {
                 return true
             }
+            if undoCanvasKey(event) {
+                return true
+            }
             // ↩ ends Draw's group of shapes and opens its comment.
             if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, endDrawingGroup() {
                 return true
@@ -164,6 +170,16 @@ extension AnnotationController {
             }
             return performShortcut(event)
         }
+    }
+
+    /// ⌘Z and ⇧⌘Z in Draw and Wireframe: undo and redo of the canvas's last change.
+    private func undoCanvasKey(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard isDrawing, event.charactersIgnoringModifiers?.lowercased() == "z", modifiers.contains(.command), !modifiers.contains(.option), !modifiers.contains(.control) else {
+            return false
+        }
+        dispatch(modifiers.contains(.shift) ? .redoDrawing : .undoDrawing)
+        return true
     }
 
     /// A key for one of the HUD's buttons while Tilde has the keyboard, under the rule that

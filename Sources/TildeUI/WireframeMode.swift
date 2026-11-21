@@ -99,14 +99,6 @@ final class WireframeMode: ObservableObject {
         sendTool()
     }
 
-    func undo() {
-        canvas.undoWireframe()
-    }
-
-    func redo() {
-        canvas.redoWireframe()
-    }
-
     /// Applies a change from the bar to the look at once: the canvas and Settings follow the
     /// defaults.
     func change(_ change: WireframeLook.Change) {

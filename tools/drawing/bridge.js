@@ -45,6 +45,18 @@ function takeNewShapes() {
   return JSON.stringify(elements.map(describe));
 }
 
+// Undo and redo of the canvas's last change. Wireframe mode keeps its own history; Draw keeps
+// Excalidraw's, which taking the shapes for a note clears, so a saved note never comes back.
+function undoCanvas() {
+  if (wireframe) undoWireframe();
+  else document.querySelector('.excalidraw [data-testid="button-undo"]')?.click();
+}
+
+function redoCanvas() {
+  if (wireframe) redoWireframe();
+  else document.querySelector('.excalidraw [data-testid="button-redo"]')?.click();
+}
+
 // With the other elements of each shape's group.
 function remove(ids) {
   changeElements(withGroups(ids), () => ({ isDeleted: true }));
@@ -74,7 +86,7 @@ function pointerWentThrough(isPress) {
 window.tildeDraw = {
   setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect, setSnapFrame,
   shapesOf, clear, newShapes, takeNewShapes, remove, takesPointer, pointerWentThrough,
-  setWireframe, setWireframeLook, showPreview, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
+  setWireframe, setWireframeLook, showPreview, undoCanvas, redoCanvas, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 
 // Tilde takes its own keys before the page; it must know when a text field here has the

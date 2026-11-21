@@ -8,7 +8,7 @@ import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
 import { api, taken, live, changeElements, isTextField } from "../scene.js";
 import { selection, setKindIcons, deleteComponent, hideHandles } from "./chip.js";
 import { componentAt, kindNames, wireframeElements } from "./components.js";
-import { clearHistory, undoWireframe, redoWireframe } from "./history.js";
+import { clearHistory, record, undoWireframe, redoWireframe } from "./history.js";
 import { commented, closeComment } from "./comment.js";
 import { labelled, endLabel } from "./labels.js";
 import { stopAdjusting } from "./pointer.js";
@@ -62,7 +62,7 @@ export function restoreWireframe({ shapes, origin: [left, top] }) {
   const elements = shapes.filter((shape) => kindNames[shape.type] || shape.type === "text").flatMap((shape) => {
     const [x, y, width, height] = shape.rect;
     if (shape.type === "text") {
-      return convertToExcalidrawElements([{ type: "text", x: x + left, y: y + top, text: shape.text, strokeColor: textColor, fontFamily: 2 }]);
+      return convertToExcalidrawElements([{ type: "text", x: x + left, y: y + top, text: shape.text, strokeColor: textColor, fontFamily: 2, customData: { tildeOn: null } }]);
     }
     const data = Object.fromEntries(["label", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
     return wireframeElements(shape.type, { x: x + left, y: y + top, width, height }, data);
@@ -78,6 +78,9 @@ export function attachTexts() {
   const typing = api.getAppState().editingTextElement?.id;
   const loose = live().filter((element) => element.type === "text" && element.id !== typing && !taken.has(element.id) && !("tildeOn" in (element.customData ?? {})));
   if (!loose.length) return;
+  // A new text is one change for Undo.
+  const looseIDs = new Set(loose.map((element) => element.id));
+  record(api.getSceneElementsIncludingDeleted().filter((element) => !looseIDs.has(element.id)));
   changeElements(loose.map((element) => element.id), (text) => {
     const component = componentAt(text.x, text.y);
     if (!component) return { customData: { ...text.customData, tildeOn: null } };

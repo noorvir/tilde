@@ -2,8 +2,9 @@
 // Excalidraw actions that Tilde keeps. Excalidraw's own menu opens hidden; an item here clicks
 // its item there, so each action runs as Excalidraw runs it.
 
-import { hasGroup } from "./draw-mode.js";
+import { deleteSelected, hasGroup } from "./draw-mode.js";
 import { post } from "./scene.js";
+import { deleteComponent } from "./wireframe/chip.js";
 import { componentAt } from "./wireframe/components.js";
 import { wireframe } from "./wireframe/mode.js";
 import { openComponentComment } from "./wireframe/pointer.js";
@@ -64,8 +65,10 @@ function item(name, label, icon, shortcut) {
   return `<div data-item="${name}"><svg viewBox="0 0 16 16">${icons[icon]}</svg><span>${label}</span>${keys}</div>`;
 }
 
+const componentHere = () => componentAt(openedAt.x, openedAt.y);
+
 function canComment() {
-  if (wireframe) return Boolean(componentAt(openedAt.x, openedAt.y));
+  if (wireframe) return Boolean(componentHere());
   return hasGroup;
 }
 
@@ -76,6 +79,11 @@ export function contextMenuRequested(event) {
     const shown = new Map([...document.querySelectorAll(".excalidraw .context-menu li[data-testid]")].map((entry) => [
       entry.dataset.testid, entry.querySelector(".context-menu-item__shortcut")?.textContent ?? "",
     ]));
+    // Delete in wireframe mode is for the component under the pointer.
+    if (wireframe) {
+      shown.delete("deleteSelectedElements");
+      if (componentHere()) shown.set("deleteSelectedElements", "Delete");
+    }
     const groups = kept
       .map((group) => group.filter(([name]) => shown.has(name)).map(([name, label, icon]) => item(name, label, icon, macShortcut(shown.get(name)))))
       .filter((group) => group.length);
@@ -101,6 +109,12 @@ function close() {
 
 function run(name) {
   close();
+  if (name === "deleteSelectedElements") {
+    const component = wireframe && componentHere();
+    if (component) deleteComponent(component.groupIds[0]);
+    else if (!wireframe) deleteSelected();
+    return;
+  }
   if (name !== "addComment") {
     document.querySelector(`.excalidraw .context-menu li[data-testid="${name}"]`)?.click();
     return;
@@ -109,7 +123,7 @@ function run(name) {
     post("addComment");
     return;
   }
-  const component = componentAt(openedAt.x, openedAt.y);
+  const component = componentHere();
   if (component) openComponentComment(component.groupIds[0]);
 }
 

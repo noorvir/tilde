@@ -306,7 +306,7 @@ struct WireframeCanvasTests {
         #expect(try await rects() == [grown])
 
         // Past the opposite corner, from the original size.
-        try await page.draw("undoWireframe()")
+        try await page.draw("undoCanvas()")
         try await page.hover(inside)
         let opposite = CGPoint(x: 640 - from.x, y: 420 - from.y)
         try await page.drag(from: from, to: CGPoint(x: opposite.x + (opposite.x - from.x), y: opposite.y + (opposite.y - from.y)))
@@ -430,7 +430,7 @@ struct WireframeCanvasTests {
         #expect(try await rects() == [[200, 150, 240, 120], [204, 274, 232, 120]])
 
         // Without ⌘ the same drag snaps to them.
-        try await page.draw("undoWireframe()")
+        try await page.draw("undoCanvas()")
         try await page.drag(from: CGPoint(x: 204, y: 274), to: CGPoint(x: 436, y: 394))
         #expect(try await rects() == [[200, 150, 240, 120], [200, 270, 240, 124]])
     }
@@ -562,21 +562,21 @@ struct WireframeCanvasTests {
         try await page.press("z", meta: true)
         #expect(try await page.shapes().map(\.label) == [nil])
         #expect(try await rects() == [[260, 190, 240, 120]])
-        try await page.draw("undoWireframe()")
+        try await page.draw("undoCanvas()")
         #expect(try await rects() == [[200, 150, 240, 120]])
-        try await page.draw("undoWireframe()")
+        try await page.draw("undoCanvas()")
         #expect(try await page.shapes().isEmpty)
         // Nothing is left to undo.
-        try await page.draw("undoWireframe()")
+        try await page.draw("undoCanvas()")
         #expect(try await page.shapes().isEmpty)
 
         try await page.press("z", meta: true, shift: true)
         try await page.press("z", meta: true, shift: true)
-        try await page.draw("redoWireframe()")
+        try await page.draw("redoCanvas()")
         let redone = try await page.shapes()
         #expect(redone.map(\.label) == ["Plan"])
         #expect(redone.map(\.rect) == [[260, 190, 240, 120]])
-        try await page.draw("redoWireframe()")
+        try await page.draw("redoCanvas()")
         #expect(try await page.shapes().isEmpty)
     }
 
@@ -745,7 +745,7 @@ struct WireframeCanvasTests {
         try await page.draw("setWireframeWindow([130, 120, 900, 700])")
         #expect(try await rects() == [[290, 210, 240, 120]])
 
-        try await page.draw("undoWireframe()")
+        try await page.draw("undoCanvas()")
         #expect(try await rects() == [[230, 170, 240, 120]])
     }
 

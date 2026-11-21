@@ -4,7 +4,7 @@
 
 import { cursorRing, isSelectMode, setSelectMode } from "./cursor.js";
 import { ringStyle } from "./rings.js";
-import { api, taken, post, postPointer, live, changeElements } from "./scene.js";
+import { api, taken, post, postPointer, live, changeElements, isTextField } from "./scene.js";
 import { isHandle } from "./wireframe/chip.js";
 import { wireframe } from "./wireframe/mode.js";
 import { isOverComponent, isResent, wireframeReleased } from "./wireframe/pointer.js";
@@ -88,6 +88,26 @@ export function setColor(color) {
 export function setNoTool() {
   cancelClickArrow();
   setSelectMode(true);
+}
+
+// Delete and Backspace in Draw: the selected shapes, with their text, as one change that Undo
+// brings back. The shapes of saved notes stay.
+export function deleteSelected() {
+  const selected = api.getAppState().selectedElementIds;
+  const ids = new Set(live().filter((element) => selected[element.id] && !taken.has(element.id)).map((element) => element.id));
+  if (!ids.size) return;
+  const elements = api.getSceneElementsIncludingDeleted().map((element) => {
+    if (!ids.has(element.id) && !ids.has(element.containerId)) return element;
+    return { ...element, isDeleted: true, version: element.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) };
+  });
+  api.updateScene({ elements, appState: { selectedElementIds: {} }, captureUpdate: "IMMEDIATELY" });
+}
+
+export function deleteKey(event) {
+  if (wireframe || isTextField(event.target) || (event.key !== "Backspace" && event.key !== "Delete")) return;
+  event.stopPropagation();
+  event.preventDefault();
+  deleteSelected();
 }
 
 export function deselect() {

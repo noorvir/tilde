@@ -376,19 +376,11 @@ final class AnnotationController: ObservableObject {
                 drawing.putToolDown()
             }
             updateOverlayInput()
-        // A wireframe keeps its own undo history, of every change; Draw undoes a shape's note.
+        // The canvas's last change, in Draw and Wireframe; never a saved note.
         case .undoShape:
-            if isWireframe {
-                wireframe.undo()
-            } else {
-                undoLastDrawing()
-            }
+            drawing.panel.undoCanvas()
         case .redoShape:
-            if isWireframe {
-                wireframe.redo()
-            } else {
-                redoLastDrawing()
-            }
+            drawing.panel.redoCanvas()
         case .openShapeComment:
             Task { await addDrawingNote() }
         case .takeWireframe:
@@ -1132,25 +1124,6 @@ final class AnnotationController: ObservableObject {
                 return
             }
             commentBox.follow(pending)
-        }
-    }
-
-    /// A note of a drawing can be undone in draw mode, and come back.
-    private func undoLastDrawing() {
-        let isDrawingNote: (Draft) -> Bool = { draft in
-            if case .drawing = draft.annotation.target {
-                return true
-            }
-            return false
-        }
-        if let index = drafts.lastIndex(where: isDrawingNote) {
-            drawing.keepUndone(drafts.remove(at: index))
-        }
-    }
-
-    private func redoLastDrawing() {
-        if let draft = drawing.takeUndone() {
-            drafts.append(draft)
         }
     }
 

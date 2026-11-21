@@ -194,7 +194,7 @@ struct HUDView: View {
         Group {
             tools()
             HUDBarDivider()
-            undoRedo()
+            undoRedo
         }
         .disabled(controller.isDrawingPaused)
         Spacer(minLength: 0)
@@ -212,7 +212,7 @@ struct HUDView: View {
             HStack(spacing: HUDAccessory.size.scaled(4)) {
                 wireframeTools
                 HUDBarDivider()
-                undoRedo(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"])
+                undoRedo
             }
             .opacity(isStyling ? 0 : 1)
             .allowsHitTesting(!isStyling)
@@ -241,11 +241,11 @@ struct HUDView: View {
     }
 
     @ViewBuilder
-    private func undoRedo(undoKeys: [String] = [], redoKeys: [String] = []) -> some View {
-        HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: undoKeys, help: "Undo") {
+    private var undoRedo: some View {
+        HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: ["⌘Z"], help: "Undo") {
             controller.dispatch(.undoDrawing)
         }
-        HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: redoKeys, help: "Redo") {
+        HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: ["⇧⌘Z"], help: "Redo") {
             controller.dispatch(.redoDrawing)
         }
     }

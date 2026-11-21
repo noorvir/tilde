@@ -380,6 +380,14 @@ private final class CanvasPanel: FloatingPanel {
     private var heldEvents: [NSEvent]?
     private var isPressTaken = false
 
+    /// ⌘ keys come here before the main menu, whose Undo would go to the page.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command), !isTyping, onKey(event) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, !isTyping, onKey(event) {
             return

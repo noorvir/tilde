@@ -145,13 +145,14 @@ final class DrawingPanel {
         active?.wireframe = json
     }
 
-    /// Undo and redo of wireframe mode's changes, which the canvas keeps.
-    func undoWireframe() {
-        active?.run("undoWireframe()")
+    /// Undo and redo of the canvas's changes, in Draw and Wireframe. Saved notes are not in its
+    /// history.
+    func undoCanvas() {
+        active?.run("undoCanvas()")
     }
 
-    func redoWireframe() {
-        active?.run("redoWireframe()")
+    func redoCanvas() {
+        active?.run("redoCanvas()")
     }
 
     /// Lines for wireframe shapes to snap to, in Quartz screen coordinates.
