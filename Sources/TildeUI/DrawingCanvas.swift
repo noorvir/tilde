@@ -57,6 +57,9 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         }
     }
 
+    /// Draw has shapes that no comment has taken yet.
+    private(set) var hasGroup = false
+
     var windowNumber: Int? {
         panel?.windowNumber
     }
@@ -155,6 +158,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         underBlur = nil
         isReady = false
         isLoaded = false
+        hasGroup = false
     }
 
     func setTool(_ tool: String) {
@@ -208,8 +212,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             }
         case "escape":
             owner?.onEscape()
-        case "shape":
-            owner?.onShape()
+        case "group", "noGroup":
+            hasGroup = text == "group"
         case "edited":
             owner?.onEdited()
         case "clickAway":

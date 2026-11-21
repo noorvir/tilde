@@ -1,5 +1,6 @@
-// Draw mode: the tool, a shape that is edited while its comment is open, the arrow that a
-// click starts, and snapping to the element under the pointer.
+// Draw mode: the tool, the group of shapes that one comment gets (Esc ends it), the shapes
+// that are edited while their comment is open, the arrow that a click starts, and snapping to
+// the element under the pointer.
 
 import { cursorRing, isSelectMode, setSelectMode } from "./cursor.js";
 import { ringStyle } from "./rings.js";
@@ -12,16 +13,18 @@ import { isWireframeSnapped } from "./wireframe/snap.js";
 let drawingTool = "arrow";
 // The shapes being edited while their comment is open; nothing else can change meanwhile.
 export let editing = null;
-let isWaitingForEdit = false;
 let isPressOnShape = false;
 let pressAt = null;
+// The elements that were there at the press: the others are what the press drew.
+let idsAtPress = new Set();
 // An arrow started by a click, whose end follows the pointer until the next click.
 export let clickArrow = null;
 
 export function cancelClickArrow() {
   if (!clickArrow) return;
+  const { id } = clickArrow;
   clickArrow = null;
-  changeElements(live().filter((element) => !taken.has(element.id)).map((element) => element.id), () => ({ isDeleted: true }));
+  changeElements([id], () => ({ isDeleted: true }));
   api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
 }
 
@@ -39,7 +42,6 @@ export function setTool(type) {
 
 // Only these shapes can change, with the handles of the selection tool, and no shape can be drawn.
 export function editShapes(ids) {
-  isWaitingForEdit = false;
   editing = new Set(ids);
   changeElements(live().filter((element) => !editing.has(element.id)).map((element) => element.id), () => ({ locked: true }));
   api.setActiveTool({ type: "selection" });
@@ -47,7 +49,6 @@ export function editShapes(ids) {
 }
 
 export function endEditing() {
-  isWaitingForEdit = false;
   if (!editing) return;
   editing = null;
   changeElements(live().map((element) => element.id), () => ({ locked: false }));
@@ -58,7 +59,20 @@ export function endEditing() {
 // The session ended: no shape is edited.
 export function resetEditing() {
   editing = null;
-  isWaitingForEdit = false;
+}
+
+// Whether Draw has shapes that no comment has taken yet: Esc then ends the group and opens
+// its comment. Tilde gets each change.
+let hasGroup = false;
+
+export function groupChanged() {
+  if (!api) return;
+  const appState = api.getAppState();
+  const unfinished = new Set([clickArrow?.id, appState.newElement?.id, appState.multiElement?.id, appState.editingTextElement?.id]);
+  const isGroup = !wireframe && !editing && live().some((element) => !taken.has(element.id) && !unfinished.has(element.id));
+  if (isGroup === hasGroup) return;
+  hasGroup = isGroup;
+  post(isGroup ? "group" : "noGroup");
 }
 
 // Draw's colour, which wireframe mode gives back when it ends.
@@ -152,7 +166,7 @@ export function pointerLeft() {
 
 function selectEdited() {
   const element = live().find((candidate) => editing.has(candidate.id));
-  const selectedLinearElement = element?.type === "arrow" ? new globalThis.TildeLinearElementEditor(element) : null;
+  const selectedLinearElement = element?.type === "arrow" && editing.size === 1 ? new globalThis.TildeLinearElementEditor(element) : null;
   const selectedElementIds = Object.fromEntries([...editing].map((id) => [id, true]));
   api.updateScene({ appState: { selectedElementIds, selectedLinearElement }, captureUpdate: "NEVER" });
 }
@@ -183,8 +197,9 @@ export function pointerPressed(event) {
   cursorRing.style.display = "none";
   startSnap = snapPoint(event.clientX, event.clientY, event);
   pressAt = { x: event.clientX, y: event.clientY };
+  idsAtPress = new Set(api?.getSceneElementsIncludingDeleted().map((element) => element.id));
   isPressOnShape = true;
-  if (isWaitingForEdit || (editing && !isOnEditedShape(event.clientX, event.clientY))) {
+  if (editing && !isOnEditedShape(event.clientX, event.clientY)) {
     isPressOnShape = false;
     event.stopPropagation();
     event.preventDefault();
@@ -240,8 +255,6 @@ function finishClickArrow(element, event) {
   clickArrow = null;
   changeElements([element.id], () => linePoints(from, to));
   api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
-  isWaitingForEdit = true;
-  post("shape");
 }
 
 // Excalidraw applies a drag's moves once a frame, and loses a move that came while the frame
@@ -260,7 +273,8 @@ export function moveToRelease(event) {
   }));
 }
 
-// The release: Excalidraw has finished a shape, or the edit of one.
+// The release: Excalidraw has finished a shape, or the edit of one. A new shape joins the group,
+// and the tool stays for the next one.
 export function pointerReleased(event) {
   isPressed = false;
   if (wireframe) {
@@ -269,28 +283,31 @@ export function pointerReleased(event) {
   }
   if (!isPressOnShape) return;
   ring.style.display = "none";
+  // A click with the text tool opens Excalidraw's text field, which Esc or a click away ends.
+  if (!editing && api.getAppState().activeTool.type === "text") return;
   // After Excalidraw has finished the shape.
   setTimeout(() => {
-    const fresh = live().filter((element) => !taken.has(element.id));
-    if (clickArrow && fresh.length) {
-      finishClickArrow(fresh[fresh.length - 1], event);
+    const created = live().filter((element) => !taken.has(element.id) && !idsAtPress.has(element.id));
+    if (clickArrow) {
+      const arrow = live().find((element) => element.id === clickArrow.id);
+      if (arrow) finishClickArrow(arrow, event);
+      else clickArrow = null;
       return;
     }
     const isClick = Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) < 4;
-    if (fresh.length && isClick && api.getAppState().activeTool.type === "arrow") {
-      clickArrow = { start: startSnap };
+    if (created.length && isClick && api.getAppState().activeTool.type === "arrow") {
+      clickArrow = { start: startSnap, id: created[created.length - 1].id };
       return;
     }
     // With the other tools, a click without a drag draws nothing.
-    if (fresh.length && isClick) {
-      changeElements(fresh.map((element) => element.id), () => ({ isDeleted: true }));
+    if (created.length && isClick) {
+      changeElements(created.map((element) => element.id), () => ({ isDeleted: true }));
       api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
       return;
     }
-    if (fresh.length) {
-      snapNewShape(fresh[fresh.length - 1], event);
-      isWaitingForEdit = true;
-      post("shape");
+    if (created.length) {
+      snapNewShape(created[created.length - 1], event);
+      groupChanged();
     } else if (api.getAppState().activeTool.type === "selection") {
       snapSelectedArrow(event);
       // A press beside the handles clears the selection; the shape stays in edit mode.

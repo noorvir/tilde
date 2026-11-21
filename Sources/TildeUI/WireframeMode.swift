@@ -40,19 +40,16 @@ final class WireframeMode: ObservableObject {
         let screen: CGRect?
     }
 
-    /// Card, Rectangle and Circle stand in for any component not in the list.
+    /// Rectangle and Circle stand in for any component not in the list.
     nonisolated static let tools = [
         (tool: "section", symbol: "rectangle.split.3x1", key: "s", help: "Section"),
-        (tool: "card", symbol: "square.text.square", key: "c", help: "Card"),
-        (tool: "table", symbol: "tablecells", key: "t", help: "Table"),
-        (tool: "button", symbol: "capsule", key: "b", help: "Button"),
-        (tool: "dropdown", symbol: "chevron.down.square", key: "d", help: "Dropdown"),
-        (tool: "list", symbol: "list.bullet.rectangle", key: "l", help: "List"),
         (tool: "rectangle", symbol: "rectangle", key: "r", help: "Rectangle"),
+        (tool: "button", symbol: "capsule", key: "b", help: "Button"),
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
+        (tool: "text", symbol: "textformat", key: "t", help: "Text"),
     ]
     /// The tool of the first start, before one was chosen.
-    nonisolated static let firstTool = "card"
+    nonisolated static let firstTool = "rectangle"
     /// The chip of a wireframe's note.
     nonisolated static let chip = "Wireframe"
 

@@ -273,7 +273,6 @@ final class AnnotationController: ObservableObject {
         canvas.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         canvas.isOverTildeWindow = { [weak self] point in self?.picker.windows.isOverTildeWindow(point) == true }
         canvas.onEscape = { [weak self] in self?.escapePressed() }
-        canvas.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
         canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
         canvas.onClickAway = { [weak self] in
             self?.dispatch(.clickAway)
@@ -482,6 +481,11 @@ final class AnnotationController: ObservableObject {
         // In the picker, Esc first goes from an app's windows back to the apps.
         if isSourcePickerOpen, sourcePicker.openApp != nil {
             sourcePicker.openApp = nil
+            return
+        }
+        // Esc ends a group of shapes and opens its comment.
+        if drawing.panel.hasGroup, accepts(.shapeFinished) {
+            dispatch(.shapeFinished)
             return
         }
         dispatch(.escape)

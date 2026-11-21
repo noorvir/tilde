@@ -2,7 +2,7 @@
 // must know of.
 
 import { isSelectMode, setOverLabel } from "./cursor.js";
-import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft } from "./draw-mode.js";
+import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft, groupChanged } from "./draw-mode.js";
 import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
@@ -23,6 +23,7 @@ function clear() {
   taken.clear();
   api.updateScene({ elements: [], captureUpdate: "NEVER" });
   api.history.clear();
+  groupChanged();
 }
 
 // The shapes drawn and not taken yet, as `takeNewShapes` gives them; they stay as they are.
@@ -40,6 +41,7 @@ function takeNewShapes() {
   clearHistory();
   // Their empty tags go before the pictures are taken.
   drawLook();
+  groupChanged();
   return JSON.stringify(elements.map(describe));
 }
 
@@ -95,7 +97,7 @@ export function swallowToolKey(event) {
 export function escapePressed(event) {
   if (event.key !== "Escape") return;
   // Excalidraw ends the text being typed.
-  if (wireframe && isTextField(event.target)) return;
+  if (isTextField(event.target)) return;
   event.preventDefault();
   // In wireframe mode Esc steps back one level: the chip's menu, then the selection; with
   // nothing selected it reaches Tilde, which puts the tool down.

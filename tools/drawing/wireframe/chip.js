@@ -195,7 +195,8 @@ export function showHandles() {
   placeGrip(frame);
 
   if (selection.menu === "kinds") {
-    const items = Object.entries(kindNames).map(([value, name]) => {
+    // The bar's kinds; an older note's kind stays in the list while it has it.
+    const items = Object.entries(kindNames).filter(([value]) => kindIcons[value] || value === kind).map(([value, name]) => {
       const background = value === kind ? "background:rgba(255,255,255,.2);" : "";
       const icon = kindIcons[value] ? `<img src="${kindIcons[value]}" style="max-width:16px;max-height:14px;pointer-events:none">` : "";
       const iconSlot = `<span style="display:flex;justify-content:center;width:18px">${icon}</span>`;

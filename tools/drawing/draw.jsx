@@ -27,7 +27,7 @@ import { createRoot } from "react-dom/client";
 import { post, setAPI } from "./scene.js";
 import { escapePressed, focusChanged, swallowToolKey } from "./bridge.js";
 import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
-import { blockPressWithNoTool, moveToRelease, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
+import { blockPressWithNoTool, groupChanged, moveToRelease, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
 import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOutline, typeMenu } from "./wireframe/chip.js";
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
@@ -75,6 +75,8 @@ const initialData = {
     currentItemStrokeColor: "#2F76FF",
     currentItemRoughness: 0,
     currentItemStrokeWidth: 2,
+    // Helvetica, for text.
+    currentItemFontFamily: 2,
     activeTool: { type: "arrow", locked: true },
   },
 };
@@ -82,7 +84,10 @@ const initialData = {
 createRoot(document.getElementById("root")).render(
   <Excalidraw
     initialData={initialData}
-    onChange={drawLook}
+    onChange={() => {
+      drawLook();
+      groupChanged();
+    }}
     excalidrawAPI={(value) => {
       setAPI(value);
       post("ready");

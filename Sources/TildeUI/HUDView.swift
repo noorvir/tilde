@@ -308,6 +308,7 @@ struct HUDView: View {
         (tool: "rectangle", symbol: "rectangle", help: "Rectangle"),
         (tool: "ellipse", symbol: "circle", help: "Circle"),
         (tool: "freedraw", symbol: "scribble", help: "Freehand"),
+        (tool: "text", symbol: "textformat", help: "Text"),
     ]
 
     nonisolated static let drawingColors = [

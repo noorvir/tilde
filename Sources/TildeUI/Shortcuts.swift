@@ -155,6 +155,7 @@ final class ShortcutStore: ObservableObject {
         case rectangleTool
         case ellipseTool
         case penTool
+        case textTool
         case color1
         case color2
         case color3
@@ -188,7 +189,7 @@ final class ShortcutStore: ObservableObject {
             switch self {
             case .startAnnotation, .togglePause: .global
             case .annotationMode, .recordingMode, .drawingMode, .pauseOrResume: .modes
-            case .arrowTool, .rectangleTool, .ellipseTool, .penTool: .drawingTools
+            case .arrowTool, .rectangleTool, .ellipseTool, .penTool, .textTool: .drawingTools
             case .color1, .color2, .color3, .color4, .color5, .color6: .colors
             }
         }
@@ -200,6 +201,7 @@ final class ShortcutStore: ObservableObject {
             case .rectangleTool: "rectangle"
             case .ellipseTool: "ellipse"
             case .penTool: "freedraw"
+            case .textTool: "text"
             default: nil
             }
         }
@@ -222,6 +224,7 @@ final class ShortcutStore: ObservableObject {
             case .rectangleTool: "Rectangle"
             case .ellipseTool: "Circle"
             case .penTool: "Freehand"
+            case .textTool: "Text"
             default: drawingColor?.name ?? rawValue
             }
         }
@@ -234,7 +237,7 @@ final class ShortcutStore: ObservableObject {
             case .recordingMode: "Into or out of recording mode, as the record toggle"
             case .drawingMode: "Starts drawing, as Draw; Esc puts the tool down"
             case .pauseOrResume: "Pauses or resumes, or records in recording mode"
-            case .arrowTool, .rectangleTool, .ellipseTool, .penTool: "Draws with this tool"
+            case .arrowTool, .rectangleTool, .ellipseTool, .penTool, .textTool: "Draws with this tool"
             default: "Draws in this colour"
             }
         }
@@ -250,6 +253,7 @@ final class ShortcutStore: ObservableObject {
             case .pauseOrResume: Self.key(kVK_Space, "Space")
             case .ellipseTool: Self.key(kVK_ANSI_O, "O")
             case .penTool: Self.key(kVK_ANSI_P, "P")
+            case .textTool: Self.key(kVK_ANSI_T, "T")
             case .color1: Self.key(kVK_ANSI_1, "1")
             case .color2: Self.key(kVK_ANSI_2, "2")
             case .color3: Self.key(kVK_ANSI_3, "3")

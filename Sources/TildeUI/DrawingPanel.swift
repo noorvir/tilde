@@ -19,7 +19,6 @@ final class DrawingPanel {
     private var releaseTask: Task<Void, Never>?
     private var isOverLabel = false
     var onEscape: () -> Void = {}
-    var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
     var onClickAway: () -> Void = {}
     /// A press, in Quartz screen coordinates. True: it was for something else, such as a label.
@@ -54,6 +53,11 @@ final class DrawingPanel {
         }
         self.look = look
         canvases.forEach { $0.look = look }
+    }
+
+    /// Draw has shapes that no comment has taken yet: Esc ends the group and opens its comment.
+    var hasGroup: Bool {
+        active?.hasGroup ?? false
     }
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
