@@ -120,11 +120,16 @@ export function setSnapFrame(frame) {
   snapFrame = frame;
 }
 
-// In Draw with no tool, the canvas takes no press, so nothing draws.
+// In Draw with no tool nothing draws: a press on a shape selects it, and ⇧ adds it to the selection.
 export function blockPressWithNoTool(event) {
   if (!isSelectMode || wireframe) return;
   event.stopImmediatePropagation();
   event.preventDefault();
+  if (event.type !== "pointerdown") return;
+  const shape = shapeAt(event.clientX, event.clientY);
+  const selectedElementIds = event.shiftKey ? { ...api.getAppState().selectedElementIds } : {};
+  if (shape) selectedElementIds[shape.id] = true;
+  api.updateScene({ appState: { selectedElementIds }, captureUpdate: "NEVER" });
 }
 
 // Snapping: to the corners, edge midpoints and centre of the element under the pointer.
@@ -197,18 +202,25 @@ function distanceToSegment(x, y, [ax, ay], [bx, by]) {
   return Math.hypot(x - ax - along * (bx - ax), y - ay - along * (by - ay));
 }
 
+// Whether a point is on a shape, within `reach`: near an arrow's line, or in a box around another shape.
+function isOnShape(element, x, y, reach) {
+  if (element.type === "arrow") {
+    const points = element.points.map(([px, py]) => [element.x + px, element.y + py]);
+    return points.slice(1).some((point, index) => distanceToSegment(x, y, points[index], point) <= reach);
+  }
+  const xs = element.points?.map(([px]) => element.x + px) ?? [element.x, element.x + element.width];
+  const ys = element.points?.map(([, py]) => element.y + py) ?? [element.y, element.y + element.height];
+  return x >= Math.min(...xs) - reach && x <= Math.max(...xs) + reach && y >= Math.min(...ys) - reach && y <= Math.max(...ys) + reach;
+}
+
 // Whether a press at this point belongs to the shapes being edited, with room for their handles.
 function isOnEditedShape(x, y) {
-  const reach = 18;
-  return live().filter((element) => editing.has(element.id)).some((element) => {
-    if (element.type === "arrow") {
-      const points = element.points.map(([px, py]) => [element.x + px, element.y + py]);
-      return points.slice(1).some((point, index) => distanceToSegment(x, y, points[index], point) <= reach);
-    }
-    const xs = element.points?.map(([px]) => element.x + px) ?? [element.x, element.x + element.width];
-    const ys = element.points?.map(([, py]) => element.y + py) ?? [element.y, element.y + element.height];
-    return x >= Math.min(...xs) - reach && x <= Math.max(...xs) + reach && y >= Math.min(...ys) - reach && y <= Math.max(...ys) + reach;
-  });
+  return live().some((element) => editing.has(element.id) && isOnShape(element, x, y, 18));
+}
+
+// The shape not taken yet under a point, the top one, for a click with no tool.
+export function shapeAt(x, y) {
+  return live().filter((element) => !taken.has(element.id) && isOnShape(element, x, y, 8)).pop();
 }
 
 // Excalidraw puts the text of a click inside the shape under it; a label starts at the click

@@ -2,7 +2,7 @@
 // must know of.
 
 import { isSelectMode, setOverLabel } from "./cursor.js";
-import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft, groupChanged } from "./draw-mode.js";
+import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft, groupChanged, shapeAt } from "./draw-mode.js";
 import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
@@ -69,17 +69,20 @@ function setSnapTargetsHere(targets) {
 }
 
 // Whether a press at this point, in points from the top left of the canvas, is for the page.
-// With a tool, every press is; with none, Draw takes no press, and wireframe mode only those on
-// its components.
+// With a tool, every press is; with none, wireframe mode takes only those on its components,
+// and Draw those on a shape, to select it.
 function takesPointer(x, y) {
   if (!isSelectMode) return true;
-  return Boolean(wireframe) && wireframeTakesPointer(x, y);
+  if (wireframe) return wireframeTakesPointer(x, y);
+  return Boolean(shapeAt(x, y));
 }
 
 // The pointer went through the canvas to a window behind, such as one of Tilde's own: the page
 // gets no more moves, so the tool's ring does not stay where the pointer left.
 function pointerWentThrough(isPress) {
   pointerLeft();
+  // A click beside the shapes clears Draw's selection.
+  if (isPress && !wireframe) deselect();
   wireframePointerWentThrough(isPress);
 }
 
