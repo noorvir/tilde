@@ -219,22 +219,53 @@ function boundsOf(element) {
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
+// The wings of a line's arrowheads, as Excalidraw draws them: about 25 pt back from the tip,
+// 20° to each side, shorter on a short last segment.
+function arrowheadPoints(element) {
+  const points = element.points.map(([px, py]) => [element.x + px, element.y + py]);
+  const ends = [];
+  if (element.endArrowhead) ends.push([points[points.length - 1], points[points.length - 2]]);
+  if (element.startArrowhead) ends.push([points[0], points[1]]);
+  return ends.flatMap(([tip, before]) => {
+    if (!before) return [];
+    const angle = Math.atan2(before[1] - tip[1], before[0] - tip[0]);
+    const length = Math.min(25, Math.hypot(before[0] - tip[0], before[1] - tip[1]) / 2);
+    return [-1, 1].map((side) => [tip[0] + length * Math.cos(angle + side * Math.PI / 9), tip[1] + length * Math.sin(angle + side * Math.PI / 9)]);
+  });
+}
+
 // Tilde's dashed outline around each selected shape in Draw, so the user sees what Delete
-// removes. Excalidraw outlines a selection only with its selection tool.
+// removes. Excalidraw outlines a selection only with its selection tool. The box holds the
+// drawn shape, with arrowheads and stroke, and a margin; a flat shape gets a minimum size.
 export const selectionLayer = document.createElement("div");
 selectionLayer.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:9997";
 let shownOutlines = "";
 
+function outlineOf(element) {
+  let [left, top, right, bottom] = boundsOf(element);
+  for (const [x, y] of element.type === "arrow" ? arrowheadPoints(element) : []) {
+    left = Math.min(left, x);
+    top = Math.min(top, y);
+    right = Math.max(right, x);
+    bottom = Math.max(bottom, y);
+  }
+  const reach = element.strokeWidth / 2 + 6;
+  const minimum = 28;
+  const centre = [(left + right) / 2, (top + bottom) / 2];
+  const width = Math.max(right - left + 2 * reach, minimum);
+  const height = Math.max(bottom - top + 2 * reach, minimum);
+  return [centre[0] - width / 2, centre[1] - height / 2, width, height].map(Math.round);
+}
+
 export function drawSelection() {
   const selected = !api || wireframe || editing ? {} : api.getAppState().selectedElementIds;
-  const boxes = live().filter((element) => selected[element.id]).map(boundsOf);
+  const boxes = live().filter((element) => selected[element.id]).map(outlineOf);
   const key = JSON.stringify(boxes);
   if (key === shownOutlines) return;
   shownOutlines = key;
-  const margin = 6;
-  selectionLayer.replaceChildren(...boxes.map(([left, top, right, bottom]) => {
+  selectionLayer.replaceChildren(...boxes.map(([left, top, width, height]) => {
     const outline = document.createElement("div");
-    outline.style.cssText = `position:absolute;left:${left - margin}px;top:${top - margin}px;width:${right - left + 2 * margin}px;height:${bottom - top + 2 * margin}px;border:1.5px dashed #2F76FF;border-radius:4px;box-sizing:border-box`;
+    outline.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${width}px;height:${height}px;border:1.5px dashed #2F76FF;border-radius:4px;box-sizing:border-box`;
     return outline;
   }));
 }
