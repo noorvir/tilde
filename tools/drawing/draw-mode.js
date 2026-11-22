@@ -317,7 +317,8 @@ function finishClickArrow(element, event) {
   }
   clickArrow = null;
   changeElements([element.id], () => linePoints(from, to));
-  api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
+  // The new arrow is selected, so Delete removes it.
+  api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: { [element.id]: true } }, captureUpdate: "NEVER" });
 }
 
 // Excalidraw applies a drag's moves once a frame, and loses a move that came while the frame
@@ -370,6 +371,9 @@ export function pointerReleased(event) {
     }
     if (created.length) {
       snapNewShape(created[created.length - 1], event);
+      // The new shape is selected, so Delete removes it.
+      const selectedElementIds = Object.fromEntries(created.map((element) => [element.id, true]));
+      api.updateScene({ appState: { selectedElementIds }, captureUpdate: "NEVER" });
       groupChanged();
     } else if (api.getAppState().activeTool.type === "selection") {
       snapSelectedArrow(event);

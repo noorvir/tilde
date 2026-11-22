@@ -21,8 +21,12 @@ extension AnnotationController {
     }
 
     func mouseMoved(to point: CGPoint) {
-        // In wireframe mode nothing behind the components is highlighted.
-        guard commentBox.pending == nil, previewCard.id == nil, !isWireframe else {
+        // In Draw and Wireframe nothing behind the shapes is highlighted.
+        if isDrawing {
+            hover = nil
+            return
+        }
+        guard commentBox.pending == nil, previewCard.id == nil else {
             return
         }
         hoverPicker.pointerMoved(isOverPanel: isOverPanel(point))

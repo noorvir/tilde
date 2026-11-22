@@ -478,7 +478,9 @@ final class AnnotationController: ObservableObject {
             sourcePicker.openApp = nil
             return
         }
-        if endDrawingGroup() {
+        // In Draw, Esc first puts the tool down and keeps the group; at the root it opens the
+        // group's comment, as ↩ does.
+        if !isWireframe, drawing.isToolDown, endDrawingGroup() {
             return
         }
         dispatch(.escape)
