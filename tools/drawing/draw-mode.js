@@ -208,9 +208,35 @@ function isOnShape(element, x, y, reach) {
     const points = element.points.map(([px, py]) => [element.x + px, element.y + py]);
     return points.slice(1).some((point, index) => distanceToSegment(x, y, points[index], point) <= reach);
   }
+  const [left, top, right, bottom] = boundsOf(element);
+  return x >= left - reach && x <= right + reach && y >= top - reach && y <= bottom + reach;
+}
+
+// Left, top, right and bottom of a shape, with the points of a line.
+function boundsOf(element) {
   const xs = element.points?.map(([px]) => element.x + px) ?? [element.x, element.x + element.width];
   const ys = element.points?.map(([, py]) => element.y + py) ?? [element.y, element.y + element.height];
-  return x >= Math.min(...xs) - reach && x <= Math.max(...xs) + reach && y >= Math.min(...ys) - reach && y <= Math.max(...ys) + reach;
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+// Tilde's dashed outline around each selected shape in Draw, so the user sees what Delete
+// removes. Excalidraw outlines a selection only with its selection tool.
+export const selectionLayer = document.createElement("div");
+selectionLayer.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:9997";
+let shownOutlines = "";
+
+export function drawSelection() {
+  const selected = !api || wireframe || editing ? {} : api.getAppState().selectedElementIds;
+  const boxes = live().filter((element) => selected[element.id]).map(boundsOf);
+  const key = JSON.stringify(boxes);
+  if (key === shownOutlines) return;
+  shownOutlines = key;
+  const margin = 6;
+  selectionLayer.replaceChildren(...boxes.map(([left, top, right, bottom]) => {
+    const outline = document.createElement("div");
+    outline.style.cssText = `position:absolute;left:${left - margin}px;top:${top - margin}px;width:${right - left + 2 * margin}px;height:${bottom - top + 2 * margin}px;border:1.5px dashed #2F76FF;border-radius:4px;box-sizing:border-box`;
+    return outline;
+  }));
 }
 
 // Whether a press at this point belongs to the shapes being edited, with room for their handles.

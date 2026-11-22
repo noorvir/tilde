@@ -28,7 +28,7 @@ import { post, setAPI } from "./scene.js";
 import { contextMenu, contextMenuKey, contextMenuPointer, contextMenuRequested, contextMenuStyle } from "./context-menu.js";
 import { escapePressed, focusChanged, swallowToolKey } from "./bridge.js";
 import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
-import { blockPressWithNoTool, deleteKey, enterEndsText, groupChanged, hideShapesForText, moveToRelease, showShapesAgain, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
+import { blockPressWithNoTool, deleteKey, drawSelection, selectionLayer, enterEndsText, groupChanged, hideShapesForText, moveToRelease, showShapesAgain, pointerLeft, pointerMoved, pointerPressed, pointerReleased, ring } from "./draw-mode.js";
 import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOutline, typeMenu } from "./wireframe/chip.js";
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
@@ -42,7 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.head.appendChild(labelCursor);
   document.body.append(
     lookLayer, labelField, labelStyle, chipStyle, handleOutline, selectionOutline, chip, grip, ...corners, typeMenu, bordersMenu, commentBox, moveCursor, windowOutline,
-    guideX, guideY, guideLabel, snapRing, ring, cursorRing, contextMenu, contextMenuStyle,
+    guideX, guideY, guideLabel, snapRing, ring, cursorRing, selectionLayer, contextMenu, contextMenuStyle,
   );
 });
 
@@ -96,6 +96,7 @@ createRoot(document.getElementById("root")).render(
     initialData={initialData}
     onChange={() => {
       drawLook();
+      drawSelection();
       groupChanged();
       attachTexts();
     }}

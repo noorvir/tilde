@@ -2,7 +2,7 @@
 // must know of.
 
 import { isSelectMode, setOverLabel } from "./cursor.js";
-import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft, groupChanged, shapeAt } from "./draw-mode.js";
+import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft, groupChanged, shapeAt, drawSelection } from "./draw-mode.js";
 import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
@@ -37,6 +37,9 @@ function takeNewShapes() {
   const elements = live().filter((element) => !taken.has(element.id));
   if (!elements.length) return "";
   elements.forEach((element) => taken.add(element.id));
+  // No outline in the note's pictures.
+  api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+  drawSelection();
   api.history.clear();
   clearHistory();
   // Their empty tags go before the pictures are taken.
