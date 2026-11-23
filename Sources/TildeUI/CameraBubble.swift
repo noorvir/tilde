@@ -464,7 +464,7 @@ private struct CameraBubbleBar: View {
                 HUDButton(image: Image(systemName: bubble.shape == .circle ? "circle" : "app"), help: "Shape") {
                     bubble.toggleShape()
                 }
-                menuButton(image: nil, title: String(CameraBubble.sizes[bubble.sizeIndex].name.prefix(1)), menu: .size, help: "Size")
+                sizeButton
                 HUDBarDivider()
                 HUDButton(image: Image(systemName: "xmark"), help: "Turn camera off") {
                     bubble.toggle()
@@ -512,14 +512,63 @@ private struct CameraBubbleBar: View {
         }
     }
 
+    /// The current size's icon; grey while its sizes show.
+    private var sizeButton: some View {
+        let name = CameraBubble.sizes[bubble.sizeIndex].name
+        return Button {
+            bubble.toggleMenu(.size)
+        } label: {
+            SizeIcon(shape: bubble.shape, index: bubble.sizeIndex)
+                .modifier(HUDButtonChrome(isOn: bubble.openMenu == .size))
+        }
+        .buttonStyle(.plain)
+        .tildeTooltip(bubble.openMenu == .size ? nil : "Size: \(name)")
+        .accessibilityLabel("Size")
+        .accessibilityValue(name)
+    }
+
+    /// A row of the sizes, each drawn as the bubble's shape at that size.
     private var sizeMenu: some View {
-        MenuCard(width: 160) {
+        let size = HUDAccessory.size
+        return HStack(spacing: size.scaled(2)) {
             ForEach(CameraBubble.sizes.indices, id: \.self) { index in
-                MenuRow(symbol: "circle.dashed", title: CameraBubble.sizes[index].name, isOn: index == bubble.sizeIndex, width: 160) {
+                let name = CameraBubble.sizes[index].name
+                Button {
                     bubble.chooseSize(index)
+                } label: {
+                    SizeIcon(shape: bubble.shape, index: index)
+                        .modifier(HUDButtonChrome(isOn: index == bubble.sizeIndex))
                 }
+                .buttonStyle(.plain)
+                .tildeTooltip(name)
+                .accessibilityLabel(name)
+                .accessibilityAddTraits(index == bubble.sizeIndex ? .isSelected : [])
             }
         }
+        .padding(size.scaled(4))
+        .hudCard(cornerRadius: size.scaled(12))
+        .environment(\.pillSize, size)
+    }
+}
+
+/// The bubble's shape drawn small, medium or large, in a frame of the largest.
+private struct SizeIcon: View {
+    let shape: CameraBubble.Shape
+    let index: Int
+    @Environment(\.pillSize) private var pillSize
+
+    var body: some View {
+        let side = pillSize.scaled([7, 10, 13][min(index, 2)])
+        let frame = pillSize.scaled(14)
+        Group {
+            if shape == .circle {
+                Circle().strokeBorder(lineWidth: 1.5)
+            } else {
+                RoundedRectangle(cornerRadius: side * 0.28).strokeBorder(lineWidth: 1.5)
+            }
+        }
+        .frame(width: side, height: side)
+        .frame(width: frame, height: frame)
     }
 }
 
