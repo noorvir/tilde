@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import OSLog
 import SwiftUI
 
 /// The camera bubble of recording mode: the user's camera in a round or rounded window, with
@@ -28,6 +29,8 @@ final class CameraBubble: ObservableObject {
     @Published private(set) var openMenu: Menu?
     /// The camera may not be used: the bubble shows a crossed-out camera.
     @Published private(set) var isDenied = false
+    /// A spinner until the first frame; a retry after a failure.
+    @Published fileprivate var cameraState: CameraCapture.State = .starting
 
     private let defaults: UserDefaults
     private let capture = CameraCapture()
@@ -46,6 +49,9 @@ final class CameraBubble: ObservableObject {
         microphoneID = defaults.string(forKey: "CameraMicrophoneID")
         shape = defaults.string(forKey: "CameraShape").flatMap(Shape.init(rawValue:)) ?? .circle
         sizeIndex = min(max(defaults.object(forKey: "CameraSize") as? Int ?? 1, 0), Self.sizes.count - 1)
+        capture.onState = { [weak self] state in
+            self?.cameraState = state
+        }
     }
 
     var side: CGFloat {
@@ -80,7 +86,7 @@ final class CameraBubble: ObservableObject {
         if let cameraID, all.contains(where: { $0.uniqueID == cameraID }) {
             return cameraID
         }
-        return AVCaptureDevice.default(for: .video)?.uniqueID ?? all.first?.uniqueID
+        return CameraCapture.defaultCamera()?.uniqueID ?? all.first?.uniqueID
     }
 
     var currentMicrophoneID: String? {
@@ -236,6 +242,12 @@ final class CameraBubble: ObservableObject {
     private func makeBubblePanel() -> BubblePanel {
         let origin = homeOrigin(on: screen())
         let panel = BubblePanel(frame: NSRect(origin: origin, size: NSSize(width: side, height: side)), movesByDrag: true)
+        panel.onClick = { [weak self] in
+            guard let self, cameraState == .failed else {
+                return
+            }
+            capture.retry()
+        }
         panel.contentView = NSHostingView(rootView: CameraBubbleView(bubble: self, session: capture.session))
         bubblePanel = panel
         return panel
@@ -264,6 +276,8 @@ final class CameraBubble: ObservableObject {
 /// A borderless panel that floats over other apps without taking the keyboard.
 private final class BubblePanel: NSPanel {
     private let movesByDrag: Bool
+    /// A press that did not move the panel.
+    var onClick: () -> Void = {}
 
     init(frame: NSRect, movesByDrag: Bool) {
         self.movesByDrag = movesByDrag
@@ -282,56 +296,263 @@ private final class BubblePanel: NSPanel {
 
     override func sendEvent(_ event: NSEvent) {
         if movesByDrag, event.type == .leftMouseDown {
+            let origin = frame.origin
             performDrag(with: event)
+            if frame.origin == origin {
+                onClick()
+            }
             return
         }
         super.sendEvent(event)
     }
 }
 
-/// Runs the capture session that the bubble shows and records, off the main thread.
-private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
-    let session = AVCaptureSession()
-    private let output = AVCaptureMovieFileOutput()
-    private let queue = DispatchQueue(label: "dev.tilde.camera")
-    /// Waits for the file that `stopRecording` ends; read and written on `queue`.
-    private var finished: CheckedContinuation<URL?, Never>?
+/// Runs the capture session that the bubble shows and records, off the main thread. It
+/// configures the session once per camera, reports when the first frame comes, and retries
+/// once after a runtime error.
+private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    enum State: Equatable {
+        case starting, running, failed
+    }
 
+    let session = AVCaptureSession()
+    /// Called on the main thread.
+    var onState: @MainActor (State) -> Void = { _ in }
+    private let output = AVCaptureMovieFileOutput()
+    /// Only to see the first frame.
+    private let frames = AVCaptureVideoDataOutput()
+    private let queue = DispatchQueue(label: "dev.tilde.camera")
+    private let frameQueue = DispatchQueue(label: "dev.tilde.camera.frames")
+    private static let log = Logger(subsystem: "dev.tilde.app", category: "camera")
+    // Read and written on `queue`, except where noted.
+    /// Waits for the file that `stopRecording` ends.
+    private var finished: CheckedContinuation<URL?, Never>?
+    private var cameraID: String?
+    private var isWanted = false
+    private var retried = false
+    private var started = Date()
+    /// Counts starts, so a late frame or time limit of an earlier start does nothing.
+    private var attempt = 0
+    /// The attempt whose first frame came.
+    private var seenAttempt = -1
+    private var observers: [Any] = []
+
+    /// The built-in camera, else an external one. A Continuity Camera only when chosen: it can
+    /// take seconds to connect, or fail.
+    static func defaultCamera() -> AVCaptureDevice? {
+        let builtIn = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: .unspecified).devices
+        let external = AVCaptureDevice.DiscoverySession(deviceTypes: [.external], mediaType: .video, position: .unspecified).devices
+        return builtIn.first ?? external.first
+    }
+
+    override init() {
+        super.init()
+        frames.alwaysDiscardsLateVideoFrames = true
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: nil) { [weak self] note in
+                let error = note.userInfo?[AVCaptureSessionErrorKey] as? Error
+                self?.queue.async { self?.runtimeError(error) }
+            },
+            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
+                self?.queue.async { self?.logStep("interrupted") }
+            },
+            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
+                self?.queue.async { self?.logStep("interruption ended") }
+            },
+            center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: nil) { [weak self] note in
+                let id = (note.object as? AVCaptureDevice)?.uniqueID
+                self?.queue.async { self?.disconnected(id) }
+            },
+        ]
+    }
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    /// Runs the session on `cameraID`, or the default camera; does nothing while it already
+    /// runs on that camera.
     func start(cameraID: String?) {
-        use(cameraID: cameraID)
         queue.async { [self] in
-            if session.canAddOutput(output) {
-                session.addOutput(output)
-            }
-            if !session.isRunning {
-                session.startRunning()
+            isWanted = true
+            self.cameraID = cameraID
+            retried = false
+            run()
+        }
+    }
+
+    /// Changes the camera; starts it only while the session is wanted.
+    func use(cameraID: String?) {
+        queue.async { [self] in
+            self.cameraID = cameraID
+            if isWanted {
+                retried = false
+                run()
             }
         }
     }
 
-    func use(cameraID: String?) {
-        queue.async { [session] in
-            let device = cameraID.flatMap(AVCaptureDevice.init(uniqueID:)) ?? AVCaptureDevice.default(for: .video)
-            let current = session.inputs.compactMap { ($0 as? AVCaptureDeviceInput)?.device.uniqueID }
-            guard let device, current != [device.uniqueID], let input = try? AVCaptureDeviceInput(device: device) else {
+    /// Tries again after a failure.
+    func retry() {
+        queue.async { [self] in
+            guard isWanted else {
                 return
             }
-            session.beginConfiguration()
-            session.inputs.forEach(session.removeInput)
-            if session.canAddInput(input) {
-                session.addInput(input)
-            }
-            session.commitConfiguration()
+            retried = false
+            restart()
         }
     }
 
     func stop() {
-        queue.async { [session] in
+        queue.async { [self] in
+            isWanted = false
+            attempt += 1
             if session.isRunning {
                 session.stopRunning()
+                logStep("stopped")
             }
         }
     }
+
+    // MARK: Starting, on `queue`
+
+    private func run() {
+        let device = cameraID.flatMap(AVCaptureDevice.init(uniqueID:)) ?? Self.defaultCamera()
+        guard let device else {
+            fail("no camera")
+            return
+        }
+        let current = session.inputs.compactMap { ($0 as? AVCaptureDeviceInput)?.device.uniqueID }
+        if current == [device.uniqueID], session.isRunning {
+            return
+        }
+        begin()
+        logStep("device \(device.localizedName) (\(device.deviceType.rawValue))")
+        if current != [device.uniqueID] {
+            let input: AVCaptureDeviceInput
+            do {
+                input = try AVCaptureDeviceInput(device: device)
+            } catch {
+                fail("input: \(error.localizedDescription)")
+                return
+            }
+            logStep("input made")
+            session.beginConfiguration()
+            session.inputs.forEach(session.removeInput)
+            guard session.canAddInput(input) else {
+                session.commitConfiguration()
+                fail("cannot add input")
+                return
+            }
+            session.addInput(input)
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+            }
+            if session.canAddOutput(frames) {
+                session.addOutput(frames)
+            }
+            session.commitConfiguration()
+        }
+        startRunning()
+    }
+
+    /// Stops and starts the session on its camera again, with a fresh input.
+    private func restart() {
+        if session.isRunning {
+            session.stopRunning()
+        }
+        session.beginConfiguration()
+        session.inputs.forEach(session.removeInput)
+        session.commitConfiguration()
+        run()
+    }
+
+    /// A new attempt: the bubble shows a spinner until the first frame or the time limit.
+    private func begin() {
+        attempt += 1
+        started = Date()
+        let attempt = attempt
+        frames.setSampleBufferDelegate(self, queue: frameQueue)
+        report(.starting)
+        queue.asyncAfter(deadline: .now() + 10) { [self] in
+            if self.attempt == attempt, isWanted, seenAttempt != attempt {
+                fail("no frame after 10 s")
+            }
+        }
+    }
+
+    private func startRunning() {
+        if !session.isRunning {
+            logStep("startRunning begun")
+            session.startRunning()
+            logStep("startRunning done, running: \(session.isRunning)")
+        }
+    }
+
+    private func runtimeError(_ error: Error?) {
+        logStep("runtime error: \(error.map { String(describing: $0) } ?? "unknown")")
+        guard isWanted else {
+            return
+        }
+        if retried {
+            fail("runtime error after retry")
+            return
+        }
+        retried = true
+        restart()
+    }
+
+    private func disconnected(_ id: String?) {
+        let current = session.inputs.compactMap { ($0 as? AVCaptureDeviceInput)?.device.uniqueID }
+        guard let id, current.contains(id) else {
+            return
+        }
+        logStep("camera disconnected")
+        guard isWanted else {
+            return
+        }
+        // The chosen camera is gone: the default one takes its place.
+        if cameraID == id {
+            cameraID = nil
+        }
+        restart()
+    }
+
+    private func fail(_ reason: String) {
+        logStep("failed: \(reason)")
+        attempt += 1
+        report(.failed)
+    }
+
+    private func logStep(_ step: String) {
+        let elapsed = Date().timeIntervalSince(started)
+        Self.log.notice("\(step, privacy: .public) at \(elapsed, format: .fixed(precision: 2), privacy: .public) s")
+    }
+
+    private func report(_ state: State) {
+        let onState = onState
+        Task { @MainActor in
+            onState(state)
+        }
+    }
+
+    // MARK: Frames, on `frameQueue`
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        // No more frames are needed after the first.
+        frames.setSampleBufferDelegate(nil, queue: nil)
+        queue.async { [self] in
+            guard seenAttempt != attempt else {
+                return
+            }
+            seenAttempt = attempt
+            logStep("first frame")
+            report(.running)
+        }
+    }
+
+    // MARK: Recording
 
     func startRecording(to file: URL) {
         queue.async { [self] in
@@ -396,6 +617,29 @@ private struct CameraBubbleView: View {
                     .foregroundStyle(.white.opacity(0.6))
             } else {
                 CameraPreview(session: session)
+                switch bubble.cameraState {
+                case .starting:
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                case .failed:
+                    VStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 16))
+                        Text("Camera did not start")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Click to retry")
+                            .font(.system(size: 10.5))
+                            .opacity(0.7)
+                    }
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.tildeInk)
+                case .running:
+                    EmptyView()
+                }
             }
         }
         .frame(width: bubble.side, height: bubble.side)
