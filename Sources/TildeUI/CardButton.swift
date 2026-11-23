@@ -8,6 +8,8 @@ struct CardButton: View {
     var title: String?
     var isDestructive = false
     var keys: [String] = []
+    /// Working: a spinner in place of the icon; the title and width stay.
+    var isLoading = false
     let help: String
     let action: () -> Void
     @Environment(\.pillSize) private var pillSize
@@ -18,6 +20,12 @@ struct CardButton: View {
             HStack(spacing: pillSize.scaled(5)) {
                 Image(systemName: symbol)
                     .font(.system(size: pillSize.font(12), weight: .semibold))
+                    .opacity(isLoading ? 0 : 1)
+                    .overlay {
+                        if isLoading {
+                            ProgressView().controlSize(.mini)
+                        }
+                    }
                 if let title {
                     Text(title)
                         .font(.system(size: pillSize.font(12.5), weight: .medium))

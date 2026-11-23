@@ -3,24 +3,15 @@ import AVFoundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
-/// What a saved camera video sits on: the clip centred, with rounded corners and a shadow.
+/// What a saved video sits on.
 enum VideoBackground: Equatable {
-    /// The clip as recorded, with no frame.
-    case none
     case gradient(VideoGradient)
-    /// An image the user added, in `VideoBackground.folder`.
+    /// An image the user added, in `VideoBackgrounds.folder`.
     case image(URL)
 
-    /// The user's own backgrounds.
-    static let folder: URL = {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return support.appendingPathComponent("Tilde/Backgrounds", isDirectory: true)
-    }()
-
-    /// As kept in the defaults: "none", "gradient:<name>" or "image:<file name>".
+    /// As kept in the defaults: "gradient:<name>" or "image:<file name>".
     var key: String {
         switch self {
-        case .none: "none"
         case .gradient(let gradient): "gradient:\(gradient.rawValue)"
         case .image(let url): "image:\(url.lastPathComponent)"
         }
@@ -28,16 +19,17 @@ enum VideoBackground: Equatable {
 
     init?(key: String) {
         let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
-        switch (parts.first, parts.count) {
-        case ("none", 1):
-            self = .none
-        case ("gradient", 2):
+        guard parts.count == 2 else {
+            return nil
+        }
+        switch parts[0] {
+        case "gradient":
             guard let gradient = VideoGradient(rawValue: parts[1]) else {
                 return nil
             }
             self = .gradient(gradient)
-        case ("image", 2):
-            let url = Self.folder.appendingPathComponent(parts[1])
+        case "image":
+            let url = VideoBackgrounds.folder.appendingPathComponent(parts[1])
             guard FileManager.default.fileExists(atPath: url.path) else {
                 return nil
             }
@@ -74,82 +66,230 @@ enum VideoGradient: String, CaseIterable {
     }
 }
 
-/// Writes a clip centred on a background, as a 1920 × 1080 MP4 with the clip's sound.
-enum VideoFramer {
-    static let canvas = CGSize(width: 1920, height: 1080)
-    /// The share of the canvas the clip may take on each axis.
-    private static let fill: CGFloat = 0.86
+/// The backgrounds to choose from: the gradients and the user's own images. The last one
+/// chosen is the next clip's.
+@MainActor
+final class VideoBackgrounds: ObservableObject {
+    nonisolated static let folder: URL = {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return support.appendingPathComponent("Tilde/Backgrounds", isDirectory: true)
+    }()
 
-    enum Failure: Error {
-        case noBackground, exportFailed
+    /// The user's images, oldest first.
+    @Published private(set) var images: [URL] = []
+    private(set) var last: VideoBackground
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+        last = defaults.string(forKey: "VideoBackground").flatMap(VideoBackground.init(key:)) ?? .gradient(.dusk)
+        images = Self.saved()
     }
 
-    static func export(_ video: URL, on background: VideoBackground, to file: URL) async throws {
-        guard background != .none else {
-            try FileManager.default.copyItem(at: video, to: file)
-            return
+    func remember(_ background: VideoBackground) {
+        last = background
+        defaults.set(background.key, forKey: "VideoBackground")
+    }
+
+    /// Asks for images and copies them to the folder; returns the last one added.
+    func add() -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose images to put saved videos on"
+        NSApp.activate()
+        guard panel.runModal() == .OK else {
+            return nil
         }
-        guard let image = image(of: background) else {
+        var added: URL?
+        for image in panel.urls {
+            let file = Self.folder.appendingPathComponent("\(UUID().uuidString).\(image.pathExtension)")
+            do {
+                try FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: image, to: file)
+                added = file
+            } catch {
+                continue
+            }
+        }
+        images = Self.saved()
+        return added
+    }
+
+    func remove(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        images = Self.saved()
+        if last == .image(url) {
+            remember(.gradient(.dusk))
+        }
+    }
+
+    private static func saved() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles)) ?? []
+        func created(_ url: URL) -> Date {
+            (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+        }
+        return files.sorted { created($0) < created($1) }
+    }
+}
+
+/// Where a saved video's parts go on its 16:9 canvas, in fractions of the canvas with a
+/// top-left origin, so the preview and the export place them alike at any size.
+struct ClipLayout: Equatable {
+    var background: VideoBackground
+    /// The screen clip's centre.
+    var screenCenter = CGPoint(x: 0.5, y: 0.5)
+    /// 1 fits the clip to the canvas.
+    var screenScale: CGFloat = 0.86
+    /// The camera's centre; nil for a clip without a camera.
+    var cameraCenter: CGPoint?
+    /// The camera's side, in fractions of the canvas height.
+    var cameraSide: CGFloat = 0.28
+    var cameraShape = CameraBubble.Shape.circle
+
+    static let aspect: CGFloat = 16 / 9
+
+    /// The screen clip's and the camera's frames on a canvas of `canvas` size, top-left origin.
+    func frames(in canvas: CGSize, clip: CGSize) -> (screen: CGRect, camera: CGRect?) {
+        let fit = min(canvas.width / max(clip.width, 1), canvas.height / max(clip.height, 1)) * screenScale
+        let size = CGSize(width: clip.width * fit, height: clip.height * fit)
+        let screen = CGRect(
+            x: screenCenter.x * canvas.width - size.width / 2, y: screenCenter.y * canvas.height - size.height / 2, width: size.width, height: size.height
+        )
+        guard let cameraCenter else {
+            return (screen, nil)
+        }
+        let side = cameraSide * canvas.height
+        let camera = CGRect(x: cameraCenter.x * canvas.width - side / 2, y: cameraCenter.y * canvas.height - side / 2, width: side, height: side)
+        return (screen, camera)
+    }
+}
+
+/// Writes a screen clip and its camera on a background, as a 1920 × 1080 MP4 with the clip's
+/// sound.
+enum VideoFramer {
+    static let canvas = CGSize(width: 1920, height: 1080)
+
+    enum Failure: Error {
+        case noBackground, noVideo, exportFailed
+    }
+
+    static func export(_ video: URL, camera: URL?, layout: ClipLayout, to file: URL) async throws {
+        guard let backdrop = image(of: layout.background) else {
             throw Failure.noBackground
         }
-        let backdrop = Backdrop(image: image)
-        let asset = AVURLAsset(url: video)
-        let canvasRect = CGRect(origin: .zero, size: canvas)
-        let composition = AVMutableVideoComposition(asset: asset) { request in
-            let framed = frame(request.sourceImage, on: backdrop.image).cropped(to: canvasRect)
-            request.finish(with: framed, context: nil)
+        let screenAsset = AVURLAsset(url: video)
+        guard let screenTrack = try await screenAsset.loadTracks(withMediaType: .video).first else {
+            throw Failure.noVideo
         }
-        composition.renderSize = canvas
+        let duration = try await screenAsset.load(.duration)
+        let range = CMTimeRange(start: .zero, duration: duration)
+        let composition = AVMutableComposition()
+        guard let screenPart = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw Failure.exportFailed
+        }
+        try screenPart.insertTimeRange(range, of: screenTrack, at: .zero)
+        for audio in try await screenAsset.loadTracks(withMediaType: .audio) {
+            let part = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+            try part?.insertTimeRange(range, of: audio, at: .zero)
+        }
 
-        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+        var cameraPart: AVMutableCompositionTrack?
+        if let camera, layout.cameraCenter != nil {
+            let cameraAsset = AVURLAsset(url: camera)
+            if let cameraTrack = try await cameraAsset.loadTracks(withMediaType: .video).first {
+                let cameraDuration = try await cameraAsset.load(.duration)
+                let part = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+                try part?.insertTimeRange(CMTimeRange(start: .zero, duration: CMTimeMinimum(duration, cameraDuration)), of: cameraTrack, at: .zero)
+                cameraPart = part
+            }
+        }
+
+        let clipSize = try await screenTrack.load(.naturalSize)
+        let instruction = FrameInstruction(
+            timeRange: range, screenID: screenPart.trackID, cameraID: cameraPart?.trackID, layout: layout, clipSize: clipSize, backdrop: backdrop
+        )
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.customVideoCompositorClass = FrameCompositor.self
+        videoComposition.renderSize = canvas
+        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.instructions = [instruction]
+
+        guard let session = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
             throw Failure.exportFailed
         }
         session.outputURL = file
         session.outputFileType = .mp4
-        session.videoComposition = composition
+        session.videoComposition = videoComposition
         await session.export()
         guard session.status == .completed else {
             throw session.error ?? Failure.exportFailed
         }
     }
 
-    /// A CIImage does not change once made, so the frames' handler may share it.
-    private struct Backdrop: @unchecked Sendable {
-        let image: CIImage
+    /// One frame: the background, the screen clip rounded with a shadow, and the camera in
+    /// its shape, mirrored, with a white rim.
+    fileprivate static func frame(_ instruction: FrameInstruction, screen: CIImage, camera: CIImage?) -> CIImage {
+        let layout = instruction.layout
+        let frames = layout.frames(in: canvas, clip: instruction.clipSize)
+        var result = instruction.backdrop
+
+        let screenRect = flipped(frames.screen)
+        let placed = fit(screen, in: screenRect)
+        let radius = min(screenRect.width, screenRect.height) * 0.025
+        result = shadow(of: screenRect, radius: radius).composited(over: result)
+        result = masked(placed, to: screenRect, radius: radius).composited(over: result)
+
+        if let camera, let cameraFrame = frames.camera {
+            let cameraRect = flipped(cameraFrame)
+            let extent = camera.extent
+            let side = min(extent.width, extent.height)
+            let square = camera
+                .cropped(to: CGRect(x: extent.midX - side / 2, y: extent.midY - side / 2, width: side, height: side))
+                .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
+            let cameraRadius = layout.cameraShape == .circle ? cameraRect.width / 2 : cameraRect.width * 0.2
+            let rim: CGFloat = max(2, cameraRect.width * 0.012)
+            let rimRect = cameraRect.insetBy(dx: -rim, dy: -rim)
+            result = shadow(of: rimRect, radius: cameraRadius + rim).composited(over: result)
+            result = solid(rimRect, radius: cameraRadius + rim, color: .white).composited(over: result)
+            result = masked(fit(square, in: cameraRect), to: cameraRect, radius: cameraRadius).composited(over: result)
+        }
+        return result.cropped(to: CGRect(origin: .zero, size: canvas))
     }
 
-    /// The clip scaled to fit, centred, with rounded corners and a soft shadow, on the backdrop.
-    private static func frame(_ clip: CIImage, on backdrop: CIImage) -> CIImage {
-        let source = clip.extent
-        let scale = min(canvas.width * fill / source.width, canvas.height * fill / source.height)
-        let size = CGSize(width: source.width * scale, height: source.height * scale)
-        let rect = CGRect(x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2, width: size.width, height: size.height)
-        let placed = clip
-            .transformed(by: CGAffineTransform(translationX: -source.minX, y: -source.minY))
-            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    /// A top-left rect on the canvas in Core Image's bottom-left coordinates.
+    private static func flipped(_ rect: CGRect) -> CGRect {
+        CGRect(x: rect.minX, y: canvas.height - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    private static func fit(_ image: CIImage, in rect: CGRect) -> CIImage {
+        let extent = image.extent
+        return image
+            .transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+            .transformed(by: CGAffineTransform(scaleX: rect.width / extent.width, y: rect.height / extent.height))
             .transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+    }
 
-        let corners = CIFilter.roundedRectangleGenerator()
-        corners.extent = rect
-        corners.radius = Float(min(rect.width, rect.height) * 0.025)
-        corners.color = .white
-        let mask = corners.outputImage ?? CIImage(color: .white).cropped(to: rect)
+    private static func solid(_ rect: CGRect, radius: CGFloat, color: CIColor) -> CIImage {
+        let shape = CIFilter.roundedRectangleGenerator()
+        shape.extent = rect
+        shape.radius = Float(radius)
+        shape.color = color
+        return shape.outputImage ?? CIImage.empty()
+    }
 
-        let shade = CIFilter.roundedRectangleGenerator()
-        shade.extent = rect.offsetBy(dx: 0, dy: -14)
-        shade.radius = corners.radius
-        shade.color = CIColor(red: 0, green: 0, blue: 0, alpha: 0.45)
-        let shadow = (shade.outputImage ?? CIImage.empty()).applyingGaussianBlur(sigma: 28)
+    private static func masked(_ image: CIImage, to rect: CGRect, radius: CGFloat) -> CIImage {
+        let mask = solid(rect, radius: radius, color: .white)
+        return image.applyingFilter("CIBlendWithAlphaMask", parameters: [kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: mask])
+    }
 
-        let rounded = placed.applyingFilter("CIBlendWithAlphaMask", parameters: [kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: mask])
-        return rounded.composited(over: shadow.composited(over: backdrop))
+    private static func shadow(of rect: CGRect, radius: CGFloat) -> CIImage {
+        solid(rect.offsetBy(dx: 0, dy: -12), radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.45)).applyingGaussianBlur(sigma: 24)
     }
 
     /// The background at the canvas size: a gradient, or an image that fills it.
     static func image(of background: VideoBackground) -> CIImage? {
         switch background {
-        case .none:
-            return nil
         case .gradient(let gradient):
             return gradientImage(gradient, size: canvas).map(CIImage.init(cgImage:))
         case .image(let url):
@@ -183,5 +323,54 @@ enum VideoFramer {
         // Quartz's origin is the bottom-left: the top-left corner is at the full height.
         context.drawLinearGradient(cgGradient, start: CGPoint(x: 0, y: size.height), end: CGPoint(x: size.width, y: 0), options: [])
         return context.makeImage()
+    }
+}
+
+/// The whole clip's composition: which tracks, and where they go. It does not change once
+/// made, so the compositor's threads may share it.
+private final class FrameInstruction: NSObject, AVVideoCompositionInstructionProtocol, @unchecked Sendable {
+    let timeRange: CMTimeRange
+    let enablePostProcessing = false
+    let containsTweening = true
+    let requiredSourceTrackIDs: [NSValue]?
+    let passthroughTrackID = kCMPersistentTrackID_Invalid
+    let screenID: CMPersistentTrackID
+    let cameraID: CMPersistentTrackID?
+    let layout: ClipLayout
+    let clipSize: CGSize
+    let backdrop: CIImage
+
+    init(timeRange: CMTimeRange, screenID: CMPersistentTrackID, cameraID: CMPersistentTrackID?, layout: ClipLayout, clipSize: CGSize, backdrop: CIImage) {
+        self.timeRange = timeRange
+        self.screenID = screenID
+        self.cameraID = cameraID
+        self.layout = layout
+        self.clipSize = clipSize
+        self.backdrop = backdrop
+        requiredSourceTrackIDs = [screenID, cameraID].compactMap { $0 }.map { NSNumber(value: $0) }
+    }
+}
+
+private final class FrameCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
+    private static let context = CIContext()
+    private static let pixelFormat: [String: any Sendable] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+
+    let sourcePixelBufferAttributes: [String: any Sendable]? = FrameCompositor.pixelFormat
+    let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = FrameCompositor.pixelFormat
+
+    func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
+
+    func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
+        guard let instruction = request.videoCompositionInstruction as? FrameInstruction,
+              let screen = request.sourceFrame(byTrackID: instruction.screenID),
+              let output = request.renderContext.newPixelBuffer()
+        else {
+            request.finish(with: VideoFramer.Failure.exportFailed)
+            return
+        }
+        let camera = instruction.cameraID.flatMap(request.sourceFrame(byTrackID:)).map { CIImage(cvPixelBuffer: $0) }
+        let image = VideoFramer.frame(instruction, screen: CIImage(cvPixelBuffer: screen), camera: camera)
+        Self.context.render(image, to: output)
+        request.finish(withComposedVideoFrame: output)
     }
 }
