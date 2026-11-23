@@ -66,11 +66,12 @@ export function restoreWireframe({ shapes, origin: [left, top] }) {
 }
 
 // The scene's version, to tell Tilde of each change to the shapes or components, which it
-// saves as a draft.
-let sentVersion = 0;
+// saves as a draft: each element's id and version, as a move or resize rebuilds a component as
+// new elements at their first version.
+let sentVersion = "";
 
 export function postChange() {
-  const version = api.getSceneElementsIncludingDeleted().reduce((sum, element) => sum + element.version, 0);
+  const version = api.getSceneElementsIncludingDeleted().map((element) => `${element.id}:${element.version}:${element.isDeleted ? 1 : 0}`).join(",");
   if (version === sentVersion) return;
   sentVersion = version;
   post("canvasChanged");

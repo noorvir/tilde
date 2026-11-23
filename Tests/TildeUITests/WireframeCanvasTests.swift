@@ -401,6 +401,18 @@ struct WireframeCanvasTests {
         #expect(moved.map(\.rect) == [[100, 100, 600, 400], [150, 150, 300, 250], [280, 250, 200, 100]])
     }
 
+    /// A move rebuilds the component as new elements; Tilde still hears of the change, so the
+    /// draft keeps the new place.
+    @Test func aMoveIsAChangeForTheDraft() async throws {
+        try await drawComponent("card", from: CGPoint(x: 200, y: 200), to: CGPoint(x: 400, y: 300))
+        try await page.hover(CGPoint(x: 300, y: 250))
+        let before = page.messages.filter { $0 == "canvasChanged" }.count
+        let chip = try await chipCentre()
+        try await page.drag(from: chip, to: CGPoint(x: chip.x + 20, y: chip.y + 10), on: Self.chip)
+        #expect(try await rects().last == [220, 210, 200, 100])
+        try await page.wait { self.page.messages.filter { $0 == "canvasChanged" }.count > before }
+    }
+
     /// A drag on a section draws in it while a tool is chosen: the section stays. Its chip
     /// moves it.
     @Test func aDragOnASectionDrawsInIt() async throws {
