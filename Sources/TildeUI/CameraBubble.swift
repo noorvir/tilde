@@ -248,10 +248,10 @@ final class CameraBubble: ObservableObject {
         let center = NotificationCenter.default
         bubbleObservers = [
             center.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.layoutBar() }
+                MainActor.assumeIsolated { self?.barFollows() }
             },
             center.addObserver(forName: NSWindow.didChangeScreenNotification, object: panel, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.layoutBar() }
+                MainActor.assumeIsolated { self?.barFollows() }
             },
         ]
         panel.onClick = { [weak self] in
@@ -260,7 +260,7 @@ final class CameraBubble: ObservableObject {
             }
             capture.retry()
         }
-        panel.contentView = NSHostingView(rootView: CameraBubbleView(bubble: self, session: capture.session))
+        panel.contentView = NSHostingView(rootView: CameraBubbleView(bubble: self, display: capture.display))
         bubblePanel = panel
         return panel
     }
@@ -270,6 +270,13 @@ final class CameraBubble: ObservableObject {
         panel.contentView = FirstMouseHostingView(rootView: CameraBubbleBar(bubble: self))
         barPanel = panel
         return panel
+    }
+
+    /// While a clip records the bar is hidden: a drag of the bubble does no work for it.
+    private func barFollows() {
+        if showsBar {
+            layoutBar()
+        }
     }
 
     /// The bar centred under the bubble, or above it when the bubble is near the screen's
@@ -334,17 +341,20 @@ struct CameraRecording: Sendable {
 
 /// Runs the capture session that the bubble shows and records, off the main thread. It
 /// configures the session once per camera, reports when the first frame comes, and retries
-/// once after a runtime error.
+/// once after a runtime error. The bubble draws the frames of its video data output: the
+/// session has no preview connection to rebuild when the window moves or changes screen.
 private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     enum State: Equatable {
         case starting, running, failed
     }
 
     let session = AVCaptureSession()
+    /// The bubble's picture.
+    let display = CameraDisplay()
     /// Called on the main thread.
     var onState: @MainActor (State) -> Void = { _ in }
     private let output = AVCaptureMovieFileOutput()
-    /// Only to see the first frame.
+    /// The frames the bubble shows.
     private let frames = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "dev.tilde.camera")
     private let frameQueue = DispatchQueue(label: "dev.tilde.camera.frames")
@@ -565,8 +575,10 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
 
     // MARK: Frames, on `frameQueue`
 
-    /// Logs a gap of over a second between frames, which a frozen picture would show.
+    /// Shows the frame; logs a gap of over a second between frames, which a frozen picture
+    /// would show.
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        display.show(sampleBuffer)
         let now = Date()
         let previous = lastFrame
         lastFrame = now
@@ -671,7 +683,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
 
 private struct CameraBubbleView: View {
     @ObservedObject var bubble: CameraBubble
-    let session: AVCaptureSession
+    let display: CameraDisplay
 
     var body: some View {
         let clip = bubble.shape == .circle ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: bubble.side * 0.2))
@@ -682,7 +694,7 @@ private struct CameraBubbleView: View {
                     .font(.system(size: bubble.side * 0.2))
                     .foregroundStyle(.white.opacity(0.6))
             } else {
-                CameraPreview(session: session)
+                CameraPreview(display: display)
                 switch bubble.cameraState {
                 case .starting:
                     ProgressView()
@@ -717,61 +729,23 @@ private struct CameraBubbleView: View {
 }
 
 private struct CameraPreview: NSViewRepresentable {
-    let session: AVCaptureSession
+    let display: CameraDisplay
 
     func makeNSView(context: Context) -> PreviewView {
-        PreviewView(session: session)
+        PreviewView(display: display)
     }
 
     func updateNSView(_ view: PreviewView, context: Context) {}
 
     /// The camera's picture, filling the view from its centre, as a mirror.
     final class PreviewView: NSView {
-        private let preview: AVCaptureVideoPreviewLayer
+        private let display: CameraDisplay
 
-        init(session: AVCaptureSession) {
-            preview = AVCaptureVideoPreviewLayer(session: session)
+        init(display: CameraDisplay) {
+            self.display = display
             super.init(frame: .zero)
             wantsLayer = true
-            preview.videoGravity = .resizeAspectFill
-            layer?.addSublayer(preview)
-            mirror()
-        }
-
-        private var screenObserver: Any?
-
-        /// A preview layer can stop drawing after its window moves to another screen: it gets
-        /// the session again there.
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let screenObserver {
-                NotificationCenter.default.removeObserver(screenObserver)
-            }
-            screenObserver = nil
-            guard let window else {
-                return
-            }
-            screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reattach() }
-            }
-        }
-
-        private func reattach() {
-            cameraLog.notice("preview moved to another screen; reattaching")
-            let session = preview.session
-            preview.session = nil
-            preview.session = session
-            preview.contentsScale = window?.backingScaleFactor ?? 2
-            mirror()
-        }
-
-        /// The connection comes with the session's first input, and again after each change.
-        private func mirror() {
-            guard let connection = preview.connection, !connection.isVideoMirrored || connection.automaticallyAdjustsVideoMirroring else {
-                return
-            }
-            connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = true
+            layer?.addSublayer(display.layer)
         }
 
         @available(*, unavailable)
@@ -783,10 +757,35 @@ private struct CameraPreview: NSViewRepresentable {
             super.layout()
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            preview.frame = bounds
+            display.layer.bounds = CGRect(origin: .zero, size: bounds.size)
+            display.layer.position = CGPoint(x: bounds.midX, y: bounds.midY)
             CATransaction.commit()
-            mirror()
         }
+    }
+}
+
+/// Shows camera frames as they come, from any one queue at a time, mirrored. It needs no
+/// main thread and no capture connection, so a window move or a busy main thread does not
+/// stop it.
+final class CameraDisplay: @unchecked Sendable {
+    let layer = AVSampleBufferDisplayLayer()
+
+    init() {
+        layer.videoGravity = .resizeAspectFill
+        layer.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
+    }
+
+    func show(_ frame: CMSampleBuffer) {
+        // A live frame shows now, not at its time stamp on a timebase the layer does not have.
+        if !frame.sampleAttachments.isEmpty {
+            frame.sampleAttachments[0][.displayImmediately] = true
+        }
+        let renderer = layer.sampleBufferRenderer
+        if renderer.status == .failed {
+            cameraLog.error("camera display failed: \(String(describing: renderer.error), privacy: .public); flushing")
+            renderer.flush()
+        }
+        renderer.enqueue(frame)
     }
 }
 
