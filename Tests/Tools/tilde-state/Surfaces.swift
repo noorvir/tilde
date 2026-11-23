@@ -136,7 +136,7 @@ enum Surfaces {
         }
     }
 
-    static func controller(_ state: UIState) async throws -> AnnotationController {
+    private static func controller(_ state: UIState) async throws -> AnnotationController {
         let controller = try await Fixtures.controller()
         if let client = state.clientWithIcon {
             controller.clientIcon = { $0 == client ? Fixtures.appIcon : nil }
