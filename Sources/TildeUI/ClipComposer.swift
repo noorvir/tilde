@@ -197,13 +197,26 @@ struct ClipComposer: View {
 /// A background as the saved video shows it: a gradient, or an image that fills.
 private struct BackgroundFill: View {
     let background: VideoBackground
+    /// Decoded once: the body runs on every tick of a drag.
+    @MainActor private static let images = NSCache<NSURL, NSImage>()
+
+    @MainActor private static func image(at url: URL) -> NSImage? {
+        if let image = images.object(forKey: url as NSURL) {
+            return image
+        }
+        let image = NSImage(contentsOf: url)
+        if let image {
+            images.setObject(image, forKey: url as NSURL)
+        }
+        return image
+    }
 
     var body: some View {
         switch background {
         case .gradient(let gradient):
             LinearGradient(colors: gradient.cgColors.map { Color(cgColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
         case .image(let url):
-            if let image = NSImage(contentsOf: url) {
+            if let image = Self.image(at: url) {
                 Color.clear.overlay(Image(nsImage: image).resizable().scaledToFill()).clipped()
             } else {
                 Color.gray

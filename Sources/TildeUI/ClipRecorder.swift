@@ -16,8 +16,6 @@ final class ClipRecorder {
     var keep: (Draft) -> Void = { _ in }
     /// Records the camera beside a clip, while its bubble shows.
     weak var camera: CameraBubble?
-    /// The camera file of each clip recorded with the camera, by the clip's video.
-    private(set) var cameraTracks: [URL: URL] = [:]
     /// The camera file of the clip in progress.
     private var cameraFile: URL?
 
@@ -58,7 +56,7 @@ final class ClipRecorder {
                     .adoptClip: { [self] in
                         recorder = started
                         if recordsCamera, let camera {
-                            let file = video.deletingPathExtension().appendingPathExtension("camera.mov")
+                            let file = Self.cameraFile(of: video)
                             cameraFile = file
                             camera.startRecording(to: file)
                         }
@@ -112,8 +110,9 @@ final class ClipRecorder {
         Task {
             do {
                 let clip = try await recorder.stop()
-                if recordsCamera, let cameraTrack = await camera?.stopRecording() {
-                    cameraTracks[clip.video] = cameraTrack
+                // The camera file is finished, also one cut short by the camera going off.
+                if recordsCamera {
+                    _ = await camera?.stopRecording()
                 }
                 let target = Target.recording(video: clip.video, seconds: clip.seconds, source: recorded.name)
                 let annotation = Annotation(comment: "", target: target, frame: recorded.frame, image: clip.poster, contextImage: nil)
@@ -159,7 +158,13 @@ final class ClipRecorder {
     nonisolated static func deleteVideo(of draft: Draft) {
         if case .recording(let video, _, _) = draft.annotation.target {
             try? FileManager.default.removeItem(at: video)
-            try? FileManager.default.removeItem(at: video.deletingPathExtension().appendingPathExtension("camera.mov"))
+            try? FileManager.default.removeItem(at: cameraFile(of: video))
         }
+    }
+
+    /// Where a clip's camera is recorded, beside its video. It stays on disk with the clip, so a
+    /// restored or carried clip has it too.
+    nonisolated static func cameraFile(of video: URL) -> URL {
+        video.deletingPathExtension().appendingPathExtension("camera.mov")
     }
 }

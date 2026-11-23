@@ -650,8 +650,13 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
 
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo file: URL, from connections: [AVCaptureConnection], error: Error?) {
         queue.async { [self] in
-            // A file cut short by an error can still play; one with no frames cannot.
-            finished?.resume(returning: output.recordedDuration.seconds > 0 ? file : nil)
+            // A file cut short by an error or by the camera going off can still play, and stays
+            // beside its clip; one with no frames cannot.
+            let hasFrames = output.recordedDuration.seconds > 0
+            if !hasFrames {
+                try? FileManager.default.removeItem(at: file)
+            }
+            finished?.resume(returning: hasFrames ? file : nil)
             finished = nil
         }
     }

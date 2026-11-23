@@ -707,6 +707,7 @@ final class AnnotationController: ObservableObject {
         gaveKeyboardBack = false
         holdsKeyboard = false
         drafts = []
+        layouts = [:]
         scope.reset()
         browserOffer.reset()
 
@@ -1212,7 +1213,8 @@ final class AnnotationController: ObservableObject {
 
     /// The camera file recorded beside a clip's video, if any.
     func cameraTrack(of video: URL) -> URL? {
-        clips.cameraTracks[video]
+        let file = ClipRecorder.cameraFile(of: video)
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
     }
 
     /// Where a clip's parts go on its saved video; a clip starts with the last background

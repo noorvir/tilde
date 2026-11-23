@@ -168,6 +168,11 @@ final class SessionArchive: @unchecked Sendable {
     func adopt(_ video: URL, into id: String) -> URL {
         let own = newClip(in: id)
         try? linkOrCopy(video, to: own)
+        // Its camera, recorded beside it.
+        let camera = ClipRecorder.cameraFile(of: video)
+        if FileManager.default.fileExists(atPath: camera.path) {
+            try? linkOrCopy(camera, to: ClipRecorder.cameraFile(of: own))
+        }
         return own
     }
 
