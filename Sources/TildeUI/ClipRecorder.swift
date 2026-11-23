@@ -110,9 +110,10 @@ final class ClipRecorder {
         Task {
             do {
                 let clip = try await recorder.stop()
-                // The camera file is finished, also one cut short by the camera going off.
-                if recordsCamera {
-                    _ = await camera?.stopRecording()
+                // The camera file is finished, also one cut short by the camera going off, and
+                // put on the clip's time.
+                if recordsCamera, let recording = await camera?.stopRecording() {
+                    await CameraAlignment.align(recording, toClipStartingAt: clip.start)
                 }
                 let target = Target.recording(video: clip.video, seconds: clip.seconds, source: recorded.name)
                 let annotation = Annotation(comment: "", target: target, frame: recorded.frame, image: clip.poster, contextImage: nil)
@@ -137,8 +138,8 @@ final class ClipRecorder {
         if cameraFile != nil {
             cameraFile = nil
             Task {
-                if let file = await camera?.stopRecording() {
-                    try? FileManager.default.removeItem(at: file)
+                if let recording = await camera?.stopRecording() {
+                    try? FileManager.default.removeItem(at: recording.file)
                 }
             }
         }

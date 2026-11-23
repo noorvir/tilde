@@ -110,8 +110,9 @@ final class CameraBubble: ObservableObject {
         capture.resumeRecording()
     }
 
-    /// The finished camera file, or nil when it recorded nothing.
-    func stopRecording() async -> URL? {
+    /// The finished camera file and when its first frame was captured on the host clock, or
+    /// nil when it recorded nothing.
+    func stopRecording() async -> CameraRecording? {
         await capture.stopRecording()
     }
 
@@ -325,6 +326,12 @@ private final class BubblePanel: NSPanel {
 /// Notice and above, which release builds keep.
 private let cameraLog = Logger(subsystem: "dev.tilde.app", category: "camera")
 
+/// A camera file and when its first frame was captured on the host clock, if known.
+struct CameraRecording: Sendable {
+    let file: URL
+    let start: CMTime?
+}
+
 /// Runs the capture session that the bubble shows and records, off the main thread. It
 /// configures the session once per camera, reports when the first frame comes, and retries
 /// once after a runtime error.
@@ -346,7 +353,12 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     private var lastFrame: Date?
     // Read and written on `queue`, except where noted.
     /// Waits for the file that `stopRecording` ends.
-    private var finished: CheckedContinuation<URL?, Never>?
+    private var finished: CheckedContinuation<CameraRecording?, Never>?
+    /// When the file in progress started, on the host clock.
+    private var recordingStart: CMTime?
+    /// A file that ended before `stopRecording`, such as when the camera went off or changed:
+    /// `stopRecording` returns it.
+    private var endedEarly: CameraRecording?
     private var cameraID: String?
     private var isWanted = false
     private var retried = false
@@ -581,6 +593,8 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             guard session.isRunning, !output.isRecording else {
                 return
             }
+            recordingStart = nil
+            endedEarly = nil
             output.startRecording(to: file, recordingDelegate: self)
         }
     }
@@ -601,15 +615,35 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         }
     }
 
-    func stopRecording() async -> URL? {
+    func stopRecording() async -> CameraRecording? {
         await withCheckedContinuation { continuation in
             queue.async { [self] in
                 guard output.isRecording else {
-                    continuation.resume(returning: nil)
+                    continuation.resume(returning: endedEarly)
+                    endedEarly = nil
                     return
                 }
                 finished = continuation
                 output.stopRecording()
+            }
+        }
+    }
+
+    /// The file's first frame, as the session's clock gives it (macOS 15 and later).
+    @available(macOS 15.0, *)
+    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo file: URL, startPTS: CMTime, from connections: [AVCaptureConnection]) {
+        let start = CMSyncConvertTime(startPTS, from: session.synchronizationClock ?? CMClockGetHostTimeClock(), to: CMClockGetHostTimeClock())
+        queue.async { [self] in
+            recordingStart = start
+        }
+    }
+
+    /// Before macOS 15: the time recording began, a frame or so before its first frame.
+    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo file: URL, from connections: [AVCaptureConnection]) {
+        let start = CMClockGetTime(CMClockGetHostTimeClock())
+        queue.async { [self] in
+            if recordingStart == nil {
+                recordingStart = start
             }
         }
     }
@@ -622,8 +656,13 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             if !hasFrames {
                 try? FileManager.default.removeItem(at: file)
             }
-            finished?.resume(returning: hasFrames ? file : nil)
-            finished = nil
+            let recording = hasFrames ? CameraRecording(file: file, start: recordingStart) : nil
+            if let finished {
+                finished.resume(returning: recording)
+                self.finished = nil
+            } else {
+                endedEarly = recording
+            }
         }
     }
 }

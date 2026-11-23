@@ -13,6 +13,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         let seconds: Double
         /// The last frame, as PNG.
         let poster: Data?
+        /// When the first frame was captured, on the host clock: the clip's time zero, which
+        /// its sound is written against too, and the camera is aligned to.
+        let start: CMTime
     }
 
     enum Failure: Error {
@@ -385,7 +388,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             VTCreateCGImageFromCVPixelBuffer(lastFrame, options: nil, imageOut: &image)
             poster = image.flatMap { ScreenCapture.png(from: $0, outline: nil, scale: 1, maxSide: 1600) }
         }
-        return Clip(video: writer.outputURL, seconds: (end - start).seconds, poster: poster)
+        return Clip(video: writer.outputURL, seconds: (end - start).seconds, poster: poster, start: start)
     }
 
     /// Ends the recording and deletes its file.
