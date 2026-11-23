@@ -1,6 +1,6 @@
 // Editing a component after it is drawn. Over one, it shows as selected: with no tool a drag
 // anywhere on it moves it (with a tool a drag draws in it, and its chip or grip moves it), ⌥ and
-// a drag moves a copy, and a double-click edits its text. A chip just below it moves it too:
+// a drag moves a copy, and a double-click edits its text. A chip above its top right moves it too:
 // a click on its name changes the kind, its Borders button opens the borders, its Comment
 // button its comment, its other controls set the rows and columns of a table or list or the
 // fill of a rectangle or ellipse, and × deletes it. A handle at each corner resizes it, and
@@ -61,9 +61,9 @@ export const chipStyle = document.createElement("style");
 chipStyle.textContent = `
 #tilde-chip::before { content: ""; position: absolute; left: 0; right: 0; }
 #tilde-chip[data-side="below"]::before { top: -6px; height: 6px; }
-#tilde-chip[data-side="above"]::before { bottom: -2px; height: 2px; }
+#tilde-chip[data-side="above"]::before { bottom: -6px; height: 6px; }
 `;
-const gap = { below: 6, above: 2 };
+const gap = { below: 6, above: 6 };
 
 // The component under the pointer, the component that a click selected (its handles show
 // while the pointer is not over another one), and the chip's menu that is open: "kinds",
@@ -218,17 +218,17 @@ export function showHandles() {
   if (selection.menu === "comment") placeMenu(commentBox, chip.querySelector("[data-menu=comment]"));
 }
 
-// The chip goes just below the component, at its left edge; where it would leave the screen
-// at the bottom, just above it, after the label's tag. It stays on the screen.
+// The chip goes just above the component, right-aligned with its right edge, and never over
+// the label's tag; where it would leave the screen at the top, just below it. It stays on the
+// screen.
 function placeChip(frame) {
   const { width, height } = chip.getBoundingClientRect();
-  let side = "below";
-  let left = frame.x;
-  let top = frame.y + frame.height + gap.below;
-  if (top + height > window.innerHeight) {
-    side = "above";
-    left = frame.x + shownTagWidth(frame) + 4;
-    top = frame.y - gap.above - height;
+  let side = "above";
+  const left = Math.max(frame.x + frame.width - width, frame.x + shownTagWidth(frame) + 4);
+  let top = frame.y - gap.above - height;
+  if (top < 0) {
+    side = "below";
+    top = frame.y + frame.height + gap.below;
   }
   chip.dataset.side = side;
   Object.assign(chip.style, {

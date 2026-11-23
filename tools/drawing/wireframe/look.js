@@ -59,15 +59,14 @@ export function tagTop({ y }) {
   return y >= 17 ? y - 17 : y + 2;
 }
 
-// A tag as wide as its text, or a short empty one.
+// A tag as wide as its text.
 export function tagWidth(text) {
-  return text ? text.length * 7 + 10 : 28;
+  return text.length * 7 + 10;
 }
 
 const placeholder = "Add label";
 
-// The tag of the component under the pointer is active: darker, and with "Add label" when it
-// has no label.
+// The tag of the component under the pointer is active: darker. Its size stays.
 let activeGroup = null;
 
 export function setActiveTag(group) {
@@ -83,8 +82,7 @@ function tagText(frame) {
   const label = frame.customData.label;
   const isActive = frame.groupIds[0] === activeGroup;
   if (label) return { text: label, isPlaceholder: false, isActive, isShown: true };
-  if (isActive) return { text: placeholder, isPlaceholder: true, isActive, isShown: true };
-  return { text: "", isPlaceholder: false, isActive, isShown: !taken.has(frame.id) };
+  return { text: placeholder, isPlaceholder: true, isActive, isShown: !taken.has(frame.id) };
 }
 
 export function shownTagWidth(frame) {
@@ -158,7 +156,7 @@ export function drawLook() {
   // The rectangle being drawn, which Excalidraw draws in no colour, shows as the component.
   const drawing = api.getAppState().newElement;
   if (wireframe?.tool && drawing?.type === "rectangle" && !drawing.customData) {
-    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool), tag: { text: "", isPlaceholder: false, isActive: false, isShown: true } });
+    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool), tag: { text: placeholder, isPlaceholder: true, isActive: false, isShown: true } });
   }
 
   const next = components.map((component) => {
