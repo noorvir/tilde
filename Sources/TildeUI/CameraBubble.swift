@@ -36,6 +36,7 @@ final class CameraBubble: ObservableObject {
     private let capture = CameraCapture()
     private var bubblePanel: BubblePanel?
     private var barPanel: BubblePanel?
+    private var bubbleObservers: [Any] = []
     /// Recording mode, also while choosing a source; the bubble shows in it while `isOn`.
     private var isRecordMode = false
     private var showsBar = false
@@ -245,6 +246,16 @@ final class CameraBubble: ObservableObject {
     private func makeBubblePanel() -> BubblePanel {
         let origin = homeOrigin(on: screen())
         let panel = BubblePanel(frame: NSRect(origin: origin, size: NSSize(width: side, height: side)), movesByDrag: true)
+        // A drag or a screen change: the bar follows, under or above.
+        let center = NotificationCenter.default
+        bubbleObservers = [
+            center.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.layoutBar() }
+            },
+            center.addObserver(forName: NSWindow.didChangeScreenNotification, object: panel, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.layoutBar() }
+            },
+        ]
         panel.onClick = { [weak self] in
             guard let self, cameraState == .failed else {
                 return
@@ -263,15 +274,19 @@ final class CameraBubble: ObservableObject {
         return panel
     }
 
-    /// The bar centred under the bubble; an open menu grows it upward, over the bubble.
+    /// The bar centred under the bubble, or above it when the bubble is near the screen's
+    /// bottom; an open menu grows it upward.
     private func layoutBar() {
         guard let barPanel, let bubblePanel, let content = barPanel.contentView else {
             return
         }
         content.layoutSubtreeIfNeeded()
         let size = content.fittingSize
-        let barTop = bubblePanel.frame.minY - 8
-        let origin = NSPoint(x: (bubblePanel.frame.midX - size.width / 2).rounded(), y: barTop - HUDAccessory.size.height)
+        let bubble = bubblePanel.frame
+        let bottom = (bubblePanel.screen ?? screen())?.visibleFrame.minY ?? 0
+        let below = bubble.minY - 8 - HUDAccessory.size.height
+        let y = below >= bottom ? below : bubble.maxY + 8
+        let origin = NSPoint(x: (bubble.midX - size.width / 2).rounded(), y: y.rounded())
         barPanel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 }
@@ -310,6 +325,9 @@ private final class BubblePanel: NSPanel {
     }
 }
 
+/// Notice and above, which release builds keep.
+private let cameraLog = Logger(subsystem: "dev.tilde.app", category: "camera")
+
 /// Runs the capture session that the bubble shows and records, off the main thread. It
 /// configures the session once per camera, reports when the first frame comes, and retries
 /// once after a runtime error.
@@ -326,7 +344,9 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     private let frames = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "dev.tilde.camera")
     private let frameQueue = DispatchQueue(label: "dev.tilde.camera.frames")
-    private static let log = Logger(subsystem: "dev.tilde.app", category: "camera")
+    private static let log = cameraLog
+    /// The time of the newest frame; on `frameQueue`.
+    private var lastFrame: Date?
     // Read and written on `queue`, except where noted.
     /// Waits for the file that `stopRecording` ends.
     private var finished: CheckedContinuation<URL?, Never>?
@@ -364,6 +384,12 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             },
             center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
                 self?.queue.async { self?.logStep("interruption ended") }
+            },
+            center.addObserver(forName: AVCaptureSession.didStartRunningNotification, object: session, queue: nil) { [weak self] _ in
+                self?.queue.async { self?.logStep("session started running") }
+            },
+            center.addObserver(forName: AVCaptureSession.didStopRunningNotification, object: session, queue: nil) { [weak self] _ in
+                self?.queue.async { self?.logStep("session stopped running") }
             },
             center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: nil) { [weak self] note in
                 let id = (note.object as? AVCaptureDevice)?.uniqueID
@@ -488,6 +514,9 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         started = Date()
         let attempt = attempt
         frames.setSampleBufferDelegate(self, queue: frameQueue)
+        frameQueue.async { [self] in
+            lastFrame = nil
+        }
         report(.starting)
         queue.asyncAfter(deadline: .now() + 10) { [self] in
             if self.attempt == attempt, isWanted, seenAttempt != attempt {
@@ -505,7 +534,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     }
 
     private func runtimeError(_ error: Error?) {
-        logStep("runtime error: \(error.map { String(describing: $0) } ?? "unknown")")
+        Self.log.error("runtime error: \(error.map { String(describing: $0) } ?? "unknown", privacy: .public)")
         guard isWanted else {
             return
         }
@@ -534,7 +563,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     }
 
     private func fail(_ reason: String) {
-        logStep("failed: \(reason)")
+        Self.log.error("failed: \(reason, privacy: .public)")
         attempt += 1
         report(.failed)
     }
@@ -553,9 +582,18 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
 
     // MARK: Frames, on `frameQueue`
 
+    /// Logs a gap of over a second between frames, which a frozen picture would show.
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        // No more frames are needed after the first.
-        frames.setSampleBufferDelegate(nil, queue: nil)
+        let now = Date()
+        let previous = lastFrame
+        lastFrame = now
+        if let previous {
+            let gap = now.timeIntervalSince(previous)
+            if gap > 1 {
+                Self.log.notice("frame gap of \(gap, format: .fixed(precision: 2), privacy: .public) s")
+            }
+            return
+        }
         queue.async { [self] in
             guard seenAttempt != attempt else {
                 return
@@ -686,9 +724,44 @@ private struct CameraPreview: NSViewRepresentable {
             super.init(frame: .zero)
             wantsLayer = true
             preview.videoGravity = .resizeAspectFill
-            preview.connection?.automaticallyAdjustsVideoMirroring = false
-            preview.connection?.isVideoMirrored = true
             layer?.addSublayer(preview)
+            mirror()
+        }
+
+        private var screenObserver: Any?
+
+        /// A preview layer can stop drawing after its window moves to another screen: it gets
+        /// the session again there.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let screenObserver {
+                NotificationCenter.default.removeObserver(screenObserver)
+            }
+            screenObserver = nil
+            guard let window else {
+                return
+            }
+            screenObserver = NotificationCenter.default.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reattach() }
+            }
+        }
+
+        private func reattach() {
+            cameraLog.notice("preview moved to another screen; reattaching")
+            let session = preview.session
+            preview.session = nil
+            preview.session = session
+            preview.contentsScale = window?.backingScaleFactor ?? 2
+            mirror()
+        }
+
+        /// The connection comes with the session's first input, and again after each change.
+        private func mirror() {
+            guard let connection = preview.connection, !connection.isVideoMirrored || connection.automaticallyAdjustsVideoMirroring else {
+                return
+            }
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = true
         }
 
         @available(*, unavailable)
@@ -702,6 +775,7 @@ private struct CameraPreview: NSViewRepresentable {
             CATransaction.setDisableActions(true)
             preview.frame = bounds
             CATransaction.commit()
+            mirror()
         }
     }
 }
@@ -767,7 +841,7 @@ private struct CameraBubbleBar: View {
             }
             Rectangle().fill(.white.opacity(0.1)).frame(height: 1).padding(.vertical, 3).padding(.horizontal, 6)
             ForEach(bubble.microphones, id: \.uniqueID) { microphone in
-                MenuRow(symbol: "waveform", title: microphone.localizedName, isOn: microphone.uniqueID == bubble.currentMicrophoneID) {
+                MenuRow(symbol: "mic", title: microphone.localizedName, isOn: microphone.uniqueID == bubble.currentMicrophoneID) {
                     bubble.chooseMicrophone(microphone.uniqueID)
                 }
             }
