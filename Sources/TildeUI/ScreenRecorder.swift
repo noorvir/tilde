@@ -146,6 +146,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
                 moved.showsCursor = true
                 moved.pixelFormat = configuration.pixelFormat
                 moved.sourceRect = CGRect(origin: origin, size: windowArea.rect.size)
+                // A new configuration has no microphone: the sound would stop.
+                if #available(macOS 15.0, *), let microphone {
+                    moved.captureMicrophone = true
+                    moved.microphoneCaptureDeviceID = microphone
+                }
                 stream.updateConfiguration(moved) { _ in }
             }
         }
