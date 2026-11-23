@@ -470,9 +470,8 @@ final class AnnotationController: ObservableObject {
         case .keepKeyboard:
             gaveKeyboardBack = false
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
-            // A comment that is open, as after Done in Wireframe, keeps the keyboard. While
-            // recording, the recorded window keeps it, so its hover effects show in the clip.
-            if !hud.isInBrowser, commentBox.pending == nil, recording == nil {
+            // A comment that is open, as after Done in Wireframe, keeps the keyboard.
+            if !hud.isInBrowser, commentBox.pending == nil {
                 overlays.makeKey()
             }
         case .giveKeyboardBack:
@@ -983,13 +982,17 @@ final class AnnotationController: ObservableObject {
     /// overlay, or in Draw and Wireframe the canvas, which has their keys. The HUD is a
     /// non-activating panel: without this, keys stay with the app in front.
     func takeKeyboard() {
-        // While recording, Tilde stays in the back: an app that is not active shows no hover
-        // effects in the clip. Esc reaches Tilde as a hot key.
-        guard session != nil, recording == nil else {
+        guard session != nil else {
             return
         }
         // Before Tilde comes forward: macOS shows a Space with a window of the app it activates.
         overlays.moveToShownSpace()
+        // In recording mode the overlay takes the keys (Space records) without Tilde coming
+        // forward: an app that is not active shows no hover effects in the clip.
+        if recording != nil {
+            overlays.makeKey()
+            return
+        }
         NSApp.activate(ignoringOtherApps: true)
         if !focusCanvas() {
             overlays.makeKey()
@@ -997,9 +1000,10 @@ final class AnnotationController: ObservableObject {
     }
 
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
-    /// or the preview has it or annotating is paused.
+    /// or the preview has it or annotating is paused. In recording mode too, after a source is
+    /// chosen, so Space records: the overlay takes keys there but not the pointer.
     func makeOverlayKey() {
-        guard overlayTakesInput, commentBox.pending == nil, previewCard.id == nil else {
+        guard overlayTakesInput || recording != nil, commentBox.pending == nil, previewCard.id == nil else {
             return
         }
         if !focusCanvas() {
