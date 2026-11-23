@@ -24,8 +24,10 @@ struct WireframeCanvasTests {
         try await page.load()
     }
 
+    /// Every kind of the bar has an icon, as Tilde gives them; the kinds menu lists only those.
     private func start(tool: String) async throws {
-        try await page.draw("setWireframe({tool: '\(tool)', icons: {}})")
+        let kinds = WireframeMode.tools.map { "\($0.tool): 'data:,'" }.joined(separator: ", ")
+        try await page.draw("setWireframe({tool: '\(tool)', icons: {\(kinds)}})")
     }
 
     /// Draws a component of `tool` with a drag between two corners.
@@ -953,7 +955,7 @@ struct WireframeCanvasTests {
         try await page.draw("setTool('rectangle')")
         try await page.draw("setColor('#FF3B30')")
         try await page.drag(from: corner, to: oppositeCorner)
-        try await page.wait { self.page.messages.contains("shape") }
+        try await page.wait { self.page.messages.contains("group") }
         let raw = try await page.rawShapes()
         #expect(raw.count == 1)
         #expect(raw.first?["type"] as? String == "rectangle")
@@ -967,11 +969,11 @@ struct WireframeCanvasTests {
         #expect(try await !page.takesPointer(CGPoint(x: 600, y: 400)))
         try await page.drag(from: CGPoint(x: 600, y: 400), to: CGPoint(x: 800, y: 600))
         #expect(try await page.shapes().isEmpty)
-        #expect(page.messages.filter { $0 == "shape" }.count == 1)
+        #expect(page.messages.filter { $0 == "group" }.count == 1)
 
         try await page.draw("setTool('ellipse')")
         try await page.drag(from: CGPoint(x: 600, y: 400), to: CGPoint(x: 800, y: 600))
-        try await page.wait { self.page.messages.filter { $0 == "shape" }.count == 2 }
+        try await page.wait { self.page.messages.filter { $0 == "group" }.count == 2 }
         #expect(try await page.rawShapes().first?["type"] as? String == "ellipse")
     }
 

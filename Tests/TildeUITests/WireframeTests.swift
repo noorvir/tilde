@@ -92,19 +92,19 @@ struct WireframeTests {
 
     // MARK: - Tools
 
-    /// Wireframe mode starts with the card; a tool's button or letter chooses the tool, in
+    /// Wireframe mode starts with the rectangle; a tool's button or letter chooses the tool, in
     /// upper case too, and the mode stays.
     @Test func aToolsLetterChoosesTheWireframeTool() throws {
         open(Open(canvas: .draw))
         controller.dispatch(.startWireframe)
         #expect(controller.isWireframe)
-        #expect(controller.wireframe.tool == "card")
+        #expect(controller.wireframe.tool == "rectangle")
 
         for (tool, _, letter, _) in WireframeMode.tools {
             #expect(controller.handleKey(try key(letter), in: .canvas))
             #expect(controller.wireframe.tool == tool)
         }
-        #expect(controller.handleKey(try key("T", modifiers: .shift), in: .overlay(hoveredNote: nil)))
+        #expect(controller.handleKey(try key("G", modifiers: .shift), in: .overlay(hoveredNote: nil)))
         #expect(controller.wireframe.tool == "table")
         controller.setWireframeTool("button")
         #expect(controller.wireframe.tool == "button")
@@ -128,8 +128,8 @@ struct WireframeTests {
         #expect(controller.isWireframe)
         #expect(controller.pauses.isEmpty)
 
-        // ⌘Z is the canvas's own key: undo of its changes.
-        #expect(!controller.handleKey(try key("z", code: kVK_ANSI_Z, modifiers: .command), in: .canvas))
+        // ⌘Z undoes the canvas's last change.
+        #expect(controller.handleKey(try key("z", code: kVK_ANSI_Z, modifiers: .command), in: .canvas))
         #expect(controller.isWireframe)
     }
 
@@ -138,7 +138,7 @@ struct WireframeTests {
         open(Open(canvas: .draw))
         #expect(controller.handleKey(try key("r", code: kVK_ANSI_R), in: .canvas))
         #expect(controller.drawing.tool == "rectangle")
-        #expect(controller.wireframe.tool == "card")
+        #expect(controller.wireframe.tool == "rectangle")
         #expect(!controller.isWireframe)
     }
 
@@ -218,7 +218,7 @@ struct WireframeTests {
         #expect(controller.drawing.tool == "ellipse")
         #expect(controller.isDrawing)
         #expect(controller.pauses.isEmpty)
-        #expect(controller.wireframe.tool == "card")
+        #expect(controller.wireframe.tool == "rectangle")
 
         controller.setDrawingTool("arrow")
         #expect(!controller.drawing.isToolDown)
@@ -227,7 +227,7 @@ struct WireframeTests {
     }
 
     /// A new wireframe has a tool again after Esc put the last one's tool down.
-    @Test func aNewWireframeStartsWithTheCard() {
+    @Test func aNewWireframeStartsWithTheRectangle() {
         open(Open(canvas: .wireframe))
         controller.escapePressed()
         #expect(controller.wireframe.tool == nil)
@@ -236,7 +236,7 @@ struct WireframeTests {
         #expect(!controller.isWireframe)
         open(Open(canvas: .draw))
         controller.dispatch(.startWireframe)
-        #expect(controller.wireframe.tool == "card")
+        #expect(controller.wireframe.tool == "rectangle")
     }
 
     // MARK: - Done, pause and the hold key
@@ -331,7 +331,7 @@ struct WireframeTests {
         let controller = AnnotationController(store: SessionStore(), browser: BrowserController(), archive: Fixtures.archive(), defaults: defaults)
         controller.setStateForTesting(session: Fixtures.session(), mode: .open(Open()))
         controller.dispatch(.startWireframe)
-        #expect(controller.wireframe.tool == "card")
+        #expect(controller.wireframe.tool == "rectangle")
         controller.setWireframeTool("table")
         controller.escapePressed()
         #expect(controller.wireframe.tool == nil)
@@ -352,7 +352,7 @@ struct WireframeTests {
         #expect(controller.wireframe.bar == WireframeBar(isStyling: true, isAdjusting: false))
         controller.escapePressed()
         #expect(controller.wireframe.bar == WireframeBar())
-        #expect(controller.wireframe.tool == "card")
+        #expect(controller.wireframe.tool == "rectangle")
 
         controller.wireframe.bar = WireframeBar(isStyling: true)
         #expect(controller.canvasPressed(at: CGPoint(x: 400, y: 300)))
@@ -493,7 +493,7 @@ struct WireframeTests {
         controller.editWireframe(wireframe.id)
         #expect(controller.isWireframe)
         #expect(controller.previewCard.id == nil)
-        #expect(controller.wireframe.tool == "card")
+        #expect(controller.wireframe.tool == "rectangle")
         #expect(controller.drafts.count == 2)
     }
 

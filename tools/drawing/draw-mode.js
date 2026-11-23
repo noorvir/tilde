@@ -19,6 +19,8 @@ let pressAt = null;
 let idsAtPress = new Set();
 // An arrow started by a click, whose end follows the pointer until the next click.
 export let clickArrow = null;
+// A release whose new element Tilde has not yet finished.
+let isSettling = false;
 
 export function cancelClickArrow() {
   if (!clickArrow) return;
@@ -66,7 +68,7 @@ export function resetEditing() {
 export let hasGroup = false;
 
 export function groupChanged() {
-  if (!api) return;
+  if (!api || isSettling) return;
   const appState = api.getAppState();
   const unfinished = new Set([clickArrow?.id, appState.newElement?.id, appState.multiElement?.id, appState.editingTextElement?.id]);
   const isGroup = !wireframe && !editing && live().some((element) => !taken.has(element.id) && !unfinished.has(element.id));
@@ -406,37 +408,44 @@ export function pointerReleased(event) {
   ring.style.display = "none";
   // A click with the text tool opens Excalidraw's text field, which Esc or a click away ends.
   if (!editing && api.getAppState().activeTool.type === "text") return;
-  // After Excalidraw has finished the shape.
+  // After Excalidraw has finished the shape. Until then a click's element is no group's: it
+  // becomes a click arrow, or it goes.
+  isSettling = true;
   setTimeout(() => {
-    const created = live().filter((element) => !taken.has(element.id) && !idsAtPress.has(element.id));
-    if (clickArrow) {
-      const arrow = live().find((element) => element.id === clickArrow.id);
-      if (arrow) finishClickArrow(arrow, event);
-      else clickArrow = null;
-      return;
-    }
-    const isClick = Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) < 4;
-    if (created.length && isClick && api.getAppState().activeTool.type === "arrow") {
-      clickArrow = { start: startSnap, id: created[created.length - 1].id };
-      return;
-    }
-    // With the other tools, a click without a drag draws nothing.
-    if (created.length && isClick) {
-      changeElements(created.map((element) => element.id), () => ({ isDeleted: true }));
-      api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
-      return;
-    }
-    if (created.length) {
-      snapNewShape(created[created.length - 1], event);
-      // The new shape is selected, so Delete removes it.
-      const selectedElementIds = Object.fromEntries(created.map((element) => [element.id, true]));
-      api.updateScene({ appState: { selectedElementIds }, captureUpdate: "NEVER" });
-      groupChanged();
-    } else if (api.getAppState().activeTool.type === "selection") {
-      snapSelectedArrow(event);
-      // A press beside the handles clears the selection; the shape stays in edit mode.
-      if (editing && !api.getAppState().selectedElementIds[[...editing][0]]) selectEdited();
-      post("edited");
-    }
+    isSettling = false;
+    settleRelease(event);
+    groupChanged();
   }, 0);
+}
+
+function settleRelease(event) {
+  const created = live().filter((element) => !taken.has(element.id) && !idsAtPress.has(element.id));
+  if (clickArrow) {
+    const arrow = live().find((element) => element.id === clickArrow.id);
+    if (arrow) finishClickArrow(arrow, event);
+    else clickArrow = null;
+    return;
+  }
+  const isClick = Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) < 4;
+  if (created.length && isClick && api.getAppState().activeTool.type === "arrow") {
+    clickArrow = { start: startSnap, id: created[created.length - 1].id };
+    return;
+  }
+  // With the other tools, a click without a drag draws nothing.
+  if (created.length && isClick) {
+    changeElements(created.map((element) => element.id), () => ({ isDeleted: true }));
+    api.updateScene({ appState: { multiElement: null, newElement: null, selectedLinearElement: null, selectedElementIds: {} }, captureUpdate: "NEVER" });
+    return;
+  }
+  if (created.length) {
+    snapNewShape(created[created.length - 1], event);
+    // The new shape is selected, so Delete removes it.
+    const selectedElementIds = Object.fromEntries(created.map((element) => [element.id, true]));
+    api.updateScene({ appState: { selectedElementIds }, captureUpdate: "NEVER" });
+  } else if (api.getAppState().activeTool.type === "selection") {
+    snapSelectedArrow(event);
+    // A press beside the handles clears the selection; the shape stays in edit mode.
+    if (editing && !api.getAppState().selectedElementIds[[...editing][0]]) selectEdited();
+    post("edited");
+  }
 }
