@@ -28,6 +28,10 @@ final class HUDPanel {
     /// is zero and cannot give this.
     private var contentFrame: CGRect = .zero
     private var clickMonitor: Any?
+    private var listMonitor: Any?
+    private var otherAppMonitor: Any?
+    /// A press closed the list: the rest of it, up to its release, does nothing more.
+    private var isSwallowingPress = false
 
     /// Room for the widest content (the source picker) and its shadow.
     private static let width: CGFloat = HUDAccessoryPicker.sizes.max.width + 2 * 16
@@ -51,6 +55,20 @@ final class HUDPanel {
                 MainActor.assumeIsolated { controller?.takeKeyboard() }
             }
             return event
+        }
+        // The list closes on a press outside it, as a popover does. A press on Tilde's overlay or
+        // canvas only closes it: it starts no note or drawing. One on the rest of the HUD still
+        // works; one in another app only closes it.
+        listMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .leftMouseDragged, .leftMouseUp, .rightMouseUp]) { [weak self] event in
+            let type = event.type
+            let windowNumber = event.windowNumber
+            let swallows = MainActor.assumeIsolated { self?.swallowsListPress(type, windowNumber: windowNumber) ?? false }
+            return swallows ? nil : event
+        }
+        otherAppMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            MainActor.assumeIsolated {
+                _ = self?.closeListOutside(at: NSEvent.mouseLocation)
+            }
         }
         hosting.rootView = HUDView(controller: controller) { [weak self] in
             self?.dragPill()
@@ -208,6 +226,42 @@ final class HUDPanel {
             return false
         }
         return Self.screenRect(ofContent: contentFrame, inWindow: window.frame).contains(point)
+    }
+
+    /// Whether the event is part of a press that closed the list outside the HUD, which Tilde
+    /// then ignores.
+    private func swallowsListPress(_ type: NSEvent.EventType, windowNumber: Int) -> Bool {
+        switch type {
+        case .leftMouseDown, .rightMouseDown:
+            guard closeListOutside(at: NSEvent.mouseLocation), windowNumber != window.windowNumber else {
+                return false
+            }
+            isSwallowingPress = true
+            return true
+        case .leftMouseUp, .rightMouseUp:
+            guard isSwallowingPress else {
+                return false
+            }
+            isSwallowingPress = false
+            return true
+        default:
+            return isSwallowingPress
+        }
+    }
+
+    /// Closes the list for a press outside it and its button. True when it closed.
+    private func closeListOutside(at point: NSPoint) -> Bool {
+        let hud = controller.hud
+        guard hud.showsList, hud.listFrame != .zero, window.isVisible else {
+            return false
+        }
+        let list = Self.screenRect(ofContent: hud.listFrame, inWindow: window.frame)
+        let button = Self.screenRect(ofContent: hud.listButtonFrame, inWindow: window.frame)
+        guard !list.contains(point), !button.contains(point) else {
+            return false
+        }
+        hud.showsList = false
+        return true
     }
 
     /// Converts a frame in the panel's SwiftUI space (top-left origin) to AppKit screen

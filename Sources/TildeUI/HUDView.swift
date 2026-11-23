@@ -91,6 +91,8 @@ struct HUDView: View {
             }
             if hud.isShown, controller.isOpen, hud.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
+                    .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { hud.listFrame = $0 }
+                    .onDisappear { hud.listFrame = .zero }
                     .transition(Self.zoom)
             }
             if hud.isShown, controller.isSourcePickerOpen {
@@ -446,6 +448,7 @@ struct HUDView: View {
             HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: hud.showsList, help: hud.showsList ? "Hide notes" : "Show notes") {
                 controller.dispatch(.toggleList)
             }
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { hud.listButtonFrame = $0 }
             .disabled(count == 0)
 
             HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all notes") {

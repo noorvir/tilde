@@ -15,6 +15,10 @@ final class HUDPlacement: ObservableObject {
     @Published var display: CGDirectDisplayID?
     /// The list of notes shows under the floating HUD.
     @Published var showsList = false
+    /// The list and its button, in the panel's SwiftUI space; the list's is zero while it does
+    /// not show. A press outside both closes the list.
+    var listFrame: CGRect = .zero
+    var listButtonFrame: CGRect = .zero
 
     private let browser: BrowserController
     private let makePanel: () -> HUDPanel
