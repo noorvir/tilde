@@ -39,6 +39,20 @@ for worker in 0..<workers {
     try process.run()
     processes.append(process)
 }
+// The transition tables need no drawing: they run while the states draw.
+let tables = (try? FileManager.default.contentsOfDirectory(atPath: contract.appendingPathComponent("transitions").path))?.filter { $0.hasSuffix(".json") }.sorted() ?? []
+var tableRuns: [(table: String, process: Process, output: URL)] = []
+for table in tables {
+    let output = out.appendingPathComponent("\(table).result")
+    FileManager.default.createFile(atPath: output.path, contents: nil)
+    let process = Process()
+    process.executableURL = stateTool
+    process.arguments = ["transition", contract.appendingPathComponent("transitions/\(table)").path]
+    process.standardOutput = try FileHandle(forWritingTo: output)
+    try process.run()
+    tableRuns.append((table, process, output))
+}
+
 var renderFailed = false
 for process in processes {
     process.waitUntilExit()
@@ -87,36 +101,46 @@ if isRecording {
 } else if hasPictures, !isExact {
     print("WARNING pictures were recorded on \((recorded ?? "an unknown setup\n").dropLast()), this is \(setup.dropLast()): pixels approximate")
 }
-for name in names {
+// Each state's result, in the order of `names`; compared in parallel.
+var results = [String?](repeating: nil, count: names.count)
+results.withUnsafeMutableBufferPointer { results in
+    DispatchQueue.concurrentPerform(iterations: names.count) { index in
+        results[index] = compare(names[index])
+    }
+}
+failures += results.compactMap { $0 }
+
+/// Compares one state's drawing with its picture, or records it; returns the failure.
+func compare(_ name: String) -> String? {
     let base = String(name.dropLast(5))
     let actual = out.appendingPathComponent(base + ".png")
     let reference = pictures.appendingPathComponent(base + ".png")
     if isRecording {
         try? FileManager.default.removeItem(at: reference)
-        try FileManager.default.copyItem(at: actual, to: reference)
-        continue
+        do {
+            try FileManager.default.copyItem(at: actual, to: reference)
+        } catch {
+            return "\(base): not recorded: \(error)"
+        }
+        return nil
     }
     guard let now = pixels(actual) else {
-        failures.append("\(base): not drawn")
-        continue
+        return "\(base): not drawn"
     }
     guard hasPictures else {
-        continue
+        return nil
     }
     guard let then = pixels(reference) else {
-        failures.append("\(base): no picture for macOS \(major). Look at \(actual.path), then --record")
-        continue
+        return "\(base): no picture for macOS \(major). Look at \(actual.path), then --record"
     }
     guard now.width == then.width, now.height == then.height else {
-        failures.append("\(base): size \(now.width)x\(now.height), picture \(then.width)x\(then.height)")
-        continue
+        return "\(base): size \(now.width)x\(now.height), picture \(then.width)x\(then.height)"
     }
     if now.bytes == then.bytes {
-        continue
+        return nil
     }
     guard !isExact else {
-        failures.append("\(base): pixels differ: \(actual.path)")
-        continue
+        return "\(base): pixels differ: \(actual.path)"
     }
     var different = 0
     for offset in stride(from: 0, to: now.bytes.count, by: 4) {
@@ -127,8 +151,9 @@ for name in names {
     }
     let ratio = Double(different) / Double(now.width * now.height)
     if ratio > maxDifferentRatio {
-        failures.append(String(format: "%@: %.2f%% of pixels differ: %@", base, ratio * 100, actual.path))
+        return String(format: "%@: %.2f%% of pixels differ: %@", base, ratio * 100, actual.path)
     }
+    return nil
 }
 
 // State plus event gives state: each row's `expect` must be part of the result.
@@ -146,18 +171,11 @@ func contains(_ whole: Any?, _ part: Any?) -> Bool {
     return false
 }
 
-let tables = (try? FileManager.default.contentsOfDirectory(atPath: contract.appendingPathComponent("transitions").path))?.filter { $0.hasSuffix(".json") } ?? []
 var rowCount = 0
-for table in tables.sorted() {
-    let path = contract.appendingPathComponent("transitions/\(table)")
-    let process = Process()
-    process.executableURL = stateTool
-    process.arguments = ["transition", path.path]
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    try process.run()
-    let output = pipe.fileHandleForReading.readDataToEndOfFile()
+for (table, process, outputFile) in tableRuns {
     process.waitUntilExit()
+    let path = contract.appendingPathComponent("transitions/\(table)")
+    let output = try Data(contentsOf: outputFile)
     let rows = try JSONSerialization.jsonObject(with: Data(contentsOf: path)) as? [[String: Any]] ?? []
     let results = (try? JSONSerialization.jsonObject(with: output)) as? [[String: Any]] ?? []
     guard rows.count == results.count else {
