@@ -244,8 +244,8 @@ final class CameraBubble: ObservableObject {
             isDenied = false
             capture.start(cameraID: currentCameraID)
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                Task { @MainActor [weak self] in
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                Task { @MainActor in
                     guard let self else {
                         return
                     }
