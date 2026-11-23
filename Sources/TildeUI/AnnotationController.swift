@@ -406,7 +406,17 @@ final class AnnotationController: ObservableObject {
             drawing.panel.setSnapFrame(nil)
             hover = nil
             if commentBox.pending == nil {
-                drawing.panel.hide()
+                if drawing.panel.hasGroup {
+                    // Shapes with no comment yet stay as a draft note; its pictures show them.
+                    Task {
+                        await keepDrawingDraft()
+                        if !isDrawing {
+                            drawing.panel.hide()
+                        }
+                    }
+                } else {
+                    drawing.panel.hide()
+                }
             }
             // The drawing tools showed in the floating panel.
             if hud.isInBrowser {
@@ -1128,6 +1138,19 @@ final class AnnotationController: ObservableObject {
         drawing.panel.editShapes(note.drawingIDs)
     }
 
+    /// Draw ended with shapes that have no comment yet: they become an unfinished note, which
+    /// its comment in the preview finishes. Saved to disk at once.
+    private func keepDrawingDraft() async {
+        let sessionID = session?.id
+        // The session may have ended meanwhile.
+        guard sessionID != nil, let note = await drawing.takeNote(), session?.id == sessionID else {
+            return
+        }
+        add(Pending(note, browser: browser, withContext: false), comment: "")
+        drafts[drafts.count - 1].isUnfinished = true
+        saver.save()
+    }
+
     /// The shape of the open comment changed: its link and the comment box go with it.
     private func updateEditedDrawing() {
         guard let ids = commentBox.pending?.drawingIDs, !ids.isEmpty else {
@@ -1350,6 +1373,10 @@ final class AnnotationController: ObservableObject {
         dispatch(.editNote, with: [.editNote: { [self] in
             if let index = drafts.firstIndex(where: { $0.id == id }) {
                 drafts[index].annotation.comment = comment
+                // A drawing's draft is finished by its comment; a wireframe's only by Done.
+                if !drafts[index].isWireframe, !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    drafts[index].isUnfinished = false
+                }
             }
         }])
     }
