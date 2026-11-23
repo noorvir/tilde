@@ -45,35 +45,81 @@ struct ClipComposer: View {
         .onDisappear { players.stop() }
     }
 
+    /// One line: the recent backgrounds and the menu of the others on the left, Play and the
+    /// scrubber in the middle under the video, the camera's shape on the right.
     private func controls(_ layout: ClipLayout) -> some View {
-        HStack(spacing: 6) {
-            CardButton(symbol: players.isPlaying ? "pause.fill" : "play.fill", help: players.isPlaying ? "Pause" : "Play") {
-                players.toggle()
+        CenteredRow(spacing: 12) {
+            HStack(spacing: 6) {
+                ForEach(backgrounds.recents, id: \.key) { background in
+                    swatch(background, title: title(of: background), selected: layout.background)
+                        .contextMenu {
+                            if case .image(let url) = background {
+                                Button("Remove") { backgrounds.remove(url) }
+                            }
+                        }
+                }
+                moreBackgrounds
             }
-            ClipScrubber(players: players, clock: players.clock)
-            Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 18).padding(.horizontal, 4)
-            ForEach(VideoGradient.allCases, id: \.self) { gradient in
-                swatch(.gradient(gradient), title: gradient.name, selected: layout.background)
+            HStack(spacing: 6) {
+                CardButton(symbol: players.isPlaying ? "pause.fill" : "play.fill", help: players.isPlaying ? "Pause" : "Play") {
+                    players.toggle()
+                }
+                ClipScrubber(players: players, clock: players.clock)
             }
-            ForEach(Array(backgrounds.images.enumerated()), id: \.element) { index, url in
-                swatch(.image(url), title: "Image \(index + 1)", selected: layout.background)
-                    .contextMenu {
-                        Button("Remove") { backgrounds.remove(url) }
+            HStack(spacing: 6) {
+                if layout.cameraCenter != nil {
+                    CardButton(symbol: layout.cameraShape == .circle ? "circle" : "app", help: "Camera shape") {
+                        var changed = controller.layout(of: video)
+                        changed.cameraShape = changed.cameraShape == .circle ? .rounded : .circle
+                        controller.setLayout(changed, of: video)
                     }
+                }
             }
-            CardButton(symbol: "plus", help: "Add a background image") {
+        }
+    }
+
+    /// The backgrounds that are not among the swatches, and adding an image.
+    private var moreBackgrounds: some View {
+        Menu {
+            ForEach(backgrounds.others, id: \.key) { background in
+                Button(title(of: background)) { choose(background) }
+            }
+            Divider()
+            Button("Add image") {
                 if let added = backgrounds.add() {
                     choose(.image(added))
                 }
             }
-            Spacer(minLength: 0)
-            if layout.cameraCenter != nil {
-                CardButton(symbol: layout.cameraShape == .circle ? "circle" : "app", help: "Camera shape") {
-                    var changed = controller.layout(of: video)
-                    changed.cameraShape = changed.cameraShape == .circle ? .rounded : .circle
-                    controller.setLayout(changed, of: video)
+            if !backgrounds.images.isEmpty {
+                Menu("Remove image") {
+                    ForEach(backgrounds.images, id: \.self) { url in
+                        Button(title(of: .image(url))) { backgrounds.remove(url) }
+                    }
                 }
             }
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+                .frame(width: 30, height: 20)
+                .background(RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.07)))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .tildeTooltip("More backgrounds")
+        .accessibilityLabel("More backgrounds")
+    }
+
+    private func title(of background: VideoBackground) -> String {
+        switch background {
+        case .gradient(let gradient):
+            return gradient.name
+        case .image(let url):
+            let index = backgrounds.images.firstIndex(of: url) ?? 0
+            return "Image \(index + 1)"
         }
     }
 
@@ -329,6 +375,33 @@ final class ClipClock: ObservableObject {
     }
 }
 
+/// A row of three parts: the middle one is centred and takes the width the sides leave, at
+/// least half of the row; the sides sit at the row's ends.
+private struct CenteredRow: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let height = sizes.map(\.height).max() ?? 0
+        let ideal = sizes.map(\.width).reduce(0, +) + spacing * 2
+        return CGSize(width: proposal.width ?? ideal, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else {
+            return
+        }
+        let leading = subviews[0].sizeThatFits(.unspecified)
+        let trailing = subviews[2].sizeThatFits(.unspecified)
+        let side = max(leading.width, trailing.width) + spacing
+        let middle = max(bounds.width / 2, bounds.width - 2 * side)
+        let height = ProposedViewSize(width: nil, height: bounds.height)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: height)
+        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: ProposedViewSize(width: middle, height: bounds.height))
+        subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: height)
+    }
+}
+
 /// The seek bar with the time played and the clip's length.
 private struct ClipScrubber: View {
     let players: ClipPlayers
@@ -348,7 +421,7 @@ private struct ClipScrubber: View {
             }
             .controlSize(.small)
             .tint(.white)
-            .frame(minWidth: 120, maxWidth: 260)
+            .frame(minWidth: 120, maxWidth: .infinity)
             .accessibilityLabel("Position")
             .accessibilityValue(clock.text)
             Text(clock.text)

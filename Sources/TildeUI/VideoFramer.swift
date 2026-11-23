@@ -67,7 +67,7 @@ enum VideoGradient: String, CaseIterable {
 }
 
 /// The backgrounds to choose from: the gradients and the user's own images. The last one
-/// chosen is the next clip's.
+/// chosen is the next clip's; the four chosen most recently show as swatches.
 @MainActor
 final class VideoBackgrounds: ObservableObject {
     nonisolated static let folder: URL = {
@@ -77,18 +77,46 @@ final class VideoBackgrounds: ObservableObject {
 
     /// The user's images, oldest first.
     @Published private(set) var images: [URL] = []
+    /// The four backgrounds chosen most recently. One of them chosen again keeps its place,
+    /// so the swatches do not move under the pointer.
+    @Published private(set) var recents: [VideoBackground] = []
     private(set) var last: VideoBackground
     private let defaults: UserDefaults
+    private static let recentCount = 4
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
         last = defaults.string(forKey: "VideoBackground").flatMap(VideoBackground.init(key:)) ?? .gradient(.dusk)
         images = Self.saved()
+        let kept = (defaults.stringArray(forKey: "VideoBackgroundRecents") ?? []).compactMap(VideoBackground.init(key:))
+        recents = Self.filled([last] + kept)
+    }
+
+    /// All the backgrounds that are not among the recent ones: gradients, then images.
+    var others: [VideoBackground] {
+        (VideoGradient.allCases.map(VideoBackground.gradient) + images.map(VideoBackground.image)).filter { !recents.contains($0) }
     }
 
     func remember(_ background: VideoBackground) {
         last = background
         defaults.set(background.key, forKey: "VideoBackground")
+        if !recents.contains(background) {
+            setRecents([background] + recents)
+        }
+    }
+
+    private func setRecents(_ backgrounds: [VideoBackground]) {
+        recents = Self.filled(backgrounds)
+        defaults.set(recents.map(\.key), forKey: "VideoBackgroundRecents")
+    }
+
+    /// The first four of `backgrounds`, each once, then gradients while there are fewer.
+    private static func filled(_ backgrounds: [VideoBackground]) -> [VideoBackground] {
+        var result: [VideoBackground] = []
+        for background in backgrounds + VideoGradient.allCases.map(VideoBackground.gradient) where !result.contains(background) {
+            result.append(background)
+        }
+        return Array(result.prefix(recentCount))
     }
 
     /// Asks for images and copies them to the folder; returns the last one added.
@@ -119,6 +147,7 @@ final class VideoBackgrounds: ObservableObject {
     func remove(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
         images = Self.saved()
+        setRecents(recents.filter { $0 != .image(url) })
         if last == .image(url) {
             remember(.gradient(.dusk))
         }
