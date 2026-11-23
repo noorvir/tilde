@@ -10,7 +10,8 @@ extension CookieBrowser {
 }
 
 /// A quiet bar over the page until logins are imported: Import opens the same chooser as
-/// Settings › Browser. × hides it until Tilde quits; "Don't show again" for good.
+/// Settings › Browser. × hides it until Tilde quits; "Don't show again" until its switch in
+/// Settings › Browser is on again.
 struct LoginImportBar: View {
     static let enabledKey = "OfferLoginImport"
     @ObservedObject var browser: BrowserController
@@ -40,7 +41,7 @@ struct LoginImportBar: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.6))
-                .help("Settings › Browser still imports logins")
+                .help("Settings › Browser turns it back on")
                 Button {
                     browser.hidesLoginImport = true
                 } label: {

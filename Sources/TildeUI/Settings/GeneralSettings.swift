@@ -143,6 +143,7 @@ private struct BrowserSettings: View {
     @State private var asksToClear = false
     @AppStorage("BrowserImport.summary") private var lastImport = ""
     @AppStorage(BrowserOffer.enabledKey) private var offersBrowser = true
+    @AppStorage(LoginImportBar.enabledKey) private var offersImport = true
 
     var body: some View {
         SettingsSection("Browser") {
@@ -151,12 +152,22 @@ private struct BrowserSettings: View {
                     choice = browsers()
                 }
             }
+            SettingsDivider()
+            SettingsRow(title: "Offer to import logins", subtitle: "A bar in Tilde's browser until logins are imported") {
+                Toggle("Offer to import logins", isOn: $offersImport)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .tint(Color.tildeBlue)
+                    .labelsHidden()
+            }
             // Not while the page is in Tilde's browser already.
             if browser.pageURL == nil {
                 SettingsDivider()
                 SettingsRow(title: "Offer Tilde's browser", subtitle: "For a note on a page in another browser") {
-                    Toggle("", isOn: $offersBrowser)
+                    Toggle("Offer Tilde's browser", isOn: $offersBrowser)
                         .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .tint(Color.tildeBlue)
                         .labelsHidden()
                 }
             }
