@@ -151,7 +151,7 @@ final class AnnotationController: ObservableObject {
         clips.keep = { [weak self] draft in
             self?.keepClip(draft)
         }
-        clips.camera = camera
+        clips.camera = self.camera
         return clips
     }()
     /// The source picker under the HUD while choosing.
@@ -1217,7 +1217,10 @@ final class AnnotationController: ObservableObject {
         let layout = layout(of: video)
         let cameraTrack = cameraTrack(of: video)
         savingVideo = video
-        Task {
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
             let started = Date()
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
