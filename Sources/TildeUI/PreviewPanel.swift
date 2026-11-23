@@ -286,7 +286,7 @@ struct PreviewView: View {
                 }
             }
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
-                controller.deleteDraft(id)
+                controller.askToDelete(id)
             }
             .disabled(!controller.canEditNotes)
         }

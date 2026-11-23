@@ -650,8 +650,8 @@ struct BehaviourTests {
         #expect(controller.previewCard.id == nil)
     }
 
-    /// Delete in the preview always asks first: Esc keeps the note, ↩ deletes it. Typing in
-    /// the comment deletes text, not the note.
+    /// Delete in the preview, by key or button, always asks first: Esc keeps the note, ↩
+    /// deletes it. Typing in the comment deletes text, not the note.
     @Test func deleteInThePreviewAsksFirst() async throws {
         let drafts = Fixtures.drafts(2)
         controller.setStateForTesting(
@@ -672,6 +672,11 @@ struct BehaviourTests {
         #expect(controller.handleConfirmationKey(36, in: NSPanel()))
         try await until { self.controller.drafts.map(\.id) == [drafts[1].id] }
         #expect(controller.confirmation == nil)
+
+        // The card's Delete button asks the same.
+        controller.askToDelete(drafts[1].id)
+        #expect(controller.confirmation == .deleteNote)
+        #expect(controller.drafts.count == 1)
     }
 
     // MARK: - The menu

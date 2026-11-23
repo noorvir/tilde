@@ -176,7 +176,7 @@ struct SessionFlow: Equatable {
         case discardRecording
         /// Replace the notes on screen with a saved session's.
         case restore
-        /// Delete the note shown in the preview; asked for Delete and Backspace there.
+        /// Delete the note shown in the preview; asked by its Delete button and keys.
         case deleteNote
     }
 
@@ -185,7 +185,7 @@ struct SessionFlow: Equatable {
         /// The session ended elsewhere, such as the agent cancelling it.
         case ended
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
-        /// Delete or Backspace in the preview: asks before the note goes.
+        /// The preview's Delete button, Delete or Backspace: asks before the note goes.
         case requestDeleteNote
         /// The Annotate button and its key: annotation mode on, from any other mode, or off.
         case toggleAnnotating
@@ -640,7 +640,7 @@ struct SessionFlow: Equatable {
             return facts.notes > 0 ? [.deleteNote] : []
 
         case .requestDeleteNote:
-            // Only the preview's keys ask it.
+            // Only the preview asks it.
             guard facts.notes > 0, open.panel == .preview, !open.activity.isPicking else {
                 return []
             }

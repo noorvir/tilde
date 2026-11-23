@@ -1566,7 +1566,8 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Delete or Backspace in the preview asks first, for a note and for a clip alike.
+    /// The preview's Delete button, Delete and Backspace ask first, for a note and for a clip
+    /// alike.
     func askToDelete(_ id: Draft.ID) {
         deleteAsked = id
         dispatch(.requestDeleteNote)
