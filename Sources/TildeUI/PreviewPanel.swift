@@ -1,7 +1,6 @@
 import TildeCore
 import AppKit
 import Carbon.HIToolbox
-import AVKit
 import SwiftUI
 
 /// Centred card that shows one annotation's close-up large and its context screenshot as a

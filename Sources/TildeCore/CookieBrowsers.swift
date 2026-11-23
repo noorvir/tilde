@@ -180,14 +180,15 @@ extension BrowserCookies {
             return String(decoding: bytes[at..<end], as: UTF8.self)
         }
 
-        guard bytes.count >= 8, String(decoding: bytes[0..<4], as: UTF8.self) == "cook", let pageCount = big(4) else {
+        // Counts larger than the file can hold are a damaged file.
+        guard bytes.count >= 8, String(decoding: bytes[0..<4], as: UTF8.self) == "cook", let pageCount = big(4), pageCount <= (bytes.count - 8) / 4 else {
             throw Failure.database("not a Safari cookie file")
         }
         var pageStart = 8 + 4 * pageCount
         var cookies: [HTTPCookie] = []
         var skipped = 0
         for page in 0..<pageCount {
-            guard let pageSize = big(8 + 4 * page), let count = little(pageStart + 4) else {
+            guard let pageSize = big(8 + 4 * page), let count = little(pageStart + 4), count <= pageSize / 4 else {
                 throw Failure.database("a Safari cookie page is cut short")
             }
             for index in 0..<count {
@@ -240,6 +241,8 @@ extension BrowserCookies {
         }
         var handle: OpaquePointer?
         guard sqlite3_open_v2(copy.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db = handle else {
+            // SQLite may make a handle also when it fails to open.
+            sqlite3_close(handle)
             throw Failure.database("open failed")
         }
         defer { sqlite3_close(db) }

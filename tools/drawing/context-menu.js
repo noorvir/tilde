@@ -100,6 +100,9 @@ export function contextMenuRequested(event) {
   });
 }
 
+// A click outside the page, such as on the HUD, closes the menu: else its keys would wait.
+window.addEventListener("blur", () => close());
+
 function close() {
   if (!isOpen) return;
   isOpen = false;

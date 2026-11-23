@@ -143,7 +143,6 @@ final class DrawingPanel {
         active?.focus()
     }
 
-
     /// Wireframe mode's tool and icons as JSON, or `null` to leave the mode.
     func setWireframe(_ json: String) {
         active?.wireframe = json

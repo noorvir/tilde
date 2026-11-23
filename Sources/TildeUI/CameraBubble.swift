@@ -120,9 +120,6 @@ final class CameraBubble: ObservableObject {
     func toggle() {
         isOn.toggle()
         defaults.set(isOn, forKey: "CameraOn")
-        if isShowing {
-            capture.buttonPressed()
-        }
         openMenu = nil
         refresh()
     }
@@ -353,14 +350,11 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     private var cameraID: String?
     private var isWanted = false
     private var retried = false
-    private var started = Date()
     /// Counts starts, so a late frame or time limit of an earlier start does nothing.
     private var attempt = 0
     /// The attempt whose first frame came.
     private var seenAttempt = -1
     private var observers: [Any] = []
-    /// When the camera button turned the camera on, until the first frame.
-    private var pressed: Date?
 
     /// The built-in camera, else an external one. A Continuity Camera only when chosen: it can
     /// take seconds to connect, or fail.
@@ -379,17 +373,11 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
                 let error = note.userInfo?[AVCaptureSessionErrorKey] as? Error
                 self?.queue.async { self?.runtimeError(error) }
             },
-            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { [weak self] _ in
-                self?.queue.async { self?.logStep("interrupted") }
+            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { _ in
+                Self.log.notice("interrupted")
             },
-            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { [weak self] _ in
-                self?.queue.async { self?.logStep("interruption ended") }
-            },
-            center.addObserver(forName: AVCaptureSession.didStartRunningNotification, object: session, queue: nil) { [weak self] _ in
-                self?.queue.async { self?.logStep("session started running") }
-            },
-            center.addObserver(forName: AVCaptureSession.didStopRunningNotification, object: session, queue: nil) { [weak self] _ in
-                self?.queue.async { self?.logStep("session stopped running") }
+            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { _ in
+                Self.log.notice("interruption ended")
             },
             center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: nil) { [weak self] note in
                 let id = (note.object as? AVCaptureDevice)?.uniqueID
@@ -424,15 +412,6 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         }
     }
 
-    /// The camera button turned the camera on: the first frame logs the time since.
-    func buttonPressed() {
-        let now = Date()
-        queue.async { [self] in
-            pressed = now
-            logStep("camera button pressed")
-        }
-    }
-
     /// Tries again after a failure.
     func retry() {
         queue.async { [self] in
@@ -450,7 +429,6 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             attempt += 1
             if session.isRunning {
                 session.stopRunning()
-                logStep("stopped")
             }
         }
     }
@@ -468,7 +446,6 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             return
         }
         begin()
-        logStep("device \(device.localizedName) (\(device.deviceType.rawValue))")
         if current != [device.uniqueID] {
             let input: AVCaptureDeviceInput
             do {
@@ -477,7 +454,6 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
                 fail("input: \(error.localizedDescription)")
                 return
             }
-            logStep("input made")
             session.beginConfiguration()
             session.inputs.forEach(session.removeInput)
             guard session.canAddInput(input) else {
@@ -511,7 +487,6 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     /// A new attempt: the bubble shows a spinner until the first frame or the time limit.
     private func begin() {
         attempt += 1
-        started = Date()
         let attempt = attempt
         frames.setSampleBufferDelegate(self, queue: frameQueue)
         frameQueue.async { [self] in
@@ -527,9 +502,10 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
 
     private func startRunning() {
         if !session.isRunning {
-            logStep("startRunning begun")
             session.startRunning()
-            logStep("startRunning done, running: \(session.isRunning)")
+            if !session.isRunning {
+                Self.log.notice("did not start running")
+            }
         }
     }
 
@@ -551,7 +527,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         guard let id, current.contains(id) else {
             return
         }
-        logStep("camera disconnected")
+        Self.log.notice("camera disconnected")
         guard isWanted else {
             return
         }
@@ -566,11 +542,6 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         Self.log.error("failed: \(reason, privacy: .public)")
         attempt += 1
         report(.failed)
-    }
-
-    private func logStep(_ step: String) {
-        let elapsed = Date().timeIntervalSince(started)
-        Self.log.notice("\(step, privacy: .public) at \(elapsed, format: .fixed(precision: 2), privacy: .public) s")
     }
 
     private func report(_ state: State) {
@@ -599,11 +570,6 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
                 return
             }
             seenAttempt = attempt
-            logStep("first frame")
-            if let pressed {
-                Self.log.notice("first frame \(Date().timeIntervalSince(pressed), format: .fixed(precision: 2), privacy: .public) s after the camera button")
-                self.pressed = nil
-            }
             report(.running)
         }
     }

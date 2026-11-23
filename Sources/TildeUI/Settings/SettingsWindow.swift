@@ -140,7 +140,6 @@ final class SettingsModel: ObservableObject {
     let version: String
     let onResult: (InstallResult) -> Void
     let onResetHUD: () -> Void
-    /// The Chromium profiles whose logins Tilde's browser can import.
     /// The installed browsers whose logins Tilde's browser can import.
     let cookieBrowsers: () -> [CookieBrowser]
     /// Whether macOS allows Tilde to record the screen and to use Accessibility.

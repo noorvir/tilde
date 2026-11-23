@@ -1260,6 +1260,8 @@ final class AnnotationController: ObservableObject {
         }
         let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
         let formatter = DateFormatter()
+        // Digits in every locale: the name is for files.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date())).mp4")
         let layout = layout(of: video)

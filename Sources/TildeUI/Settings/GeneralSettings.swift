@@ -203,6 +203,8 @@ struct ImportSheet: View {
     @State private var selected: CookieBrowser?
     @State private var profile: CookieProfile?
     @State private var isImporting = false
+    /// The import under way; Cancel stops it before the cookies go to the browser.
+    @State private var importing: Task<Void, Never>?
     @State private var error: String?
 
     var body: some View {
@@ -222,7 +224,10 @@ struct ImportSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { onDone(nil) }
+                Button("Cancel") {
+                    importing?.cancel()
+                    onDone(nil)
+                }
                     .keyboardShortcut(.cancelAction)
                 Button(action: importLogins) {
                     // While importing, a spinner takes the label's place at the same width.
@@ -305,11 +310,12 @@ struct ImportSheet: View {
         }
         isImporting = true
         error = nil
-        Task {
+        importing = Task {
             let started = Date()
             defer { isImporting = false }
             do {
                 let result = try await Task.detached { try BrowserCookies.cookies(of: profile) }.value
+                try Task.checkCancellation()
                 await browser.add(result.cookies)
                 let wait = 1 - Date().timeIntervalSince(started)
                 if wait > 0 {
@@ -317,6 +323,8 @@ struct ImportSheet: View {
                 }
                 let time = Date().formatted(date: .abbreviated, time: .shortened)
                 onDone("✓ \(result.cookies.count) cookies from \(profile.title), \(time)")
+            } catch is CancellationError {
+                return
             } catch {
                 self.error = "Could not import: \(error)"
             }

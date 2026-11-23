@@ -5,7 +5,7 @@ import ScreenCaptureKit
 import VideoToolbox
 
 /// Records one display, one window or an iPhone on a cable to an H.264 `.mp4` file, without
-/// Tilde's own windows other than its browser and the camera bubble, and with the microphone
+/// Tilde's own windows other than its browser on a display, and with the microphone
 /// when asked (macOS 15 and later). The video leaves out the time spent paused.
 final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     struct Clip {
@@ -68,15 +68,16 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// Set by Stop and Discard: from then on nothing is written.
     private var isStopped = false
 
-    /// What a clip records besides the source: Tilde's windows to keep in it, such as its
-    /// browser and the camera bubble, and the microphone's `AVCaptureDevice.uniqueID`.
+    /// What a clip records besides the source: Tilde's windows to keep in a display's clip,
+    /// such as its browser, and the microphone's `AVCaptureDevice.uniqueID`. The camera is a
+    /// file of its own.
     struct Extras {
         var keptWindows: [Int] = []
         var microphone: String?
     }
 
     /// Starts recording a source into `video`. Of Tilde's windows, only `extras.keptWindows`
-    /// show in it.
+    /// show in a display's clip; a window's clip shows that window's app alone.
     static func start(
         _ source: RecordingSource, to video: URL, extras: Extras, onSourceEnded: @escaping @Sendable () -> Void
     ) async throws -> ScreenRecorder {
@@ -89,9 +90,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             return try await start(phone, to: video, onSourceEnded: onSourceEnded)
         case .window(let window):
             let content = try await shareableContent()
-            let kept = content.windows.filter { extras.keptWindows.contains(Int($0.windowID)) }
             guard let shared = content.windows.first(where: { $0.windowID == CGWindowID(window.number) }),
-                  let (showing, display) = ScreenCapture.filter(showingAppOf: shared, at: shared.frame, content: content, keeping: kept)
+                  let (showing, display) = ScreenCapture.filter(showingAppOf: shared, at: shared.frame, content: content, keeping: [])
             else {
                 throw Failure.noSource
             }
