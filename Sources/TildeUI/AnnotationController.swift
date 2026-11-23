@@ -446,7 +446,6 @@ final class AnnotationController: ObservableObject {
         case .keepDrawing:
             drawing.panel.endEditing()
             drawing.panel.stopDrawing()
-            drawing.panel.setSnapFrame(nil)
             hover = nil
             if commentBox.pending == nil {
                 if drawing.panel.hasGroup {

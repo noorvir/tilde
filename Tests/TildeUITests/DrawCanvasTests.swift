@@ -20,13 +20,6 @@ struct DrawCanvasTests {
         page.messages.filter { $0 == "group" }.count
     }
 
-    /// Takes the new shapes and removes them, as Tilde does when a shape's comment is saved.
-    private func removeNewShapes() async throws {
-        let ids = try await page.takeShapes().map(\.id)
-        try await page.draw("remove(\(DrawingPanel.json(ids)))")
-        try await page.draw("endEditing()")
-    }
-
     private func rect(of shape: [String: Any]?) -> [Double]? {
         (shape?["rect"] as? [NSNumber])?.map(\.doubleValue)
     }
@@ -77,28 +70,6 @@ struct DrawCanvasTests {
         try await page.click(CGPoint(x: 200, y: 150))
         #expect(try await page.rawShapes().isEmpty)
         #expect(groupMessages() == 0, "\(page.messages)")
-    }
-
-    /// A new shape's corners go to the corners, edge midpoints and centre of the element under
-    /// the pointer, within 16 points; ⌘ turns that off.
-    @Test func aShapeSnapsToTheElementUnderThePointer() async throws {
-        try await page.draw("setTool('rectangle')")
-        try await page.draw("setSnapFrame([400, 300, 200, 100])")
-        try await page.drag(from: CGPoint(x: 392, y: 306), to: CGPoint(x: 607, y: 391))
-        try await page.wait { self.groupMessages() == 1 }
-        #expect(rect(of: try await page.rawShapes().first) == [400, 300, 200, 100])
-        try await removeNewShapes()
-
-        try await page.drag(from: CGPoint(x: 392, y: 306), to: CGPoint(x: 607, y: 391), meta: true)
-        try await page.wait { self.groupMessages() == 2 }
-        #expect(rect(of: try await page.rawShapes().first) == [392, 306, 215, 85])
-        try await removeNewShapes()
-
-        // No element under the pointer: nothing to snap to.
-        try await page.draw("setSnapFrame(null)")
-        try await page.drag(from: CGPoint(x: 392, y: 306), to: CGPoint(x: 607, y: 391))
-        try await page.wait { self.groupMessages() == 3 }
-        #expect(rect(of: try await page.rawShapes().first) == [392, 306, 215, 85])
     }
 
     /// While a shape's comment is open, only that shape changes: a press beside it is a click

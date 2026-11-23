@@ -81,7 +81,6 @@ final class WireframeMode: ObservableObject {
     func start() {
         reset()
         tool = lastTool
-        canvas.setSnapFrame(nil)
         sendTool()
     }
 

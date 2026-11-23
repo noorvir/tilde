@@ -1,9 +1,7 @@
 // Draw mode: the tool, the group of shapes that one comment gets (Esc ends it), the shapes
-// that are edited while their comment is open, the arrow that a click starts, and snapping to
-// the element under the pointer.
+// that are edited while their comment is open, and the arrow that a click starts.
 
 import { cursorRing, isSelectMode, setSelectMode } from "./cursor.js";
-import { ringStyle } from "./rings.js";
 import { api, taken, post, postPointer, live, changeElements, isTextField } from "./scene.js";
 import { isHandle } from "./wireframe/chip.js";
 import { wireframe } from "./wireframe/mode.js";
@@ -117,11 +115,6 @@ export function deselect() {
   api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
 }
 
-// The element under the pointer, for snapping; nil clears it.
-export function setSnapFrame(frame) {
-  snapFrame = frame;
-}
-
 // In Draw with no tool nothing draws: a press on a shape selects it, and ⇧ adds it to the selection.
 export function blockPressWithNoTool(event) {
   if (!isSelectMode || wireframe) return;
@@ -134,35 +127,13 @@ export function blockPressWithNoTool(event) {
   api.updateScene({ appState: { selectedElementIds }, captureUpdate: "NEVER" });
 }
 
-// Snapping: to the corners, edge midpoints and centre of the element under the pointer.
-const snapDistance = 16;
-let snapFrame = null;
-let startSnap = null;
-export const ring = document.createElement("div");
-ring.style.cssText = `${ringStyle};border-color:#2F76FF;background:rgba(47,118,255,.25)`;
 export let isPressed = false;
 
-function snapPoint(x, y, event) {
-  if (!snapFrame || event.metaKey) return null;
-  const [left, top, width, height] = snapFrame;
-  const xs = [left, left + width / 2, left + width];
-  const ys = [top, top + height / 2, top + height];
-  let best = null;
-  for (const px of xs) {
-    for (const py of ys) {
-      const distance = Math.hypot(px - x, py - y);
-      if (distance <= snapDistance && (!best || distance < best.distance)) best = { x: px, y: py, distance };
-    }
-  }
-  return best;
-}
+const cursorTools = new Set(["arrow", "rectangle", "ellipse", "freedraw", "text"]);
 
-const drawingTools = new Set(["arrow", "rectangle", "ellipse"]);
-const cursorTools = new Set([...drawingTools, "freedraw", "text"]);
-
-function showCursorRing(event, isSnapping) {
+function showCursorRing(event) {
   const tool = api?.getAppState().activeTool.type;
-  const isShown = cursorTools.has(tool) && !isSelectMode && !editing && !clickArrow && !isPressed && !isSnapping && !isWireframeSnapped && !isHandle(event.target)
+  const isShown = cursorTools.has(tool) && !isSelectMode && !editing && !clickArrow && !isPressed && !isWireframeSnapped && !isHandle(event.target)
     && !(wireframe && (isOverComponent || wireframe.tool === "text"));
   cursorRing.style.display = isShown ? "block" : "none";
   if (!isShown) return;
@@ -177,14 +148,7 @@ function showCursorRing(event, isSnapping) {
 // The pointer moved: Tilde gets its place, and the rings show.
 export function pointerMoved(event) {
   postPointer(event.clientX, event.clientY);
-  const tool = api?.getAppState().activeTool.type;
-  const point = drawingTools.has(tool) || tool === "selection" ? snapPoint(event.clientX, event.clientY, event) : null;
-  ring.style.display = point ? "block" : "none";
-  if (point) {
-    ring.style.left = `${point.x}px`;
-    ring.style.top = `${point.y}px`;
-  }
-  showCursorRing(event, point !== null);
+  showCursorRing(event);
 }
 
 export function pointerLeft() {
@@ -317,7 +281,6 @@ export function enterEndsText(event) {
 export function pointerPressed(event) {
   isPressed = true;
   cursorRing.style.display = "none";
-  startSnap = snapPoint(event.clientX, event.clientY, event);
   pressAt = { x: event.clientX, y: event.clientY };
   idsAtPress = new Set(api?.getSceneElementsIncludingDeleted().map((element) => element.id));
   isPressOnShape = true;
@@ -333,43 +296,9 @@ function linePoints(start, end) {
   return { x: start.x, y: start.y, width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y), points: [[0, 0], [end.x - start.x, end.y - start.y]], lastCommittedPoint: null };
 }
 
-function snapNewShape(element, event) {
-  const end = snapPoint(event.clientX, event.clientY, event);
-  if (!startSnap && !end) return;
-  if (element.type === "arrow") {
-    const last = element.points[element.points.length - 1];
-    const from = startSnap ?? { x: element.x, y: element.y };
-    const to = end ?? { x: element.x + last[0], y: element.y + last[1] };
-    changeElements([element.id], () => linePoints(from, to));
-  } else if (element.type === "rectangle" || element.type === "ellipse") {
-    const firstX = startSnap?.x ?? element.x;
-    const firstY = startSnap?.y ?? element.y;
-    const lastX = end?.x ?? element.x + element.width;
-    const lastY = end?.y ?? element.y + element.height;
-    changeElements([element.id], () => ({
-      x: Math.min(firstX, lastX), y: Math.min(firstY, lastY), width: Math.abs(lastX - firstX), height: Math.abs(lastY - firstY),
-    }));
-  }
-}
-
-function snapSelectedArrow(event) {
-  const end = snapPoint(event.clientX, event.clientY, event);
-  const selected = Object.keys(api.getAppState().selectedElementIds);
-  if (!end || selected.length !== 1) return;
-  const element = live().find((candidate) => candidate.id === selected[0]);
-  if (element?.type !== "arrow") return;
-  const last = element.points[element.points.length - 1];
-  const start = { x: element.x, y: element.y };
-  const stop = { x: element.x + last[0], y: element.y + last[1] };
-  const nearStart = Math.hypot(start.x - end.x, start.y - end.y) < Math.hypot(stop.x - end.x, stop.y - end.y);
-  // A snap is for an end that was dragged, not for an arrow moved as a whole.
-  if (Math.min(Math.hypot(start.x - end.x, start.y - end.y), Math.hypot(stop.x - end.x, stop.y - end.y)) > snapDistance * 2) return;
-  changeElements([element.id], () => (nearStart ? linePoints(end, stop) : linePoints(start, end)));
-}
-
 function finishClickArrow(element, event) {
-  const from = clickArrow.start ?? { x: element.x, y: element.y };
-  const to = snapPoint(event.clientX, event.clientY, event) ?? { x: event.clientX, y: event.clientY };
+  const from = { x: element.x, y: element.y };
+  const to = { x: event.clientX, y: event.clientY };
   if (Math.hypot(to.x - from.x, to.y - from.y) < 4) {
     cancelClickArrow();
     return;
@@ -405,7 +334,6 @@ export function pointerReleased(event) {
     return;
   }
   if (!isPressOnShape) return;
-  ring.style.display = "none";
   // A click with the text tool opens Excalidraw's text field, which Esc or a click away ends.
   if (!editing && api.getAppState().activeTool.type === "text") return;
   // After Excalidraw has finished the shape. Until then a click's element is no group's: it
@@ -428,7 +356,7 @@ function settleRelease(event) {
   }
   const isClick = Math.hypot(event.clientX - pressAt.x, event.clientY - pressAt.y) < 4;
   if (created.length && isClick && api.getAppState().activeTool.type === "arrow") {
-    clickArrow = { start: startSnap, id: created[created.length - 1].id };
+    clickArrow = { id: created[created.length - 1].id };
     return;
   }
   // With the other tools, a click without a drag draws nothing.
@@ -438,12 +366,10 @@ function settleRelease(event) {
     return;
   }
   if (created.length) {
-    snapNewShape(created[created.length - 1], event);
     // The new shape is selected, so Delete removes it.
     const selectedElementIds = Object.fromEntries(created.map((element) => [element.id, true]));
     api.updateScene({ appState: { selectedElementIds }, captureUpdate: "NEVER" });
   } else if (api.getAppState().activeTool.type === "selection") {
-    snapSelectedArrow(event);
     // A press beside the handles clears the selection; the shape stays in edit mode.
     if (editing && !api.getAppState().selectedElementIds[[...editing][0]]) selectEdited();
     post("edited");

@@ -3,7 +3,7 @@
 // a drag moves a copy, and a double-click edits its text. A chip above its top right moves it too:
 // a click on its name changes the kind, its Borders button opens the borders, its Comment
 // button its comment, its other controls set the rows and columns of a table or list or the
-// fill of a rectangle or ellipse, and × deletes it. A handle at each corner resizes it, and
+// fill of an ellipse, and × deletes it. A handle at each corner resizes it, and
 // its opposite corner stays; a grip at the middle of its top edge moves it. Moves and resizes
 // snap. Only components not sent yet can change; each change can be undone.
 
@@ -125,7 +125,7 @@ function chipControls(frame) {
     const counts = rowsOf(kind, frame, data);
     controls += stepper("rows", counts.rows) + (kind === "table" ? stepper("columns", counts.columns) : "");
   }
-  if (kind === "rectangle" || kind === "ellipse") controls += fillToggle(data.filled);
+  if (kind === "ellipse") controls += fillToggle(data.filled);
   return controls;
 }
 

@@ -137,10 +137,6 @@ final class DrawingPanel {
         active?.focus()
     }
 
-    /// The element to snap to, in Quartz screen coordinates.
-    func setSnapFrame(_ frame: CGRect?) {
-        active?.setSnapFrame(frame)
-    }
 
     /// Wireframe mode's tool and icons as JSON, or `null` to leave the mode.
     func setWireframe(_ json: String) {

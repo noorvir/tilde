@@ -121,15 +121,6 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         captureUnder()
     }
 
-    func setSnapFrame(_ frame: CGRect?) {
-        guard let frame else {
-            run("setSnapFrame(null)")
-            return
-        }
-        let origin = self.frame.flipped.origin
-        run("setSnapFrame([\(frame.minX - origin.x), \(frame.minY - origin.y), \(frame.width), \(frame.height)])")
-    }
-
     func shapes(_ ids: [String]) async -> [[String: Any]] {
         guard let webView, !ids.isEmpty,
               let text = try? await webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.shapesOf(\(DrawingPanel.json(ids))) : \"\"") as? String,

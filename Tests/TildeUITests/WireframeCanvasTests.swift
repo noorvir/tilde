@@ -766,8 +766,8 @@ struct WireframeCanvasTests {
         #expect(try await !page.shows("[data-kind=\"table\"]"))
     }
 
-    /// The chip's controls set the borders, the rows and columns of a table, and the fill of a
-    /// rectangle, which the next rectangle takes.
+    /// The chip's controls set the borders, the rows and columns of a table, and the fill of an
+    /// ellipse, which the next ellipse takes.
     @Test func theChipSetsBordersRowsAndFill() async throws {
         try await drawComponent("table")
         try await page.hover(inside)
@@ -793,7 +793,7 @@ struct WireframeCanvasTests {
         #expect(table.map(\.columns) == [4])
         _ = try await page.takeShapes()
 
-        try await drawComponent("rectangle")
+        try await drawComponent("ellipse")
         try await page.hover(inside)
         try await page.click(on: "[data-action=\"filled\"]")
         #expect(try await page.shapes().map(\.filled) == [false])

@@ -24,12 +24,12 @@ export function rowsOf(kind, { width, height }, data) {
 }
 
 export const allBorders = ["top", "right", "bottom", "left"];
-// A new rectangle or ellipse is filled as the last one set.
+// A new ellipse is filled as the last one set.
 let isFilled = true;
 
 export function newData(kind) {
   const data = { borders: allBorders };
-  if (kind === "rectangle" || kind === "ellipse") data.filled = isFilled;
+  if (kind === "ellipse") data.filled = isFilled;
   return data;
 }
 
