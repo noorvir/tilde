@@ -2,8 +2,8 @@ import AVFoundation
 import SwiftUI
 
 /// A recording in the preview, as its saved video will be: the clip and its camera on a
-/// background. Drag either to move it, and its corner dot to resize it. Every change goes to
-/// the clip's layout at once.
+/// background. Drag either to move it, and its corner dot to resize it. A drag goes to the
+/// clip's layout when it ends; until then only the composer redraws.
 struct ClipComposer: View {
     private enum Part {
         case screen, camera
@@ -13,8 +13,7 @@ struct ClipComposer: View {
     @ObservedObject private var backgrounds: VideoBackgrounds
     let video: URL
     @StateObject private var players: ClipPlayers
-    /// The layout when the drag in progress began.
-    @State private var dragStart: ClipLayout?
+    @StateObject private var drag = ComposerDrag()
 
     init(controller: AnnotationController, video: URL) {
         self.controller = controller
@@ -24,7 +23,7 @@ struct ClipComposer: View {
     }
 
     var body: some View {
-        let layout = controller.layout(of: video)
+        let layout = drag.layout ?? controller.layout(of: video)
         VStack(alignment: .leading, spacing: 10) {
             GeometryReader { geometry in
                 let canvas = geometry.size
@@ -102,9 +101,9 @@ struct ClipComposer: View {
                         layout.cameraCenter = clamped(CGPoint(x: center.x + dx, y: center.y + dy))
                     }
                 }
-                controller.setLayout(layout, of: video)
+                drag.move(to: layout)
             }
-            .onEnded { _ in dragStart = nil }
+            .onEnded { _ in endDrag() }
     }
 
     /// The bottom-right corner follows the pointer; the part keeps its centre and its shape.
@@ -122,18 +121,19 @@ struct ClipComposer: View {
                     let side = start.cameraSide * canvas.height + value.translation.width + value.translation.height
                     layout.cameraSide = min(max(side / canvas.height, 0.1), 0.7)
                 }
-                controller.setLayout(layout, of: video)
+                drag.move(to: layout)
             }
-            .onEnded { _ in dragStart = nil }
+            .onEnded { _ in endDrag() }
     }
 
     private func beginDrag() -> ClipLayout {
-        if let dragStart {
-            return dragStart
+        drag.begin(from: controller.layout(of: video))
+    }
+
+    private func endDrag() {
+        if let layout = drag.end() {
+            controller.setLayout(layout, of: video)
         }
-        let start = controller.layout(of: video)
-        dragStart = start
-        return start
     }
 
     private func clamped(_ point: CGPoint) -> CGPoint {
@@ -191,6 +191,37 @@ struct ClipComposer: View {
         var layout = controller.layout(of: video)
         layout.background = background
         controller.setLayout(layout, of: video)
+    }
+}
+
+/// A drag in the composer. The layout follows the pointer here and goes to the controller
+/// once, at the end: the controller's change redraws the HUD and the preview, and saves.
+@MainActor
+final class ComposerDrag: ObservableObject {
+    /// The layout while a drag goes on.
+    @Published private(set) var layout: ClipLayout?
+    private var start: ClipLayout?
+
+    /// The layout the drag started from: `current` at its first tick.
+    func begin(from current: ClipLayout) -> ClipLayout {
+        if let start {
+            return start
+        }
+        start = current
+        return current
+    }
+
+    func move(to layout: ClipLayout) {
+        self.layout = layout
+    }
+
+    /// The layout to keep, if the drag moved anything.
+    func end() -> ClipLayout? {
+        defer {
+            layout = nil
+            start = nil
+        }
+        return layout
     }
 }
 
