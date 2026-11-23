@@ -3,7 +3,7 @@
 // its item there, so each action runs as Excalidraw runs it.
 
 import { deleteSelected, hasGroup } from "./draw-mode.js";
-import { post } from "./scene.js";
+import { api, post } from "./scene.js";
 import { deleteComponent } from "./wireframe/chip.js";
 import { componentAt } from "./wireframe/components.js";
 import { wireframe } from "./wireframe/mode.js";
@@ -104,19 +104,23 @@ function close() {
   if (!isOpen) return;
   isOpen = false;
   contextMenu.style.display = "none";
+  // Excalidraw's own menu, hidden under Tilde's, closes too: else it takes the next click.
+  api.updateScene({ appState: { contextMenu: null }, captureUpdate: "NEVER" });
   post("notTyping");
 }
 
 function run(name) {
+  // Excalidraw's item runs while its menu is still there; closing Tilde's then closes that one.
+  if (name !== "deleteSelectedElements" && name !== "addComment") {
+    document.querySelector(`.excalidraw .context-menu li[data-testid="${name}"]`)?.click();
+    close();
+    return;
+  }
   close();
   if (name === "deleteSelectedElements") {
     const component = wireframe && componentHere();
     if (component) deleteComponent(component.groupIds[0]);
     else if (!wireframe) deleteSelected();
-    return;
-  }
-  if (name !== "addComment") {
-    document.querySelector(`.excalidraw .context-menu li[data-testid="${name}"]`)?.click();
     return;
   }
   if (!wireframe) {
