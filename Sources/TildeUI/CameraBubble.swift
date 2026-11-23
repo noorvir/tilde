@@ -1,6 +1,5 @@
 import AppKit
 import AVFoundation
-import OSLog
 import SwiftUI
 
 /// The camera bubble of recording mode: the user's camera in a round or rounded window, with
@@ -250,10 +249,16 @@ final class CameraBubble: ObservableObject {
             center.addObserver(forName: NSWindow.didMoveNotification, object: panel, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.barFollows() }
             },
-            center.addObserver(forName: NSWindow.didChangeScreenNotification, object: panel, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.barFollows() }
+            center.addObserver(forName: NSWindow.didChangeScreenNotification, object: panel, queue: .main) { [weak self, weak panel] _ in
+                MainActor.assumeIsolated {
+                    CameraLog.note("bubble changed screen: \(panel?.screen?.localizedName ?? "none"), frame \(panel.map { NSStringFromRect($0.frame) } ?? "")")
+                    self?.barFollows()
+                }
             },
         ]
+        panel.onDrag = { [weak panel] ended in
+            CameraLog.note("bubble drag \(ended ? "ended" : "began") at \(panel.map { NSStringFromPoint($0.frame.origin) } ?? "")")
+        }
         panel.onClick = { [weak self] in
             guard let self, cameraState == .failed else {
                 return
@@ -296,11 +301,17 @@ final class CameraBubble: ObservableObject {
     }
 }
 
-/// A borderless panel that floats over other apps without taking the keyboard.
+/// A borderless panel that floats over other apps without taking the keyboard. With
+/// `movesByDrag` it follows the pointer event by event, as the HUD and the preview do: the
+/// main thread stays in its normal loop, which the window server's own drag does not allow.
 private final class BubblePanel: NSPanel {
     private let movesByDrag: Bool
     /// A press that did not move the panel.
     var onClick: () -> Void = {}
+    /// A drag began (`false`) or ended (`true`).
+    var onDrag: (_ ended: Bool) -> Void = { _ in }
+    /// Where in the panel the button went down, and whether the panel has moved since.
+    private var press: (inPanel: NSPoint, hasMoved: Bool)?
 
     init(frame: NSRect, movesByDrag: Bool) {
         self.movesByDrag = movesByDrag
@@ -318,20 +329,43 @@ private final class BubblePanel: NSPanel {
     override var canBecomeKey: Bool { false }
 
     override func sendEvent(_ event: NSEvent) {
-        if movesByDrag, event.type == .leftMouseDown {
-            let origin = frame.origin
-            performDrag(with: event)
-            if frame.origin == origin {
-                onClick()
-            }
+        guard movesByDrag else {
+            super.sendEvent(event)
             return
         }
-        super.sendEvent(event)
+        switch event.type {
+        case .leftMouseDown:
+            press = (event.locationInWindow, false)
+        case .leftMouseDragged:
+            guard var press else {
+                return
+            }
+            let pointer = convertPoint(toScreen: event.locationInWindow)
+            let origin = NSPoint(x: pointer.x - press.inPanel.x, y: pointer.y - press.inPanel.y)
+            if !press.hasMoved {
+                guard hypot(origin.x - frame.minX, origin.y - frame.minY) >= 2 else {
+                    return
+                }
+                press.hasMoved = true
+                self.press = press
+                onDrag(false)
+            }
+            setFrameOrigin(origin)
+        case .leftMouseUp:
+            guard let press else {
+                return
+            }
+            self.press = nil
+            if press.hasMoved {
+                onDrag(true)
+            } else {
+                onClick()
+            }
+        default:
+            super.sendEvent(event)
+        }
     }
 }
-
-/// Notice and above, which release builds keep.
-private let cameraLog = Logger(subsystem: "dev.tilde.app", category: "camera")
 
 /// A camera file and when its first frame was captured on the host clock, if known.
 struct CameraRecording: Sendable {
@@ -358,9 +392,12 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     private let frames = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "dev.tilde.camera")
     private let frameQueue = DispatchQueue(label: "dev.tilde.camera.frames")
-    private static let log = cameraLog
-    /// The time of the newest frame; on `frameQueue`.
+    // On `frameQueue`.
+    /// The time of the newest frame.
     private var lastFrame: Date?
+    private var statsStart = Date()
+    private var frameCount = 0
+    private var longestGap: TimeInterval = 0
     // Read and written on `queue`, except where noted.
     /// Waits for the file that `stopRecording` ends.
     private var finished: CheckedContinuation<CameraRecording?, Never>?
@@ -398,10 +435,10 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
                 self?.queue.async { self?.runtimeError(error) }
             },
             center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: nil) { _ in
-                Self.log.notice("interrupted")
+                CameraLog.note("session interrupted")
             },
             center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: nil) { _ in
-                Self.log.notice("interruption ended")
+                CameraLog.note("session interruption ended")
             },
             center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: nil) { [weak self] note in
                 let id = (note.object as? AVCaptureDevice)?.uniqueID
@@ -528,13 +565,13 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         if !session.isRunning {
             session.startRunning()
             if !session.isRunning {
-                Self.log.notice("did not start running")
+                CameraLog.note("did not start running")
             }
         }
     }
 
     private func runtimeError(_ error: Error?) {
-        Self.log.error("runtime error: \(error.map { String(describing: $0) } ?? "unknown", privacy: .public)")
+        CameraLog.error("runtime error: \(error.map { String(describing: $0) } ?? "unknown")")
         guard isWanted else {
             return
         }
@@ -551,7 +588,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         guard let id, current.contains(id) else {
             return
         }
-        Self.log.notice("camera disconnected")
+        CameraLog.note("camera disconnected")
         guard isWanted else {
             return
         }
@@ -563,7 +600,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     }
 
     private func fail(_ reason: String) {
-        Self.log.error("failed: \(reason, privacy: .public)")
+        CameraLog.error("failed: \(reason)")
         attempt += 1
         report(.failed)
     }
@@ -585,12 +622,10 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
         let previous = lastFrame
         lastFrame = now
         if let previous {
-            let gap = now.timeIntervalSince(previous)
-            if gap > 1 {
-                Self.log.notice("frame gap of \(gap, format: .fixed(precision: 2), privacy: .public) s")
-            }
+            count(gap: now.timeIntervalSince(previous), at: now)
             return
         }
+        statsStart = now
         queue.async { [self] in
             guard seenAttempt != attempt else {
                 return
@@ -598,6 +633,24 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             seenAttempt = attempt
             report(.running)
         }
+    }
+
+    /// Every two seconds: how many frames came and the longest wait between two, which a
+    /// frozen picture would show. A wait of over a quarter second is logged at once.
+    private func count(gap: TimeInterval, at now: Date) {
+        frameCount += 1
+        longestGap = max(longestGap, gap)
+        if gap > 0.25 {
+            CameraLog.note("frame gap of \(Int(gap * 1000)) ms")
+        }
+        let elapsed = now.timeIntervalSince(statsStart)
+        guard elapsed >= 2 else {
+            return
+        }
+        CameraLog.note("\(String(format: "%.1f", Double(frameCount) / elapsed)) frames a second, longest gap \(Int(longestGap * 1000)) ms")
+        frameCount = 0
+        longestGap = 0
+        statsStart = now
     }
 
     // MARK: Recording
@@ -609,6 +662,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             }
             recordingStart = nil
             endedEarly = nil
+            CameraLog.note("camera file starts")
             output.startRecording(to: file, recordingDelegate: self)
         }
     }
@@ -650,7 +704,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
                 return
             }
             let lag = (now - pauseAsked).seconds * 1000
-            Self.log.notice("camera file \(change, privacy: .public) \(lag, format: .fixed(precision: 1), privacy: .public) ms after the clip")
+            CameraLog.note("camera file \(change) \(String(format: "%.1f", lag)) ms after the clip")
         }
     }
 
@@ -692,6 +746,7 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             // A file cut short by an error or by the camera going off can still play, and stays
             // beside its clip; one with no frames cannot.
             let hasFrames = output.recordedDuration.seconds > 0
+            CameraLog.note("camera file ended after \(String(format: "%.2f", output.recordedDuration.seconds)) s\(error.map { ", error \($0.localizedDescription)" } ?? "")")
             if !hasFrames {
                 try? FileManager.default.removeItem(at: file)
             }
@@ -808,8 +863,8 @@ final class CameraDisplay: @unchecked Sendable {
             frame.sampleAttachments[0][.displayImmediately] = true
         }
         let renderer = layer.sampleBufferRenderer
-        if renderer.status == .failed {
-            cameraLog.error("camera display failed: \(String(describing: renderer.error), privacy: .public); flushing")
+        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
+            CameraLog.error("display stopped (status \(renderer.status.rawValue), error \(String(describing: renderer.error))); flushing")
             renderer.flush()
         }
         renderer.enqueue(frame)

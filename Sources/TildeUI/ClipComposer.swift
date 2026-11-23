@@ -1,5 +1,4 @@
 import AVFoundation
-import OSLog
 import SwiftUI
 
 /// A recording in the preview, as its saved video will be: the clip and its camera on a
@@ -194,7 +193,6 @@ final class ClipPlayers: ObservableObject {
     private var wasPlaying = false
     /// Counts Play and Pause, so a start that waited for loading does nothing once paused.
     private var playCount = 0
-    private static let log = Logger(subsystem: "dev.tilde.app", category: "camera")
 
     init(video: URL, camera cameraFile: URL?, seconds: Double) {
         clock.duration = seconds
@@ -288,7 +286,7 @@ final class ClipPlayers: ObservableObject {
                 return
             }
             let offset = (camera.currentTime() - screen.currentTime()).seconds * 1000
-            Self.log.notice("preview: camera \(offset, format: .fixed(precision: 1), privacy: .public) ms ahead of the clip")
+            CameraLog.note("preview: camera \(String(format: "%.1f", offset)) ms ahead of the clip")
         }
     }
 
