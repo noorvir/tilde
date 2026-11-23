@@ -156,24 +156,23 @@ struct WireframeLookTests {
         #expect(try await count(##"rect[height="6"]"##) == 0)
     }
 
-    /// Every component has a tag, also with no label: a short empty one. With the pointer over
-    /// the component, or over its tag, the tag is active and says "Add label"; then empty again.
-    @Test func anEmptyTagSaysAddLabelUnderThePointer() async throws {
+    /// Every component has a tag, also with no label: then it says "Add label" in faded text.
+    /// The pointer over the component or its tag only darkens it: its size stays.
+    @Test func anEmptyTagSaysAddLabelAndKeepsItsSize() async throws {
         try await page.draw("setWireframe({tool: 'card', icons: {}})")
         try await restore("[{type: 'card', rect: [200, 150, 240, 120]}]")
-        let emptyTag = ##"rect[x="200"][y="133"][width="28"][height="15"][fill="#2F7BF6"]"##
+        let emptyTag = ##"rect[x="200"][y="133"][width="73"][height="15"][fill="#2F7BF6"]"##
         #expect(try await count(emptyTag) == 1)
-        #expect(try await count("text") == 0)
+        #expect(try await texts() == "Add label")
 
         try await page.hover(CGPoint(x: 320, y: 210))
-        #expect(try await count(##"rect[x="200"][y="133"][width="73"][fill="#1D5BD8"]"##) == 1)
+        #expect(try await count(##"rect[x="200"][y="133"][width="73"][height="15"][fill="#1D5BD8"]"##) == 1)
         #expect(try await texts() == "Add label")
         try await page.hover(CGPoint(x: 260, y: 140))
         #expect(try await texts() == "Add label")
 
         try await page.hover(CGPoint(x: 800, y: 600))
         #expect(try await count(emptyTag) == 1)
-        #expect(try await count("text") == 0)
     }
 
     /// Done takes the components for the agent's pictures: an empty tag goes, a label stays.

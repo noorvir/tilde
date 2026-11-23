@@ -348,13 +348,13 @@ struct WireframeCanvasTests {
         #expect(try await !page.takesPointer(empty))
         // The label tag stands on the component's top edge, partly above it.
         #expect(try await page.takesPointer(CGPoint(x: corner.x + 20, y: corner.y - 8)))
-        // The chip shows below the selected component.
+        // The chip shows above the selected component.
         try await page.click(inside)
         #expect(try await page.shows(Self.chip))
         let center = "(() => { const box = document.querySelector('\(Self.chip)').getBoundingClientRect(); return [box.left + box.width / 2, box.top + box.height / 2]; })()"
         let values = try #require(try await page.run(center) as? [Double])
         let chip = CGPoint(x: values[0], y: values[1])
-        #expect(chip.y > oppositeCorner.y)
+        #expect(chip.y < corner.y)
         #expect(try await page.takesPointer(chip))
 
         try await page.draw("pointerWentThrough(true)")
@@ -391,7 +391,8 @@ struct WireframeCanvasTests {
         #expect(drawn.map(\.rect) == [[100, 100, 600, 400], [150, 150, 300, 250], [200, 200, 200, 100]])
 
         try await page.hover(CGPoint(x: 300, y: 250))
-        try await page.drag(from: CGPoint(x: 210, y: 315), to: CGPoint(x: 230, y: 325), on: Self.chip)
+        let chip = try await chipCentre()
+        try await page.drag(from: chip, to: CGPoint(x: chip.x + 20, y: chip.y + 10), on: Self.chip)
         #expect(try await rects().last == [220, 210, 200, 100])
 
         try await start(tool: "")
@@ -410,7 +411,8 @@ struct WireframeCanvasTests {
         #expect(shapes.map(\.rect) == [[100, 100, 600, 400], [150, 150, 200, 100]])
 
         try await page.hover(CGPoint(x: 600, y: 450))
-        try await page.drag(from: CGPoint(x: 110, y: 515), to: CGPoint(x: 140, y: 555), on: Self.chip)
+        let chip = try await chipCentre()
+        try await page.drag(from: chip, to: CGPoint(x: chip.x + 30, y: chip.y + 40), on: Self.chip)
         shapes = try await page.shapes()
         #expect(shapes.map(\.rect) == [[130, 140, 600, 400], [150, 150, 200, 100]])
     }
@@ -977,31 +979,34 @@ struct WireframeCanvasTests {
         #expect(try await page.rawShapes().first?["type"] as? String == "ellipse")
     }
 
-    /// The chip goes just below the component, at its left edge, clear of the label's tag. The
-    /// pointer gets from the component to the chip without the chip going.
-    @Test func theChipIsBelowTheComponent() async throws {
+    /// The chip goes just above the component, right-aligned with it. The pointer gets from the
+    /// component to the chip without the chip going.
+    @Test func theChipIsAboveTheComponent() async throws {
         try await restore("[{type: 'card', rect: [200, 150, 240, 120], label: 'Plan'}]")
         try await page.hover(inside)
-        #expect(try await chipBox() == [200, 276, chipWidth()])
+        let width = try await chipWidth()
+        // The chip is 22 high and 6 above the component; the tag "Plan" is 38 wide.
+        #expect(try await chipBox() == [max(440 - width, 242), 122, width])
 
-        try await page.hover(CGPoint(x: 210, y: 273))
+        try await page.hover(CGPoint(x: 430, y: 147))
         #expect(try await page.shows("#tilde-chip"))
-        try await page.hover(CGPoint(x: 210, y: 287))
+        try await page.hover(CGPoint(x: 430, y: 133))
         #expect(try await page.shows("#tilde-chip"))
     }
 
-    /// At the bottom of the screen the chip goes just above the component, after its tag, as the
-    /// tag shows: with no label, "Add label" while the pointer is over it.
-    @Test func atTheBottomTheChipIsAboveTheComponentAfterTheTag() async throws {
-        try await restore("[{type: 'card', rect: [300, 720, 200, 60], label: 'Plan'}, {type: 'card', rect: [700, 720, 200, 60]}]")
-        try await page.hover(CGPoint(x: 400, y: 750))
-        // The tag "Plan" is 38 wide; the chip is 22 high and 2 above the component.
-        #expect(try await chipBox() == [342, 696, chipWidth()])
+    /// At the top of the screen the chip goes just below the component, still right-aligned
+    /// and never over the tag: with no label, the tag says "Add label".
+    @Test func atTheTopTheChipIsBelowTheComponent() async throws {
+        try await restore("[{type: 'card', rect: [300, 10, 200, 60], label: 'Plan'}, {type: 'card', rect: [700, 10, 200, 60]}]")
+        try await page.hover(CGPoint(x: 400, y: 40))
+        var width = try await chipWidth()
+        #expect(try await chipBox() == [max(500 - width, 342), 76, width])
 
-        try await page.hover(CGPoint(x: 800, y: 750))
+        try await page.hover(CGPoint(x: 800, y: 40))
+        width = try await chipWidth()
         // "Add label" makes the tag 73 wide.
-        #expect(try await chipBox() == [777, 696, chipWidth()])
-        try await page.hover(CGPoint(x: 790, y: 719))
+        #expect(try await chipBox() == [max(900 - width, 777), 76, width])
+        try await page.hover(CGPoint(x: 890, y: 73))
         #expect(try await page.shows("#tilde-chip"))
     }
 
@@ -1010,16 +1015,18 @@ struct WireframeCanvasTests {
     @Test func theChipStaysOnTheScreen() async throws {
         try await restore("[{type: 'card', rect: [-60, 100, 200, 80]}, {type: 'table', rect: [1100, 300, 90, 80]}, {type: 'button', rect: [600, 500, 20, 40]}]")
         try await page.hover(CGPoint(x: 50, y: 140))
-        #expect(try await chipBox() == [0, 186, chipWidth()])
+        var width = try await chipWidth()
+        #expect(try await chipBox() == [max(140 - width, -60 + 73 + 4, 0), 72, width])
 
         try await page.hover(CGPoint(x: 1150, y: 340))
-        let width = try await chipWidth()
+        width = try await chipWidth()
         let right = try await chipBox()
-        #expect(right == [CanvasPage.size.width - width, 386, width], "\(right), \(width)")
+        #expect(right == [CanvasPage.size.width - width, 272, width], "\(right), \(width)")
 
         try await page.hover(CGPoint(x: 610, y: 520))
-        #expect(try await chipBox() == [600, 546, chipWidth()])
-        #expect(try await chipWidth() > 20)
+        width = try await chipWidth()
+        #expect(try await chipBox() == [677, 472, width])
+        #expect(width > 20)
     }
 
     /// The Borders button shows the borders that are on, and opens a menu of all borders and
@@ -1081,6 +1088,11 @@ struct WireframeCanvasTests {
 
     private func chipWidth() async throws -> Double {
         try await box(of: "#tilde-chip")[2]
+    }
+
+    private func chipCentre() async throws -> CGPoint {
+        let box = try await box(of: "#tilde-chip")
+        return CGPoint(x: box[0] + box[2] / 2, y: box[1] + box[3] / 2)
     }
 
     /// Each row of the borders menu, and whether it is checked.
