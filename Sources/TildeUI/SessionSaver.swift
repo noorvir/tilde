@@ -99,9 +99,7 @@ final class SessionSaver {
                 images[SessionArchive.imageName(unfinished.note.id)] = captures.image
                 images[SessionArchive.contextImageName(unfinished.note.id)] = captures.contextImage
             }
-            if !images.isEmpty {
-                archive.saveImages(images, of: record.id)
-            }
+            archive.saveImages(images, of: record.id, notes: record.notes.map(\.id))
         }
     }
 

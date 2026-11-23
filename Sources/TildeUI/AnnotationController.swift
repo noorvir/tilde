@@ -556,6 +556,23 @@ final class AnnotationController: ObservableObject {
         dispatch(.escape)
     }
 
+    /// A draft save waits for changes to stop.
+    var hasWaitingDraftSave: Bool {
+        drawSaveTime.isPending || wireframeSaveTime.isPending
+    }
+
+    /// Before Tilde quits: the draft saves that wait for changes to stop run now. `done` comes
+    /// once their shapes are read.
+    func saveWaitingDrafts(_ done: @escaping @MainActor () -> Void) {
+        drawSaveTime.runNow()
+        wireframeSaveTime.runNow()
+        // The page answers within a few frames.
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            done()
+        }
+    }
+
     /// ↩ in Draw: ends the group, or, when Tilde has not heard of it yet, as right after a
     /// release, asks the page for its comment once the release has settled. False outside Draw.
     func returnInDraw() -> Bool {
@@ -1425,7 +1442,18 @@ final class AnnotationController: ObservableObject {
             }
             let id = wireframe.shownNote
             wireframe.readDraft { [weak self] note in
-                guard let self, let note else {
+                guard let self else {
+                    return
+                }
+                // Every component deleted: a draft goes; a sent or finished note waits for Done.
+                guard let note else {
+                    if let id, let index = drafts.firstIndex(where: { $0.id == id }), drafts[index].isUnfinished {
+                        drafts.remove(at: index)
+                        if wireframe.shownNote == id {
+                            wireframe.shownNote = nil
+                        }
+                        saver.save()
+                    }
                     return
                 }
                 let kept = keepWireframeDraft(note, id: id)

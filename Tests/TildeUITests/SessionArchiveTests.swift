@@ -12,7 +12,7 @@ struct SessionArchiveTests {
         let note = try #require(record.notes.first)
 
         archive.save(record)
-        archive.saveImages([SessionArchive.imageName(note.id): Data([1, 2, 3])], of: record.id)
+        archive.saveImages([SessionArchive.imageName(note.id): Data([1, 2, 3])], of: record.id, notes: [note.id])
         archive.flush()
 
         #expect(archive.record(record.id) == record)
@@ -69,12 +69,28 @@ struct SessionArchiveTests {
         let record = Fixtures.record(isLocal: true, notes: 1, pageURL: nil)
         let note = try #require(record.notes.first)
         archive.save(record)
-        archive.saveImages([SessionArchive.imageName(note.id): Data([7])], of: record.id)
+        archive.saveImages([SessionArchive.imageName(note.id): Data([7])], of: record.id, notes: [note.id])
         archive.forgetImages(of: note.id, in: record.id)
-        archive.saveImages([SessionArchive.imageName(note.id): Data([9])], of: record.id)
+        archive.saveImages([SessionArchive.imageName(note.id): Data([9])], of: record.id, notes: [note.id])
         archive.flush()
 
         #expect(archive.closeUp(of: note, in: record.id) == Data([9]))
+    }
+
+    /// The pictures of a comment box that closed, and of no note, go at the next save.
+    @Test func picturesOfNoNoteGoAtTheNextSave() throws {
+        let archive = Fixtures.archive()
+        let record = Fixtures.record(isLocal: true, notes: 1, pageURL: nil)
+        let note = try #require(record.notes.first)
+        let closed = UUID()
+        archive.save(record)
+        archive.saveImages([SessionArchive.imageName(closed): Data([1]), SessionArchive.contextImageName(closed): Data([2])], of: record.id, notes: [note.id, closed])
+        archive.saveImages([SessionArchive.imageName(note.id): Data([7])], of: record.id, notes: [note.id])
+        archive.flush()
+
+        #expect(archive.closeUp(of: note, in: record.id) == Data([7]))
+        let gone = SessionRecord.Note(id: closed, comment: "", target: note.target, frame: note.frame, marker: note.marker, chip: note.chip, anchor: nil, isUnfinished: nil)
+        #expect(archive.closeUp(of: gone, in: record.id) == nil)
     }
 
     @Test func restoredNotesHaveTheirSavedImages() async throws {
@@ -82,7 +98,7 @@ struct SessionArchiveTests {
         let record = Fixtures.record(isLocal: true, notes: 1, pageURL: nil)
         let note = try #require(record.notes.first)
         archive.save(record)
-        archive.saveImages([SessionArchive.imageName(note.id): Data([7]), SessionArchive.contextImageName(note.id): Data([8])], of: record.id)
+        archive.saveImages([SessionArchive.imageName(note.id): Data([7]), SessionArchive.contextImageName(note.id): Data([8])], of: record.id, notes: [note.id])
         archive.flush()
 
         let drafts = SessionSaver.drafts(from: record, archive: archive, into: record.id)

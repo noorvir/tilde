@@ -100,7 +100,7 @@ final class SessionArchive: @unchecked Sendable {
     }
 
     /// Saves a session's images not on disk yet, keyed by file name.
-    func saveImages(_ images: [String: Data], of id: String) {
+    func saveImages(_ images: [String: Data], of id: String, notes: [UUID]) {
         queue.async { [self] in
             let folder = folder(id)
             for (name, data) in images {
@@ -110,6 +110,12 @@ final class SessionArchive: @unchecked Sendable {
                 }
                 try? createPrivateFolder(folder)
                 try? writePrivate(data, to: url)
+            }
+            // The pictures of a comment box that closed, or that became a note of its own.
+            let kept = Set(notes.flatMap { [Self.imageName($0), Self.contextImageName($0)] })
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            for file in files where file.pathExtension == "png" && !kept.contains(file.lastPathComponent) {
+                try? FileManager.default.removeItem(at: file)
             }
         }
     }
