@@ -1,46 +1,50 @@
-import Combine
-import Foundation
+import AppKit
+import AVFoundation
 import Testing
 @testable import TildeUI
 
 @MainActor
 struct ComposerDragTests {
-    /// Each change of the controller redraws the HUD and the preview. A drag of 60 ticks wrote
-    /// the layout to it at each tick; now it writes it once, at the end, and the ticks change
-    /// only the composer's own drag.
-    @Test func aDragChangesTheControllerOnceAtItsEnd() async throws {
-        let controller = try await Fixtures.controller()
-        let video = URL(fileURLWithPath: "/tmp/clip-\(UUID().uuidString).mp4")
-        var changes = 0
-        let watch = controller.objectWillChange.sink { changes += 1 }
-        defer { watch.cancel() }
+    /// A drag moves the canvas's own layers: the layout goes out once, at its end, so no
+    /// view redraws while the pointer moves.
+    @Test func aDragHandsTheLayoutOverOnceAtItsEnd() throws {
+        let view = ComposerCanvas.CanvasView(screen: AVPlayer(), camera: AVPlayer())
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 360), styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = view
+        var layout = ClipLayout(background: .gradient(.dusk))
+        layout.cameraCenter = CGPoint(x: 0.16, y: 0.74)
+        let clip = CGSize(width: 1280, height: 800)
+        view.show(layout, clipSize: clip)
+        var handed: [ClipLayout] = []
+        view.onChange = { handed.append($0) }
 
-        // As before: every tick to the controller.
-        for tick in 1...60 {
-            var layout = controller.layout(of: video)
-            layout.screenCenter = CGPoint(x: 0.5 + Double(tick) / 1000, y: 0.5)
-            controller.setLayout(layout, of: video)
+        let camera = try #require(layout.frames(in: view.bounds.size, clip: clip).camera)
+        let start = view.convert(NSPoint(x: camera.midX, y: camera.midY), to: nil)
+        func send(_ type: NSEvent.EventType, dx: CGFloat) throws {
+            let point = NSPoint(x: start.x + dx, y: start.y)
+            let event = try #require(NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            ))
+            switch type {
+            case .leftMouseDown: view.mouseDown(with: event)
+            case .leftMouseDragged: view.mouseDragged(with: event)
+            default: view.mouseUp(with: event)
+            }
         }
-        let perTick = changes
-        #expect(perTick >= 60)
 
-        changes = 0
-        let drag = ComposerDrag()
-        var dragTicks = 0
-        let dragWatch = drag.objectWillChange.sink { dragTicks += 1 }
-        defer { dragWatch.cancel() }
-        let start = drag.begin(from: controller.layout(of: video))
+        try send(.leftMouseDown, dx: 0)
         for tick in 1...60 {
-            var layout = drag.begin(from: controller.layout(of: video))
-            layout.screenCenter = CGPoint(x: start.screenCenter.x + Double(tick) / 1000, y: 0.5)
-            drag.move(to: layout)
+            try send(.leftMouseDragged, dx: CGFloat(tick))
+            // The controller's layout does not stop the drag.
+            view.show(layout, clipSize: clip)
         }
-        #expect(changes == 0)
-        #expect(dragTicks == 60)
-        let kept = try #require(drag.end())
-        controller.setLayout(kept, of: video)
-        #expect(changes == 1)
-        #expect(controller.layout(of: video).screenCenter == kept.screenCenter)
-        #expect(drag.layout == nil)
+        #expect(handed.isEmpty)
+        try send(.leftMouseUp, dx: 60)
+
+        #expect(handed.count == 1)
+        let moved = try #require(handed.first?.cameraCenter)
+        #expect(abs(moved.x - (0.16 + 60 / 640)) < 0.001)
+        #expect(moved.y == 0.74)
+        #expect(view.shown == handed.first)
     }
 }

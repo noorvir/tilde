@@ -2,18 +2,14 @@ import AVFoundation
 import SwiftUI
 
 /// A recording in the preview, as its saved video will be: the clip and its camera on a
-/// background. Drag either to move it, and its corner dot to resize it. A drag goes to the
-/// clip's layout when it ends; until then only the composer redraws.
+/// background. Drag either to move it, and its corner dot to resize it. A drag moves the
+/// canvas's layers directly and goes to the clip's layout when it ends: no view redraws
+/// while it goes on.
 struct ClipComposer: View {
-    private enum Part {
-        case screen, camera
-    }
-
     @ObservedObject var controller: AnnotationController
     @ObservedObject private var backgrounds: VideoBackgrounds
     let video: URL
     @StateObject private var players: ClipPlayers
-    @StateObject private var drag = ComposerDrag()
 
     init(controller: AnnotationController, video: URL) {
         self.controller = controller
@@ -30,20 +26,13 @@ struct ClipComposer: View {
     }
 
     var body: some View {
-        let layout = drag.layout ?? controller.layout(of: video)
+        let layout = controller.layout(of: video)
         VStack(alignment: .leading, spacing: 10) {
-            GeometryReader { geometry in
-                let canvas = geometry.size
-                let frames = layout.frames(in: canvas, clip: players.clipSize)
-                ZStack(alignment: .topLeading) {
-                    BackgroundFill(background: layout.background)
-                    screen(frames.screen, canvas: canvas)
-                    if let cameraFrame = frames.camera, let camera = players.camera {
-                        cameraView(camera, frame: cameraFrame, shape: layout.cameraShape, canvas: canvas)
-                    }
+            ZStack {
+                BackgroundFill(background: layout.background)
+                ComposerCanvas(players: players, layout: layout, clipSize: players.clipSize) { changed in
+                    controller.setLayout(changed, of: video)
                 }
-                .frame(width: canvas.width, height: canvas.height)
-                .clipped()
             }
             .aspectRatio(ClipLayout.aspect, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -53,98 +42,6 @@ struct ClipComposer: View {
             controls(layout)
         }
         .onDisappear { players.stop() }
-    }
-
-    private func screen(_ frame: CGRect, canvas: CGSize) -> some View {
-        let radius = min(frame.width, frame.height) * 0.025
-        return PlayerLayerView(player: players.screen, fills: false, mirrored: false)
-            .frame(width: frame.width, height: frame.height)
-            .clipShape(RoundedRectangle(cornerRadius: radius))
-            .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
-            .overlay(alignment: .bottomTrailing) { resizeDot(.screen, canvas: canvas) }
-            .contentShape(Rectangle())
-            .gesture(move(.screen, canvas: canvas))
-            .position(x: frame.midX, y: frame.midY)
-            .accessibilityLabel("Screen recording")
-    }
-
-    private func cameraView(_ player: AVPlayer, frame: CGRect, shape: CameraBubble.Shape, canvas: CGSize) -> some View {
-        let clip = shape == .circle ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: frame.width * 0.2))
-        return PlayerLayerView(player: player, fills: true, mirrored: true)
-            .frame(width: frame.width, height: frame.height)
-            .clipShape(clip)
-            .overlay(clip.stroke(Color.white, lineWidth: max(1.5, frame.width * 0.012)))
-            .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
-            .overlay(alignment: .bottomTrailing) { resizeDot(.camera, canvas: canvas) }
-            .contentShape(clip)
-            .gesture(move(.camera, canvas: canvas))
-            .position(x: frame.midX, y: frame.midY)
-            .accessibilityLabel("Camera")
-    }
-
-    private func resizeDot(_ part: Part, canvas: CGSize) -> some View {
-        Circle()
-            .fill(Color.white)
-            .frame(width: 12, height: 12)
-            .shadow(color: .black.opacity(0.4), radius: 2)
-            .padding(4)
-            .contentShape(Rectangle())
-            .gesture(resize(part, canvas: canvas))
-            .accessibilityLabel(part == .screen ? "Resize screen recording" : "Resize camera")
-    }
-
-    private func move(_ part: Part, canvas: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 2)
-            .onChanged { value in
-                let start = beginDrag()
-                let dx = value.translation.width / canvas.width
-                let dy = value.translation.height / canvas.height
-                var layout = start
-                switch part {
-                case .screen:
-                    layout.screenCenter = clamped(CGPoint(x: start.screenCenter.x + dx, y: start.screenCenter.y + dy))
-                case .camera:
-                    if let center = start.cameraCenter {
-                        layout.cameraCenter = clamped(CGPoint(x: center.x + dx, y: center.y + dy))
-                    }
-                }
-                drag.move(to: layout)
-            }
-            .onEnded { _ in endDrag() }
-    }
-
-    /// The bottom-right corner follows the pointer; the part keeps its centre and its shape.
-    private func resize(_ part: Part, canvas: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                let start = beginDrag()
-                let frames = start.frames(in: canvas, clip: players.clipSize)
-                var layout = start
-                switch part {
-                case .screen:
-                    let width = frames.screen.width + 2 * value.translation.width
-                    layout.screenScale = min(max(start.screenScale * width / max(frames.screen.width, 1), 0.2), 1)
-                case .camera:
-                    let side = start.cameraSide * canvas.height + value.translation.width + value.translation.height
-                    layout.cameraSide = min(max(side / canvas.height, 0.1), 0.7)
-                }
-                drag.move(to: layout)
-            }
-            .onEnded { _ in endDrag() }
-    }
-
-    private func beginDrag() -> ClipLayout {
-        drag.begin(from: controller.layout(of: video))
-    }
-
-    private func endDrag() {
-        if let layout = drag.end() {
-            controller.setLayout(layout, of: video)
-        }
-    }
-
-    private func clamped(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
     }
 
     private func controls(_ layout: ClipLayout) -> some View {
@@ -199,37 +96,6 @@ struct ClipComposer: View {
         var layout = controller.layout(of: video)
         layout.background = background
         controller.setLayout(layout, of: video)
-    }
-}
-
-/// A drag in the composer. The layout follows the pointer here and goes to the controller
-/// once, at the end: the controller's change redraws the HUD and the preview, and saves.
-@MainActor
-final class ComposerDrag: ObservableObject {
-    /// The layout while a drag goes on.
-    @Published private(set) var layout: ClipLayout?
-    private var start: ClipLayout?
-
-    /// The layout the drag started from: `current` at its first tick.
-    func begin(from current: ClipLayout) -> ClipLayout {
-        if let start {
-            return start
-        }
-        start = current
-        return current
-    }
-
-    func move(to layout: ClipLayout) {
-        self.layout = layout
-    }
-
-    /// The layout to keep, if the drag moved anything.
-    func end() -> ClipLayout? {
-        defer {
-            layout = nil
-            start = nil
-        }
-        return layout
     }
 }
 
@@ -443,30 +309,51 @@ private struct ClipScrubber: View {
     }
 }
 
-/// A player's picture with no controls: fitted, or filling from the centre, and mirrored for
-/// the camera.
-private struct PlayerLayerView: NSViewRepresentable {
-    let player: AVPlayer
-    let fills: Bool
-    let mirrored: Bool
+/// The clip and its camera as layers on the composer's background. The view owns a drag from
+/// its first tick to its end; the layout it shows changes only between drags.
+struct ComposerCanvas: NSViewRepresentable {
+    let players: ClipPlayers
+    let layout: ClipLayout
+    let clipSize: CGSize
+    /// Called once at the end of a drag that moved or resized something.
+    let onChange: (ClipLayout) -> Void
 
-    func makeNSView(context: Context) -> LayerView {
-        LayerView(player: player, fills: fills, mirrored: mirrored)
+    func makeNSView(context: Context) -> CanvasView {
+        CanvasView(screen: players.screen, camera: players.camera)
     }
 
-    func updateNSView(_ view: LayerView, context: Context) {}
+    func updateNSView(_ view: CanvasView, context: Context) {
+        view.onChange = onChange
+        view.show(layout, clipSize: clipSize)
+    }
 
-    final class LayerView: NSView {
-        private let playerLayer: AVPlayerLayer
-        private let mirrored: Bool
+    final class CanvasView: NSView {
+        enum Part {
+            case screen, camera
+        }
 
-        init(player: AVPlayer, fills: Bool, mirrored: Bool) {
-            playerLayer = AVPlayerLayer(player: player)
-            self.mirrored = mirrored
+        private struct Drag {
+            let part: Part
+            let resizes: Bool
+            let start: NSPoint
+            let layout: ClipLayout
+            var hasMoved = false
+        }
+
+        var onChange: (ClipLayout) -> Void = { _ in }
+        private(set) var shown = ClipLayout(background: .gradient(.dusk))
+        private var clipSize = CGSize(width: 16, height: 10)
+        private var drag: Drag?
+        private let screen: PartLayers
+        private let camera: PartLayers?
+
+        init(screen: AVPlayer, camera: AVPlayer?) {
+            self.screen = PartLayers(player: screen, fills: false, mirrored: false)
+            self.camera = camera.map { PartLayers(player: $0, fills: true, mirrored: true) }
             super.init(frame: .zero)
             wantsLayer = true
-            playerLayer.videoGravity = fills ? .resizeAspectFill : .resizeAspect
-            layer?.addSublayer(playerLayer)
+            self.screen.add(to: layer)
+            self.camera?.add(to: layer)
         }
 
         @available(*, unavailable)
@@ -474,14 +361,226 @@ private struct PlayerLayerView: NSViewRepresentable {
             fatalError("init(coder:) is not used")
         }
 
+        override var isFlipped: Bool { true }
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        /// Ignored while a drag goes on: the drag's own layout shows until it ends.
+        func show(_ layout: ClipLayout, clipSize: CGSize) {
+            guard drag == nil, layout != shown || clipSize != self.clipSize else {
+                return
+            }
+            shown = layout
+            self.clipSize = clipSize
+            place()
+        }
+
         override func layout() {
             super.layout()
+            place()
+        }
+
+        private func place() {
+            let frames = shown.frames(in: bounds.size, clip: clipSize)
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            playerLayer.setAffineTransform(mirrored ? CGAffineTransform(scaleX: -1, y: 1) : .identity)
-            playerLayer.bounds = CGRect(origin: .zero, size: bounds.size)
-            playerLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+            screen.place(in: frames.screen, radius: min(frames.screen.width, frames.screen.height) * 0.025, rim: 0)
+            if let camera {
+                if let frame = frames.camera {
+                    let radius = shown.cameraShape == .circle ? frame.width / 2 : frame.width * 0.2
+                    camera.place(in: frame, radius: radius, rim: max(1.5, frame.width * 0.012))
+                }
+                camera.isHidden = frames.camera == nil
+            }
             CATransaction.commit()
+        }
+
+        // MARK: Dragging
+
+        override func mouseDown(with event: NSEvent) {
+            let point = convert(event.locationInWindow, from: nil)
+            guard let (part, resizes) = target(at: point) else {
+                super.mouseDown(with: event)
+                return
+            }
+            drag = Drag(part: part, resizes: resizes, start: point, layout: shown)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard var drag else {
+                return
+            }
+            let point = convert(event.locationInWindow, from: nil)
+            let translation = CGSize(width: point.x - drag.start.x, height: point.y - drag.start.y)
+            if !drag.hasMoved {
+                guard hypot(translation.width, translation.height) >= (drag.resizes ? 1 : 2) else {
+                    return
+                }
+                drag.hasMoved = true
+                self.drag = drag
+            }
+            shown = dragged(drag, by: translation)
+            place()
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard let drag else {
+                return
+            }
+            self.drag = nil
+            if drag.hasMoved, shown != drag.layout {
+                onChange(shown)
+            }
+        }
+
+        /// The part under `point`, top first; `resizes` on its corner dot.
+        private func target(at point: NSPoint) -> (Part, resizes: Bool)? {
+            let frames = shown.frames(in: bounds.size, clip: clipSize)
+            if camera != nil, let frame = frames.camera {
+                if PartLayers.dotArea(of: frame).contains(point) {
+                    return (.camera, true)
+                }
+                if shown.cameraShape == .circle {
+                    if hypot(point.x - frame.midX, point.y - frame.midY) <= frame.width / 2 {
+                        return (.camera, false)
+                    }
+                } else if frame.contains(point) {
+                    return (.camera, false)
+                }
+            }
+            if PartLayers.dotArea(of: frames.screen).contains(point) {
+                return (.screen, true)
+            }
+            if frames.screen.contains(point) {
+                return (.screen, false)
+            }
+            return nil
+        }
+
+        /// A move keeps the part's centre on the canvas; a resize moves the bottom-right corner
+        /// with the pointer, and the part keeps its centre and its shape.
+        private func dragged(_ drag: Drag, by translation: CGSize) -> ClipLayout {
+            let canvas = bounds.size
+            let start = drag.layout
+            var layout = start
+            if drag.resizes {
+                let frames = start.frames(in: canvas, clip: clipSize)
+                switch drag.part {
+                case .screen:
+                    let width = frames.screen.width + 2 * translation.width
+                    layout.screenScale = min(max(start.screenScale * width / max(frames.screen.width, 1), 0.2), 1)
+                case .camera:
+                    let side = start.cameraSide * canvas.height + translation.width + translation.height
+                    layout.cameraSide = min(max(side / canvas.height, 0.1), 0.7)
+                }
+                return layout
+            }
+            let dx = translation.width / canvas.width
+            let dy = translation.height / canvas.height
+            switch drag.part {
+            case .screen:
+                layout.screenCenter = clamped(CGPoint(x: start.screenCenter.x + dx, y: start.screenCenter.y + dy))
+            case .camera:
+                if let center = start.cameraCenter {
+                    layout.cameraCenter = clamped(CGPoint(x: center.x + dx, y: center.y + dy))
+                }
+            }
+            return layout
+        }
+
+        private func clamped(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
+        }
+
+        // MARK: Accessibility
+
+        override func isAccessibilityElement() -> Bool { false }
+
+        override func accessibilityChildren() -> [Any]? {
+            let frames = shown.frames(in: bounds.size, clip: clipSize)
+            var parts = [("Screen recording", frames.screen), ("Resize screen recording", PartLayers.dotArea(of: frames.screen))]
+            if camera != nil, let frame = frames.camera {
+                parts += [("Camera", frame), ("Resize camera", PartLayers.dotArea(of: frame))]
+            }
+            return parts.map { label, frame in
+                let element = NSAccessibilityElement()
+                element.setAccessibilityRole(.image)
+                element.setAccessibilityLabel(label)
+                element.setAccessibilityParent(self)
+                element.setAccessibilityFrameInParentSpace(frame)
+                return element
+            }
+        }
+    }
+
+    /// One part's layers: a shadow drawn from its outline alone, its player clipped to its
+    /// shape with an optional white rim, and its corner dot. A path shadow costs no pass over
+    /// the video's pixels as the part moves.
+    final class PartLayers {
+        private static let dot: CGFloat = 12
+        private static let dotInset: CGFloat = 4
+
+        private let shadow = CALayer()
+        private let clip = CALayer()
+        private let player: AVPlayerLayer
+        private let dot = CALayer()
+        private let mirrored: Bool
+
+        init(player: AVPlayer, fills: Bool, mirrored: Bool) {
+            self.player = AVPlayerLayer(player: player)
+            self.mirrored = mirrored
+            self.player.videoGravity = fills ? .resizeAspectFill : .resizeAspect
+            shadow.shadowColor = NSColor.black.cgColor
+            shadow.shadowOpacity = 0.4
+            shadow.shadowRadius = mirrored ? 8 : 10
+            shadow.shadowOffset = CGSize(width: 0, height: mirrored ? 4 : 5)
+            clip.masksToBounds = true
+            clip.cornerCurve = .continuous
+            clip.borderColor = NSColor.white.cgColor
+            clip.addSublayer(self.player)
+            dot.backgroundColor = NSColor.white.cgColor
+            dot.cornerRadius = Self.dot / 2
+            dot.shadowColor = NSColor.black.cgColor
+            dot.shadowOpacity = 0.4
+            dot.shadowRadius = 2
+            dot.shadowOffset = .zero
+            dot.shadowPath = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: Self.dot, height: Self.dot), transform: nil)
+        }
+
+        /// Where a press takes the corner dot: a little larger than the dot.
+        static func dotArea(of frame: CGRect) -> CGRect {
+            let side = dot + 2 * dotInset
+            return CGRect(x: frame.maxX - side, y: frame.maxY - side, width: side, height: side)
+        }
+
+        var isHidden: Bool {
+            get { clip.isHidden }
+            set {
+                shadow.isHidden = newValue
+                clip.isHidden = newValue
+                dot.isHidden = newValue
+            }
+        }
+
+        func add(to parent: CALayer?) {
+            parent?.addSublayer(shadow)
+            parent?.addSublayer(clip)
+            parent?.addSublayer(dot)
+        }
+
+        /// Call inside a transaction with actions off.
+        func place(in frame: CGRect, radius: CGFloat, rim: CGFloat) {
+            let local = CGRect(origin: .zero, size: frame.size)
+            shadow.frame = frame
+            shadow.shadowPath = CGPath(roundedRect: local, cornerWidth: radius, cornerHeight: radius, transform: nil)
+            clip.frame = frame
+            clip.cornerRadius = radius
+            clip.borderWidth = rim
+            player.bounds = local
+            player.position = CGPoint(x: local.midX, y: local.midY)
+            player.setAffineTransform(mirrored ? CGAffineTransform(scaleX: -1, y: 1) : .identity)
+            let area = Self.dotArea(of: frame)
+            dot.frame = area.insetBy(dx: Self.dotInset, dy: Self.dotInset)
         }
     }
 }
