@@ -1,16 +1,19 @@
 // What the pointer does in wireframe mode: a drag draws a component, also in another, or with
 // no tool moves one; the chip and the top grip move one too, a corner handle resizes one from
-// that corner, and ⌥ and a drag copies one. A click selects one, and a double-click or a click on its tag edits its label.
+// that corner, and ⌥ and a drag copies one. A click selects one, a double-click edits its text,
+// and a click on its tag edits its label. A drag on the text of the selected component, with
+// any tool, moves the text off it as a free text, which moves as a component does. The Text
+// tool's click types a component's text, or a free text where there is no component.
 
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
 import { api, postPointer, live } from "../scene.js";
 import { typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles, toggleMenu } from "./chip.js";
-import { newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
+import { kindNames, newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { commentBox, commented, openComment, closeComment } from "./comment.js";
 import { record } from "./history.js";
-import { labelField, labelled, editLabel, endLabel, isDoubleClick } from "./labels.js";
-import { tagAt } from "./look.js";
+import { labelField, labelled, editLabel, editText, endLabel, isDoubleClick } from "./labels.js";
+import { tagAt, textAt, textBox, textHeight } from "./look.js";
 import { wireframe } from "./mode.js";
 import { snapLines, nearest, nearestOf, hideGuides, showGuides } from "./snap.js";
 
@@ -55,8 +58,7 @@ export function wireframeReleased() {
 // After Excalidraw has finished the rectangle of a drag: it becomes the component of the tool.
 // A click instead selects the component under it, and a double-click edits its label.
 function finishWireframeShape(press) {
-  // A text tool's click selects nothing.
-  if (!press || !wireframe || api.getAppState().activeTool.type === "text") return;
+  if (!press || !wireframe) return;
   const created = live().filter((element) => !press.ids.has(element.id));
   const box = created.find((element) => element.type === "rectangle" && !element.customData);
   const rest = api.getSceneElementsIncludingDeleted().filter((element) => element.id !== box?.id);
@@ -68,7 +70,7 @@ function finishWireframeShape(press) {
       return element.customData?.tildeWireframe && x >= element.x && x <= element.x + element.width && y >= element.y && y <= element.y + element.height;
     }).pop();
     selectGroup(component?.groupIds[0] ?? null);
-    if (component && isDoubleClick(component.groupIds[0], press.time)) editLabel(component);
+    if (component && isDoubleClick(component.groupIds[0], press.time)) editText(component);
     return;
   }
   const elements = wireframeElements(wireframe.tool, box, newData(wireframe.tool));
@@ -84,7 +86,7 @@ function startAdjusting(event, frame, mode, from, corner = null) {
   const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
   adjusting = {
     mode, from, corner, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, pressedAt: event.timeStamp, rect, data: frame.customData, moved: false, menuBefore,
-    before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && event.altKey,
+    before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && from !== "text" && event.altKey,
   };
   event.target.setPointerCapture?.(event.pointerId);
   cursorRing.style.display = "none";
@@ -110,13 +112,27 @@ export function openComponentComment(group) {
 
 // The component a press on it moves, or with ⌥ copies. While a tool is chosen a press draws,
 // also on a component, so that one can be drawn in another: a component then moves by its chip.
+// A free text moves with any tool.
 function movableAt(event) {
   const component = componentAt(event.clientX, event.clientY);
-  return component && (isSelectMode || event.altKey) ? component : null;
+  const isFreeText = component?.customData.tildeWireframe === "text";
+  return component && (isSelectMode || event.altKey || isFreeText) ? component : null;
+}
+
+// The text of a component leaves it: a free text in the same place, which moves from now on.
+function freeText() {
+  const { group, rect, data } = adjusting;
+  const { text, ...rest } = data;
+  rebuild(group, rect, rest);
+  const free = wireframeElements("text", textBox({ ...rect, customData: data }), { text });
+  api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...free], captureUpdate: "NEVER" });
+  const [frame] = free;
+  Object.assign(adjusting, { group: frame.groupIds[0], rect: { x: frame.x, y: frame.y, width: frame.width, height: frame.height }, data: frame.customData });
+  selection.hovered = adjusting.group;
 }
 
 function adjust(event) {
-  const { mode, start, rect, data } = adjusting;
+  const { start } = adjusting;
   const pointer = { x: event.clientX, y: event.clientY };
   const dx = pointer.x - start.x;
   const dy = pointer.y - start.y;
@@ -125,14 +141,16 @@ function adjust(event) {
     record(adjusting.before);
     // The copy goes on top, and moves; the original stays.
     if (adjusting.isCopy) {
+      const { rect, data } = adjusting;
       const copy = wireframeElements(data.tildeWireframe, rect, data);
       api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...copy], captureUpdate: "NEVER" });
       adjusting.group = copy[0].groupIds[0];
       selection.hovered = adjusting.group;
     }
+    if (adjusting.from === "text") freeText();
   }
   if (!adjusting.moved) return;
-  const { group } = adjusting;
+  const { mode, rect, data, group } = adjusting;
   postPointer(pointer.x, pointer.y);
   const lines = event.metaKey ? { x: [], y: [] } : snapLines(pointer, group);
   let next;
@@ -177,14 +195,16 @@ function editWireframe(event) {
       const frame = frameOf(adjusting.group);
       adjusting = null;
       hideGuides();
-      if (!moved && frame && from === "body") {
+      // A click on a component or its text selects it; a double-click, or the Text tool's
+      // click, types its text.
+      if (!moved && frame && (from === "body" || from === "text")) {
         selectGroup(frame.groupIds[0]);
-        if (isDoubleClick(frame.groupIds[0], pressedAt)) editLabel(frame);
+        if (isDoubleClick(frame.groupIds[0], pressedAt) || wireframe.tool === "text") editText(frame);
       }
       // A click on the grip selects the component, as one on it does.
       if (!moved && frame && from === "grip") selectGroup(frame.groupIds[0]);
-      // A click on the chip's name opens the kinds, or closes them.
-      if (!moved && from === "chip") selection.menu = menuBefore === "kinds" ? null : "kinds";
+      // A click on the chip's name opens the kinds, or closes them. A free text has none.
+      if (!moved && frame && from === "chip" && kindNames[frame.customData.tildeWireframe]) selection.menu = menuBefore === "kinds" ? null : "kinds";
       showHandles();
     }
     return true;
@@ -195,17 +215,30 @@ function editWireframe(event) {
     return true;
   }
   if (event.type === "pointerdown" && commented && !event.target.closest?.("[data-menu=comment]")) closeComment(true);
-  if (event.type === "pointerdown" && labelled && event.target !== labelField) endLabel(true);
+  if (event.type === "pointerdown" && labelled && event.target !== labelField) {
+    endLabel(true);
+    pressEndedTyping = true;
+  } else if (event.type === "pointerdown") {
+    pressEndedTyping = false;
+  }
   if (!isHandle(event.target)) {
     // A click on a component's tag types its label.
     const tagged = tagAt(event.clientX, event.clientY);
-    // The text tool starts a label on a tag too.
-    const isText = api?.getAppState().activeTool.type === "text";
-    if (event.type === "pointerdown" && tagged && !isText) {
+    if (event.type === "pointerdown" && tagged) {
       event.stopImmediatePropagation();
       event.preventDefault();
       selectGroup(tagged.groupIds[0]);
       editLabel(tagged);
+      return true;
+    }
+    // A press on the selected component's text, with any tool, may move the text off it; ⌥
+    // still copies the component.
+    const textOwner = textAt(event.clientX, event.clientY);
+    const texted = textOwner && textOwner.groupIds[0] === selection.selected && !event.altKey ? textOwner : null;
+    if (event.type === "pointerdown" && texted) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      startAdjusting(event, texted, "move", "text");
       return true;
     }
     if (event.type === "pointerdown") {
@@ -223,9 +256,10 @@ function editWireframe(event) {
       const group = (componentAt(event.clientX, event.clientY) ?? tagged)?.groupIds[0] ?? null;
       if (group !== selection.hovered && !commented) selection.menu = null;
       selection.hovered = group;
-      const isMovable = Boolean(movableAt(event)) && !labelled;
+      const isMovable = (Boolean(movableAt(event)) || Boolean(texted)) && !labelled;
       isOverComponent = isMovable || (Boolean(tagged) && !labelled);
       let cursor = isSelectMode ? "default" : "";
+      if (wireframe.tool === "text") cursor = "text";
       if (isMovable) cursor = event.altKey ? "copy" : "move";
       if (tagged && !labelled) cursor = "text";
       moveCursor.textContent = cursor ? `canvas { cursor: ${cursor} !important; }` : "";
@@ -282,6 +316,26 @@ function editWireframe(event) {
   return true;
 }
 
+// The press ended the label or text that was typed: its release types no new one.
+let pressEndedTyping = false;
+// The place of the Text tool's own press, not one on a tag, a text or a handle.
+let textPress = null;
+
+// The Text tool's click: on a component it types the component's text, elsewhere a new free
+// text that starts at the point.
+function placeText(x, y) {
+  const component = componentAt(x, y);
+  if (component) {
+    selectGroup(component.groupIds[0]);
+    editText(component);
+    return;
+  }
+  const scene = api.getSceneElementsIncludingDeleted();
+  const [frame] = wireframeElements("text", { x, y: y - textHeight / 2, width: 4, height: textHeight }, {});
+  api.updateScene({ elements: [...scene, frame], captureUpdate: "NEVER" });
+  editText(frame, scene);
+}
+
 // The pointer itself snaps: Excalidraw gets the event again at the snapped point, so the
 // shape follows the guides while it is drawn. ⌘ turns all snapping off: Excalidraw gets the
 // event again without ⌘, which would turn its own snapping to other shapes on.
@@ -328,6 +382,21 @@ export function snapPointer(event) {
     },
   };
   if (editWireframe(event)) return;
+  // The Text tool draws nothing: its click types a text, unless the press ended one. A drag
+  // with it does nothing.
+  if (wireframe.tool === "text") {
+    if (event.type === "pointerdown") {
+      selectGroup(null);
+      textPress = pressEndedTyping ? null : { x: event.clientX, y: event.clientY };
+    }
+    const isClick = textPress && Math.hypot(event.clientX - textPress.x, event.clientY - textPress.y) < 4;
+    if (event.type === "pointerup" && isClick) placeText(textPress.x, textPress.y);
+    if (event.type === "pointerup") textPress = null;
+    hideGuides();
+    event.stopImmediatePropagation();
+    event.preventDefault();
+    return;
+  }
   if (isSelectMode) {
     // No tool: a press on empty space draws nothing, and deselects.
     if (event.type === "pointerdown") selectGroup(null);

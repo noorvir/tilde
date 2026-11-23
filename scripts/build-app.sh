@@ -13,8 +13,9 @@ set -eu
 
 cd "$(dirname "$0")/.."
 configuration="${1:-release}"
-# scripts/release.sh changes this line; a release from a tag sets TILDE_VERSION instead.
-version="${TILDE_VERSION:-0.2.0}"
+# A release sets TILDE_VERSION; any other build is the latest tag on HEAD's history plus " (dev)".
+latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"
+version="${TILDE_VERSION:-${latest_tag#v} (dev)}"
 identity="${TILDE_SIGN_IDENTITY:--}"
 # The public half of the EdDSA key that signs updates (Sparkle's generate_keys prints it). An
 # update that this key did not sign is refused. TILDE_UPDATE_PUBLIC_KEY replaces it for tests.

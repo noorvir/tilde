@@ -40,7 +40,8 @@ final class WireframeMode: ObservableObject {
         let screen: CGRect?
     }
 
-    /// Rectangle and Circle stand in for any component not in the list.
+    /// Rectangle and Circle stand in for any component not in the list. Text draws no
+    /// component: its click types text on a component, or free text elsewhere.
     nonisolated static let tools = [
         (tool: "section", symbol: "rectangle.split.3x1", key: "s", help: "Section"),
         (tool: "table", symbol: "tablecells", key: "g", help: "Table"),

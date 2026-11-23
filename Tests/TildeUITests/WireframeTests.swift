@@ -119,7 +119,7 @@ struct WireframeTests {
         let drawTool = controller.drawing.tool
         let color = controller.drawing.color
 
-        for letter in ["a", "p", "w", "x", "1", "6"] {
+        for letter in ["a", "p", "w", "q", "1", "6"] {
             #expect(controller.handleKey(try key(letter), in: .canvas), "\(letter) was not taken")
         }
         #expect(controller.wireframe.tool == "list")

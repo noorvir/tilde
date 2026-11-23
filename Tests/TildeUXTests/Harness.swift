@@ -49,12 +49,15 @@ enum Key: Int {
     case v = 9
     case leftBracket = 33
     case r = 15
+    case g = 5
     case space = 49
     case b = 11
     case d = 2
     case c = 8
     case z = 6
     case delete = 51
+    case t = 17
+    case x = 7
 }
 
 /// A picture of the screen, or an image of the app's, read in points.

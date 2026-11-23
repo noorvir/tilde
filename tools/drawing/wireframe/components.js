@@ -33,7 +33,8 @@ export function newData(kind) {
 }
 
 // A component in the scene: one element as large as it, which nothing of Excalidraw draws, with
-// its kind and `data` (label, borders, rows, columns, fill). The look layer draws it.
+// its kind and `data` (label, text, borders, rows, columns, fill). The look layer draws it. A
+// free text is one too, of kind "text", as large as its text.
 export function wireframeElements(kind, { x, y, width, height }, data, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`]) {
   const [frame] = convertToExcalidrawElements([{
     type: "rectangle", x, y, width, height, roughness: 0, strokeWidth: 1, fillStyle: "solid", strokeStyle: "solid",
@@ -42,10 +43,11 @@ export function wireframeElements(kind, { x, y, width, height }, data, groupIds 
   return [{ ...frame, groupIds, customData: { ...data, tildeWireframe: kind } }];
 }
 
-// A new kind keeps the rect and the label, and the fill or rows where the new kind has them.
+// A new kind keeps the rect, the label and the text, and the fill or rows where the new kind has
+// them.
 export function changedKind(frame, kind) {
   const old = frame.customData;
-  const data = { ...newData(kind), tildeWireframe: kind, label: old.label, comment: old.comment };
+  const data = { ...newData(kind), tildeWireframe: kind, label: old.label, text: old.text, comment: old.comment };
   if (old.borders) data.borders = old.borders;
   if (old.radius) data.radius = old.radius;
   if ("filled" in data && old.filled !== undefined) data.filled = old.filled;
@@ -89,14 +91,7 @@ export function componentAt(x, y) {
 export function rebuild(group, rect, data) {
   const all = api.getSceneElementsIncludingDeleted();
   const index = all.findIndex((element) => element.groupIds.includes(group));
-  // Its texts keep their place relative to it.
-  const rest = all.filter((element) => !element.groupIds.includes(group)).map((element) => {
-    const at = element.customData?.tildeOn === group ? element.customData.at : null;
-    if (!at) return element;
-    const x = rect.x + at[0] * rect.width;
-    const y = rect.y + at[1] * rect.height;
-    return { ...element, x, y, version: element.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) };
-  });
+  const rest = all.filter((element) => !element.groupIds.includes(group));
   rest.splice(index, 0, ...wireframeElements(data.tildeWireframe, rect, data, [group]));
   api.updateScene({ elements: rest, captureUpdate: "NEVER" });
 }

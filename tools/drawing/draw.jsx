@@ -12,7 +12,7 @@
 //   wireframe/preview.js     still pictures of components in each state, for Tilde's Settings
 //   wireframe/pointer.js     drawing, moving, resizing and copying with the pointer
 //   wireframe/chip.js        a component's handles: the chip, its kinds and borders, the corners and the grip
-//   wireframe/labels.js      a label typed in place
+//   wireframe/labels.js      a label or a text typed in place
 //   wireframe/comment.js     a component's comment
 //   wireframe/snap.js        the lines to snap to, and the guides
 //   wireframe/history.js     undo and redo
@@ -33,7 +33,7 @@ import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOu
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
 import { drawLook, lookLayer } from "./wireframe/look.js";
-import { attachTexts, keyPressed } from "./wireframe/mode.js";
+import { keyPressed } from "./wireframe/mode.js";
 import { snapPointer } from "./wireframe/pointer.js";
 import { guideLabel, guideX, guideY, snapRing } from "./wireframe/snap.js";
 import { windowOutline } from "./wireframe/window.js";
@@ -98,7 +98,6 @@ createRoot(document.getElementById("root")).render(
       drawLook();
       drawSelection();
       groupChanged();
-      attachTexts();
     }}
     excalidrawAPI={(value) => {
       setAPI(value);

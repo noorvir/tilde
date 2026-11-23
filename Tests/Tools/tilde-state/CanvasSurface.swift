@@ -27,11 +27,27 @@ enum CanvasSurface {
         ["type": "button", "rect": [130, 150, 92, 26], "label": "Choose", "borders": allBorders],
     ]
 
-    static func image(look: WireframeLook, chip: UIState.Chip?, isNested: Bool) async throws -> CGImage {
+    /// The same components with texts, a table's in its header, and a free text below the
+    /// dropdown.
+    private static let textShapes: [[String: Any]] = zip(shapes, ["On demand", "Spot", "us-east", "GPUs", nil, "Launch"]).map { shape, text in
+        var shape = shape
+        shape["text"] = text
+        return shape
+    } + [
+        ["type": "text", "rect": [480, 170, 108, 18], "text": "Prices per hour"],
+    ]
+
+    static func image(look: WireframeLook, chip: UIState.Chip?, isNested: Bool, hasTexts: Bool) async throws -> CGImage {
         let app = try await Renderer.render(NSHostingView(rootView: MockApp()), size: size, appearance: .aqua)
         let page = try await WireframePicturePage.load(html: html())
         let state = chip?.rawValue ?? "normal"
-        return try await page.picture(of: isNested ? nestedShapes : shapes, look: look, state: state, over: app, size: size)
+        var drawn = shapes
+        if isNested {
+            drawn = nestedShapes
+        } else if hasTexts {
+            drawn = textShapes
+        }
+        return try await page.picture(of: drawn, look: look, state: state, over: app, size: size)
     }
 
     /// The canvas's page from the sources.

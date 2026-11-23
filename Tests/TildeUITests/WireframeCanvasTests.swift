@@ -15,6 +15,8 @@ struct WireframeCanvasTests {
     private let corner = CGPoint(x: 200, y: 150)
     private let oppositeCorner = CGPoint(x: 440, y: 270)
     private let inside = CGPoint(x: 320, y: 210)
+    /// On the component's label tag, above its top left corner.
+    private let tag = CGPoint(x: 210, y: 142)
     private let allBorders = ["top", "right", "bottom", "left"]
 
     init() async throws {
@@ -41,7 +43,7 @@ struct WireframeCanvasTests {
     /// A drag with a tool draws that tool's component in the dragged rectangle, with all four
     /// borders; a rectangle and a circle are filled. Done takes it, once.
     @Test func eachToolDrawsItsComponent() async throws {
-        for (tool, _, _, _) in WireframeMode.tools {
+        for (tool, _, _, _) in WireframeMode.tools where tool != "text" {
             try await drawComponent(tool)
             let isPlainShape = tool == "rectangle" || tool == "ellipse"
             let expected = Shape(type: tool, rect: [200, 150, 240, 120], borders: allBorders, filled: isPlainShape ? true : nil)
@@ -103,11 +105,11 @@ struct WireframeCanvasTests {
         #expect(raw.allSatisfy { $0["color"] == nil })
     }
 
-    // MARK: - Labels
+    // MARK: - Labels and text
 
-    /// A double-click on a component opens its label in place; Return keeps the text, and the
+    /// A double-click on a component opens its text in place; Return keeps the text, and the
     /// component keeps its place and kind.
-    @Test func aDoubleClickLabelsAComponent() async throws {
+    @Test func aDoubleClickTypesAComponentsText() async throws {
         try await drawComponent("card")
         try await page.click(inside)
         #expect(try await !page.shows("#tilde-label"))
@@ -119,15 +121,63 @@ struct WireframeCanvasTests {
         try await page.typeLabel("Plan")
         #expect(try await page.press("Enter"))
         #expect(try await !page.shows("#tilde-label"))
-        let labelled = try await page.shapes()
-        #expect(labelled.map(\.label) == ["Plan"])
-        #expect(labelled.map(\.type) == ["card"])
-        #expect(labelled.map(\.rect) == [[200, 150, 240, 120]])
+        let texted = try await page.shapes()
+        #expect(texted.map(\.text) == ["Plan"])
+        #expect(texted.map(\.label) == [nil])
+        #expect(texted.map(\.type) == ["card"])
+        #expect(texted.map(\.rect) == [[200, 150, 240, 120]])
     }
 
-    /// Esc in the label field keeps the label as it was; a click elsewhere keeps the new text;
-    /// an empty text takes the label away.
-    @Test func escKeepsTheOldLabelAndAClickAwayKeepsTheNewOne() async throws {
+    /// Every kind takes a text by a double-click, with its tool or with none.
+    @Test func everyKindTakesAText() async throws {
+        for (tool, _, _, _) in WireframeMode.tools where tool != "text" {
+            for hasTool in [true, false] {
+                try await drawComponent(tool)
+                if !hasTool {
+                    try await start(tool: "")
+                }
+                try await page.doubleClick(inside)
+                try await page.typeLabel("Go")
+                try await page.press("Enter")
+                #expect(try await page.shapes().map(\.text) == ["Go"], "\(tool), with its tool: \(hasTool)")
+                try await page.draw("clear()")
+            }
+        }
+    }
+
+    /// A double-click types the text of the component under it in every state: with a tool and
+    /// with none, selected or not, and nested in a section, for the part and for the section.
+    @Test func aDoubleClickTypesTextInEveryState() async throws {
+        try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
+        try await drawComponent("card", from: CGPoint(x: 150, y: 150), to: CGPoint(x: 350, y: 250))
+        let card = CGPoint(x: 250, y: 200)
+        let section = CGPoint(x: 500, y: 400)
+        var texts: [String?] = [nil, nil]
+        for hasTool in [true, false] {
+            try await start(tool: hasTool ? "card" : "")
+            for isSelected in [false, true] {
+                for (index, point) in [section, card].enumerated() {
+                    if isSelected {
+                        try await page.click(point)
+                        try await Task.sleep(for: .milliseconds(450))
+                    } else {
+                        try await page.click(CGPoint(x: 900, y: 700))
+                    }
+                    try await page.doubleClick(point)
+                    let text = "\(index) \(hasTool) \(isSelected)"
+                    try await page.typeLabel(text)
+                    try await page.press("Enter")
+                    texts[index] = text
+                    #expect(try await page.shapes().map(\.text) == texts, "with a tool: \(hasTool), selected: \(isSelected)")
+                    #expect(try await page.shapes().count == 2)
+                }
+            }
+        }
+    }
+
+    /// Esc in the field keeps the text as it was; a click elsewhere keeps the new text; an
+    /// empty text takes the text away.
+    @Test func escKeepsTheOldTextAndAClickAwayKeepsTheNewOne() async throws {
         try await drawComponent("button")
         try await page.doubleClick(inside)
         try await page.typeLabel("Save")
@@ -136,25 +186,26 @@ struct WireframeCanvasTests {
         try await page.doubleClick(inside)
         try await page.typeLabel("Cancel")
         #expect(try await page.press("Escape"))
-        #expect(try await page.shapes().map(\.label) == ["Save"])
+        #expect(try await page.shapes().map(\.text) == ["Save"])
         // Esc in the field is the field's: Tilde does not get it.
         #expect(!page.messages.contains("escape"))
 
         try await page.doubleClick(inside)
         try await page.typeLabel("Send")
         try await page.click(CGPoint(x: 900, y: 600))
-        #expect(try await page.shapes().map(\.label) == ["Send"])
+        #expect(try await page.shapes().map(\.text) == ["Send"])
 
         try await page.doubleClick(inside)
         try await page.typeLabel("")
         try await page.press("Enter")
-        #expect(try await page.shapes().map(\.label) == [nil])
+        #expect(try await page.shapes().map(\.text) == [nil])
     }
 
-    /// A section takes a label too, though a drag on it draws in it.
+    /// A click on a component's tag types its label, a section's too, though a drag on it
+    /// draws in it.
     @Test func aSectionTakesALabel() async throws {
         try await drawComponent("section")
-        try await page.doubleClick(inside)
+        try await page.click(tag)
         try await page.typeLabel("Billing")
         try await page.press("Enter")
         let shapes = try await page.shapes()
@@ -162,10 +213,100 @@ struct WireframeCanvasTests {
         #expect(shapes.map(\.label) == ["Billing"])
     }
 
+    /// A component's text moves and resizes with it. A drag on the text of the selected
+    /// component moves the text off it: a free text from then on, which the component no longer
+    /// takes along. Undo puts the text back on the component.
+    @Test func aTextFollowsItsComponentUntilItIsMovedOffIt() async throws {
+        try await drawComponent("card")
+        try await start(tool: "")
+        try await page.doubleClick(inside)
+        try await page.typeLabel("Plan")
+        try await page.press("Enter")
+
+        // Away from the text, a drag moves the card and its text.
+        try await page.drag(from: CGPoint(x: 230, y: 170), to: CGPoint(x: 280, y: 200))
+        #expect(try await rects() == [[250, 180, 240, 120]])
+        #expect(try await page.shapes().map(\.text) == ["Plan"])
+        try await page.hover(CGPoint(x: 370, y: 240))
+        try await page.drag(from: CGPoint(x: 490, y: 300), to: CGPoint(x: 530, y: 340), on: Self.resizer)
+        #expect(try await page.shapes().map(\.text) == ["Plan"])
+
+        // The text is in the card's middle, at (390, 260): a drag there moves it off.
+        try await page.click(CGPoint(x: 300, y: 200))
+        try await page.drag(from: CGPoint(x: 390, y: 260), to: CGPoint(x: 690, y: 460), meta: true)
+        let freed = try await page.shapes()
+        #expect(freed.map(\.type) == ["card", "text"])
+        #expect(freed.map(\.text) == [nil, "Plan"])
+        let free = try #require(freed.last?.rect)
+        #expect(abs(free[0] + free[2] / 2 - 690) <= 1 && abs(free[1] + free[3] / 2 - 460) <= 1, "\(free)")
+
+        // The card moves without it now.
+        try await page.drag(from: CGPoint(x: 260, y: 190), to: CGPoint(x: 160, y: 190), meta: true)
+        #expect(try await page.shapes().last?.rect == free)
+
+        try await page.press("z", meta: true)
+        try await page.press("z", meta: true)
+        let undone = try await page.shapes()
+        #expect(undone.map(\.type) == ["card"])
+        #expect(undone.map(\.text) == ["Plan"])
+    }
+
+    /// The Text tool's click types a free text on empty space, and the text of a component on
+    /// one; a drag with it draws nothing. Esc drops a new free text, and an empty one goes. The
+    /// report has a free text as a shape of its own, with its rect, and a component's text in
+    /// the component.
+    @Test func theTextToolTypesFreeTextAndAComponentsText() async throws {
+        try await drawComponent("button")
+        try await start(tool: "text")
+        try await page.click(CGPoint(x: 700, y: 500))
+        #expect(try await page.shows("#tilde-label"))
+        try await page.typeLabel("Prices in USD")
+        try await page.press("Enter")
+
+        try await page.click(inside)
+        try await page.typeLabel("Buy")
+        try await page.press("Enter")
+
+        try await page.click(CGPoint(x: 700, y: 650))
+        #expect(try await page.press("Escape"))
+        try await page.click(CGPoint(x: 900, y: 650))
+        try await page.typeLabel("")
+        try await page.press("Enter")
+        try await page.drag(from: CGPoint(x: 600, y: 100), to: CGPoint(x: 800, y: 200))
+
+        let raw = try await page.rawShapes()
+        #expect(raw.map { $0["type"] as? String } == ["button", "text"])
+        #expect(raw[0]["text"] as? String == "Buy")
+        #expect(raw[1]["text"] as? String == "Prices in USD")
+        let rect = try #require(raw[1]["rect"] as? [Double])
+        #expect(Array(rect[...1]) == [700, 491] && rect[2] > 40 && rect[3] == 18, "\(rect)")
+        #expect(Set(raw[1].keys) == ["id", "type", "text", "rect"])
+
+        // A click on a free text types it again, and a drag moves it, with the Text tool too.
+        try await page.click(CGPoint(x: 710, y: 500))
+        try await page.typeLabel("Prices in EUR")
+        try await page.press("Enter")
+        try await page.drag(from: CGPoint(x: 710, y: 500), to: CGPoint(x: 760, y: 540), meta: true)
+        let moved = try await page.shapes()
+        #expect(moved.map(\.text) == ["Buy", "Prices in EUR"])
+        #expect(moved.last?.rect.prefix(2) == [750, 531])
+    }
+
+    /// A note's free text and a component's text show again from its report.
+    @Test func aNotesTextShowsAgain() async throws {
+        try await start(tool: "card")
+        let shapes = "[{type: 'card', rect: [10, 20, 240, 120], text: 'Plan'}, {type: 'text', rect: [10, 160, 60, 18], text: 'Note'}]"
+        try await page.draw("restoreWireframe({shapes: \(shapes), origin: [100, 100]})")
+        let shown = try await page.shapes()
+        #expect(shown.map(\.type) == ["card", "text"])
+        #expect(shown.map(\.text) == ["Plan", "Note"])
+        #expect(shown.map(\.rect) == [[110, 120, 240, 120], [110, 260, 60, 18]])
+    }
+
     // MARK: - No tool, after Esc
 
     /// With no tool, as after Esc, a drag on empty space draws nothing; components can still be
-    /// moved (a section too), resized and labelled. A tool draws again.
+    /// moved (a section too), resized and given a text. A tool draws again.
     @Test func withNoToolNothingDrawsAndComponentsStillChange() async throws {
         try await drawComponent("section")
         try await start(tool: "")
@@ -183,7 +324,7 @@ struct WireframeCanvasTests {
         try await page.doubleClick(CGPoint(x: 370, y: 240))
         try await page.typeLabel("Header")
         try await page.press("Enter")
-        #expect(try await page.shapes().map(\.label) == ["Header"])
+        #expect(try await page.shapes().map(\.text) == ["Header"])
 
         try await drawComponent("card", from: CGPoint(x: 700, y: 500), to: CGPoint(x: 900, y: 650))
         #expect(try await page.shapes().map(\.type) == ["section", "card"])
@@ -374,8 +515,8 @@ struct WireframeCanvasTests {
         #expect(try await page.run("document.getElementById('tilde-chip').dataset.side") as? String == "above")
     }
 
-    /// ⌥ and a drag moves a copy: the first component stays, and the copy has its kind, its
-    /// label and its size.
+    /// ⌥ and a drag moves a copy, also from the component's text: the first component stays, and
+    /// the copy has its kind, its text and its size.
     @Test func optionAndADragCopiesAComponent() async throws {
         try await drawComponent("button")
         try await page.doubleClick(inside)
@@ -385,7 +526,7 @@ struct WireframeCanvasTests {
         try await page.drag(from: inside, to: CGPoint(x: inside.x + 300, y: inside.y + 200), alt: true)
         let shapes = try await page.shapes()
         #expect(shapes.map(\.type) == ["button", "button"])
-        #expect(shapes.map(\.label) == ["Save", "Save"])
+        #expect(shapes.map(\.text) == ["Save", "Save"])
         #expect(shapes.map(\.rect) == [[200, 150, 240, 120], [500, 350, 240, 120]])
         #expect(shapes[0].id != shapes[1].id)
     }
@@ -545,7 +686,7 @@ struct WireframeCanvasTests {
 
     // MARK: - Undo, redo and delete
 
-    /// Undo and redo step through every change: a new component, a move, a label, a delete.
+    /// Undo and redo step through every change: a new component, a move, a text, a delete.
     @Test func undoAndRedoStepThroughEveryChange() async throws {
         try await drawComponent("card")
         try await start(tool: "")
@@ -558,9 +699,9 @@ struct WireframeCanvasTests {
         #expect(try await page.shapes().isEmpty)
 
         try await page.press("z", meta: true)
-        #expect(try await page.shapes().map(\.label) == ["Plan"])
+        #expect(try await page.shapes().map(\.text) == ["Plan"])
         try await page.press("z", meta: true)
-        #expect(try await page.shapes().map(\.label) == [nil])
+        #expect(try await page.shapes().map(\.text) == [nil])
         #expect(try await rects() == [[260, 190, 240, 120]])
         try await page.draw("undoCanvas()")
         #expect(try await rects() == [[200, 150, 240, 120]])
@@ -574,7 +715,7 @@ struct WireframeCanvasTests {
         try await page.press("z", meta: true, shift: true)
         try await page.draw("redoCanvas()")
         let redone = try await page.shapes()
-        #expect(redone.map(\.label) == ["Plan"])
+        #expect(redone.map(\.text) == ["Plan"])
         #expect(redone.map(\.rect) == [[260, 190, 240, 120]])
         try await page.draw("redoCanvas()")
         #expect(try await page.shapes().isEmpty)
@@ -597,11 +738,14 @@ struct WireframeCanvasTests {
     // MARK: - The chip
 
     /// The chip's name opens the kinds; a kind changes the component and keeps its place, its
-    /// label and its borders.
+    /// label, its text and its borders.
     @Test func theChipChangesTheKind() async throws {
         try await drawComponent("card")
-        try await page.doubleClick(inside)
+        try await page.click(tag)
         try await page.typeLabel("Plans")
+        try await page.press("Enter")
+        try await page.doubleClick(inside)
+        try await page.typeLabel("Compare")
         try await page.press("Enter")
         try await page.hover(inside)
         #expect(try await !page.shows("[data-kind=\"table\"]"))
@@ -612,6 +756,7 @@ struct WireframeCanvasTests {
         let changed = try await page.shapes()
         #expect(changed.map(\.type) == ["table"])
         #expect(changed.map(\.label) == ["Plans"])
+        #expect(changed.map(\.text) == ["Compare"])
         #expect(changed.map(\.rect) == [[200, 150, 240, 120]])
         #expect(changed.map(\.borders) == [allBorders])
         #expect(try await !page.shows("[data-kind=\"table\"]"))
@@ -777,7 +922,7 @@ struct WireframeCanvasTests {
     /// and keeps what was.
     @Test func doneTakesTheComponentsAndTheModesEndDropsTheRest() async throws {
         try await drawComponent("card")
-        try await page.doubleClick(inside)
+        try await page.click(tag)
         try await page.typeLabel("Plan")
         try await page.press("Enter")
         let raw = try await page.rawShapes()

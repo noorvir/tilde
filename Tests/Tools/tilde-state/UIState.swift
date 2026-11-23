@@ -192,6 +192,8 @@ struct UIState: Decodable {
     var chip: Chip?
     /// The canvas has its components inside a section, and a button inside a card.
     var nested: Bool?
+    /// The canvas's components have texts, and a free text is beside them.
+    var texts: Bool?
 
     init(file: URL) throws {
         let data = try Data(contentsOf: file)

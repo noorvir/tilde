@@ -5,7 +5,6 @@
 # that do.
 #   TILDE_SIGN_IDENTITY="Developer ID Application: Name (TEAMID)" TILDE_NOTARY_PROFILE=tilde \
 #   scripts/release.sh 0.3.0
-# With a version, it commits the version number in scripts/build-app.sh first.
 #   scripts/release.sh --from-tag
 # takes the version from the tag vX.Y.Z on HEAD and commits nothing, as the Release workflow
 # (.github/workflows/release.yml) does when a tag is pushed. It needs TILDE_UPDATE_PRIVATE_KEY
@@ -81,13 +80,6 @@ repo=$(sed -n 's|.*"https://github.com/\([^/]*/[^/]*\)/releases/latest/download/
 if [ -z "$repo" ]; then
     echo "No GitHub feed URL in SparkleUpdates.feedURL." >&2
     exit 1
-fi
-
-if [ "$from_tag" = false ]; then
-    sed -i '' "s/^version=.*/version=\"\${TILDE_VERSION:-$version}\"/" scripts/build-app.sh
-    if ! git diff --quiet; then
-        git commit -q -m "Release $version" scripts/build-app.sh
-    fi
 fi
 
 TILDE_VERSION=$version TILDE_UNIVERSAL=1 TILDE_STRICT=1 scripts/build-app.sh

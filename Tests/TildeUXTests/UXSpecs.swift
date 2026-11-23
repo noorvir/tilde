@@ -1204,7 +1204,7 @@ struct UXSpecs {
         let frame = ChangingWindow.frame
         let drawn = CGRect(x: frame.minX + 80, y: frame.minY + 120, width: 200, height: 100)
         try await withApp(defaults: ["wireframes": "true"]) { app in
-            try await drawCard(app, in: drawn)
+            try await drawRectangle(app, in: drawn)
             try await app.key(.escape)
             var part = try await sides(app, near: drawn)
             step("card drawn")
@@ -1277,14 +1277,85 @@ struct UXSpecs {
         }
     }
 
-    /// Starts wireframe mode and draws a card with ⌘ over `rect`.
-    private func drawCard(_ app: TildeApp, in rect: CGRect) async throws {
+    /// A double-click on a rectangle types its text in its middle, and on a table in its header; the
+    /// text moves with its component. The Text tool's click types a free text where there is no
+    /// component. Each text shows in its component's colour.
+    @Test func aTextGoesOnAComponentOrAnywhere() async throws {
+        let window = try ChangingWindow()
+        defer { window.close() }
+        let frame = ChangingWindow.frame
+        try await withApp(defaults: ["wireframes": "true"]) { app in
+            try await drawRectangle(app, in: CGRect(x: frame.minX + 60, y: frame.minY + 60, width: 200, height: 100))
+            try await app.key(.g)
+            try await app.hold("command", down: true)
+            try await app.slowDrag(from: CGPoint(x: frame.minX + 60, y: frame.minY + 200), to: CGPoint(x: frame.minX + 300, y: frame.minY + 320))
+            try await app.hold("command", down: false)
+            try await app.key(.escape)
+            let card = try await sides(app, near: CGRect(x: frame.minX + 60, y: frame.minY + 60, width: 200, height: 100))
+            let table = try await sides(app, near: CGRect(x: frame.minX + 60, y: frame.minY + 200, width: 240, height: 120))
+            step("card and table drawn")
+
+            // Where a text shows: a strip through its middle.
+            func strip(_ x: Double, _ y: Double) -> CGRect { CGRect(x: x - 30, y: y - 6, width: 60, height: 12) }
+            let cardText = strip(card.midX, card.midY)
+            // A table's text is in the middle of its header, 18 pt high here.
+            let tableText = strip(table.midX, table.minY + 9)
+            let moved = cardText.offsetBy(dx: 160, dy: 0)
+            // A free text starts where the Text tool clicks.
+            let click = CGPoint(x: frame.minX + 370, y: frame.minY + 300)
+            let free = CGRect(x: click.x, y: click.y - 6, width: 60, height: 12)
+            let screen = try await app.screen()
+            let before = (
+                card: screen.count(in: cardText, every: 1, where: Picture.isWireframeBlue), table: screen.count(in: tableText, every: 1, where: Picture.isWireframeTeal),
+                moved: screen.count(in: moved, every: 1, where: Picture.isWireframeBlue), free: screen.count(in: free, every: 1, where: Picture.isWireframeBlue)
+            )
+
+            try await doubleClick(app, at: CGPoint(x: card.midX, y: card.midY))
+            try await type(app, "Plan")
+            try await waitFor(app, at: cardText, every: 1, Picture.isWireframeBlue, atLeast: before.card + 15)
+            step("text on the card")
+
+            try await doubleClick(app, at: CGPoint(x: table.midX, y: table.midY))
+            try await type(app, "GPUs")
+            try await waitFor(app, at: tableText, every: 1, Picture.isWireframeTeal, atLeast: before.table + 15)
+            step("text on the table")
+
+            try await drag(app, from: CGPoint(x: card.minX + 20, y: card.minY + 20), by: CGVector(dx: 160, dy: 0))
+            try await waitFor(app, at: moved, every: 1, Picture.isWireframeBlue, atLeast: before.moved + 15)
+            try await waitFor(app, at: cardText, every: 1, Picture.isWireframeBlue, atMost: before.card + 5)
+            step("the text moved with the card")
+
+            try await app.key(.t)
+            try await app.click(at: click)
+            try await type(app, "Note")
+            try await waitFor(app, at: free, every: 1, Picture.isWireframeBlue, atLeast: before.free + 15)
+            step("free text")
+        }
+    }
+
+    /// Two clicks at once, as a hand double-clicks.
+    private func doubleClick(_ app: TildeApp, at point: CGPoint) async throws {
+        for _ in 0..<2 {
+            try await app.mouseDown(at: point)
+            try await app.mouseUp(at: point)
+        }
+    }
+
+    /// Types into the field that opened, once it has the keyboard, and keeps the text.
+    private func type(_ app: TildeApp, _ text: String) async throws {
+        try await Task.sleep(for: .milliseconds(300))
+        try await app.type(text)
+        try await app.key(.enter)
+    }
+
+    /// Starts wireframe mode and draws a rectangle with ⌘ over `rect`.
+    private func drawRectangle(_ app: TildeApp, in rect: CGRect) async throws {
         try await app.menu("Start Annotation")
         try await app.waitToSee("Annotating")
         try await app.key(.w)
         try await app.waitToSee("Done, ⌘↩")
         try await app.waitToSee("Drawing canvas", timeout: 15)
-        try await app.key(.c)
+        try await app.key(.r)
         try await app.hold("command", down: true)
         try await app.slowDrag(from: rect.origin, to: CGPoint(x: rect.maxX, y: rect.maxY))
         try await app.hold("command", down: false)
