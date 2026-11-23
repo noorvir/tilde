@@ -461,8 +461,9 @@ final class AnnotationController: ObservableObject {
         case .keepKeyboard:
             gaveKeyboardBack = false
             // The next Esc must reach Tilde; a click in another app gives that app the keyboard.
-            // A comment that is open, as after Done in Wireframe, keeps the keyboard.
-            if !hud.isInBrowser, commentBox.pending == nil {
+            // A comment that is open, as after Done in Wireframe, keeps the keyboard. While
+            // recording, the recorded window keeps it, so its hover effects show in the clip.
+            if !hud.isInBrowser, commentBox.pending == nil, recording == nil {
                 overlays.makeKey()
             }
         case .giveKeyboardBack:
@@ -973,7 +974,9 @@ final class AnnotationController: ObservableObject {
     /// overlay, or in Draw and Wireframe the canvas, which has their keys. The HUD is a
     /// non-activating panel: without this, keys stay with the app in front.
     func takeKeyboard() {
-        guard session != nil else {
+        // While recording, Tilde stays in the back: an app that is not active shows no hover
+        // effects in the clip. Esc reaches Tilde as a hot key.
+        guard session != nil, recording == nil else {
             return
         }
         // Before Tilde comes forward: macOS shows a Space with a window of the app it activates.
