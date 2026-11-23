@@ -366,6 +366,8 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     private var finished: CheckedContinuation<CameraRecording?, Never>?
     /// When the file in progress started, on the host clock.
     private var recordingStart: CMTime?
+    /// When the last pause or resume was asked for, on the host clock.
+    private var pauseAsked: CMTime?
     /// A file that ended before `stopRecording`, such as when the camera went off or changed:
     /// `stopRecording` returns it.
     private var endedEarly: CameraRecording?
@@ -612,18 +614,43 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     }
 
     func pauseRecording() {
-        queue.async { [output] in
+        let asked = CMClockGetTime(CMClockGetHostTimeClock())
+        queue.async { [self] in
             if output.isRecording {
+                pauseAsked = asked
                 output.pauseRecording()
             }
         }
     }
 
     func resumeRecording() {
-        queue.async { [output] in
+        let asked = CMClockGetTime(CMClockGetHostTimeClock())
+        queue.async { [self] in
             if output.isRecordingPaused {
+                pauseAsked = asked
                 output.resumeRecording()
             }
+        }
+    }
+
+    /// The clip pauses and resumes when asked; the camera file does at its next frame. The
+    /// two lags of a pause, less each other, are how far that pause moved the camera.
+    func fileOutput(_ output: AVCaptureFileOutput, didPauseRecordingTo file: URL, from connections: [AVCaptureConnection]) {
+        logLag("paused")
+    }
+
+    func fileOutput(_ output: AVCaptureFileOutput, didResumeRecordingTo file: URL, from connections: [AVCaptureConnection]) {
+        logLag("resumed")
+    }
+
+    private func logLag(_ change: String) {
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        queue.async { [self] in
+            guard let pauseAsked else {
+                return
+            }
+            let lag = (now - pauseAsked).seconds * 1000
+            Self.log.notice("camera file \(change, privacy: .public) \(lag, format: .fixed(precision: 1), privacy: .public) ms after the clip")
         }
     }
 

@@ -32,6 +32,32 @@ struct CameraAlignmentTests {
         #expect(abs((segments.first?.timeMapping.target.duration.seconds ?? 0) - 0.5) < 0.01)
     }
 
+    /// Play right after the preview opens, before either file has loaded: both players wait,
+    /// then run on the same time of the clip.
+    @MainActor @Test func playStartsTheClipAndItsCameraInStep() async throws {
+        let video = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString).mov")
+        let cameraFile = ClipRecorder.cameraFile(of: video)
+        defer {
+            try? FileManager.default.removeItem(at: video)
+            try? FileManager.default.removeItem(at: cameraFile)
+        }
+        try await Self.writeMovie(to: video, seconds: 2)
+        try await Self.writeMovie(to: cameraFile, seconds: 2)
+
+        let players = ClipPlayers(video: video, camera: cameraFile, seconds: 2)
+        let camera = try #require(players.camera)
+        players.toggle()
+        let limit = Date().addingTimeInterval(5)
+        while players.screen.currentTime().seconds < 0.3, Date() < limit {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let offset = (camera.currentTime() - players.screen.currentTime()).seconds
+        players.stop()
+
+        #expect(players.screen.currentTime().seconds >= 0.3)
+        #expect(abs(offset) < 0.005, "\(offset)")
+    }
+
     /// The scrubber's time: minutes and two-digit seconds, cut down to the second.
     @MainActor @Test func theScrubberShowsPlayedAndLength() {
         let clock = ClipClock()

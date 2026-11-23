@@ -1,4 +1,5 @@
 import AVFoundation
+import OSLog
 import SwiftUI
 
 /// A recording in the preview, as its saved video will be: the clip and its camera on a
@@ -145,6 +146,9 @@ final class ClipPlayers: ObservableObject {
     private var timeObserver: Any?
     /// Playing when the scrubber was taken, to go on after it.
     private var wasPlaying = false
+    /// Counts Play and Pause, so a start that waited for loading does nothing once paused.
+    private var playCount = 0
+    private static let log = Logger(subsystem: "dev.tilde.app", category: "camera")
 
     init(video: URL, camera cameraFile: URL?, seconds: Double) {
         clock.duration = seconds
@@ -189,16 +193,63 @@ final class ClipPlayers: ObservableObject {
         }
     }
 
-    /// Both players start on the same frame of the clip at the same host time, a moment from now.
+    /// Both players start on the same frame of the clip at the same host time, once both are
+    /// loaded, on that frame and prerolled. A synchronized start before a player is ready to
+    /// play raises an exception.
     private func playBoth() {
-        let time = screen.currentTime()
-        let host = CMClockGetTime(CMClockGetHostTimeClock()) + CMTime(value: 1, timescale: 20)
-        screen.setRate(1, time: time, atHostTime: host)
-        camera?.setRate(1, time: time, atHostTime: host)
+        playCount += 1
+        let count = playCount
         isPlaying = true
+        Task {
+            await startBoth(count)
+        }
+    }
+
+    private func startBoth(_ count: Int) async {
+        let players = [screen] + (camera.map { [$0] } ?? [])
+        while players.contains(where: { $0.status == .unknown || $0.currentItem?.status == .unknown }) {
+            try? await Task.sleep(for: .milliseconds(10))
+            guard count == playCount else {
+                return
+            }
+        }
+        let ready = players.filter { $0.status == .readyToPlay && $0.currentItem?.status == .readyToPlay }
+        let time = screen.currentTime()
+        for player in ready {
+            _ = await player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+        for player in ready {
+            _ = await player.preroll(atRate: 1)
+        }
+        guard count == playCount, isPlaying else {
+            return
+        }
+        let host = CMClockGetTime(CMClockGetHostTimeClock()) + CMTime(value: 1, timescale: 20)
+        for player in ready {
+            player.setRate(1, time: .invalid, atHostTime: host)
+        }
+        logOffset(count)
+    }
+
+    /// The camera's lead over the clip a second after Play, in milliseconds.
+    private func logOffset(_ count: Int) {
+        guard let camera else {
+            return
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard count == playCount, isPlaying else {
+                return
+            }
+            let offset = (camera.currentTime() - screen.currentTime()).seconds * 1000
+            Self.log.notice("preview: camera \(offset, format: .fixed(precision: 1), privacy: .public) ms ahead of the clip")
+        }
     }
 
     private func pauseBoth() {
+        playCount += 1
+        screen.cancelPendingPrerolls()
+        camera?.cancelPendingPrerolls()
         screen.pause()
         camera?.pause()
         // The camera stops where the clip does.
