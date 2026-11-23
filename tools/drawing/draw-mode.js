@@ -277,6 +277,20 @@ export function enterEndsText(event) {
   event.target.blur();
 }
 
+// ↩ ends Draw's group and opens its comment. Tilde takes ↩ first; it comes here when Tilde had
+// not heard of the group yet, as right after a release. Excalidraw would edit the selected
+// shape's text instead.
+export function enterEndsGroup(event) {
+  if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.altKey || event.ctrlKey || wireframe || editing || isTextField(event.target)) return;
+  event.stopPropagation();
+  event.preventDefault();
+  // After the release has settled, so the group is known.
+  setTimeout(() => {
+    groupChanged();
+    if (hasGroup) post("addComment");
+  }, 0);
+}
+
 // A press: beside the shapes that are edited, it is a click away for Tilde.
 export function pointerPressed(event) {
   isPressed = true;

@@ -4,7 +4,7 @@ import Combine
 /// Transparent window that receives hover, click and drag while annotating: one per screen
 /// above everything, or, for a session limited to one window, one the size of that window
 /// ordered just above it, so windows brought in front of it cover it too.
-final class OverlayWindow: FloatingPanel {
+final class OverlayWindow: FloatingPanel, AnnotationSurface {
     static let overlayLevel = NSWindow.Level(rawValue: NSWindow.Level.popUpMenu.rawValue + 1)
 
     /// On one window, ordered just above it, instead of on a whole screen.

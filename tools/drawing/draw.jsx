@@ -28,7 +28,7 @@ import { post, setAPI } from "./scene.js";
 import { contextMenu, contextMenuKey, contextMenuPointer, contextMenuRequested, contextMenuStyle } from "./context-menu.js";
 import { escapePressed, focusChanged, swallowToolKey } from "./bridge.js";
 import { cursorRing, labelCursor, moveCursor } from "./cursor.js";
-import { blockPressWithNoTool, deleteKey, drawSelection, selectionLayer, enterEndsText, groupChanged, hideShapesForText, moveToRelease, showShapesAgain, pointerLeft, pointerMoved, pointerPressed, pointerReleased } from "./draw-mode.js";
+import { blockPressWithNoTool, deleteKey, drawSelection, selectionLayer, enterEndsGroup, enterEndsText, groupChanged, hideShapesForText, moveToRelease, showShapesAgain, pointerLeft, pointerMoved, pointerPressed, pointerReleased } from "./draw-mode.js";
 import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOutline, typeMenu } from "./wireframe/chip.js";
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
@@ -70,6 +70,7 @@ document.addEventListener("keydown", keyPressed, true);
 document.addEventListener("keydown", deleteKey, true);
 document.addEventListener("keydown", escapePressed, true);
 document.addEventListener("keydown", enterEndsText, true);
+document.addEventListener("keydown", enterEndsGroup, true);
 
 window.addEventListener("pointermove", pointerMoved, true);
 document.addEventListener("pointerleave", pointerLeft);

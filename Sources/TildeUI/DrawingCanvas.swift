@@ -383,7 +383,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 /// Excalidraw ignores a press on a page without focus, so a press first gives the canvas the
 /// keyboard, and reaches the page once the page has focus. The comment box gets the keyboard
 /// back when the press ends.
-private final class CanvasPanel: FloatingPanel {
+private final class CanvasPanel: FloatingPanel, AnnotationSurface {
     var onPress: (CGPoint) -> Bool = { _ in false }
     /// Tilde's keys come before the page's, unless a text field on the page has the keyboard.
     var onKey: (NSEvent) -> Bool = { _ in false }

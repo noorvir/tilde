@@ -233,7 +233,8 @@ final class HUDPanel {
     private func swallowsListPress(_ type: NSEvent.EventType, windowNumber: Int) -> Bool {
         switch type {
         case .leftMouseDown, .rightMouseDown:
-            guard closeListOutside(at: NSEvent.mouseLocation), windowNumber != window.windowNumber else {
+            // Other windows of Tilde, such as the preview, take the press as usual.
+            guard closeListOutside(at: NSEvent.mouseLocation), NSApp.window(withWindowNumber: windowNumber) is AnnotationSurface else {
                 return false
             }
             isSwallowingPress = true

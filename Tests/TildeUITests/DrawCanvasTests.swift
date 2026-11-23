@@ -49,6 +49,18 @@ struct DrawCanvasTests {
         #expect(shapes.first?["color"] as? String == "#2F76FF")
     }
 
+    /// ↩ right after a release, before Tilde hears of the group, still ends the group: the page
+    /// asks for its comment once the group is known, and Excalidraw edits no text.
+    @Test func returnRightAfterAReleaseAddsTheComment() async throws {
+        try await page.draw("setTool('rectangle')")
+        try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
+        #expect(try await page.press("Enter"))
+        try await page.wait { self.page.messages.contains("addComment") }
+        #expect(groupMessages() == 1)
+        #expect(page.messages.firstIndex(of: "group")! < page.messages.firstIndex(of: "addComment")!)
+        #expect(try await !page.shows(".excalidraw-wysiwyg"))
+    }
+
     /// A click starts an arrow, which is no shape for Tilde yet. Esc throws that arrow away and
     /// does not reach Tilde; with no arrow under way, Esc is Tilde's.
     @Test func escThrowsAwayTheArrowThatAClickStarted() async throws {
