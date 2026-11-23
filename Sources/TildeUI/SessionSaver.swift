@@ -104,7 +104,7 @@ final class SessionSaver {
         let notes = snapshot.drafts.map { draft in
             SessionRecord.Note(
                 id: draft.id, comment: draft.annotation.comment, target: draft.annotation.target, frame: draft.annotation.frame,
-                marker: draft.marker, chip: draft.chip, anchor: draft.anchor
+                marker: draft.marker, chip: draft.chip, anchor: draft.anchor, isUnfinished: draft.isUnfinished ? true : nil
             )
         }
         return SessionRecord(
@@ -137,6 +137,7 @@ final class SessionSaver {
             )
             var draft = Draft(annotation: annotation, marker: note.marker, chip: note.chip, capture: Task { captures }, anchor: note.anchor)
             draft.isRestored = true
+            draft.isUnfinished = note.isUnfinished == true
             return draft
         }
     }

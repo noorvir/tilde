@@ -33,7 +33,7 @@ import { bordersMenu, chip, chipStyle, corners, grip, handleOutline, selectionOu
 import { commentBox } from "./wireframe/comment.js";
 import { labelField, labelStyle } from "./wireframe/labels.js";
 import { drawLook, lookLayer } from "./wireframe/look.js";
-import { keyPressed } from "./wireframe/mode.js";
+import { keyPressed, postChange } from "./wireframe/mode.js";
 import { snapPointer } from "./wireframe/pointer.js";
 import { guideLabel, guideX, guideY, snapRing } from "./wireframe/snap.js";
 import { windowOutline } from "./wireframe/window.js";
@@ -98,6 +98,7 @@ createRoot(document.getElementById("root")).render(
       drawLook();
       drawSelection();
       groupChanged();
+      postChange();
     }}
     excalidrawAPI={(value) => {
       setAPI(value);

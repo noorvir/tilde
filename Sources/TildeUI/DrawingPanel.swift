@@ -20,6 +20,8 @@ final class DrawingPanel {
     private var isOverLabel = false
     var onEscape: () -> Void = {}
     var onEdited: () -> Void = {}
+    /// Wireframe mode's components changed.
+    var onWireframeChanged: () -> Void = {}
     /// A text field of the canvas got the keyboard, or lost it.
     var onTyping: (Bool) -> Void = { _ in }
     var onClickAway: () -> Void = {}
@@ -202,6 +204,14 @@ final class DrawingPanel {
             }
         }
         return []
+    }
+
+    func newShapes(_ done: @escaping (Drawing?) -> Void) {
+        guard let active else {
+            done(nil)
+            return
+        }
+        active.newShapes(done)
     }
 
     func takeNewShapes() async -> Drawing? {

@@ -699,8 +699,14 @@ struct SessionFlow: Equatable {
             if case .recording = open.activity {
                 return leaveRecording(for: .draw, &open)
             }
-            guard open.activity == .annotating, !open.isDrawing else {
+            guard open.activity == .annotating, open.canvas != .draw else {
                 return []
+            }
+            // Wireframe's components stay as its draft, as when Annotate ends the mode.
+            if open.canvas == .wireframe {
+                open.canvas = .draw
+                open.pauses.remove(.user)
+                return [.endWireframe, .applyPause, .showCanvas]
             }
             return openCanvas(.draw, &open)
 

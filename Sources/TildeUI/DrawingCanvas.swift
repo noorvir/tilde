@@ -177,6 +177,24 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.\(call); 0")
     }
 
+    /// The shapes not taken yet, which stay on the canvas. The call goes to the page at once,
+    /// before any later call.
+    func newShapes(_ done: @escaping (DrawingPanel.Drawing?) -> Void) {
+        guard let webView else {
+            done(nil)
+            return
+        }
+        let origin = frame.flipped.origin
+        webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.newShapes() : \"\"") { result, _ in
+            guard let text = result as? String, let shapes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]], !shapes.isEmpty else {
+                done(nil)
+                return
+            }
+            let moved = shapes.map { DrawingShapes.moved($0, by: CGVector(dx: origin.x, dy: origin.y)) }
+            done(DrawingPanel.Drawing(shapes: moved, ids: shapes.compactMap { $0["id"] as? String }, bounds: DrawingShapes.bounds(of: moved)))
+        }
+    }
+
     func takeNewShapes() async -> DrawingPanel.Drawing? {
         guard let webView,
               let text = try? await webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.takeNewShapes() : \"\"") as? String,
@@ -216,6 +234,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             hasGroup = text == "group"
         case "edited":
             owner?.onEdited()
+        case "wireframeChanged":
+            owner?.onWireframeChanged()
         case "addComment":
             owner?.onAddComment()
         case "clickAway":

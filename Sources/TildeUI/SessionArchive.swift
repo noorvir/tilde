@@ -22,9 +22,12 @@ struct SessionRecord: Codable, Equatable, Identifiable {
         let marker: CGPoint
         let chip: String
         let anchor: PageAnchor?
+        /// A draft that Send leaves out; nil in records from before drafts.
+        var isUnfinished: Bool?
 
         static func == (lhs: Note, rhs: Note) -> Bool {
             lhs.id == rhs.id && lhs.comment == rhs.comment && lhs.frame == rhs.frame && lhs.chip == rhs.chip && lhs.anchor == rhs.anchor
+                && lhs.isUnfinished == rhs.isUnfinished
         }
     }
 
@@ -197,7 +200,7 @@ final class SessionArchive: @unchecked Sendable {
                 }
                 isChanged = true
                 let target = Target.recording(video: own, seconds: seconds, source: source)
-                return SessionRecord.Note(id: note.id, comment: note.comment, target: target, frame: note.frame, marker: note.marker, chip: note.chip, anchor: note.anchor)
+                return SessionRecord.Note(id: note.id, comment: note.comment, target: target, frame: note.frame, marker: note.marker, chip: note.chip, anchor: note.anchor, isUnfinished: note.isUnfinished)
             }
             if isChanged, !write(record) {
                 isComplete = false

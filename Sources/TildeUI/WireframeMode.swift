@@ -25,8 +25,9 @@ final class WireframeMode: ObservableObject {
     /// The window of the first press: the components keep their place on it when it moves.
     private var window: ElementPicker.WindowInfo?
     private let follower = ScopeFollower()
-    /// The note whose components show again: Done updates it instead of making a new one.
-    private var shownNote: Draft.ID?
+    /// The note of the components on the canvas: one shown again, or the draft that their first
+    /// change made. Done updates it instead of making a new one.
+    var shownNote: Draft.ID?
     /// The lookup under way of the lines under the pointer.
     private var snaps: Task<Void, Never>?
     /// The newest point that came during the lookup, to look up next.
@@ -258,25 +259,52 @@ final class WireframeMode: ObservableObject {
         canvas.deselect()
         try? await Task.sleep(for: .milliseconds(100))
 
-        let bounds = drawn.bounds
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
         let chosen = window.flatMap { picker.currentWindow(number: $0.number) }
-        let window = chosen ?? scope() ?? picker.window(at: center)
-        let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
-        // The wireframe's window; else the window when the wireframe is in it, else the whole screen.
-        let inside = window.map(\.frame).flatMap { NoteCaptures.isMostlyInside(bounds, $0) ? $0 : nil }
-        let area = chosen?.frame ?? inside ?? screen
         let replaces = shownNote
+        let place = place(of: drawn.bounds, chosen: chosen, scope: scope())
 
         let canvasWindows = Set(canvas.windowNumbers.map { CGWindowID($0) })
         let page = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
-        let captures = await NoteCaptures.ofWireframe(area: area, canvas: canvasWindows, page: page)
-        let target = Target.drawing(shapes: Self.report(of: drawn.shapes, origin: area.origin, isOnWindow: chosen != nil))
-        let note = NewNote(
-            target: target, frame: bounds, marker: CGPoint(x: bounds.maxX, y: bounds.minY), chip: Self.chip, window: window,
-            captures: captures, drawingIDs: drawn.ids
-        )
+        let captures = await NoteCaptures.ofWireframe(area: place.area, canvas: canvasWindows, page: page)
+        let note = Self.note(of: drawn, chosen: chosen, place: place, captures: captures, ids: drawn.ids)
         return Taken(note: note, replaces: replaces)
+    }
+
+    /// The components as they are, as a note with no pictures, which they stay on the canvas
+    /// for; nil when there are none. The page gets the call at once, so `end()` right after
+    /// loses nothing.
+    func readDraft(_ done: @escaping (NewNote?) -> Void) {
+        let chosen = window.flatMap { picker.currentWindow(number: $0.number) }
+        let scope = scope()
+        canvas.newShapes { [weak self] drawn in
+            guard let self, let drawn else {
+                done(nil)
+                return
+            }
+            let place = place(of: drawn.bounds, chosen: chosen, scope: scope)
+            done(Self.note(of: drawn, chosen: chosen, place: place, captures: nil, ids: []))
+        }
+    }
+
+    /// The wireframe's window; else the window when the wireframe is in it, else the whole
+    /// screen. `window`: the window the note belongs to.
+    private func place(of bounds: CGRect, chosen: ElementPicker.WindowInfo?, scope: ElementPicker.WindowInfo?) -> (window: ElementPicker.WindowInfo?, area: CGRect) {
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let window = chosen ?? scope ?? picker.window(at: center)
+        let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? bounds
+        let inside = window.map(\.frame).flatMap { NoteCaptures.isMostlyInside(bounds, $0) ? $0 : nil }
+        return (window, chosen?.frame ?? inside ?? screen)
+    }
+
+    private static func note(
+        of drawn: DrawingPanel.Drawing, chosen: ElementPicker.WindowInfo?, place: (window: ElementPicker.WindowInfo?, area: CGRect), captures: Captures?, ids: [String]
+    ) -> NewNote {
+        let bounds = drawn.bounds
+        let target = Target.drawing(shapes: report(of: drawn.shapes, origin: place.area.origin, isOnWindow: chosen != nil))
+        return NewNote(
+            target: target, frame: bounds, marker: CGPoint(x: bounds.maxX, y: bounds.minY), chip: chip, window: place.window,
+            captures: captures, drawingIDs: ids
+        )
     }
 
     /// The components for the report: relative to `origin`, the top left of their window or

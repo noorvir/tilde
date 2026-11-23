@@ -7,6 +7,8 @@ struct Draft: Identifiable {
     var annotation: Annotation
     /// From a saved session, with no window or page to confirm where it belongs.
     var isRestored = false
+    /// A wireframe left before Done: kept and saved, never sent, until Done finishes it.
+    var isUnfinished = false
     /// Quartz point where the numbered marker sits.
     var marker: CGPoint
     let chip: String

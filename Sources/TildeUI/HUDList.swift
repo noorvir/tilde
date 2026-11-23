@@ -42,7 +42,7 @@ private struct AnnotationRow: View {
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
                     } else {
-                        Text(draft.chip)
+                        Text(draft.isUnfinished ? "\(draft.chip) draft" : draft.chip)
                             .font(.system(size: 11, design: .monospaced))
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)

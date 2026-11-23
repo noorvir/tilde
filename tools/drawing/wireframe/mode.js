@@ -4,7 +4,7 @@
 
 import { moveCursor, setSelectMode } from "../cursor.js";
 import { drawColor, useTool } from "../draw-mode.js";
-import { api, taken, live, changeElements, isTextField } from "../scene.js";
+import { api, taken, live, changeElements, isTextField, post } from "../scene.js";
 import { selection, setKindIcons, deleteComponent, hideHandles } from "./chip.js";
 import { kindNames, wireframeElements } from "./components.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./history.js";
@@ -61,6 +61,18 @@ export function restoreWireframe({ shapes, origin: [left, top] }) {
   });
   api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
   clearHistory();
+}
+
+// The scene's version, to tell Tilde of each change to the components, which it saves as the
+// wireframe's draft.
+let sentVersion = 0;
+
+export function postChange() {
+  if (!wireframe) return;
+  const version = api.getSceneElementsIncludingDeleted().reduce((sum, element) => sum + element.version, 0);
+  if (version === sentVersion) return;
+  sentVersion = version;
+  post("wireframeChanged");
 }
 
 // Before Done takes the components: the label that is typed is kept, and no handle, guide or

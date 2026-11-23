@@ -146,6 +146,8 @@ final class AnnotationController: ObservableObject {
     var sender = ReportSender()
     /// Comments typed into the preview or the browser's notes panel, until typing pauses.
     private let typedComments = TypedComments()
+    /// A change to the wireframe saves its draft once changes pause.
+    private let wireframeSaveTime = Countdown()
     /// The double tap, the hold key and the answers to a question.
     private let keyMonitors: KeyMonitors
     /// The session's single keys typed in other apps, while a session is on screen.
@@ -274,6 +276,7 @@ final class AnnotationController: ObservableObject {
         canvas.isOverTildeWindow = { [weak self] point in self?.picker.windows.isOverTildeWindow(point) == true }
         canvas.onEscape = { [weak self] in self?.escapePressed() }
         canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
+        canvas.onWireframeChanged = { [weak self] in self?.wireframeChanged() }
         canvas.onTyping = { [weak self] in self?.sessionKeyTap?.isTildeTyping = $0 }
         canvas.onAddComment = { [weak self] in _ = self?.endDrawingGroup() }
         canvas.onClickAway = { [weak self] in
@@ -368,7 +371,16 @@ final class AnnotationController: ObservableObject {
         case .toggleList: toggleList()
         case .showCanvas: showCanvas()
         case .showWireframe: showWireframe()
-        case .endWireframe: wireframe.end()
+        case .endWireframe:
+            // The components that Done did not take stay as the wireframe's draft.
+            wireframeSaveTime.cancel()
+            let id = wireframe.shownNote
+            wireframe.readDraft { [weak self] note in
+                if let note {
+                    self?.keepWireframeDraft(note, id: id)
+                }
+            }
+            wireframe.end()
         case .putToolDown:
             if isWireframe {
                 wireframe.putToolDown()
@@ -707,7 +719,8 @@ final class AnnotationController: ObservableObject {
         Task {
             let report: ReportSender.Report
             do {
-                report = try await sender.save(drafts, of: session)
+                // A draft is not sent until Done finishes it.
+                report = try await sender.save(drafts.filter { !$0.isUnfinished }, of: session)
             } catch {
                 log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
                 dispatch(.sendFailed(operation))
@@ -1148,26 +1161,70 @@ final class AnnotationController: ObservableObject {
     /// own comment; or they replace the note that they were shown from. Then the mode ends.
     /// Nothing drawn: the mode only ends.
     private func takeWireframe() async {
+        wireframeSaveTime.cancel()
         if let taken = await wireframe.take() {
             keep(taken)
         }
         dispatch(.wireframeTaken)
     }
 
+    /// Done finishes the draft or the note that the components replace, or makes a new note.
     private func keep(_ taken: WireframeMode.Taken) {
-        guard let replaced = taken.replaces else {
+        guard let replaced = taken.replaces, let index = drafts.firstIndex(where: { $0.id == replaced }) else {
             let pending = Pending(taken.note, browser: browser, withContext: session?.capturesContext ?? false)
             add(pending, comment: "")
             return
         }
-        if let index = drafts.firstIndex(where: { $0.id == replaced }) {
-            // The note keeps its id, and so the names of its saved pictures: the old ones go.
-            if let session {
-                archive.forgetImages(of: replaced, in: session.id)
-            }
-            drafts[index] = drafts[index].redrawn(as: taken.note)
+        // The note keeps its id, and so the names of its saved pictures: the old ones go.
+        if let session {
+            archive.forgetImages(of: replaced, in: session.id)
         }
+        drafts[index] = drafts[index].redrawn(as: taken.note)
         drawing.panel.remove(taken.note.drawingIDs)
+    }
+
+    /// Every change to the components saves the wireframe's draft half a second after changes
+    /// stop, so that a quit or a crash loses nothing.
+    private func wireframeChanged() {
+        guard isWireframe, !wireframe.isTaking else {
+            return
+        }
+        wireframeSaveTime.start(0.5) { [weak self] in
+            guard let self, isWireframe, !wireframe.isTaking else {
+                return
+            }
+            let id = wireframe.shownNote
+            wireframe.readDraft { [weak self] note in
+                guard let self, let note else {
+                    return
+                }
+                let kept = keepWireframeDraft(note, id: id)
+                // The next change updates the same draft, and Done replaces it.
+                if isWireframe, wireframe.shownNote == nil {
+                    wireframe.shownNote = kept
+                }
+            }
+        }
+    }
+
+    /// Keeps the components as an unfinished note: `id`'s, or a new one. Saved to disk at once.
+    @discardableResult
+    private func keepWireframeDraft(_ note: NewNote, id: Draft.ID?) -> Draft.ID {
+        if let id, let index = drafts.firstIndex(where: { $0.id == id }) {
+            let old = drafts[index].annotation
+            drafts[index].annotation = Annotation(
+                id: old.id, comment: old.comment, target: note.target, frame: note.frame, image: old.image, contextImage: old.contextImage
+            )
+            drafts[index].marker = note.marker
+            drafts[index].isUnfinished = true
+        } else {
+            var empty = note
+            empty.captures = Captures(image: nil, contextImage: nil)
+            add(Pending(empty, browser: browser, withContext: false), comment: "")
+            drafts[drafts.count - 1].isUnfinished = true
+        }
+        saver.save()
+        return id.flatMap { id in drafts.contains { $0.id == id } ? id : nil } ?? drafts[drafts.count - 1].id
     }
 
     /// Shows a wireframe note's components again, to edit them: Done then replaces that note,
