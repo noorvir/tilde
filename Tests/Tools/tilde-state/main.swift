@@ -14,7 +14,8 @@ if arguments.count == 3, arguments[1] == "transition" {
 if arguments.count == 3, arguments[1] == "demo-mocks" {
     Task { @MainActor in
         do {
-            try await DemoMocks.run(out: URL(fileURLWithPath: arguments[2], isDirectory: true))
+            let out = URL(fileURLWithPath: arguments[2], isDirectory: true)
+            try await (ProcessInfo.processInfo.environment["DEMO_FLOW"] == nil ? DemoMocks.run(out: out) : DemoFlow.run(out: out))
             exit(0)
         } catch {
             print(error)
