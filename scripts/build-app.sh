@@ -90,7 +90,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>Copyright © YEAR The Tilde authors.</string>
-  <key>NSCameraUsageDescription</key><string>Tilde records the screen of an iPhone connected by cable.</string>
+  <key>NSCameraUsageDescription</key><string>Tilde shows your camera in screen recordings, and records the screen of an iPhone connected by cable.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Tilde records your voice with screen recordings that show your camera.</string>
   <key>NSLocalNetworkUsageDescription</key><string>Tilde connects to the machines that you link, and opens pages from your local network in its browser.</string>
   <key>SUEnableAutomaticChecks</key><true/>
   <key>SUAutomaticallyUpdate</key><true/>

@@ -358,9 +358,9 @@ struct BehaviourTests {
         defer { try? FileManager.default.removeItem(at: folder) }
 
         #expect(throws: ScreenRecorder.Failure.badSize) {
-            _ = try ScreenRecorder.makeWriter(width: 0, height: 0, to: folder.appendingPathComponent("a.mp4"))
+            _ = try ScreenRecorder.makeWriter(width: 0, height: 0, withAudio: false, to: folder.appendingPathComponent("a.mp4"))
         }
-        let (writer, _) = try ScreenRecorder.makeWriter(width: 1290, height: 2796, to: folder.appendingPathComponent("b.mp4"))
+        let (writer, _, _) = try ScreenRecorder.makeWriter(width: 1290, height: 2796, withAudio: false, to: folder.appendingPathComponent("b.mp4"))
         writer.cancelWriting()
     }
 

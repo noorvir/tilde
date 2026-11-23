@@ -18,6 +18,14 @@ final class AnnotationController: ObservableObject {
         didSet {
             updateOverlayInput()
             tracker.isPaused = !pauses.isEmpty
+            camera.update(isRecordMode: isRecordMode, showsBar: !isClipBusy)
+        }
+    }
+    /// A clip starts, records or is being saved: the camera bubble's bar is not on screen.
+    private var isClipBusy: Bool {
+        switch recording {
+        case .starting, .recording, .finishing: true
+        default: false
         }
     }
     var mode: SessionFlow.Mode { flow.mode }
@@ -123,6 +131,11 @@ final class AnnotationController: ObservableObject {
     /// Wireframe mode, on Draw's canvas: its tool, its window and the note of its components.
     let wireframe: WireframeMode
     let wireframes: WireframeSwitch
+    /// The camera bubble of recording mode.
+    let camera: CameraBubble
+    /// The video file that Save video wrote last, while its toast shows.
+    @Published private(set) var savedVideo: URL?
+    private let savedVideoTime = Countdown()
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -217,6 +230,7 @@ final class AnnotationController: ObservableObject {
         drawing = DrawingNotes(picker: picker)
         wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
         wireframes = WireframeSwitch(defaults: defaults)
+        camera = CameraBubble(defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
         flow.choosesInPicker = defaults.bool(forKey: "ChoosesInPicker")
 
@@ -1138,10 +1152,46 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
+        let cameraWindow = camera.windowNumber
+        let extras = ScreenRecorder.Extras(keptWindows: [browser.windowNumber, cameraWindow].compactMap { $0 }, microphone: camera.microphone)
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
-            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
+            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), extras: extras, hasCamera: cameraWindow != nil, operation: operation
         )
+    }
+
+    /// The session's clips recorded with the camera.
+    var cameraVideos: [URL] {
+        drafts.compactMap { draft in
+            guard case .recording(let video, _, _) = draft.annotation.target, clips.cameraVideos.contains(video) else {
+                return nil
+            }
+            return video
+        }
+    }
+
+    /// Copies the camera clips to Movies/Tilde, and shows the last one's toast.
+    func saveCameraVideos() {
+        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies/Tilde", isDirectory: true)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            var saved: URL?
+            for (index, video) in cameraVideos.enumerated() {
+                let suffix = index == 0 ? "" : " \(index + 1)"
+                let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date()))\(suffix).mp4")
+                try FileManager.default.copyItem(at: video, to: file)
+                saved = file
+            }
+            savedVideo = saved
+            savedVideoTime.start(10) { [weak self] in
+                self?.savedVideo = nil
+            }
+        } catch {
+            log.error("could not save video: \(String(describing: error), privacy: .public)")
+            notices.show(.recordingNotSaved)
+        }
     }
 
     // MARK: - Drawing
