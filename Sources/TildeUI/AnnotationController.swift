@@ -550,6 +550,18 @@ final class AnnotationController: ObservableObject {
         dispatch(.escape)
     }
 
+    /// ↩ in Draw: ends the group, or, when Tilde has not heard of it yet, as right after a
+    /// release, asks the page for its comment once the release has settled. False outside Draw.
+    func returnInDraw() -> Bool {
+        guard isDrawing, !isWireframe, !isDrawingPaused, commentBox.pending == nil else {
+            return false
+        }
+        if !endDrawingGroup() {
+            drawing.panel.endGroup()
+        }
+        return true
+    }
+
     /// Ends Draw's group of shapes and opens its one comment. False when there is none to end.
     func endDrawingGroup() -> Bool {
         guard drawing.panel.hasGroup, accepts(.shapeFinished) else {

@@ -61,6 +61,19 @@ struct DrawCanvasTests {
         #expect(try await !page.shows(".excalidraw-wysiwyg"))
     }
 
+    /// ↩ that comes before the release, as it can from the keyboard, waits for it: the comment
+    /// opens for the shape just drawn.
+    @Test func returnBeforeTheReleaseAddsTheCommentAfterIt() async throws {
+        try await page.draw("setTool('rectangle')")
+        try await page.run("fire('pointermove', 200, 150); window.pressed = fire('pointerdown', 200, 150); fire('pointermove', 320, 210, {isPressed: true, target: window.pressed}); fire('pointermove', 440, 270, {isPressed: true, target: window.pressed}); 0")
+        #expect(try await page.press("Enter"))
+        #expect(!page.messages.contains("addComment"))
+        try await page.run("fire('pointerup', 440, 270, {target: window.pressed}); 0")
+        try await page.wait { self.page.messages.contains("addComment") }
+        #expect(page.messages.firstIndex(of: "group")! < page.messages.firstIndex(of: "addComment")!)
+        #expect(try await page.rawShapes().count == 1)
+    }
+
     /// A click starts an arrow, which is no shape for Tilde yet. Esc throws that arrow away and
     /// does not reach Tilde; with no arrow under way, Esc is Tilde's.
     @Test func escThrowsAwayTheArrowThatAClickStarted() async throws {

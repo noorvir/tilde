@@ -68,7 +68,7 @@ extension AnnotationController {
                 return true
             }
             // ↩ ends Draw's group of shapes.
-            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, endDrawingGroup() {
+            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, returnInDraw() {
                 return true
             }
             let isCommand = event.modifierFlags.contains(.command)
@@ -165,7 +165,7 @@ extension AnnotationController {
                 return true
             }
             // ↩ ends Draw's group of shapes and opens its comment.
-            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, endDrawingGroup() {
+            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, returnInDraw() {
                 return true
             }
             // ⌘↩ is Done in Draw and Wireframe.
@@ -225,8 +225,7 @@ extension AnnotationController {
             return false
         }
         // ↩ ends Draw's group, also right after a release, before Tilde heard of the group.
-        if Int(event.keyCode) == kVK_Return, !event.modifierFlags.contains(.shift), isDrawing, !isWireframe, !isDrawingPaused, commentBox.pending == nil {
-            drawing.panel.endGroup()
+        if Int(event.keyCode) == kVK_Return, !event.modifierFlags.contains(.shift), returnInDraw() {
             return true
         }
         return performShortcut(event)

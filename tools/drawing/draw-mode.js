@@ -70,10 +70,19 @@ export function groupChanged() {
   const appState = api.getAppState();
   const unfinished = new Set([clickArrow?.id, appState.newElement?.id, appState.multiElement?.id, appState.editingTextElement?.id]);
   const isGroup = !wireframe && !editing && live().some((element) => !taken.has(element.id) && !unfinished.has(element.id));
-  if (isGroup === hasGroup) return;
-  hasGroup = isGroup;
-  post(isGroup ? "group" : "noGroup");
+  if (isGroup !== hasGroup) {
+    hasGroup = isGroup;
+    post(isGroup ? "group" : "noGroup");
+  }
+  if (endsGroup && hasGroup) {
+    endsGroup = false;
+    post("addComment");
+  }
 }
+
+// ↩ came: the group's comment opens once there is a group, such as when the shape that a press
+// draws is finished, for up to a second.
+let endsGroup = false;
 
 // Draw's colour, which wireframe mode gives back when it ends.
 export let drawColor = "#2F76FF";
@@ -287,13 +296,15 @@ export function enterEndsGroup(event) {
   endGroup();
 }
 
-// Asks for the group's comment once the release has settled, so the group is known. Tilde calls
-// it for ↩ in another app while Draw is on.
+// Asks for the group's comment once the release has settled, so the group is known: ↩ can come
+// before the release does. Tilde calls it for ↩ in another app while Draw is on.
 export function endGroup() {
+  if (editing) return;
+  endsGroup = true;
+  setTimeout(groupChanged, 0);
   setTimeout(() => {
-    groupChanged();
-    if (hasGroup && !editing) post("addComment");
-  }, 0);
+    endsGroup = false;
+  }, 1000);
 }
 
 // A press: beside the shapes that are edited, it is a click away for Tilde.
