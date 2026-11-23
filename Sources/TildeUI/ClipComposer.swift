@@ -19,7 +19,14 @@ struct ClipComposer: View {
         self.controller = controller
         backgrounds = controller.backgrounds
         self.video = video
-        _players = StateObject(wrappedValue: ClipPlayers(video: video, camera: controller.cameraTrack(of: video)))
+        // The note's length until the file says its own.
+        let seconds = controller.drafts.lazy.compactMap { draft -> Double? in
+            guard case .recording(let clip, let seconds, _) = draft.annotation.target, clip == video else {
+                return nil
+            }
+            return seconds
+        }.first
+        _players = StateObject(wrappedValue: ClipPlayers(video: video, camera: controller.cameraTrack(of: video), seconds: seconds ?? 0))
     }
 
     var body: some View {
@@ -145,6 +152,7 @@ struct ClipComposer: View {
             CardButton(symbol: players.isPlaying ? "pause.fill" : "play.fill", help: players.isPlaying ? "Pause" : "Play") {
                 players.toggle()
             }
+            ClipScrubber(players: players, clock: players.clock)
             Rectangle().fill(.white.opacity(0.12)).frame(width: 1, height: 18).padding(.horizontal, 4)
             ForEach(VideoGradient.allCases, id: \.self) { gradient in
                 swatch(.gradient(gradient), title: gradient.name, selected: layout.background)
@@ -256,32 +264,51 @@ private struct BackgroundFill: View {
     }
 }
 
-/// The clip and its camera, which play, pause and start over together. Only the clip has sound.
+/// The clip and its camera, which play, pause, seek and start over together, at the same
+/// host time. Only the clip has sound.
 @MainActor
-private final class ClipPlayers: ObservableObject {
+final class ClipPlayers: ObservableObject {
     let screen: AVPlayer
     let camera: AVPlayer?
+    /// Where the clip is, for the scrubber alone: its ticks redraw nothing else.
+    let clock = ClipClock()
     /// The clip's size in pixels, once known.
     @Published private(set) var clipSize = CGSize(width: 16, height: 10)
     @Published private(set) var isPlaying = false
     private var endObserver: NSObjectProtocol?
+    private var timeObserver: Any?
+    /// Playing when the scrubber was taken, to go on after it.
+    private var wasPlaying = false
 
-    init(video: URL, camera cameraFile: URL?) {
+    init(video: URL, camera cameraFile: URL?, seconds: Double) {
+        clock.duration = seconds
         screen = AVPlayer(url: video)
         camera = cameraFile.map { AVPlayer(url: $0) }
         camera?.isMuted = true
+        // Both start at a host time of their own choosing, never on their own.
+        screen.automaticallyWaitsToMinimizeStalling = false
+        camera?.automaticallyWaitsToMinimizeStalling = false
         endObserver = NotificationCenter.default.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: screen.currentItem, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.ended()
             }
         }
+        timeObserver = screen.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in
+            MainActor.assumeIsolated {
+                self?.clock.played(to: time.seconds)
+            }
+        }
         Task {
-            await loadSize(of: video)
+            await load(video)
         }
     }
 
-    private func loadSize(of video: URL) async {
-        let tracks = try? await AVURLAsset(url: video).loadTracks(withMediaType: .video)
+    private func load(_ video: URL) async {
+        let asset = AVURLAsset(url: video)
+        if let duration = try? await asset.load(.duration), duration.isNumeric {
+            clock.duration = duration.seconds
+        }
+        let tracks = try? await asset.loadTracks(withMediaType: .video)
         guard let track = tracks?.first, let size = try? await track.load(.naturalSize), size.width > 0, size.height > 0 else {
             return
         }
@@ -290,13 +317,50 @@ private final class ClipPlayers: ObservableObject {
 
     func toggle() {
         if isPlaying {
-            screen.pause()
-            camera?.pause()
+            pauseBoth()
         } else {
-            screen.play()
-            camera?.play()
+            playBoth()
         }
-        isPlaying.toggle()
+    }
+
+    /// Both players start on the same frame of the clip at the same host time, a moment from now.
+    private func playBoth() {
+        let time = screen.currentTime()
+        let host = CMClockGetTime(CMClockGetHostTimeClock()) + CMTime(value: 1, timescale: 20)
+        screen.setRate(1, time: time, atHostTime: host)
+        camera?.setRate(1, time: time, atHostTime: host)
+        isPlaying = true
+    }
+
+    private func pauseBoth() {
+        screen.pause()
+        camera?.pause()
+        // The camera stops where the clip does.
+        camera?.seek(to: screen.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
+        isPlaying = false
+    }
+
+    /// The scrubber is taken: playing waits until it is let go.
+    func beginScrubbing() {
+        wasPlaying = isPlaying
+        if isPlaying {
+            pauseBoth()
+        }
+        clock.isScrubbing = true
+    }
+
+    func scrub(to seconds: Double) {
+        let time = CMTime(seconds: seconds, preferredTimescale: 600)
+        screen.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        camera?.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+        clock.position = seconds
+    }
+
+    func endScrubbing() {
+        clock.isScrubbing = false
+        if wasPlaying {
+            playBoth()
+        }
     }
 
     func stop() {
@@ -307,6 +371,10 @@ private final class ClipPlayers: ObservableObject {
             NotificationCenter.default.removeObserver(endObserver)
         }
         endObserver = nil
+        if let timeObserver {
+            screen.removeTimeObserver(timeObserver)
+        }
+        timeObserver = nil
     }
 
     private func ended() {
@@ -314,6 +382,64 @@ private final class ClipPlayers: ObservableObject {
         screen.seek(to: .zero)
         camera?.pause()
         camera?.seek(to: .zero)
+        clock.position = 0
+    }
+}
+
+/// Where a clip is and how long it is.
+@MainActor
+final class ClipClock: ObservableObject {
+    @Published var position: Double = 0
+    @Published var duration: Double = 0
+    /// The scrubber is held: the player's ticks do not move it.
+    var isScrubbing = false
+
+    func played(to seconds: Double) {
+        guard !isScrubbing, seconds.isFinite else {
+            return
+        }
+        position = seconds
+    }
+
+    /// "0:03 / 0:09".
+    var text: String {
+        "\(Self.time(position)) / \(Self.time(duration))"
+    }
+
+    static func time(_ seconds: Double) -> String {
+        let whole = Int(max(seconds, 0).rounded(.down))
+        return "\(whole / 60):" + String(format: "%02d", whole % 60)
+    }
+}
+
+/// The seek bar with the time played and the clip's length.
+private struct ClipScrubber: View {
+    let players: ClipPlayers
+    @ObservedObject var clock: ClipClock
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Slider(
+                value: Binding(get: { clock.position }, set: { players.scrub(to: $0) }),
+                in: 0...max(clock.duration, 0.1)
+            ) { isEditing in
+                if isEditing {
+                    players.beginScrubbing()
+                } else {
+                    players.endScrubbing()
+                }
+            }
+            .controlSize(.small)
+            .tint(.white)
+            .frame(minWidth: 120, maxWidth: 260)
+            .accessibilityLabel("Position")
+            .accessibilityValue(clock.text)
+            Text(clock.text)
+                .font(.system(size: 11.5, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.7))
+                .fixedSize()
+                .accessibilityHidden(true)
+        }
     }
 }
 

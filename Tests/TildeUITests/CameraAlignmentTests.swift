@@ -32,6 +32,17 @@ struct CameraAlignmentTests {
         #expect(abs((segments.first?.timeMapping.target.duration.seconds ?? 0) - 0.5) < 0.01)
     }
 
+    /// The scrubber's time: minutes and two-digit seconds, cut down to the second.
+    @MainActor @Test func theScrubberShowsPlayedAndLength() {
+        let clock = ClipClock()
+        clock.duration = 75.6
+        clock.played(to: 3.9)
+        #expect(clock.text == "0:03 / 1:15")
+        clock.isScrubbing = true
+        clock.played(to: 9)
+        #expect(clock.position == 3.9)
+    }
+
     /// One second of small frames at 30 a second.
     private static func writeMovie(to file: URL, seconds: Int) async throws {
         let writer = try AVAssetWriter(outputURL: file, fileType: .mov)
