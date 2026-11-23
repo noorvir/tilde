@@ -41,20 +41,20 @@ final class WireframeMode: ObservableObject {
         let screen: CGRect?
     }
 
-    /// Rectangle and Circle stand in for any component not in the list. Text draws no
-    /// component: its click types text on a component, or free text elsewhere.
+    /// Card and Circle stand in for any component not in the list. Text draws no component:
+    /// its click types text on a component, or free text elsewhere.
     nonisolated static let tools = [
         (tool: "section", symbol: "rectangle.split.3x1", key: "s", help: "Section"),
-        (tool: "table", symbol: "tablecells", key: "g", help: "Table"),
-        (tool: "button", symbol: "capsule", key: "b", help: "Button"),
-        (tool: "dropdown", symbol: "chevron.down.square", key: "d", help: "Dropdown"),
-        (tool: "list", symbol: "list.bullet.rectangle", key: "l", help: "List"),
-        (tool: "rectangle", symbol: "rectangle", key: "r", help: "Rectangle"),
+        (tool: "card", symbol: "square.text.square", key: "c", help: "Card"),
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
+        (tool: "button", symbol: "capsule", key: "b", help: "Button"),
+        (tool: "table", symbol: "tablecells", key: "g", help: "Table"),
+        (tool: "list", symbol: "list.bullet.rectangle", key: "l", help: "List"),
+        (tool: "dropdown", symbol: "chevron.down.square", key: "d", help: "Dropdown"),
         (tool: "text", symbol: "textformat", key: "t", help: "Text"),
     ]
     /// The tool of the first start, before one was chosen.
-    nonisolated static let firstTool = "rectangle"
+    nonisolated static let firstTool = "card"
     /// The chip of a wireframe's note.
     nonisolated static let chip = "Wireframe"
 

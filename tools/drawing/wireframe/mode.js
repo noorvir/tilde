@@ -57,7 +57,9 @@ export function restoreWireframe({ shapes, origin: [left, top] }) {
   const elements = shapes.filter((shape) => kindNames[shape.type] || shape.type === "text").flatMap((shape) => {
     const [x, y, width, height] = shape.rect;
     const data = Object.fromEntries(["label", "text", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
-    return wireframeElements(shape.type, { x: x + left, y: y + top, width, height }, data);
+    // Card took Rectangle's place.
+    const kind = shape.type === "rectangle" ? "card" : shape.type;
+    return wireframeElements(kind, { x: x + left, y: y + top, width, height }, data);
   });
   api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
   clearHistory();

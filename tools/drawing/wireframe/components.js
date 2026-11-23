@@ -5,8 +5,9 @@
 import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
 import { api, taken, live } from "../scene.js";
 
+// In the bar's order. Rectangle is only for older notes, which show it as Card.
 export const kindNames = {
-  section: "Section", card: "Card", table: "Table", button: "Button", dropdown: "Dropdown", list: "List", rectangle: "Rectangle", ellipse: "Circle",
+  section: "Section", card: "Card", ellipse: "Circle", button: "Button", table: "Table", list: "List", dropdown: "Dropdown", rectangle: "Rectangle",
 };
 
 export const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
