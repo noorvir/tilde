@@ -1210,12 +1210,12 @@ final class AnnotationController: ObservableObject {
         backgrounds.remember(layout.background)
     }
 
-    /// Writes a clip with its camera on its layout to Movies/Tilde, then shows the toast.
+    /// Writes a clip with its camera on its layout to Downloads, then shows the toast.
     func saveVideo(_ video: URL) {
         guard savingVideo == nil else {
             return
         }
-        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies/Tilde", isDirectory: true)
+        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date())).mp4")

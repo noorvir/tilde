@@ -281,14 +281,10 @@ struct PreviewView: View {
             if case .recording(let video, _, _) = controller.drafts.first(where: { $0.id == id })?.annotation.target {
                 CardButton(
                     symbol: "square.and.arrow.down", title: "Save video", isLoading: controller.savingVideo == video,
-                    help: "Save the video with its background to Movies/Tilde"
+                    help: "Save the video with its background to Downloads"
                 ) {
                     controller.saveVideo(video)
                 }
-                CardButton(symbol: "arrow.up", title: controller.session?.isLocal == true ? "Copy report" : "Send", help: "Send the notes and the clip") {
-                    controller.dispatch(.send)
-                }
-                .disabled(!controller.canSend)
             }
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
                 controller.deleteDraft(id)

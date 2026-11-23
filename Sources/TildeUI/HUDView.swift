@@ -650,7 +650,7 @@ private struct SavedVideoToast: View {
                     Text("Video saved")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
-                    Text("Movies › Tilde")
+                    Text("Downloads")
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.55))
                 }
