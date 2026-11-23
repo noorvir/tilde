@@ -36,7 +36,8 @@ final class CameraBubble: ObservableObject {
     private let capture = CameraCapture()
     private var bubblePanel: BubblePanel?
     private var barPanel: BubblePanel?
-    private var isShown = false
+    /// Recording mode, also while choosing a source; the bubble shows in it while `isOn`.
+    private var isRecordMode = false
     private var showsBar = false
     /// The screen to open on: the HUD's.
     var screen: () -> NSScreen? = { NSScreen.main }
@@ -60,7 +61,7 @@ final class CameraBubble: ObservableObject {
 
     /// The bubble shows, so a clip that starts now records the camera.
     var isShowing: Bool {
-        isShown && isOn
+        isRecordMode && isOn
     }
 
     /// The microphone a clip records, as `AVCaptureDevice.uniqueID`; nil for no sound. Only a
@@ -118,6 +119,9 @@ final class CameraBubble: ObservableObject {
     func toggle() {
         isOn.toggle()
         defaults.set(isOn, forKey: "CameraOn")
+        if isShowing {
+            capture.buttonPressed()
+        }
         openMenu = nil
         refresh()
     }
@@ -171,11 +175,10 @@ final class CameraBubble: ObservableObject {
     /// Shows the bubble while `isRecordMode` and the camera is on; its bar while `showsBar`,
     /// which is off while a clip records.
     func update(isRecordMode: Bool, showsBar: Bool) {
-        let shows = isRecordMode && isOn
-        guard shows != isShown || showsBar != self.showsBar else {
+        guard isRecordMode != self.isRecordMode || showsBar != self.showsBar else {
             return
         }
-        isShown = shows
+        self.isRecordMode = isRecordMode
         self.showsBar = showsBar
         if !showsBar {
             openMenu = nil
@@ -184,7 +187,7 @@ final class CameraBubble: ObservableObject {
     }
 
     private func refresh() {
-        guard isShown, isOn else {
+        guard isShowing else {
             capture.stop()
             barPanel?.orderOut(nil)
             bubblePanel?.orderOut(nil)
@@ -228,7 +231,7 @@ final class CameraBubble: ObservableObject {
 
     private func accessAnswered(_ granted: Bool) {
         isDenied = !granted
-        if granted, isShown {
+        if granted, isShowing {
             capture.start(cameraID: currentCameraID)
         }
     }
@@ -336,6 +339,8 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
     /// The attempt whose first frame came.
     private var seenAttempt = -1
     private var observers: [Any] = []
+    /// When the camera button turned the camera on, until the first frame.
+    private var pressed: Date?
 
     /// The built-in camera, else an external one. A Continuity Camera only when chosen: it can
     /// take seconds to connect, or fail.
@@ -390,6 +395,15 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
                 retried = false
                 run()
             }
+        }
+    }
+
+    /// The camera button turned the camera on: the first frame logs the time since.
+    func buttonPressed() {
+        let now = Date()
+        queue.async { [self] in
+            pressed = now
+            logStep("camera button pressed")
         }
     }
 
@@ -548,6 +562,10 @@ private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegat
             }
             seenAttempt = attempt
             logStep("first frame")
+            if let pressed {
+                Self.log.notice("first frame \(Date().timeIntervalSince(pressed), format: .fixed(precision: 2), privacy: .public) s after the camera button")
+                self.pressed = nil
+            }
             report(.running)
         }
     }
