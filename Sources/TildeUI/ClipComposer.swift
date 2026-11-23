@@ -30,7 +30,7 @@ struct ClipComposer: View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack {
                 BackgroundFill(background: layout.background)
-                ComposerCanvas(players: players, layout: layout, clipSize: players.clipSize) { changed in
+                ComposerCanvas(players: players, layout: layout, clipSize: players.clipSize, cameraPoster: players.cameraPoster) { changed in
                     controller.setLayout(changed, of: video)
                 }
             }
@@ -186,6 +186,9 @@ final class ClipPlayers: ObservableObject {
     let clock = ClipClock()
     /// The clip's size in pixels, once known.
     @Published private(set) var clipSize = CGSize(width: 16, height: 10)
+    /// The camera's first frame: it shows until the camera's player has a frame of its own,
+    /// at once and where the camera started after the clip.
+    @Published private(set) var cameraPoster: CGImage?
     @Published private(set) var isPlaying = false
     private var endObserver: NSObjectProtocol?
     private var timeObserver: Any?
@@ -215,6 +218,26 @@ final class ClipPlayers: ObservableObject {
         Task {
             await load(video)
         }
+        if let cameraFile {
+            Task {
+                cameraPoster = await Self.firstFrame(of: cameraFile)
+            }
+        }
+    }
+
+    private static func firstFrame(of file: URL) async -> CGImage? {
+        let asset = AVURLAsset(url: file)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first, let segments = try? await track.load(.segments) else {
+            return nil
+        }
+        // A camera that started after the clip has nothing before its first frame.
+        let start = segments.first { !$0.isEmpty }?.timeMapping.target.start ?? .zero
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.maximumSize = CGSize(width: 1280, height: 1280)
+        let image = try? await generator.image(at: start)
+        return image?.image
     }
 
     private func load(_ video: URL) async {
@@ -437,6 +460,7 @@ struct ComposerCanvas: NSViewRepresentable {
     let players: ClipPlayers
     let layout: ClipLayout
     let clipSize: CGSize
+    let cameraPoster: CGImage?
     /// Called once at the end of a drag that moved or resized something.
     let onChange: (ClipLayout) -> Void
 
@@ -446,6 +470,7 @@ struct ComposerCanvas: NSViewRepresentable {
 
     func updateNSView(_ view: CanvasView, context: Context) {
         view.onChange = onChange
+        view.cameraPoster = cameraPoster
         view.show(layout, clipSize: clipSize)
     }
 
@@ -463,6 +488,10 @@ struct ComposerCanvas: NSViewRepresentable {
         }
 
         var onChange: (ClipLayout) -> Void = { _ in }
+        var cameraPoster: CGImage? {
+            get { camera?.poster }
+            set { camera?.poster = newValue }
+        }
         private(set) var shown = ClipLayout(background: .gradient(.dusk))
         private var clipSize = CGSize(width: 16, height: 10)
         private var drag: Drag?
@@ -644,6 +673,8 @@ struct ComposerCanvas: NSViewRepresentable {
 
         private let shadow = CALayer()
         private let clip = CALayer()
+        /// Under the player: shows where the player has no frame.
+        private let still = CALayer()
         private let player: AVPlayerLayer
         private let dot = CALayer()
         private let mirrored: Bool
@@ -659,6 +690,9 @@ struct ComposerCanvas: NSViewRepresentable {
             clip.masksToBounds = true
             clip.cornerCurve = .continuous
             clip.borderColor = NSColor.white.cgColor
+            still.contentsGravity = fills ? .resizeAspectFill : .resizeAspect
+            still.masksToBounds = true
+            clip.addSublayer(still)
             clip.addSublayer(self.player)
             dot.backgroundColor = NSColor.white.cgColor
             dot.cornerRadius = Self.dot / 2
@@ -673,6 +707,15 @@ struct ComposerCanvas: NSViewRepresentable {
         static func dotArea(of frame: CGRect) -> CGRect {
             let side = dot + 2 * dotInset
             return CGRect(x: frame.maxX - side, y: frame.maxY - side, width: side, height: side)
+        }
+
+        var poster: CGImage? {
+            didSet {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                still.contents = poster
+                CATransaction.commit()
+            }
         }
 
         var isHidden: Bool {
@@ -698,9 +741,12 @@ struct ComposerCanvas: NSViewRepresentable {
             clip.frame = frame
             clip.cornerRadius = radius
             clip.borderWidth = rim
-            player.bounds = local
-            player.position = CGPoint(x: local.midX, y: local.midY)
-            player.setAffineTransform(mirrored ? CGAffineTransform(scaleX: -1, y: 1) : .identity)
+            let transform = mirrored ? CGAffineTransform(scaleX: -1, y: 1) : .identity
+            for layer in [still, player] {
+                layer.bounds = local
+                layer.position = CGPoint(x: local.midX, y: local.midY)
+                layer.setAffineTransform(transform)
+            }
             let area = Self.dotArea(of: frame)
             dot.frame = area.insetBy(dx: Self.dotInset, dy: Self.dotInset)
         }
