@@ -45,7 +45,7 @@ final class WireframeMode: ObservableObject {
     /// its click types text on a component, or free text elsewhere.
     nonisolated static let tools = [
         (tool: "section", symbol: "rectangle.split.3x1", key: "s", help: "Section"),
-        (tool: "card", symbol: "square.text.square", key: "c", help: "Card"),
+        (tool: "card", symbol: "square.text.square", key: "c", help: "Card / Rectangle"),
         (tool: "ellipse", symbol: "circle", key: "o", help: "Circle"),
         (tool: "button", symbol: "capsule", key: "b", help: "Button"),
         (tool: "table", symbol: "tablecells", key: "g", help: "Table"),
@@ -53,6 +53,8 @@ final class WireframeMode: ObservableObject {
         (tool: "dropdown", symbol: "chevron.down.square", key: "d", help: "Dropdown"),
         (tool: "text", symbol: "textformat", key: "t", help: "Text"),
     ]
+    /// Other keys of the tools: Rectangle's R chooses Card, which is the same tool.
+    nonisolated static let otherKeys = ["r": "card"]
     /// The tool of the first start, before one was chosen.
     nonisolated static let firstTool = "card"
     /// The chip of a wireframe's note.

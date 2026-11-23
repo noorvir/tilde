@@ -290,7 +290,8 @@ struct HUDView: View {
     /// Wireframe's tools, each with its own letter.
     private var wireframeTools: some View {
         ForEach(WireframeMode.tools, id: \.tool) { entry in
-            HUDButton(image: Image(systemName: entry.symbol), isOn: wireframe.tool == entry.tool, keys: [entry.key.uppercased()], help: entry.help) {
+            let otherKeys = WireframeMode.otherKeys.filter { $0.value == entry.tool }.keys.sorted()
+            HUDButton(image: Image(systemName: entry.symbol), isOn: wireframe.tool == entry.tool, keys: ([entry.key] + otherKeys).map { $0.uppercased() }, help: entry.help) {
                 controller.setWireframeTool(entry.tool)
             }
         }

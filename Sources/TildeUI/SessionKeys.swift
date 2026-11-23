@@ -264,8 +264,8 @@ extension AnnotationController {
         if !open.pauses.isEmpty {
             return key == "w" ? .resume : nil
         }
-        if let tool = WireframeMode.tools.first(where: { $0.key == key }) {
-            return .tool(tool.tool)
+        if let tool = WireframeMode.tools.first(where: { $0.key == key })?.tool ?? WireframeMode.otherKeys[key] {
+            return .tool(tool)
         }
         return key.allSatisfy { $0.isLetter || $0.isNumber } ? .ignored : nil
     }
