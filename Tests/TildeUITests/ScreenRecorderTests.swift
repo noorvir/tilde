@@ -13,6 +13,8 @@ struct ScreenRecorderTests {
 
         recorder.pause()
         recorder.resume()
+        // Resume's picture is taken after Resume, as the recorder asks for it then.
+        await recorder.queueDoneForTesting()
         await gate.release(with: try picture(at: now()))
         try await eventually { await recorder.hasFrameForTesting() }
 

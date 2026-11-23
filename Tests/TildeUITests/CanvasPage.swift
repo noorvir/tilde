@@ -44,6 +44,11 @@ final class CanvasPage {
     /// `frameRequests()` says how many it asked for.
     init(countsFrames: Bool = false) {
         let configuration = WKWebViewConfiguration()
+        // A page in no window gets its timers about once a second, and every wait for its
+        // queued work waits on them. In the app it is in a window and they come at once.
+        // Private WebKit preferences: a key that WebKit drops stops the run here.
+        configuration.preferences.setValue(false, forKey: "hiddenPageDOMTimerThrottlingEnabled")
+        configuration.preferences.setValue(false, forKey: "pageVisibilityBasedProcessSuppressionEnabled")
         // First, so that the frames below are timers that it counts.
         configuration.userContentController.addUserScript(WKUserScript(source: Self.queuedWork, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         if countsFrames {
@@ -72,7 +77,7 @@ final class CanvasPage {
 
     /// Each page has a web process of its own. Only a few load and run at one time, so the
     /// tests of other suites that measure time keep their speed.
-    private static var freeSlots = 4
+    private static var freeSlots = 8
     private static var waiting: [CheckedContinuation<Void, Never>] = []
     private var hasSlot = false
 
@@ -109,10 +114,13 @@ final class CanvasPage {
         DrawingCanvas.page(in: folder).map { Data($0.utf8) }
     }
 
-    /// Loads the page and waits until Excalidraw is ready.
-    func load() async throws {
-        await Self.takeSlot()
-        hasSlot = true
+    /// Loads the page and waits until Excalidraw is ready. `takesSlot`: false for a page that
+    /// mostly waits at rest, so that it starts at once and its waits hold back no other page.
+    func load(takesSlot: Bool = true) async throws {
+        if takesSlot {
+            await Self.takeSlot()
+            hasSlot = true
+        }
         guard let document = await Self.document.value else {
             throw NotReady(waitedFor: "the page's files in \(Self.folder.path)")
         }
