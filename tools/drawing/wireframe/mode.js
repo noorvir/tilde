@@ -63,16 +63,15 @@ export function restoreWireframe({ shapes, origin: [left, top] }) {
   clearHistory();
 }
 
-// The scene's version, to tell Tilde of each change to the components, which it saves as the
-// wireframe's draft.
+// The scene's version, to tell Tilde of each change to the shapes or components, which it
+// saves as a draft.
 let sentVersion = 0;
 
 export function postChange() {
-  if (!wireframe) return;
   const version = api.getSceneElementsIncludingDeleted().reduce((sum, element) => sum + element.version, 0);
   if (version === sentVersion) return;
   sentVersion = version;
-  post("wireframeChanged");
+  post("canvasChanged");
 }
 
 // Before Done takes the components: the label that is typed is kept, and no handle, guide or

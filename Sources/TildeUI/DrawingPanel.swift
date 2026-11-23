@@ -20,8 +20,8 @@ final class DrawingPanel {
     private var isOverLabel = false
     var onEscape: () -> Void = {}
     var onEdited: () -> Void = {}
-    /// Wireframe mode's components changed.
-    var onWireframeChanged: () -> Void = {}
+    /// The shapes or the wireframe's components changed.
+    var onCanvasChanged: () -> Void = {}
     /// A text field of the canvas got the keyboard, or lost it.
     var onTyping: (Bool) -> Void = { _ in }
     var onClickAway: () -> Void = {}

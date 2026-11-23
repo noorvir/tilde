@@ -148,6 +148,14 @@ final class AnnotationController: ObservableObject {
     private let typedComments = TypedComments()
     /// A change to the wireframe saves its draft once changes pause.
     private let wireframeSaveTime = Countdown()
+    /// A change to Draw's shapes saves them once changes pause.
+    private let drawSaveTime = Countdown()
+    /// Draw's shapes with no comment yet, as the saved record has them.
+    private var liveDrawGroup: SessionRecord.Note?
+    /// The id that the open comment has in the saved record, until it is a note.
+    private var composerNoteID = UUID()
+    /// The sent session whose unfinished drafts the next session takes.
+    private static let carriedDraftsKey = "CarriedDraftsSession"
     /// The double tap, the hold key and the answers to a question.
     private let keyMonitors: KeyMonitors
     /// The session's single keys typed in other apps, while a session is on screen.
@@ -233,7 +241,13 @@ final class AnnotationController: ObservableObject {
         commentBox.onChange = { [weak self] isOpen in
             self?.tracker.isHeld = isOpen
             self?.saver.isHeld = isOpen
+            if isOpen {
+                self?.composerNoteID = UUID()
+            }
+            self?.saver.saveSoon()
         }
+        // The comment being written is saved as it is typed.
+        commentBox.draft.onChange = { [weak self] in self?.saver.saveSoon() }
 
         scope.onChange = { [weak self] in self?.sourceChanged() }
         scope.onCheck = { [weak self] delta in self?.scopeChecked(movedBy: delta) }
@@ -276,7 +290,13 @@ final class AnnotationController: ObservableObject {
         canvas.isOverTildeWindow = { [weak self] point in self?.picker.windows.isOverTildeWindow(point) == true }
         canvas.onEscape = { [weak self] in self?.escapePressed() }
         canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
-        canvas.onWireframeChanged = { [weak self] in self?.wireframeChanged() }
+        canvas.onCanvasChanged = { [weak self] in
+            if self?.isWireframe == true {
+                self?.wireframeChanged()
+            } else {
+                self?.drawChanged()
+            }
+        }
         canvas.onTyping = { [weak self] in self?.sessionKeyTap?.isTildeTyping = $0 }
         canvas.onAddComment = { [weak self] in _ = self?.endDrawingGroup() }
         canvas.onClickAway = { [weak self] in
@@ -555,6 +575,15 @@ final class AnnotationController: ObservableObject {
             }
             drafts = SessionSaver.drafts(from: record, archive: archive, into: session.id)
         }
+        liveDrawGroup = nil
+        // The drafts that the last Send left come into this session.
+        if let carried = defaults.string(forKey: Self.carriedDraftsKey), carried != session.id {
+            defaults.removeObject(forKey: Self.carriedDraftsKey)
+            if var record = archive.record(carried) {
+                record.notes = record.notes.filter { $0.isUnfinished == true }
+                drafts += SessionSaver.drafts(from: record, archive: archive, into: session.id)
+            }
+        }
         saver.start(created: created)
         keyMonitors.startHold()
         startSessionKeyTap()
@@ -751,6 +780,10 @@ final class AnnotationController: ObservableObject {
             notices.showSent("Sent to \(session.client)", status: .done)
         }
         saver.save(state: .sent, reportFolder: report.folder)
+        // Drafts were not sent: the next session takes them.
+        if drafts.contains(where: \.isUnfinished) {
+            defaults.set(session.id, forKey: Self.carriedDraftsKey)
+        }
         store.finish(session.id, with: .sent(report.feedback, folder: report.folder))
         end()
 
@@ -781,7 +814,20 @@ final class AnnotationController: ObservableObject {
         guard let session else {
             return nil
         }
-        return SessionSaver.Snapshot(session: session, drafts: drafts, pageURL: scope.isBrowser ? browser.pageURL : nil, scopeApp: scope.name)
+        var unfinished: [SessionSaver.Unfinished] = []
+        if let pending = commentBox.pending {
+            let note = SessionRecord.Note(
+                id: composerNoteID, comment: commentBox.text, target: pending.target, frame: pending.frame, marker: pending.marker, chip: pending.chip,
+                anchor: pending.anchor, isUnfinished: true
+            )
+            unfinished.append(SessionSaver.Unfinished(note: note, capture: pending.capture))
+        }
+        if let liveDrawGroup {
+            unfinished.append(SessionSaver.Unfinished(note: liveDrawGroup, capture: nil))
+        }
+        return SessionSaver.Snapshot(
+            session: session, drafts: drafts, pageURL: scope.isBrowser ? browser.pageURL : nil, scopeApp: scope.name, unfinished: unfinished
+        )
     }
 
     /// Brings back a saved session's notes, also a sent one, to edit and send again: into the
@@ -1127,6 +1173,8 @@ final class AnnotationController: ObservableObject {
 
     /// Makes a note of what was just drawn. Nothing drawn: nothing happens.
     private func addDrawingNote() async {
+        drawSaveTime.cancel()
+        liveDrawGroup = nil
         guard let note = await drawing.takeNote() else {
             drawing.panel.endEditing()
             if isDrawing {
@@ -1138,11 +1186,38 @@ final class AnnotationController: ObservableObject {
         drawing.panel.editShapes(note.drawingIDs)
     }
 
+    /// Each change to Draw's shapes saves those with no comment yet, half a second after
+    /// changes stop, so that a crash keeps them: the next start has them as a draft note.
+    private func drawChanged() {
+        guard isDrawing, !isWireframe else {
+            return
+        }
+        drawSaveTime.start(0.5) { [weak self] in
+            self?.drawing.panel.newShapes { [weak self] drawn in
+                guard let self, isDrawing, !isWireframe else {
+                    return
+                }
+                let id = liveDrawGroup?.id ?? UUID()
+                liveDrawGroup = drawn.map { drawn in
+                    let center = CGPoint(x: drawn.bounds.midX, y: drawn.bounds.midY)
+                    let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? drawn.bounds
+                    return SessionRecord.Note(
+                        id: id, comment: "", target: .drawing(shapes: DrawingShapes.encode(drawn.shapes, origin: screen.origin, element: nil)),
+                        frame: drawn.bounds, marker: CGPoint(x: drawn.bounds.maxX, y: drawn.bounds.minY), chip: "Drawing", anchor: nil, isUnfinished: true
+                    )
+                }
+                saver.save()
+            }
+        }
+    }
+
     /// Draw ended with shapes that have no comment yet: they become an unfinished note, which
     /// its comment in the preview finishes. Saved to disk at once.
     private func keepDrawingDraft() async {
         let sessionID = session?.id
         // The session may have ended meanwhile.
+        drawSaveTime.cancel()
+        liveDrawGroup = nil
         guard sessionID != nil, let note = await drawing.takeNote(), session?.id == sessionID else {
             return
         }

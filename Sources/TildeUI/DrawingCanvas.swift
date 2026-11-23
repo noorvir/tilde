@@ -234,8 +234,8 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             hasGroup = text == "group"
         case "edited":
             owner?.onEdited()
-        case "wireframeChanged":
-            owner?.onWireframeChanged()
+        case "canvasChanged":
+            owner?.onCanvasChanged()
         case "addComment":
             owner?.onAddComment()
         case "clickAway":

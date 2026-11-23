@@ -1,7 +1,7 @@
 import AppKit
 import TildeCore
 
-/// Keeps the saved record of the session on screen current: it saves about a second after a
+/// Keeps the saved record of the session on screen current: it saves half a second after a
 /// change, every 10 seconds, and before the Mac sleeps. It also turns a saved session back
 /// into notes.
 @MainActor
@@ -14,6 +14,14 @@ final class SessionSaver {
         let pageURL: String?
         /// The app of the window the session is limited to.
         let scopeApp: String?
+        /// Work that is not a note yet, saved as unfinished notes so that a crash keeps it: the
+        /// open comment with its typed text, and Draw's shapes with no comment yet.
+        var unfinished: [Unfinished] = []
+    }
+
+    struct Unfinished {
+        let note: SessionRecord.Note
+        let capture: Task<Captures, Never>?
     }
 
     let archive: SessionArchive
@@ -59,12 +67,12 @@ final class SessionSaver {
         saveTime.cancel()
     }
 
-    /// Saves about a second after the last change, so a burst of changes is one write.
+    /// Saves half a second after the last change, so a burst of changes is one write.
     func saveSoon() {
         guard snapshot() != nil else {
             return
         }
-        saveTime.start(1) { [weak self] in
+        saveTime.start(0.5) { [weak self] in
             self?.save()
         }
     }
@@ -83,6 +91,13 @@ final class SessionSaver {
                 let captures = await draft.capture.value
                 images[SessionArchive.imageName(draft.id)] = captures.image
                 images[SessionArchive.contextImageName(draft.id)] = captures.contextImage
+            }
+            for unfinished in snapshot.unfinished {
+                guard let captures = await unfinished.capture?.value else {
+                    continue
+                }
+                images[SessionArchive.imageName(unfinished.note.id)] = captures.image
+                images[SessionArchive.contextImageName(unfinished.note.id)] = captures.contextImage
             }
             if !images.isEmpty {
                 archive.saveImages(images, of: record.id)
@@ -106,7 +121,7 @@ final class SessionSaver {
                 id: draft.id, comment: draft.annotation.comment, target: draft.annotation.target, frame: draft.annotation.frame,
                 marker: draft.marker, chip: draft.chip, anchor: draft.anchor, isUnfinished: draft.isUnfinished ? true : nil
             )
-        }
+        } + snapshot.unfinished.map(\.note)
         return SessionRecord(
             id: session.id, created: created, updated: Date(), client: session.client, node: session.node, isLocal: session.isLocal, state: state,
             pageURL: snapshot.pageURL, scopeApp: snapshot.scopeApp, notes: notes, reportFolder: reportFolder?.path
