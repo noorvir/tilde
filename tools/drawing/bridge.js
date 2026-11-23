@@ -2,7 +2,7 @@
 // must know of.
 
 import { isSelectMode, setOverLabel } from "./cursor.js";
-import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, pointerLeft, groupChanged, shapeAt, drawSelection } from "./draw-mode.js";
+import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, endGroup, pointerLeft, groupChanged, shapeAt, drawSelection } from "./draw-mode.js";
 import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
@@ -90,7 +90,7 @@ function pointerWentThrough(isPress) {
 }
 
 window.tildeDraw = {
-  setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect,
+  setTool, editShapes, endEditing, endGroup, setOverLabel, setColor, setNoTool, deselect,
   shapesOf, clear, newShapes, takeNewShapes, remove, takesPointer, pointerWentThrough,
   setWireframe, setWireframeLook, showPreview, undoCanvas, redoCanvas, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };

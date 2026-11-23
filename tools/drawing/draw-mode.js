@@ -284,10 +284,15 @@ export function enterEndsGroup(event) {
   if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.altKey || event.ctrlKey || wireframe || editing || isTextField(event.target)) return;
   event.stopPropagation();
   event.preventDefault();
-  // After the release has settled, so the group is known.
+  endGroup();
+}
+
+// Asks for the group's comment once the release has settled, so the group is known. Tilde calls
+// it for ↩ in another app while Draw is on.
+export function endGroup() {
   setTimeout(() => {
     groupChanged();
-    if (hasGroup) post("addComment");
+    if (hasGroup && !editing) post("addComment");
   }, 0);
 }
 

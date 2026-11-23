@@ -224,6 +224,11 @@ extension AnnotationController {
         guard focus == .other, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
             return false
         }
+        // ↩ ends Draw's group, also right after a release, before Tilde heard of the group.
+        if Int(event.keyCode) == kVK_Return, !event.modifierFlags.contains(.shift), isDrawing, !isWireframe, !isDrawingPaused, commentBox.pending == nil {
+            drawing.panel.endGroup()
+            return true
+        }
         return performShortcut(event)
     }
 

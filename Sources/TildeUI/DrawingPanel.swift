@@ -119,6 +119,12 @@ final class DrawingPanel {
         active?.run("endEditing()")
     }
 
+    /// Asks the page for the group's comment once its last shape has settled: it posts
+    /// `addComment` when there is a group.
+    func endGroup() {
+        active?.run("endGroup()")
+    }
+
     /// The hand cursor over a note's label, which a press opens.
     func setOverLabel(_ isOverLabel: Bool) {
         guard isOverLabel != self.isOverLabel else {

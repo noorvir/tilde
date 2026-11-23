@@ -1077,6 +1077,21 @@ struct BehaviourTests {
         #expect(HUDView.status(of: controller).title == "Annotating")
     }
 
+    /// ↩ in another app ends Draw's group: the page asks for its comment once the group is
+    /// known. Outside Draw, or with Draw paused, ↩ stays the app's.
+    @Test func returnInAnotherAppEndsDrawsGroupOnlyWhileDrawing() throws {
+        let enter = try keyDown("\r", keyCode: 36)
+        open()
+        #expect(!controller.handleOtherAppKey(enter, focus: .other))
+
+        controller.setStateForTesting(session: Fixtures.session(), drafts: [], mode: .open(SessionFlow.Open(canvas: .draw)), source: nil)
+        #expect(controller.handleOtherAppKey(enter, focus: .other))
+        #expect(!controller.handleOtherAppKey(enter, focus: .text))
+
+        controller.setStateForTesting(session: Fixtures.session(), drafts: [], mode: .open(SessionFlow.Open(pauses: [.user], canvas: .draw)), source: nil)
+        #expect(!controller.handleOtherAppKey(enter, focus: .other))
+    }
+
     @Test func noSessionOrAQuestionLeavesAKeyToTheOtherApp() throws {
         let a = try keyDown("a", keyCode: 0)
         #expect(controller.session == nil)
