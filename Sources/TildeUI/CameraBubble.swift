@@ -35,6 +35,8 @@ final class CameraBubble: ObservableObject {
     private var barPanel: BubblePanel?
     private var isShown = false
     private var showsBar = false
+    /// The screen to open on: the HUD's.
+    var screen: () -> NSScreen? = { NSScreen.main }
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -183,6 +185,10 @@ final class CameraBubble: ObservableObject {
             return
         }
         let bubble = bubblePanel ?? makeBubblePanel()
+        // Each time it opens, on the HUD's screen; where it was dragged when already there.
+        if !bubble.isVisible, let screen = screen(), bubble.screen != screen {
+            bubble.setFrameOrigin(homeOrigin(on: screen))
+        }
         bubble.orderFrontRegardless()
         startCamera()
         let bar = barPanel ?? makeBarPanel()
@@ -221,10 +227,14 @@ final class CameraBubble: ObservableObject {
         }
     }
 
+    /// Bottom-left, with room for its bar under it.
+    private func homeOrigin(on screen: NSScreen?) -> NSPoint {
+        let visible = screen?.visibleFrame ?? .zero
+        return NSPoint(x: visible.minX + 40, y: visible.minY + 24 + HUDAccessory.size.height + 8)
+    }
+
     private func makeBubblePanel() -> BubblePanel {
-        let screen = NSScreen.main?.visibleFrame ?? .zero
-        // Bottom-left, with room for its bar under it.
-        let origin = NSPoint(x: screen.minX + 40, y: screen.minY + 24 + HUDAccessory.size.height + 8)
+        let origin = homeOrigin(on: screen())
         let panel = BubblePanel(frame: NSRect(origin: origin, size: NSSize(width: side, height: side)), movesByDrag: true)
         panel.contentView = NSHostingView(rootView: CameraBubbleView(bubble: self, session: capture.session))
         bubblePanel = panel

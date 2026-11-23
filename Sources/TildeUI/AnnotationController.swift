@@ -256,6 +256,7 @@ final class AnnotationController: ObservableObject {
 
     /// Gives each part what it asks of the session, and takes what it reports.
     private func joinParts() {
+        camera.screen = { [weak self] in self?.hud.screen }
         saver.snapshot = { [weak self] in self?.snapshot }
         notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
         typedComments.onPause = { [weak self] in self?.saveTypedComments() }

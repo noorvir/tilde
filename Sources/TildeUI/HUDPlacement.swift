@@ -24,6 +24,19 @@ final class HUDPlacement: ObservableObject {
     private let makePanel: () -> HUDPanel
     private lazy var panel = makePanel()
 
+    /// Where the camera bubble and the preview open: the screen that shows the HUD, else the one
+    /// with the pointer.
+    var screen: NSScreen? {
+        var shown: NSScreen?
+        if isInBrowser {
+            shown = browser.window?.screen
+        } else if isShown, let display {
+            shown = NSScreen.screens.first { $0.displayID == display }
+        }
+        let pointer = NSEvent.mouseLocation
+        return shown ?? NSScreen.screens.first { $0.frame.contains(pointer) } ?? NSScreen.main
+    }
+
     init(browser: BrowserController, makePanel: @escaping () -> HUDPanel) {
         self.browser = browser
         self.makePanel = makePanel

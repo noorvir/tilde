@@ -21,6 +21,8 @@ final class PreviewPanel {
     static let minSize = NSSize(width: 560, height: 420)
     private static let sizeKey = "PreviewSize"
     private let defaults: UserDefaults
+    /// The screen to open on.
+    private let screen: () -> NSScreen?
     private var resizeObservers: [Any] = []
     private lazy var snapDrag = SnapDrag(window: window, outlineCornerRadius: 18, positionsKey: "PreviewPositions")
     /// The frame when a drag of the corner grip began.
@@ -28,6 +30,7 @@ final class PreviewPanel {
 
     init(controller: AnnotationController, defaults: UserDefaults) {
         self.defaults = defaults
+        screen = { [unowned controller] in controller.hud.screen }
         let panel = KeyPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: true)
         panel.onKey = { [unowned panel] event in
             let isEditing = panel.firstResponder is NSTextView
@@ -103,11 +106,10 @@ final class PreviewPanel {
         defaults.set(NSStringFromSize(size), forKey: sizeKey)
     }
 
-    /// Shows the card on the screen that has the pointer, centred or where it was dropped
-    /// there, with no text field focused so the arrow keys navigate.
+    /// Shows the card on the screen with the HUD, centred or where it was dropped there, with no
+    /// text field focused so the arrow keys navigate.
     func show() {
-        let pointer = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.screens.first else {
+        guard let screen = screen() ?? NSScreen.screens.first else {
             return
         }
 
