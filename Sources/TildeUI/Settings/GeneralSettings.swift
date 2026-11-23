@@ -147,7 +147,7 @@ private struct BrowserSettings: View {
     var body: some View {
         SettingsSection("Browser") {
             SettingsRow(title: "Import logins", subtitle: lastImport.isEmpty ? "Cookies from a browser on this Mac, so pages open signed in" : lastImport) {
-                Button("Import…") {
+                Button("Import") {
                     choice = browsers()
                 }
             }
@@ -256,7 +256,7 @@ struct ImportSheet: View {
             }
             Spacer()
             if item.needsFullDiskAccess {
-                Button("Grant…") {
+                Button("Grant") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
                 }
             } else if isSelected, item.profiles.count > 1 {

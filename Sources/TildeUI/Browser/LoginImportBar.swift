@@ -9,7 +9,7 @@ extension CookieBrowser {
     }
 }
 
-/// A quiet bar over the page until logins are imported: Import… opens the same chooser as
+/// A quiet bar over the page until logins are imported: Import opens the same chooser as
 /// Settings › Browser. × hides it until Tilde quits; "Don't show again" for good.
 struct LoginImportBar: View {
     static let enabledKey = "OfferLoginImport"
@@ -30,7 +30,7 @@ struct LoginImportBar: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                Button("Import…") {
+                Button("Import") {
                     choice = CookieBrowser.installed()
                 }
                 .controlSize(.small)
