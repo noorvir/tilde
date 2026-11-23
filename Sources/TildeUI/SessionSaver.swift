@@ -152,7 +152,10 @@ final class SessionSaver {
             )
             var draft = Draft(annotation: annotation, marker: note.marker, chip: note.chip, capture: Task { captures }, anchor: note.anchor)
             draft.isRestored = true
-            draft.isUnfinished = note.isUnfinished == true
+            // A comment written before a crash finishes its note, as in the preview; a
+            // wireframe only Done finishes.
+            let hasComment = !note.comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            draft.isUnfinished = note.isUnfinished == true && (draft.isWireframe || !hasComment)
             return draft
         }
     }

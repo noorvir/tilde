@@ -20,6 +20,8 @@ struct SessionFlow: Equatable {
     struct Facts: Equatable {
         /// The number of notes.
         var notes = 0
+        /// How many of them are drafts, which Send leaves.
+        var unfinished = 0
         /// The comment being written has text, and is on a drawing.
         var commentHasText = false
         var commentIsOnDrawing = false
@@ -380,7 +382,7 @@ struct SessionFlow: Equatable {
         }
         switch open.activity {
         case .recording(.starting), .recording(.finishing): return false
-        default: return facts.notes > 0 || holdsClip || open.panel == .comment
+        default: return facts.notes > facts.unfinished || holdsClip || open.panel == .comment
         }
     }
 

@@ -172,6 +172,11 @@ final class AnnotationController: ObservableObject {
     private let drawSaveTime = Countdown()
     /// Draw's shapes with no comment yet, as the saved record has them.
     private var liveDrawGroup: SessionRecord.Note?
+    /// Changes when the live group is taken, so a read of the shapes that was under way then
+    /// does not bring it back.
+    private var liveDrawToken = UUID()
+    /// Keeps Draw's shapes as a draft after Draw ends; Send waits for it.
+    private var keepingDraw: Task<Void, Never>?
     /// The id that the open comment has in the saved record, until it is a note.
     private var composerNoteID = UUID()
     /// The sent session whose unfinished drafts the next session takes.
@@ -339,6 +344,7 @@ final class AnnotationController: ObservableObject {
     /// What the flow's rules read of the notes and the comment being written, as they are now.
     var facts: SessionFlow.Facts {
         var facts = SessionFlow.Facts(notes: drafts.count)
+        facts.unfinished = drafts.filter(\.isUnfinished).count
         facts.commentHasText = commentBox.hasText
         facts.commentIsOnDrawing = commentBox.pending?.drawingIDs.isEmpty == false
         facts.wireframesOn = wireframes.isOn
@@ -450,7 +456,7 @@ final class AnnotationController: ObservableObject {
             if commentBox.pending == nil {
                 if drawing.panel.hasGroup {
                     // Shapes with no comment yet stay as a draft note; its pictures show them.
-                    Task {
+                    keepingDraw = Task {
                         await keepDrawingDraft()
                         if !isDrawing {
                             drawing.panel.hide()
@@ -788,12 +794,19 @@ final class AnnotationController: ObservableObject {
         guard let session, case .sending(let operation, _) = mode else {
             return
         }
-        let drafts = self.drafts
         Task {
+            // Draw's shapes become a draft first, so the next session takes them.
+            await keepingDraw?.value
+            // A draft is not sent until Done or its comment finishes it.
+            let notes = drafts.filter { !$0.isUnfinished }
+            guard !notes.isEmpty else {
+                log.error("nothing to send: every note is a draft")
+                dispatch(.sendFailed(operation))
+                return
+            }
             let report: ReportSender.Report
             do {
-                // A draft is not sent until Done finishes it.
-                report = try await sender.save(drafts.filter { !$0.isUnfinished }, of: session)
+                report = try await sender.save(notes, of: session)
             } catch {
                 log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
                 dispatch(.sendFailed(operation))
@@ -1289,6 +1302,7 @@ final class AnnotationController: ObservableObject {
     private func addDrawingNote() async {
         drawSaveTime.cancel()
         liveDrawGroup = nil
+        liveDrawToken = UUID()
         guard let note = await drawing.takeNote() else {
             drawing.panel.endEditing()
             if isDrawing {
@@ -1306,9 +1320,10 @@ final class AnnotationController: ObservableObject {
         guard isDrawing, !isWireframe else {
             return
         }
+        let token = liveDrawToken
         drawSaveTime.start(0.5) { [weak self] in
             self?.drawing.panel.newShapes { [weak self] drawn in
-                guard let self, isDrawing, !isWireframe else {
+                guard let self, isDrawing, !isWireframe, liveDrawToken == token else {
                     return
                 }
                 let id = liveDrawGroup?.id ?? UUID()
@@ -1332,6 +1347,7 @@ final class AnnotationController: ObservableObject {
         // The session may have ended meanwhile.
         drawSaveTime.cancel()
         liveDrawGroup = nil
+        liveDrawToken = UUID()
         guard sessionID != nil, let note = await drawing.takeNote(), session?.id == sessionID else {
             return
         }

@@ -1102,6 +1102,19 @@ struct BehaviourTests {
         #expect(controller.confirmation == .clearAll)
     }
 
+    /// Drafts are not sent: with only drafts there is nothing to send, and Send is off.
+    @Test func onlyDraftsLeaveNothingToSend() {
+        var drafts = Fixtures.drafts(2)
+        drafts[0].isUnfinished = true
+        drafts[1].isUnfinished = true
+        open(drafts: drafts)
+        #expect(!controller.canSend)
+
+        drafts[1].isUnfinished = false
+        open(drafts: drafts)
+        #expect(controller.canSend)
+    }
+
     // MARK: - Esc
 
     @Test func escPausesThenAsksToDiscardThenDismissesTheQuestion() async throws {
