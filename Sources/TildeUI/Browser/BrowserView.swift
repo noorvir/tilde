@@ -13,6 +13,7 @@ struct BrowserView: View {
             if let controller = browser.controller {
                 BrowserToolbar(browser: browser, controller: controller)
             }
+            LoginImportBar(browser: browser)
             HStack(spacing: BrowserMetrics.frame) {
                 WebView(webView: browser.webView)
                     .clipShape(RoundedRectangle(cornerRadius: BrowserMetrics.pageRadius))

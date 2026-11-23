@@ -149,9 +149,7 @@ final class SettingsModel: ObservableObject {
     init(
         setup: AgentSetup, wireframes: WireframeSwitch, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, updates: Updates, version: String,
         onResult: @escaping (InstallResult) -> Void = { _ in }, onResetHUD: @escaping () -> Void = {},
-        cookieBrowsers: @escaping () -> [CookieBrowser] = {
-            BrowserCookies.browsers().filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0.bundleID) != nil }
-        },
+        cookieBrowsers: @escaping () -> [CookieBrowser] = CookieBrowser.installed,
         permissions: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (ScreenCapture.isAllowed, AXIsProcessTrusted()) },
         wireframePreviews: WireframePreviews? = nil
     ) {

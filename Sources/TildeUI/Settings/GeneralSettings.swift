@@ -188,14 +188,14 @@ private struct BrowserSettings: View {
     }
 }
 
-private struct BrowserChoice: Identifiable {
+struct BrowserChoice: Identifiable {
     let browsers: [CookieBrowser]
     var id: [String] { browsers.map(\.id) }
 }
 
 /// The import: a browser on this Mac, then one of its profiles. Safari asks for Full Disk
 /// Access first.
-private struct ImportSheet: View {
+struct ImportSheet: View {
     let browsers: [CookieBrowser]
     let browser: BrowserController
     /// The result line, or nil when cancelled.
