@@ -650,6 +650,30 @@ struct BehaviourTests {
         #expect(controller.previewCard.id == nil)
     }
 
+    /// Delete in the preview always asks first: Esc keeps the note, ↩ deletes it. Typing in
+    /// the comment deletes text, not the note.
+    @Test func deleteInThePreviewAsksFirst() async throws {
+        let drafts = Fixtures.drafts(2)
+        controller.setStateForTesting(
+            session: Fixtures.session(), drafts: drafts, mode: .open(SessionFlow.Open(panel: .preview)), previewID: drafts[0].id
+        )
+        #expect(!controller.handleKey(try key(51), in: .preview(isTyping: true)))
+        #expect(controller.confirmation == nil)
+
+        #expect(controller.handleKey(try key(51), in: .preview(isTyping: false)))
+        #expect(controller.confirmation == .deleteNote)
+        #expect(controller.drafts.count == 2)
+        #expect(controller.handleConfirmationKey(53, in: NSPanel()))
+        #expect(controller.confirmation == nil)
+        #expect(controller.drafts.count == 2)
+
+        #expect(controller.handleKey(try key(117), in: .preview(isTyping: false)))
+        #expect(controller.confirmation == .deleteNote)
+        #expect(controller.handleConfirmationKey(36, in: NSPanel()))
+        try await until { self.controller.drafts.map(\.id) == [drafts[1].id] }
+        #expect(controller.confirmation == nil)
+    }
+
     // MARK: - The menu
 
     /// The Agents and History submenus read the agent apps' files and the saved sessions.

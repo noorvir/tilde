@@ -501,11 +501,17 @@ struct UXSpecs {
             let firstClipTime = Date().timeIntervalSince(started)
             try await app.waitToSee("Annotating")
 
-            // The clip waits in the preview's player; Esc closes the preview.
+            // The clip waits in the preview's player. Delete asks first, and Esc keeps the clip;
+            // Esc again closes the preview.
             try await app.press("Show notes")
             try await app.press("No comment")
             try await app.waitToSee("1 of 1")
             try await app.waitToSee("Play")
+            try await app.key(.delete)
+            try await app.waitToSee("Delete the clip?")
+            try await app.key(.escape)
+            try await app.waitNotToSee("Delete the clip?")
+            try await app.waitToSee("1 of 1")
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
 

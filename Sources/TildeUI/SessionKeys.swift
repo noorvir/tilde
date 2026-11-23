@@ -140,9 +140,9 @@ extension AnnotationController {
                 }
                 return true
             }
-            // Delete deletes the shown note, as the card's Delete button does.
+            // Delete asks, then deletes the shown note, as the card's Delete button does.
             if !isTyping, key == kVK_Delete || key == kVK_ForwardDelete, canEditNotes, let id = previewCard.id {
-                deleteDraft(id)
+                askToDelete(id)
                 return true
             }
             if !isTyping, key == kVK_LeftArrow {

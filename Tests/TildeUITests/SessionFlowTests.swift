@@ -68,12 +68,13 @@ struct SessionFlowTests {
         case .clearAll: return state.facts.notes > 0
         case .cancelSession: return state.facts.notes > 0 || open.holdsClip
         case .restore: return true
+        case .deleteNote: return state.facts.notes > 0 && open.panel == .preview
         }
     }
 
     static let events: [SessionFlow.Event] = [
         .begin, .ended, .escape, .togglePause, .toggleAnnotating, .resume, .startShortcut,
-        .requestClearAll, .requestCancel, .confirm, .dismissConfirmation, .restore, .openBrowser, .deleteNote, .editNote, .holdBegan, .holdEnded, .otherAppInFront,
+        .requestClearAll, .requestCancel, .requestDeleteNote, .confirm, .dismissConfirmation, .restore, .openBrowser, .deleteNote, .editNote, .holdBegan, .holdEnded, .otherAppInFront,
         .scopeAppInFront, .openComment, .clickAway, .submitComment, .openPreview, .closePreview, .toggleList,
         .startDrawing, .finishDrawing, .undoDrawing, .redoDrawing, .shapeFinished, .startWireframe, .wireframeTaken,
         .toggleRecordingMode, .record, .stop,
@@ -206,6 +207,7 @@ struct SessionFlowTests {
             case .discardComment: #expect(effects.contains(.closeComposer) && facts.commentHasText, "\(context)")
             case .discardRecording: #expect(effects.contains(.exitRecording) && open.clipInProgress, "\(context)")
             case .restore: #expect(effects.contains(.restoreDrafts), "\(context)")
+            case .deleteNote: #expect(effects == [.deleteAskedNote] && facts.notes > 0, "\(context)")
             }
         }
     }

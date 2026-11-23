@@ -531,6 +531,8 @@ struct HUDView: View {
                 Text("Discard the recording?")
             case .restore:
                 Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(controller.restoreRecord?.notes.count ?? 0) saved?")
+            case .deleteNote:
+                Text(isAskedNoteAClip ? "Delete the clip?" : "Delete the note?")
             }
         }
         .font(.system(size: 13, weight: .semibold))
@@ -541,7 +543,7 @@ struct HUDView: View {
         PillTextButton(title: "Cancel", key: "esc", isDestructive: false) {
             controller.dispatch(.dismissConfirmation)
         }
-        .tildeTooltip(confirmation == .discardRecording ? "Keep recording" : "Keep everything")
+        .tildeTooltip(cancelHelp(confirmation))
 
         switch confirmation {
         case .clearAll:
@@ -566,7 +568,28 @@ struct HUDView: View {
                 controller.dispatch(.confirm)
             }
             .tildeTooltip("Replace the notes")
+        case .deleteNote:
+            PillTextButton(title: "Delete", key: "↩", isDestructive: true) {
+                controller.dispatch(.confirm)
+            }
+            .tildeTooltip(isAskedNoteAClip ? "Delete the clip" : "Delete the note")
         }
+    }
+
+    private func cancelHelp(_ confirmation: SessionFlow.Question) -> String {
+        switch confirmation {
+        case .discardRecording: "Keep recording"
+        case .deleteNote: isAskedNoteAClip ? "Keep the clip" : "Keep the note"
+        default: "Keep everything"
+        }
+    }
+
+    /// The delete question asks about a recording.
+    private var isAskedNoteAClip: Bool {
+        guard case .recording = controller.drafts.first(where: { $0.id == controller.deleteAsked })?.annotation.target else {
+            return false
+        }
+        return true
     }
 
     private var sendHelp: String {

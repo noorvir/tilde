@@ -176,6 +176,8 @@ struct SessionFlow: Equatable {
         case discardRecording
         /// Replace the notes on screen with a saved session's.
         case restore
+        /// Delete the note shown in the preview; asked for Delete and Backspace there.
+        case deleteNote
     }
 
     enum Event: Equatable {
@@ -183,6 +185,8 @@ struct SessionFlow: Equatable {
         /// The session ended elsewhere, such as the agent cancelling it.
         case ended
         case escape, togglePause, resume, startShortcut, requestClearAll, requestCancel, confirm, dismissConfirmation
+        /// Delete or Backspace in the preview: asks before the note goes.
+        case requestDeleteNote
         /// The Annotate button and its key: annotation mode on, from any other mode, or off.
         case toggleAnnotating
         /// History's or the menu's Restore, and the menu's Open Browser, while a session is on screen.
@@ -219,6 +223,8 @@ struct SessionFlow: Equatable {
         case keepKeyboard, giveKeyboardBack, takeKeyboard
         case showEscapeNotice, showOtherAppNotice, clearNotice
         case endSession, cancelSession, clearDrafts, restoreDrafts, startLocalSession, showHUD
+        /// Delete the note that the delete question asked about.
+        case deleteAskedNote
         /// Keep the saved session that the restore question asks about.
         case askRestore
         case deleteNote, editNote
@@ -503,6 +509,7 @@ struct SessionFlow: Equatable {
         case .discardComment: open.panel == .comment
         case .clearAll: facts.notes > 0
         case .cancelSession: facts.notes > 0 || open.holdsClip
+        case .deleteNote: facts.notes > 0
         case .restore, nil: true
         }
         if !isAboutSomething {
@@ -631,6 +638,14 @@ struct SessionFlow: Equatable {
 
         case .deleteNote:
             return facts.notes > 0 ? [.deleteNote] : []
+
+        case .requestDeleteNote:
+            // Only the preview's keys ask it.
+            guard facts.notes > 0, open.panel == .preview, !open.activity.isPicking else {
+                return []
+            }
+            open.question = .deleteNote
+            return []
 
         case .editNote:
             return facts.notes > 0 ? [.editNote] : []
@@ -1091,6 +1106,8 @@ struct SessionFlow: Equatable {
             return exitRecording(&open)
         case .restore:
             return closePanel(&open) + [.restoreDrafts]
+        case .deleteNote:
+            return [.deleteAskedNote]
         }
     }
 

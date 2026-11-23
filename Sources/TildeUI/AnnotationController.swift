@@ -177,6 +177,8 @@ final class AnnotationController: ObservableObject {
     private var liveDrawToken = UUID()
     /// Keeps Draw's shapes as a draft after Draw ends; Send waits for it.
     private var keepingDraw: Task<Void, Never>?
+    /// The note that the delete question asks about.
+    private(set) var deleteAsked: Draft.ID?
     /// The id that the open comment has in the saved record, until it is a note.
     private var composerNoteID = UUID()
     /// The sent session whose unfinished drafts the next session takes.
@@ -492,6 +494,12 @@ final class AnnotationController: ObservableObject {
         case .clearDrafts:
             drafts.forEach(ClipRecorder.deleteVideo)
             drafts = []
+        case .deleteAskedNote:
+            if let id = deleteAsked {
+                deleteAsked = nil
+                // After this event: deleting is an event of its own.
+                Task { deleteDraft(id) }
+            }
         case .restoreDrafts:
             if let record = restoreRecord {
                 replaceDrafts(with: record)
@@ -1556,6 +1564,12 @@ final class AnnotationController: ObservableObject {
                 image: captures.image, contextImage: captures.contextImage
             )
         }
+    }
+
+    /// Delete or Backspace in the preview asks first, for a note and for a clip alike.
+    func askToDelete(_ id: Draft.ID) {
+        deleteAsked = id
+        dispatch(.requestDeleteNote)
     }
 
     func deleteDraft(_ id: Draft.ID) {
