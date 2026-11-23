@@ -1170,27 +1170,32 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Copies the camera clips to Movies/Tilde, and shows the last one's toast.
+    /// Writes the camera clips to Movies/Tilde on the chosen background, and shows the last
+    /// one's toast.
     func saveCameraVideos() {
         let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies/Tilde", isDirectory: true)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            var saved: URL?
-            for (index, video) in cameraVideos.enumerated() {
-                let suffix = index == 0 ? "" : " \(index + 1)"
-                let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date()))\(suffix).mp4")
-                try FileManager.default.copyItem(at: video, to: file)
-                saved = file
+        let videos = cameraVideos
+        let background = camera.background
+        Task {
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                var saved: URL?
+                for (index, video) in videos.enumerated() {
+                    let suffix = index == 0 ? "" : " \(index + 1)"
+                    let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date()))\(suffix).mp4")
+                    try await VideoFramer.export(video, on: background, to: file)
+                    saved = file
+                }
+                savedVideo = saved
+                savedVideoTime.start(10) { [weak self] in
+                    self?.savedVideo = nil
+                }
+            } catch {
+                log.error("could not save video: \(String(describing: error), privacy: .public)")
+                notices.show(.recordingNotSaved)
             }
-            savedVideo = saved
-            savedVideoTime.start(10) { [weak self] in
-                self?.savedVideo = nil
-            }
-        } catch {
-            log.error("could not save video: \(String(describing: error), privacy: .public)")
-            notices.show(.recordingNotSaved)
         }
     }
 

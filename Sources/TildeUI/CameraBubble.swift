@@ -3,8 +3,8 @@ import AVFoundation
 import SwiftUI
 
 /// The camera bubble of recording mode: the user's camera in a round or rounded window that
-/// screen clips record, with a bar under it for the camera, the microphone, the shape and the
-/// size. The camera runs only while the bubble shows. The choices stay across launches.
+/// screen clips record, with a bar under it for the camera, the microphone, the shape, the
+/// size and the background of a saved video. The camera runs only while the bubble shows. The choices stay across launches.
 @MainActor
 final class CameraBubble: ObservableObject {
     enum Shape: String {
@@ -12,7 +12,7 @@ final class CameraBubble: ObservableObject {
     }
 
     enum Menu {
-        case camera, microphone
+        case camera, microphone, background
     }
 
     static let sides: [CGFloat] = [140, 200, 280]
@@ -25,6 +25,10 @@ final class CameraBubble: ObservableObject {
     @Published private(set) var shape: Shape
     @Published private(set) var sizeIndex: Int
     @Published private(set) var openMenu: Menu?
+    /// What Save video puts the clip on.
+    @Published private(set) var background: VideoBackground
+    /// The user's own backgrounds, oldest first.
+    @Published private(set) var customBackgrounds: [URL] = []
     /// The camera may not be used: the bubble shows a crossed-out camera.
     @Published private(set) var isDenied = false
 
@@ -43,6 +47,8 @@ final class CameraBubble: ObservableObject {
         microphoneID = defaults.string(forKey: "CameraMicrophoneID")
         shape = defaults.string(forKey: "CameraShape").flatMap(Shape.init(rawValue:)) ?? .circle
         sizeIndex = min(max(defaults.object(forKey: "CameraSize") as? Int ?? 1, 0), Self.sides.count - 1)
+        background = defaults.string(forKey: "VideoBackground").flatMap(VideoBackground.init(key:)) ?? .gradient(.dusk)
+        customBackgrounds = Self.savedBackgrounds()
     }
 
     var side: CGFloat {
@@ -121,6 +127,60 @@ final class CameraBubble: ObservableObject {
         defaults.set(true, forKey: "CameraMicrophoneOn")
         openMenu = nil
         layoutBar()
+    }
+
+    func chooseBackground(_ background: VideoBackground) {
+        self.background = background
+        defaults.set(background.key, forKey: "VideoBackground")
+        openMenu = nil
+        layoutBar()
+    }
+
+    /// Asks for images, copies them to the backgrounds folder, and uses the last one.
+    func addBackgrounds() {
+        openMenu = nil
+        layoutBar()
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.message = "Choose images to put saved videos on"
+        NSApp.activate()
+        guard panel.runModal() == .OK else {
+            return
+        }
+        var added: URL?
+        for image in panel.urls {
+            let file = VideoBackground.folder.appendingPathComponent("\(UUID().uuidString).\(image.pathExtension)")
+            do {
+                try FileManager.default.createDirectory(at: VideoBackground.folder, withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: image, to: file)
+                added = file
+            } catch {
+                continue
+            }
+        }
+        customBackgrounds = Self.savedBackgrounds()
+        if let added {
+            chooseBackground(.image(added))
+        }
+    }
+
+    func removeBackground(_ url: URL) {
+        try? FileManager.default.removeItem(at: url)
+        customBackgrounds = Self.savedBackgrounds()
+        if background == .image(url) {
+            chooseBackground(.gradient(.dusk))
+        }
+    }
+
+    private static func savedBackgrounds() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: VideoBackground.folder, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles
+        )) ?? []
+        func created(_ url: URL) -> Date {
+            (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+        }
+        return files.sorted { created($0) < created($1) }
     }
 
     func toggleShape() {
@@ -351,11 +411,13 @@ private struct CameraBubbleBar: View {
             switch bubble.openMenu {
             case .camera: cameraMenu
             case .microphone: microphoneMenu
+            case .background: backgroundMenu
             case nil: EmptyView()
             }
             HStack(spacing: size.scaled(2)) {
                 deviceButton("video.fill", menu: .camera, help: "Camera")
                 deviceButton(bubble.isMicrophoneOn ? "mic.fill" : "mic.slash.fill", menu: .microphone, help: "Microphone")
+                deviceButton("photo", menu: .background, help: "Background of saved videos")
                 HUDBarDivider()
                 HUDButton(image: Image(systemName: bubble.shape == .circle ? "circle" : "app"), help: "Shape") {
                     bubble.toggleShape()
@@ -408,6 +470,77 @@ private struct CameraBubbleBar: View {
                 }
             }
         }
+    }
+}
+
+extension CameraBubbleBar {
+    fileprivate var backgroundMenu: some View {
+        MenuCard {
+            MenuRow(symbol: "rectangle.dashed", title: "No background", isOn: bubble.background == .none) {
+                bubble.chooseBackground(.none)
+            }
+            ForEach(VideoGradient.allCases, id: \.self) { gradient in
+                BackgroundRow(title: gradient.name, swatch: AnyView(gradientSwatch(gradient)), isOn: bubble.background == .gradient(gradient)) {
+                    bubble.chooseBackground(.gradient(gradient))
+                }
+            }
+            ForEach(Array(bubble.customBackgrounds.enumerated()), id: \.element) { index, url in
+                BackgroundRow(title: "Image \(index + 1)", swatch: AnyView(imageSwatch(url)), isOn: bubble.background == .image(url)) {
+                    bubble.chooseBackground(.image(url))
+                }
+                .contextMenu {
+                    Button("Remove") { bubble.removeBackground(url) }
+                }
+            }
+            MenuRow(symbol: "plus", title: "Add image…") {
+                bubble.addBackgrounds()
+            }
+        }
+    }
+
+    private func gradientSwatch(_ gradient: VideoGradient) -> some View {
+        LinearGradient(colors: gradient.cgColors.map { Color(cgColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    private func imageSwatch(_ url: URL) -> some View {
+        Group {
+            if let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                Color.gray
+            }
+        }
+    }
+}
+
+/// A row with a small picture of a background in place of the icon.
+private struct BackgroundRow: View {
+    let title: String
+    let swatch: AnyView
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        let size = HUDAccessory.size
+        Button(action: action) {
+            HStack(spacing: size.scaled(6)) {
+                swatch
+                    .frame(width: 22, height: 14)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.white.opacity(0.25)))
+                Text(title)
+                    .font(.system(size: size.font(12.5), weight: .medium))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "checkmark")
+                    .font(.system(size: size.font(10.5), weight: .semibold))
+                    .opacity(isOn ? 1 : 0)
+            }
+            .modifier(HUDButtonChrome(width: 260, isOn: isOn, padding: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
