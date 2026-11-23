@@ -11,6 +11,19 @@ if arguments.count == 3, arguments[1] == "transition" {
     FileHandle.standardOutput.write(try MainActor.assumeIsolated { try Transitions.run(table) })
     exit(0)
 }
+if arguments.count == 3, arguments[1] == "demo-mocks" {
+    Task { @MainActor in
+        do {
+            let out = URL(fileURLWithPath: arguments[2], isDirectory: true)
+            try await (ProcessInfo.processInfo.environment["DEMO_FLOW"] == nil ? DemoMocks.run(out: out) : DemoFlow.run(out: out))
+            exit(0)
+        } catch {
+            print(error)
+            exit(1)
+        }
+    }
+    RunLoop.main.run()
+}
 guard arguments.count >= 4, arguments[1] == "render" else {
     print("usage: tilde-state render <out folder> <state.json>...")
     exit(2)

@@ -14,6 +14,8 @@ final class ClipRecorder {
     var dispatch: (SessionFlow.Event, [SessionFlow.Effect: () -> Void]) -> Void = { _, _ in }
     /// Puts a stopped clip in the list.
     var keep: (Draft) -> Void = { _ in }
+    /// The videos recorded with the camera bubble on screen, which Send can also save as files.
+    private(set) var cameraVideos: Set<URL> = []
 
     private var recorder: ScreenRecorder?
     /// What the clip in progress shows: its name, such as "Safari window", and its frame.
@@ -23,8 +25,9 @@ final class ClipRecorder {
     private let log = Logger(subsystem: "dev.tilde.app", category: "recording")
 
     /// Starts recording `source` into `video` for the flow's start `operation`. `windowName`:
-    /// the name of a window's app as the HUD shows it.
-    func start(_ source: RecordingSource, windowName: String?, into video: URL, browserWindow: Int?, operation: Int) {
+    /// the name of a window's app as the HUD shows it. `hasCamera`: the camera bubble is among
+    /// the kept windows.
+    func start(_ source: RecordingSource, windowName: String?, into video: URL, extras: ScreenRecorder.Extras, hasCamera: Bool, operation: Int) {
         // What the report says the clip shows.
         let name: String
         let frame: CGRect
@@ -46,10 +49,13 @@ final class ClipRecorder {
         }
         Task {
             do {
-                let started = try await ScreenRecorder.start(source, to: video, browserWindow: browserWindow, onSourceEnded: sourceEnded)
+                let started = try await ScreenRecorder.start(source, to: video, extras: extras, onSourceEnded: sourceEnded)
                 dispatch(.clipStarted(operation), [
                     .adoptClip: { [self] in
                         recorder = started
+                        if hasCamera {
+                            cameraVideos.insert(video)
+                        }
                         recorded = (name, frame)
                         clock = (Date(), 0)
                         log.notice("recording \(name, privacy: .public)")

@@ -18,7 +18,9 @@ enum ScreenCapture {
     /// includes it) macOS puts a window of its window sharing (NSLocalWindowSharingWindow) in
     /// that window's app, and AppKit asserts on it in some apps, such as Electron ones, which
     /// crash.
-    static func filter(showingAppOf window: SCWindow, at frame: CGRect, content: SCShareableContent) -> (filter: SCContentFilter, display: CGRect)? {
+    static func filter(
+        showingAppOf window: SCWindow, at frame: CGRect, content: SCShareableContent, keeping kept: [SCWindow] = []
+    ) -> (filter: SCContentFilter, display: CGRect)? {
         let display = content.displays.max { first, second in
             area(of: first.frame.intersection(frame)) < area(of: second.frame.intersection(frame))
         }
@@ -26,7 +28,7 @@ enum ScreenCapture {
             return nil
         }
         let others = content.applications.filter { $0.processID != owner.processID }
-        return (SCContentFilter(display: display, excludingApplications: others, exceptingWindows: []), display.frame)
+        return (SCContentFilter(display: display, excludingApplications: others, exceptingWindows: kept), display.frame)
     }
 
     private static func area(of rect: CGRect) -> CGFloat {

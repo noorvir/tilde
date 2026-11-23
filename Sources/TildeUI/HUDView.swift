@@ -27,6 +27,8 @@ struct HUDView: View {
     /// Reports the frame of the visible content in the window, top-left origin.
     let onContentFrame: (CGRect) -> Void
     @State private var isPillHovered = false
+    /// Send's menu, for a session with a camera clip: send the report or save the video.
+    @State private var isSendMenuOpen = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
@@ -61,6 +63,15 @@ struct HUDView: View {
                 // Its own width, also above a wider accessory picker.
                 pill
                     .fixedSize()
+            }
+            if hud.isShown, isSendMenuOpen, controller.canSend, !controller.cameraVideos.isEmpty {
+                sendMenu
+                    .frame(width: Self.width, alignment: .trailing)
+                    .transition(.scale(scale: 0.5, anchor: .topTrailing).combined(with: .opacity))
+            }
+            if hud.isShown, let video = controller.savedVideo {
+                SavedVideoToast(video: video)
+                    .transition(Self.zoom)
             }
             if controller.isDrawing {
                 // Its own width: the HUD's, scaled, or wider for its content.
@@ -123,6 +134,8 @@ struct HUDView: View {
         .animation(.easeOut(duration: 0.15), value: notices.pause)
         .animation(.spring(duration: 0.28), value: browserOffer.url)
         .animation(.spring(duration: 0.28), value: browserOffer.showsToast)
+        .animation(.spring(duration: 0.28), value: isSendMenuOpen)
+        .animation(HUDPanel.motion, value: controller.savedVideo)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -360,6 +373,23 @@ struct HUDView: View {
             )
     }
 
+    /// Under Send, for a session with a camera clip.
+    private var sendMenu: some View {
+        let isLocal = controller.session?.isLocal == true
+        let client = controller.session?.client ?? "agent"
+        return MenuCard {
+            MenuRow(symbol: isLocal ? "doc.on.doc" : "arrow.up", title: isLocal ? "Copy report" : "Send to \(client)") {
+                isSendMenuOpen = false
+                controller.dispatch(.send)
+            }
+            MenuRow(symbol: "square.and.arrow.down", title: "Save video") {
+                isSendMenuOpen = false
+                controller.saveCameraVideos()
+            }
+        }
+        .environment(\.colorScheme, .dark)
+    }
+
     /// Record's bar under the pill: the source, then Play or Pause and Stop. It keeps its
     /// width in every state of the clip; only the icon of Play or Pause changes.
     private var recordingAccessoryBar: some View {
@@ -464,7 +494,13 @@ struct HUDView: View {
             .disabled(count == 0)
 
             // A session without an agent copies the report.
-            SendButton(copies: controller.session?.isLocal == true, action: { controller.dispatch(.send) })
+            SendButton(copies: controller.session?.isLocal == true) {
+                if controller.cameraVideos.isEmpty {
+                    controller.dispatch(.send)
+                } else {
+                    isSendMenuOpen.toggle()
+                }
+            }
                 .disabled(!controller.canSend)
                 .tildeTooltip(sendHelp, keys: ["⌘↩"])
                 .accessibilityHint(sendHelp)
@@ -628,6 +664,41 @@ struct HUDView: View {
             return .waitingForWindow
         }
         return .annotating
+    }
+}
+
+/// After Save video: where the file went, with Show in Finder and Copy.
+private struct SavedVideoToast: View {
+    let video: URL
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: PillMetrics.iconGap) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Video saved")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Movies › Tilde")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            HStack(spacing: 4) {
+                PillTextButton(title: "Show in Finder", isDestructive: false) {
+                    NSWorkspace.shared.activateFileViewerSelecting([video])
+                }
+                PillTextButton(title: "Copy", isDestructive: false) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([video as NSURL])
+                }
+            }
+        }
+        .pillInsets(.regular, leading: .text)
+        .pill()
+        .environment(\.colorScheme, .dark)
     }
 }
 
