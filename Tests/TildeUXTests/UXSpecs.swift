@@ -402,6 +402,8 @@ struct UXSpecs {
         // R picks the rectangle while drawing; it does not go to recording mode.
         try await first.key(.r)
         try await first.drag(from: start, to: end)
+        // ↩ ends the group of shapes, and its comment opens.
+        try await first.key(.enter)
         try await first.waitToSee("add", timeout: 15)
         try await first.type("On the window")
         try await first.waitToSee("On the window", timeout: 3)
@@ -499,12 +501,11 @@ struct UXSpecs {
             let firstClipTime = Date().timeIntervalSince(started)
             try await app.waitToSee("Annotating")
 
-            // The clip waits in the preview's native player; Esc closes the preview.
+            // The clip waits in the preview's player; Esc closes the preview.
             try await app.press("Show notes")
             try await app.press("No comment")
             try await app.waitToSee("1 of 1")
-            try await app.waitToSee("play/pause")
-            try await app.waitToSee("timeline")
+            try await app.waitToSee("Play")
             try await app.key(.escape)
             try await app.waitNotToSee("1 of 1")
 
@@ -606,6 +607,7 @@ struct UXSpecs {
             let frame = ChangingWindow.frame
             try await app.key(.r)
             try await app.drag(from: CGPoint(x: frame.minX + 100, y: frame.minY + 100), to: CGPoint(x: frame.minX + 300, y: frame.minY + 220))
+            try await app.key(.enter)
             try await app.waitToSee("add", timeout: 15)
             try await app.type("Keep this")
             try await app.waitToSee("Keep this", timeout: 3)
@@ -1142,7 +1144,7 @@ struct UXSpecs {
             let done = try await place(of: "Done, ⌘↩")
             try await app.press("Style")
             try await app.waitToSee("Wireframe style")
-            try await app.waitNotToSee("Card")
+            try await app.waitNotToSee("Card / Rectangle")
             #expect(try await place(of: "Style") == palette)
             #expect(try await place(of: "Done, ⌘↩") == done)
             step("style mode")
@@ -1186,7 +1188,7 @@ struct UXSpecs {
             try await app.waitNotToSee("Fade under")
             try await app.waitToSee("Wireframe style")
             try await app.key(.escape)
-            try await app.waitToSee("Card")
+            try await app.waitToSee("Card / Rectangle")
             try await app.waitNotToSee("Wireframe style")
             #expect(try await place(of: "Style") == palette)
             #expect(try await place(of: "Done, ⌘↩") == done)
@@ -1393,7 +1395,8 @@ struct UXSpecs {
                 return best.0
             }
             let column = { (x: Double) in CGRect(x: x, y: rect.minY + rect.height * 0.3, width: 0.5, height: rect.height * 0.4) }
-            let row = { (y: Double) in CGRect(x: rect.minX + rect.width * 0.25, y: y, width: rect.width * 0.15, height: 0.5) }
+            // Right of the top grip and left of the chip: the label's tag stands at the left.
+            let row = { (y: Double) in CGRect(x: rect.minX + rect.width * 0.6, y: y, width: rect.width * 0.15, height: 0.5) }
             if let left = line(rect.minX, column), let right = line(rect.maxX, column), let top = line(rect.minY, row), let bottom = line(rect.maxY, row) {
                 return CGRect(x: left, y: top, width: right - left, height: bottom - top)
             }
