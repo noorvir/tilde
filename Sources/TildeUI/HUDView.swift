@@ -85,6 +85,11 @@ struct HUDView: View {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: browserOffer.dismiss)
                     .transition(Self.zoom)
             }
+            if hud.isShown, browserOffer.showsToast, !hud.isInBrowser {
+                HUDBrowserOfferToast(onNever: browserOffer.neverOffer)
+                    .onHover { browserOffer.holdToast($0) }
+                    .transition(Self.zoom)
+            }
             if hud.isShown, let notice = notices.pause {
                 PauseCard(notice: notice, notices: notices)
                     .transition(.move(edge: .top).combined(with: .opacity))
@@ -117,6 +122,7 @@ struct HUDView: View {
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
         .animation(.easeOut(duration: 0.15), value: notices.pause)
         .animation(.spring(duration: 0.28), value: browserOffer.url)
+        .animation(.spring(duration: 0.28), value: browserOffer.showsToast)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -669,6 +675,18 @@ struct HUDAccessoryBrowserBar: View {
         .pillInsets(HUDAccessory.size)
         .pill()
         .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The toast after the browser offer's ×: it only offers to turn the offer off.
+struct HUDBrowserOfferToast: View {
+    let onNever: () -> Void
+
+    var body: some View {
+        HUDButton(image: nil, title: "Don't show again", help: "Never offer Tilde's browser; Settings turns it back on", action: onNever)
+            .pillInsets(HUDAccessory.size)
+            .pill()
+            .environment(\.colorScheme, .dark)
     }
 }
 

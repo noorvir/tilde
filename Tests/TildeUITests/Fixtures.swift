@@ -272,7 +272,7 @@ enum Fixtures {
         let model = SettingsModel(
             setup: try agentSetup(), wireframes: WireframeSwitch(defaults: MemoryDefaults()), shortcuts: ShortcutStore(defaults: MemoryDefaults()), browser: BrowserController(), history: history ?? HistoryModel(archive: archive()),
             server: ServerState(port: 7311), updates: updates ?? Updates(engine: FakeUpdateEngine()), version: "0.1.0 (42)",
-            browserProfiles: { [] }, permissions: { (true, false) }, wireframePreviews: wireframePreviews
+            cookieBrowsers: { [] }, permissions: { (true, false) }, wireframePreviews: wireframePreviews
         )
         model.page = page
         return model
