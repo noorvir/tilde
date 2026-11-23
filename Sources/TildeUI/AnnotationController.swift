@@ -133,6 +133,12 @@ final class AnnotationController: ObservableObject {
     let wireframes: WireframeSwitch
     /// The camera bubble of recording mode.
     let camera: CameraBubble
+    /// The backgrounds that saved videos can sit on.
+    let backgrounds: VideoBackgrounds
+    /// Each clip's layout on its saved video, by the clip's video, once the preview changed it.
+    @Published private var layouts: [URL: ClipLayout] = [:]
+    /// The clip whose video is being saved.
+    @Published private(set) var savingVideo: URL?
     /// The video file that Save video wrote last, while its toast shows.
     @Published private(set) var savedVideo: URL?
     private let savedVideoTime = Countdown()
@@ -143,8 +149,9 @@ final class AnnotationController: ObservableObject {
             self?.dispatch(event, with: data)
         }
         clips.keep = { [weak self] draft in
-            self?.drafts.append(draft)
+            self?.keepClip(draft)
         }
+        clips.camera = camera
         return clips
     }()
     /// The source picker under the HUD while choosing.
@@ -231,6 +238,7 @@ final class AnnotationController: ObservableObject {
         wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
         wireframes = WireframeSwitch(defaults: defaults)
         camera = CameraBubble(defaults: defaults)
+        backgrounds = VideoBackgrounds(defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
         flow.choosesInPicker = defaults.bool(forKey: "ChoosesInPicker")
 
@@ -1155,46 +1163,66 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
-        let cameraWindow = camera.windowNumber
-        let extras = ScreenRecorder.Extras(keptWindows: [browser.windowNumber, cameraWindow].compactMap { $0 }, microphone: camera.microphone)
+        let extras = ScreenRecorder.Extras(keptWindows: [browser.windowNumber].compactMap { $0 }, microphone: camera.microphone)
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
-            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), extras: extras, hasCamera: cameraWindow != nil, operation: operation
+            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), extras: extras, recordsCamera: camera.isShowing, operation: operation
         )
     }
 
-    /// The session's clips recorded with the camera.
-    var cameraVideos: [URL] {
-        drafts.compactMap { draft in
-            guard case .recording(let video, _, _) = draft.annotation.target, clips.cameraVideos.contains(video) else {
-                return nil
-            }
-            return video
+    /// A stopped clip goes to the list, and the preview opens on it once the flow is done with
+    /// the stop.
+    private func keepClip(_ draft: Draft) {
+        drafts.append(draft)
+        Task { @MainActor in
+            self.preview(draft.id)
         }
     }
 
-    /// Writes the camera clips to Movies/Tilde on the chosen background, and shows the last
-    /// one's toast.
-    func saveCameraVideos() {
+    // MARK: - Saved videos
+
+    /// The camera file recorded beside a clip's video, if any.
+    func cameraTrack(of video: URL) -> URL? {
+        clips.cameraTracks[video]
+    }
+
+    /// Where a clip's parts go on its saved video; a clip starts with the last background
+    /// chosen, and its camera in the bottom-left corner.
+    func layout(of video: URL) -> ClipLayout {
+        if let layout = layouts[video] {
+            return layout
+        }
+        var layout = ClipLayout(background: backgrounds.last)
+        if cameraTrack(of: video) != nil {
+            layout.cameraCenter = CGPoint(x: 0.16, y: 0.74)
+            layout.cameraShape = camera.shape
+        }
+        return layout
+    }
+
+    func setLayout(_ layout: ClipLayout, of video: URL) {
+        layouts[video] = layout
+        backgrounds.remember(layout.background)
+    }
+
+    /// Writes a clip with its camera on its layout to Movies/Tilde, then shows the toast.
+    func saveVideo(_ video: URL) {
+        guard savingVideo == nil else {
+            return
+        }
         let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Movies/Tilde", isDirectory: true)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        let videos = cameraVideos
-        let background = camera.background
-        Task { [weak self] in
-            guard let self else {
-                return
-            }
+        let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date())).mp4")
+        let layout = layout(of: video)
+        let cameraTrack = cameraTrack(of: video)
+        savingVideo = video
+        Task {
+            let started = Date()
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                var saved: URL?
-                for (index, video) in videos.enumerated() {
-                    let suffix = index == 0 ? "" : " \(index + 1)"
-                    let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date()))\(suffix).mp4")
-                    try await VideoFramer.export(video, on: background, to: file)
-                    saved = file
-                }
-                savedVideo = saved
+                try await VideoFramer.export(video, camera: cameraTrack, layout: layout, to: file)
+                savedVideo = file
                 savedVideoTime.start(10) { [weak self] in
                     self?.savedVideo = nil
                 }
@@ -1202,6 +1230,12 @@ final class AnnotationController: ObservableObject {
                 log.error("could not save video: \(String(describing: error), privacy: .public)")
                 notices.show(.recordingNotSaved)
             }
+            // The button's spinner shows for at least a second.
+            let left = 1 - Date().timeIntervalSince(started)
+            if left > 0 {
+                try? await Task.sleep(for: .seconds(left))
+            }
+            savingVideo = nil
         }
     }
 

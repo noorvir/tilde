@@ -2,9 +2,10 @@ import AppKit
 import AVFoundation
 import SwiftUI
 
-/// The camera bubble of recording mode: the user's camera in a round or rounded window that
-/// screen clips record, with a bar under it for the camera, the microphone, the shape, the
-/// size and the background of a saved video. The camera runs only while the bubble shows. The choices stay across launches.
+/// The camera bubble of recording mode: the user's camera in a round or rounded window, with
+/// a bar under it for the camera, the microphone, the shape and the size. A clip records the
+/// camera as its own file, which the preview places on the saved video. The camera runs only
+/// while the bubble shows. The choices stay across launches.
 @MainActor
 final class CameraBubble: ObservableObject {
     enum Shape: String {
@@ -12,10 +13,10 @@ final class CameraBubble: ObservableObject {
     }
 
     enum Menu {
-        case camera, microphone, background
+        case camera, microphone, size
     }
 
-    static let sides: [CGFloat] = [140, 200, 280]
+    static let sizes: [(name: String, side: CGFloat)] = [("Small", 140), ("Medium", 200), ("Large", 280)]
 
     /// The recording bar's camera button: the bubble shows in recording mode while on.
     @Published private(set) var isOn: Bool
@@ -25,10 +26,6 @@ final class CameraBubble: ObservableObject {
     @Published private(set) var shape: Shape
     @Published private(set) var sizeIndex: Int
     @Published private(set) var openMenu: Menu?
-    /// What Save video puts the clip on.
-    @Published private(set) var background: VideoBackground
-    /// The user's own backgrounds, oldest first.
-    @Published private(set) var customBackgrounds: [URL] = []
     /// The camera may not be used: the bubble shows a crossed-out camera.
     @Published private(set) var isDenied = false
 
@@ -46,27 +43,22 @@ final class CameraBubble: ObservableObject {
         isMicrophoneOn = defaults.object(forKey: "CameraMicrophoneOn") as? Bool ?? true
         microphoneID = defaults.string(forKey: "CameraMicrophoneID")
         shape = defaults.string(forKey: "CameraShape").flatMap(Shape.init(rawValue:)) ?? .circle
-        sizeIndex = min(max(defaults.object(forKey: "CameraSize") as? Int ?? 1, 0), Self.sides.count - 1)
-        background = defaults.string(forKey: "VideoBackground").flatMap(VideoBackground.init(key:)) ?? .gradient(.dusk)
-        customBackgrounds = Self.savedBackgrounds()
+        sizeIndex = min(max(defaults.object(forKey: "CameraSize") as? Int ?? 1, 0), Self.sizes.count - 1)
     }
 
     var side: CGFloat {
-        Self.sides[sizeIndex]
+        Self.sizes[sizeIndex].side
     }
 
-    /// The bubble's window while it shows, for a clip to keep it.
-    var windowNumber: Int? {
-        guard isShown, let bubblePanel else {
-            return nil
-        }
-        return bubblePanel.windowNumber
+    /// The bubble shows, so a clip that starts now records the camera.
+    var isShowing: Bool {
+        isShown && isOn
     }
 
     /// The microphone a clip records, as `AVCaptureDevice.uniqueID`; nil for no sound. Only a
     /// clip with the camera records sound.
     var microphone: String? {
-        guard windowNumber != nil, isMicrophoneOn else {
+        guard isShowing, isMicrophoneOn else {
             return nil
         }
         return microphoneID ?? AVCaptureDevice.default(for: .audio)?.uniqueID
@@ -91,6 +83,26 @@ final class CameraBubble: ObservableObject {
 
     var currentMicrophoneID: String? {
         microphoneID ?? AVCaptureDevice.default(for: .audio)?.uniqueID
+    }
+
+    // MARK: - Recording
+
+    /// Records the camera into `file` until `stopRecording`.
+    func startRecording(to file: URL) {
+        capture.startRecording(to: file)
+    }
+
+    func pauseRecording() {
+        capture.pauseRecording()
+    }
+
+    func resumeRecording() {
+        capture.resumeRecording()
+    }
+
+    /// The finished camera file, or nil when it recorded nothing.
+    func stopRecording() async -> URL? {
+        await capture.stopRecording()
     }
 
     // MARK: - Choices
@@ -129,71 +141,19 @@ final class CameraBubble: ObservableObject {
         layoutBar()
     }
 
-    func chooseBackground(_ background: VideoBackground) {
-        self.background = background
-        defaults.set(background.key, forKey: "VideoBackground")
-        openMenu = nil
-        layoutBar()
-    }
-
-    /// Asks for images, copies them to the backgrounds folder, and uses the last one.
-    func addBackgrounds() {
-        openMenu = nil
-        layoutBar()
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
-        panel.allowsMultipleSelection = true
-        panel.message = "Choose images to put saved videos on"
-        NSApp.activate()
-        guard panel.runModal() == .OK else {
-            return
-        }
-        var added: URL?
-        for image in panel.urls {
-            let file = VideoBackground.folder.appendingPathComponent("\(UUID().uuidString).\(image.pathExtension)")
-            do {
-                try FileManager.default.createDirectory(at: VideoBackground.folder, withIntermediateDirectories: true)
-                try FileManager.default.copyItem(at: image, to: file)
-                added = file
-            } catch {
-                continue
-            }
-        }
-        customBackgrounds = Self.savedBackgrounds()
-        if let added {
-            chooseBackground(.image(added))
-        }
-    }
-
-    func removeBackground(_ url: URL) {
-        try? FileManager.default.removeItem(at: url)
-        customBackgrounds = Self.savedBackgrounds()
-        if background == .image(url) {
-            chooseBackground(.gradient(.dusk))
-        }
-    }
-
-    private static func savedBackgrounds() -> [URL] {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: VideoBackground.folder, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles
-        )) ?? []
-        func created(_ url: URL) -> Date {
-            (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-        }
-        return files.sorted { created($0) < created($1) }
-    }
-
     func toggleShape() {
         shape = shape == .circle ? .rounded : .circle
         defaults.set(shape.rawValue, forKey: "CameraShape")
     }
 
-    /// Small, medium, large, then small again; the bubble keeps its bottom-left corner.
-    func nextSize() {
-        sizeIndex = (sizeIndex + 1) % Self.sides.count
-        defaults.set(sizeIndex, forKey: "CameraSize")
+    /// The bubble keeps the centre of its bottom edge, so its bar stays put.
+    func chooseSize(_ index: Int) {
+        sizeIndex = index
+        defaults.set(index, forKey: "CameraSize")
+        openMenu = nil
         if let bubblePanel {
-            bubblePanel.setFrame(NSRect(origin: bubblePanel.frame.origin, size: NSSize(width: side, height: side)), display: true)
+            let frame = bubblePanel.frame
+            bubblePanel.setFrame(NSRect(x: frame.midX - side / 2, y: frame.minY, width: side, height: side), display: true)
         }
         layoutBar()
     }
@@ -244,15 +204,9 @@ final class CameraBubble: ObservableObject {
             isDenied = false
             capture.start(cameraID: currentCameraID)
         case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+            AVCaptureDevice.requestAccess(for: .video) { granted in
                 Task { @MainActor in
-                    guard let self else {
-                        return
-                    }
-                    self.isDenied = !granted
-                    if granted, self.isShown {
-                        self.capture.start(cameraID: self.currentCameraID)
-                    }
+                    self.accessAnswered(granted)
                 }
             }
         default:
@@ -260,10 +214,17 @@ final class CameraBubble: ObservableObject {
         }
     }
 
+    private func accessAnswered(_ granted: Bool) {
+        isDenied = !granted
+        if granted, isShown {
+            capture.start(cameraID: currentCameraID)
+        }
+    }
+
     private func makeBubblePanel() -> BubblePanel {
         let screen = NSScreen.main?.visibleFrame ?? .zero
         // Bottom-left, with room for its bar under it.
-        let origin = NSPoint(x: screen.minX + 24, y: screen.minY + 24 + HUDAccessory.size.height + 8)
+        let origin = NSPoint(x: screen.minX + 40, y: screen.minY + 24 + HUDAccessory.size.height + 8)
         let panel = BubblePanel(frame: NSRect(origin: origin, size: NSSize(width: side, height: side)), movesByDrag: true)
         panel.contentView = NSHostingView(rootView: CameraBubbleView(bubble: self, session: capture.session))
         bubblePanel = panel
@@ -277,8 +238,7 @@ final class CameraBubble: ObservableObject {
         return panel
     }
 
-    /// The bar under the bubble, left-aligned with it; an open menu grows it upward, over the
-    /// bubble.
+    /// The bar centred under the bubble; an open menu grows it upward, over the bubble.
     private func layoutBar() {
         guard let barPanel, let bubblePanel, let content = barPanel.contentView else {
             return
@@ -286,7 +246,7 @@ final class CameraBubble: ObservableObject {
         content.layoutSubtreeIfNeeded()
         let size = content.fittingSize
         let barTop = bubblePanel.frame.minY - 8
-        let origin = NSPoint(x: bubblePanel.frame.minX, y: barTop - HUDAccessory.size.height)
+        let origin = NSPoint(x: (bubblePanel.frame.midX - size.width / 2).rounded(), y: barTop - HUDAccessory.size.height)
         barPanel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 }
@@ -319,14 +279,20 @@ private final class BubblePanel: NSPanel {
     }
 }
 
-/// Runs the capture session that the bubble's picture shows, off the main thread.
-private final class CameraCapture: @unchecked Sendable {
+/// Runs the capture session that the bubble shows and records, off the main thread.
+private final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
     let session = AVCaptureSession()
+    private let output = AVCaptureMovieFileOutput()
     private let queue = DispatchQueue(label: "dev.tilde.camera")
+    /// Waits for the file that `stopRecording` ends; read and written on `queue`.
+    private var finished: CheckedContinuation<URL?, Never>?
 
     func start(cameraID: String?) {
         use(cameraID: cameraID)
-        queue.async { [session] in
+        queue.async { [self] in
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+            }
             if !session.isRunning {
                 session.startRunning()
             }
@@ -356,6 +322,52 @@ private final class CameraCapture: @unchecked Sendable {
             }
         }
     }
+
+    func startRecording(to file: URL) {
+        queue.async { [self] in
+            guard session.isRunning, !output.isRecording else {
+                return
+            }
+            output.startRecording(to: file, recordingDelegate: self)
+        }
+    }
+
+    func pauseRecording() {
+        queue.async { [output] in
+            if output.isRecording {
+                output.pauseRecording()
+            }
+        }
+    }
+
+    func resumeRecording() {
+        queue.async { [output] in
+            if output.isRecordingPaused {
+                output.resumeRecording()
+            }
+        }
+    }
+
+    func stopRecording() async -> URL? {
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard output.isRecording else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                finished = continuation
+                output.stopRecording()
+            }
+        }
+    }
+
+    func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo file: URL, from connections: [AVCaptureConnection], error: Error?) {
+        queue.async { [self] in
+            // A file cut short by an error can still play; one with no frames cannot.
+            finished?.resume(returning: output.recordedDuration.seconds > 0 ? file : nil)
+            finished = nil
+        }
+    }
 }
 
 // MARK: - Views
@@ -376,9 +388,10 @@ private struct CameraBubbleView: View {
                 CameraPreview(session: session)
             }
         }
+        .frame(width: bubble.side, height: bubble.side)
         .clipShape(clip)
         .overlay(clip.stroke(Color.white.opacity(0.9), lineWidth: 3))
-        .frame(width: bubble.side, height: bubble.side)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityLabel("Camera")
     }
 }
@@ -386,19 +399,39 @@ private struct CameraBubbleView: View {
 private struct CameraPreview: NSViewRepresentable {
     let session: AVCaptureSession
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        let layer = AVCaptureVideoPreviewLayer(session: session)
-        layer.videoGravity = .resizeAspectFill
-        // A mirror, as people expect to see themselves.
-        layer.connection?.automaticallyAdjustsVideoMirroring = false
-        layer.connection?.isVideoMirrored = true
-        view.layer = layer
-        view.wantsLayer = true
-        return view
+    func makeNSView(context: Context) -> PreviewView {
+        PreviewView(session: session)
     }
 
-    func updateNSView(_ view: NSView, context: Context) {}
+    func updateNSView(_ view: PreviewView, context: Context) {}
+
+    /// The camera's picture, filling the view from its centre, as a mirror.
+    final class PreviewView: NSView {
+        private let preview: AVCaptureVideoPreviewLayer
+
+        init(session: AVCaptureSession) {
+            preview = AVCaptureVideoPreviewLayer(session: session)
+            super.init(frame: .zero)
+            wantsLayer = true
+            preview.videoGravity = .resizeAspectFill
+            preview.connection?.automaticallyAdjustsVideoMirroring = false
+            preview.connection?.isVideoMirrored = true
+            layer?.addSublayer(preview)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) is not used")
+        }
+
+        override func layout() {
+            super.layout()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            preview.frame = bounds
+            CATransaction.commit()
+        }
+    }
 }
 
 /// Under the bubble: camera and microphone menus, shape, size, and camera off.
@@ -407,24 +440,21 @@ private struct CameraBubbleBar: View {
 
     var body: some View {
         let size = HUDAccessory.size
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .center, spacing: 8) {
             switch bubble.openMenu {
             case .camera: cameraMenu
             case .microphone: microphoneMenu
-            case .background: backgroundMenu
+            case .size: sizeMenu
             case nil: EmptyView()
             }
             HStack(spacing: size.scaled(2)) {
-                deviceButton("video.fill", menu: .camera, help: "Camera")
-                deviceButton(bubble.isMicrophoneOn ? "mic.fill" : "mic.slash.fill", menu: .microphone, help: "Microphone")
-                deviceButton("photo", menu: .background, help: "Background of saved videos")
+                menuButton(image: Image(systemName: "video.fill"), menu: .camera, help: "Camera")
+                menuButton(image: Image(systemName: bubble.isMicrophoneOn ? "mic.fill" : "mic.slash.fill"), menu: .microphone, help: "Microphone")
                 HUDBarDivider()
                 HUDButton(image: Image(systemName: bubble.shape == .circle ? "circle" : "app"), help: "Shape") {
                     bubble.toggleShape()
                 }
-                HUDButton(image: Image(systemName: "arrow.up.left.and.arrow.down.right"), help: "Size") {
-                    bubble.nextSize()
-                }
+                menuButton(image: nil, title: String(CameraBubble.sizes[bubble.sizeIndex].name.prefix(1)), menu: .size, help: "Size")
                 HUDBarDivider()
                 HUDButton(image: Image(systemName: "xmark"), help: "Turn camera off") {
                     bubble.toggle()
@@ -437,11 +467,11 @@ private struct CameraBubbleBar: View {
         .environment(\.colorScheme, .dark)
     }
 
-    private func deviceButton(_ symbol: String, menu: CameraBubble.Menu, help: String) -> some View {
+    private func menuButton(image: Image?, title: String? = nil, menu: CameraBubble.Menu, help: String) -> some View {
         Button {
             bubble.toggleMenu(menu)
         } label: {
-            HUDButtonLabel(image: Image(systemName: symbol), opensBelow: true)
+            HUDButtonLabel(image: image, title: title, opensBelow: true)
                 .modifier(HUDButtonChrome(isActive: bubble.openMenu == menu, padding: 6))
         }
         .buttonStyle(.plain)
@@ -471,81 +501,21 @@ private struct CameraBubbleBar: View {
             }
         }
     }
-}
 
-extension CameraBubbleBar {
-    fileprivate var backgroundMenu: some View {
-        MenuCard {
-            MenuRow(symbol: "rectangle.dashed", title: "No background", isOn: bubble.background == .none) {
-                bubble.chooseBackground(.none)
-            }
-            ForEach(VideoGradient.allCases, id: \.self) { gradient in
-                BackgroundRow(title: gradient.name, swatch: AnyView(gradientSwatch(gradient)), isOn: bubble.background == .gradient(gradient)) {
-                    bubble.chooseBackground(.gradient(gradient))
+    private var sizeMenu: some View {
+        MenuCard(width: 160) {
+            ForEach(CameraBubble.sizes.indices, id: \.self) { index in
+                MenuRow(symbol: "circle.dashed", title: CameraBubble.sizes[index].name, isOn: index == bubble.sizeIndex, width: 160) {
+                    bubble.chooseSize(index)
                 }
             }
-            ForEach(Array(bubble.customBackgrounds.enumerated()), id: \.element) { index, url in
-                BackgroundRow(title: "Image \(index + 1)", swatch: AnyView(imageSwatch(url)), isOn: bubble.background == .image(url)) {
-                    bubble.chooseBackground(.image(url))
-                }
-                .contextMenu {
-                    Button("Remove") { bubble.removeBackground(url) }
-                }
-            }
-            MenuRow(symbol: "plus", title: "Add image…") {
-                bubble.addBackgrounds()
-            }
         }
-    }
-
-    private func gradientSwatch(_ gradient: VideoGradient) -> some View {
-        LinearGradient(colors: gradient.cgColors.map { Color(cgColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    private func imageSwatch(_ url: URL) -> some View {
-        Group {
-            if let image = NSImage(contentsOf: url) {
-                Image(nsImage: image).resizable().scaledToFill()
-            } else {
-                Color.gray
-            }
-        }
-    }
-}
-
-/// A row with a small picture of a background in place of the icon.
-private struct BackgroundRow: View {
-    let title: String
-    let swatch: AnyView
-    let isOn: Bool
-    let action: () -> Void
-
-    var body: some View {
-        let size = HUDAccessory.size
-        Button(action: action) {
-            HStack(spacing: size.scaled(6)) {
-                swatch
-                    .frame(width: 22, height: 14)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(.white.opacity(0.25)))
-                Text(title)
-                    .font(.system(size: size.font(12.5), weight: .medium))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "checkmark")
-                    .font(.system(size: size.font(10.5), weight: .semibold))
-                    .opacity(isOn ? 1 : 0)
-            }
-            .modifier(HUDButtonChrome(width: 260, isOn: isOn, padding: 10))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 
 /// A HUD card of rows, as the source dropdown.
 struct MenuCard<Content: View>: View {
+    var width: CGFloat = 260
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -553,7 +523,7 @@ struct MenuCard<Content: View>: View {
         VStack(spacing: size.scaled(2)) {
             content()
         }
-        .frame(width: 260)
+        .frame(width: width)
         .padding(size.scaled(4))
         .hudCard(cornerRadius: size.scaled(12))
         .environment(\.pillSize, size)
@@ -565,6 +535,7 @@ struct MenuRow: View {
     let symbol: String
     let title: String
     var isOn = false
+    var width: CGFloat = 260
     let action: () -> Void
 
     var body: some View {
@@ -576,7 +547,7 @@ struct MenuRow: View {
                     .font(.system(size: size.font(10.5), weight: .semibold))
                     .opacity(isOn ? 1 : 0)
             }
-            .modifier(HUDButtonChrome(width: 260, isOn: isOn, padding: 10))
+            .modifier(HUDButtonChrome(width: width, isOn: isOn, padding: 10))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])

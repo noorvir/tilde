@@ -276,6 +276,18 @@ struct PreviewView: View {
                 }
                 .disabled(!controller.canEditNotes)
             }
+            if case .recording(let video, _, _) = controller.drafts.first(where: { $0.id == id })?.annotation.target {
+                CardButton(
+                    symbol: "square.and.arrow.down", title: "Save video", isLoading: controller.savingVideo == video,
+                    help: "Save the video with its background to Movies/Tilde"
+                ) {
+                    controller.saveVideo(video)
+                }
+                CardButton(symbol: "arrow.up", title: controller.session?.isLocal == true ? "Copy report" : "Send", help: "Send the notes and the clip") {
+                    controller.dispatch(.send)
+                }
+                .disabled(!controller.canSend)
+            }
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {
                 controller.deleteDraft(id)
             }
@@ -299,10 +311,8 @@ struct PreviewView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         SlotTitle(text: "Recording")
                         // A new player for each clip, so the last one stops.
-                        ClipPlayer(url: video)
+                        ClipComposer(controller: controller, video: video)
                             .id(video)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1)).allowsHitTesting(false))
                     }
                 } else {
                     Screenshot(title: "Close-up", data: annotation.image) {
@@ -383,26 +393,6 @@ private struct SlotTitle: View {
         Text(text)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white.opacity(0.5))
-    }
-}
-
-/// A recording's clip in the native player with its standard controls. It waits on the first
-/// frame until Play, and stops when the preview closes or shows another note.
-private struct ClipPlayer: NSViewRepresentable {
-    let url: URL
-
-    func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
-        view.player = AVPlayer(url: url)
-        view.controlsStyle = .inline
-        return view
-    }
-
-    func updateNSView(_ view: AVPlayerView, context: Context) {}
-
-    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
-        view.player?.pause()
-        view.player = nil
     }
 }
 
