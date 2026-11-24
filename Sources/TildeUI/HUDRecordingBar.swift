@@ -94,32 +94,19 @@ private struct CameraButton: View {
 struct HUDSourceDropdown: View {
     /// From the recording bar's leading end to the dropdown, so its rows line up with the
     /// source button above them.
-    static let leadingInset = HUDAccessory.size.endInset - padding
-    private static let padding = HUDAccessory.size.scaled(4)
+    static let leadingInset = HUDAccessory.size.endInset - MenuCard<EmptyView>.padding
 
     let onUsePicker: () -> Void
 
     var body: some View {
-        let size = HUDAccessory.size
-        VStack(spacing: size.scaled(2)) {
+        let width = HUDRecordingBar.sourceWidth
+        MenuCard(width: width) {
             // The current way to choose: selected, with nothing to do.
-            HStack(spacing: size.scaled(4)) {
-                HUDButtonLabel(image: Image(systemName: "cursorarrow"), title: "Select on screen", fillsWidth: true)
-                Image(systemName: "checkmark")
-                    .font(.system(size: size.font(10.5), weight: .semibold))
-            }
-            .modifier(HUDButtonChrome(width: HUDRecordingBar.sourceWidth, isOn: true, padding: 10))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Select on screen")
-            .accessibilityAddTraits(.isSelected)
-
-            HUDButton(image: Image(systemName: "square.grid.2x2"), title: "Use window picker", width: HUDRecordingBar.sourceWidth, help: "Show screens and windows") {
-                onUsePicker()
-            }
+            MenuRow(symbol: "cursorarrow", title: "Select on screen", isOn: true, width: width) {}
+            MenuRow(symbol: "square.grid.2x2", title: "Use window picker", width: width, action: onUsePicker)
+                .tildeTooltip("Show screens and windows")
+                .accessibilityHint("Show screens and windows")
         }
-        .padding(Self.padding)
-        .hudCard(cornerRadius: size.scaled(12))
-        .environment(\.pillSize, size)
         .environment(\.colorScheme, .dark)
     }
 }

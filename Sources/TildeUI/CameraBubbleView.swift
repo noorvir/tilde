@@ -119,11 +119,11 @@ struct CameraBubbleBar: View {
         .environment(\.colorScheme, .dark)
     }
 
-    private func menuButton(image: Image?, title: String? = nil, menu: CameraBubble.Menu, help: String) -> some View {
+    private func menuButton(image: Image, menu: CameraBubble.Menu, help: String) -> some View {
         Button {
             bubble.toggleMenu(menu)
         } label: {
-            HUDButtonLabel(image: image, title: title, opensBelow: true)
+            HUDButtonLabel(image: image, opensBelow: true)
                 .modifier(HUDButtonChrome(isActive: bubble.openMenu == menu, padding: 6))
         }
         .buttonStyle(.plain)
@@ -145,7 +145,7 @@ struct CameraBubbleBar: View {
             MenuRow(symbol: "mic", title: "Record microphone", isOn: bubble.isMicrophoneOn) {
                 bubble.toggleMicrophone()
             }
-            Rectangle().fill(.white.opacity(0.1)).frame(height: 1).padding(.vertical, 3).padding(.horizontal, 6)
+            MenuDivider()
             ForEach(bubble.microphones, id: \.uniqueID) { microphone in
                 MenuRow(symbol: "mic", title: microphone.localizedName, isOn: microphone.uniqueID == bubble.currentMicrophoneID) {
                     bubble.chooseMicrophone(microphone.uniqueID)
@@ -187,9 +187,7 @@ struct CameraBubbleBar: View {
                 .accessibilityAddTraits(index == bubble.sizeIndex ? .isSelected : [])
             }
         }
-        .padding(size.scaled(4))
-        .hudCard(cornerRadius: size.scaled(12))
-        .environment(\.pillSize, size)
+        .menuCard()
     }
 }
 

@@ -275,18 +275,35 @@ private struct HUDShape: Shape {
 
 /// A HUD card of rows, as the source dropdown.
 struct MenuCard<Content: View>: View {
+    /// Around the rows, inside the card's edge.
+    static var padding: CGFloat { HUDAccessory.size.scaled(4) }
+
     var width: CGFloat = 260
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        let size = HUDAccessory.size
-        VStack(spacing: size.scaled(2)) {
+        VStack(spacing: HUDAccessory.size.scaled(2)) {
             content()
         }
         .frame(width: width)
-        .padding(size.scaled(4))
-        .hudCard(cornerRadius: size.scaled(12))
-        .environment(\.pillSize, size)
+        .menuCard()
+    }
+}
+
+extension View {
+    /// The look of a HUD menu card around its content, such as the camera's sizes in a row.
+    func menuCard() -> some View {
+        let size = HUDAccessory.size
+        return padding(MenuCard<EmptyView>.padding)
+            .hudCard(cornerRadius: size.scaled(12))
+            .environment(\.pillSize, size)
+    }
+}
+
+/// Between groups of rows in a HUD card.
+struct MenuDivider: View {
+    var body: some View {
+        Rectangle().fill(.white.opacity(0.1)).frame(height: 1).padding(.vertical, 3).padding(.horizontal, 6)
     }
 }
 

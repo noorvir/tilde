@@ -110,7 +110,7 @@ struct ClipComposer: View {
                     }
                 }
             }
-            Rectangle().fill(.white.opacity(0.1)).frame(height: 1).padding(.vertical, 3).padding(.horizontal, 6)
+            MenuDivider()
             MenuRow(symbol: "plus", title: "Add image") {
                 card.showsBackgrounds = false
                 if let added = backgrounds.add() {
