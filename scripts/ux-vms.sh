@@ -1,9 +1,10 @@
 #!/bin/sh
 # Runs all the UX specs in the two test VMs at the same time, for one result in about half the
 # time of one VM: the remote machine, the browser, the automatic update, the copied report and
-# the paste, the full-screen recording, the wireframe on a window and the settings during a session
-# specs in the second VM, the rest in the first. Each half has the time limit of
-# scripts/ux.sh. The logs are in build/ux-vm/.
+# the paste, the full-screen recording and the settings during a session specs in the second VM,
+# the rest in the first. Each half has the time limit of scripts/ux.sh. Then the wireframe on a
+# window spec runs alone in the first VM: its lag check fails while the other VM takes the host's
+# CPU. The logs are in build/ux-vm/.
 #   scripts/ux-vms.sh     TILDE_UX_VMS="<first vm> <second vm>", by default "tilde-ux tilde-ux-2"
 set -eu
 cd "$(dirname "$0")/.."
@@ -11,7 +12,8 @@ set -- ${TILDE_UX_VMS:-tilde-ux tilde-ux-2}
 first=$1
 second=$2
 # About half of the time, as measured: the specs of the second VM.
-split="aNodeIsInstalled|aClickInAnotherBrowser|anUpdateInstallsByItself|aCopiedReport|aPasteInACommentBox|theHUDShowsOverAFullScreenApp|aWireframeOnAWindow|settingsWorkAsUsualDuringASession"
+split="aNodeIsInstalled|aClickInAnotherBrowser|anUpdateInstallsByItself|aCopiedReport|aPasteInACommentBox|theHUDShowsOverAFullScreenApp|settingsWorkAsUsualDuringASession"
+alone="aWireframeOnAWindowReachesTheAgentWithItsTwoPictures"
 
 # Built once, here: both runs copy it.
 proxy/build.sh
@@ -20,11 +22,12 @@ started=$(date +%s)
 TILDE_UX_VM=$second TILDE_UX_PROXY_BUILT=1 scripts/ux-vm.sh "$split" > "build/ux-vm/$second.log" 2>&1 &
 other=$!
 status=0
-TILDE_UX_VM=$first TILDE_UX_PROXY_BUILT=1 TILDE_UX_SKIP="$split" scripts/ux-vm.sh > "build/ux-vm/$first.log" 2>&1 || status=$?
+TILDE_UX_VM=$first TILDE_UX_PROXY_BUILT=1 TILDE_UX_SKIP="$split|$alone" scripts/ux-vm.sh > "build/ux-vm/$first.log" 2>&1 || status=$?
 wait "$other" || status=$?
-for vm in "$first" "$second"; do
-    echo "=== $vm"
-    cat "build/ux-vm/$vm.log"
+TILDE_UX_VM=$first TILDE_UX_PROXY_BUILT=1 scripts/ux-vm.sh "$alone" > "build/ux-vm/$first-alone.log" 2>&1 || status=$?
+for log in "$first" "$second" "$first-alone"; do
+    echo "=== $log"
+    cat "build/ux-vm/$log.log"
 done
-echo "Both VMs took $(($(date +%s) - started)) s, with the build and the copy."
+echo "The run took $(($(date +%s) - started)) s, with the build and the copy."
 exit "$status"

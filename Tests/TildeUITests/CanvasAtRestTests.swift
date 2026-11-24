@@ -9,16 +9,16 @@ import Testing
 @Suite(.tags(.webKit), .webKitRuns)
 struct CanvasAtRestTests {
     /// With a component drawn and a tool ready, the page asks for no frame once it has drawn
-    /// what it shows. A page in no window gets its timers about once a second, so a page that
-    /// asks without end asks a few times in the 3 s.
+    /// what it shows. The page's timers are not throttled, so a page that asks without end
+    /// asks many times in the 3 s.
     @Test func thePageAtRestAsksForNoFrames() async throws {
         let page = CanvasPage(countsFrames: true)
-        try await page.load()
+        try await page.load(takesSlot: false)
         try await page.draw("setWireframe({tool: 'card', icons: {}})")
         try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
         #expect(try await page.shapes().count == 1)
 
-        try await expectNoFrames(of: page)
+        try await expectNoFrames(of: page, restingWithin: .seconds(1))
 
         // While the components' window moves, the page has frames, so that they do not lag
         // it; they stop soon after its last move.
@@ -26,13 +26,25 @@ struct CanvasAtRestTests {
         let resting = try await page.frameRequests()
         try await page.draw("setWireframeWindow([140, 100, 600, 400])")
         #expect(try await page.frameRequests() > resting)
-        try await Task.sleep(for: .seconds(2))
-        try await expectNoFrames(of: page)
+        try await expectNoFrames(of: page, restingWithin: .seconds(3))
     }
 
-    private func expectNoFrames(of page: CanvasPage, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        try await Task.sleep(for: .seconds(1))
-        let before = try await page.frameRequests()
+    /// Expects no frame for 3 s from when the page stops asking: it has asked for none for
+    /// 250 ms, or `limit` has passed, and then the frames that it still asks for fail.
+    private func expectNoFrames(of page: CanvasPage, restingWithin limit: Duration, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        let clock = ContinuousClock()
+        let end = clock.now + limit
+        var before = try await page.frameRequests()
+        var unchangedSince = clock.now
+        while clock.now < end, clock.now - unchangedSince < .milliseconds(250) {
+            try await Task.sleep(for: .milliseconds(50))
+            let count = try await page.frameRequests()
+            if count != before {
+                before = count
+                unchangedSince = clock.now
+            }
+        }
+
         try await Task.sleep(for: .seconds(3))
         let after = try await page.frameRequests()
         #expect(after == before, "The page asked for \(after - before) frames in 3 s at rest", sourceLocation: sourceLocation)
