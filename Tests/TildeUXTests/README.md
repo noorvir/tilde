@@ -20,7 +20,6 @@ First VM (`tilde-ux`):
 | `doubleControlInATextFieldGivesTheHUDTheKeys` | Double Ctrl takes the keys from another app's text field, also in full screen. |
 | `aClickOnAnotherAppKeepsTheSessionsKeysOutsideItsTextField` | After a click gives another app the keyboard, the session's single keys still work there; in its text field the keys are the field's. |
 | `settingsOpenWithNoFieldFocused` | Settings takes no field focus when it opens. |
-| `settingsWorkAsUsualDuringASession` | Settings is a window, never annotated, during a session. |
 | `theStyleControlsInTheBarChangeTheLookAtOnce` | The bar's style controls change the components on screen at once. |
 | `eachCornerResizesAPartTheTopGripMovesItAndADragStartsWhereItWasPressed` | Real drags resize and move a part; no frame of a drag shows it on the wrong side. |
 | `anUpdateInstallsWhenTildeQuitsAndTildeOpensAsTheNewVersion` | Sparkle installs on quit; the new version keeps its permissions. |
@@ -35,6 +34,7 @@ Second VM (`tilde-ux-2`):
 | `aCopiedReportGoesToTheRemoteMachineWithItsImages` | A copied report's images go to the machine over ssh. |
 | `aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter` | A dictation app's paste lands in the focused text; focus goes back after. |
 | `theHUDShowsOverAFullScreenAppOnASecondDisplayWhoseWindowRecordsWhileTheUserTypesInIt` | On a second display (`tilde-ux-display`, a virtual one) above right of the main one, over a full-screen app, the HUD is drawn where the pointer is and takes the keys; the app's window records until Stop while the user types in it; the app gets no window sharing window, on which AppKit asserts in some apps, and they crash. |
+| `settingsWorkAsUsualDuringASession` | Settings is a window, never annotated, during a session. |
 
 Alone in the first VM, after both halves:
 
