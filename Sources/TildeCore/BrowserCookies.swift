@@ -30,6 +30,16 @@ public enum ChromiumBrowser: String, CaseIterable, Sendable {
         }
     }
 
+    /// To tell whether the app is installed, for its icon, and to know its windows.
+    public var bundleID: String {
+        switch self {
+        case .chrome: "com.google.Chrome"
+        case .arc: "company.thebrowser.Browser"
+        case .brave: "com.brave.Browser"
+        case .edge: "com.microsoft.edgemac"
+        }
+    }
+
     /// The Keychain item that holds the cookie encryption password.
     var keychain: (service: String, account: String) {
         switch self {
@@ -96,77 +106,48 @@ public enum BrowserCookies {
         return try cookies(database: profile.cookies, password: password)
     }
 
-    /// Reads a copy of the cookie database, so a running browser's lock does not matter, and
-    /// deletes the copy afterwards.
+    /// Reads a copy of the cookie database, so a running browser's lock does not matter.
     static func cookies(database: URL, password: String) throws -> (cookies: [HTTPCookie], skipped: Int) {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-cookies-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let copy = folder.appendingPathComponent("Cookies")
-        for suffix in ["", "-wal", "-shm"] {
-            let source = URL(fileURLWithPath: database.path + suffix)
-            if FileManager.default.fileExists(atPath: source.path) {
-                try FileManager.default.copyItem(at: source, to: URL(fileURLWithPath: copy.path + suffix))
+        try withCopy(of: database) { db in
+            // From version 24 each value starts with the SHA-256 of its host.
+            let version = Int(scalar(db, "SELECT value FROM meta WHERE key = 'version'") ?? "") ?? 0
+            let key = derivedKey(password: password)
+
+            var statement: OpaquePointer?
+            let query = "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite FROM cookies"
+            guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+                throw Failure.database(String(cString: sqlite3_errmsg(db)))
             }
-        }
+            defer { sqlite3_finalize(statement) }
 
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(copy.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db = handle else {
-            throw Failure.database("open failed")
-        }
-        defer { sqlite3_close(db) }
-
-        // From version 24 each value starts with the SHA-256 of its host.
-        let version = Int(scalar(db, "SELECT value FROM meta WHERE key = 'version'") ?? "") ?? 0
-        let key = derivedKey(password: password)
-
-        var statement: OpaquePointer?
-        let query = "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite FROM cookies"
-        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-            throw Failure.database(String(cString: sqlite3_errmsg(db)))
-        }
-        defer { sqlite3_finalize(statement) }
-
-        var cookies: [HTTPCookie] = []
-        var skipped = 0
-        while sqlite3_step(statement) == SQLITE_ROW {
-            let host = text(statement, 0)
-            var value = text(statement, 2)
-            if value.isEmpty {
-                let encrypted = blob(statement, 3)
-                guard let decrypted = decrypt(encrypted, key: key, host: host, hasHostHash: version >= 24) else {
-                    skipped += 1
-                    continue
+            var cookies: [HTTPCookie] = []
+            var skipped = 0
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let host = text(statement, 0)
+                var value = text(statement, 2)
+                if value.isEmpty {
+                    let encrypted = blob(statement, 3)
+                    guard let decrypted = decrypt(encrypted, key: key, host: host, hasHostHash: version >= 24) else {
+                        skipped += 1
+                        continue
+                    }
+                    value = decrypted
                 }
-                value = decrypted
-            }
 
-            var properties: [HTTPCookiePropertyKey: Any] = [
-                .domain: host, .name: text(statement, 1), .value: value, .path: text(statement, 4),
-            ]
-            let expires = sqlite3_column_int64(statement, 5)
-            if expires > 0 {
-                properties[.expires] = date(chromiumTime: expires)
+                let expires = sqlite3_column_int64(statement, 5)
+                let cookie = Self.cookie(
+                    domain: host, name: text(statement, 1), value: value, path: text(statement, 4),
+                    expires: expires > 0 ? date(chromiumTime: expires) : nil, isSecure: sqlite3_column_int(statement, 6) == 1,
+                    isHTTPOnly: sqlite3_column_int(statement, 7) == 1, sameSite: sqlite3_column_int(statement, 8)
+                )
+                if let cookie {
+                    cookies.append(cookie)
+                } else {
+                    skipped += 1
+                }
             }
-            if sqlite3_column_int(statement, 6) == 1 {
-                properties[.secure] = "TRUE"
-            }
-            if sqlite3_column_int(statement, 7) == 1 {
-                properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
-            }
-            switch sqlite3_column_int(statement, 8) {
-            case 1: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax
-            case 2: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict
-            default: break
-            }
-
-            if let cookie = HTTPCookie(properties: properties) {
-                cookies.append(cookie)
-            } else {
-                skipped += 1
-            }
+            return (cookies, skipped)
         }
-        return (cookies, skipped)
     }
 
     // MARK: - Decryption
@@ -265,6 +246,53 @@ public enum BrowserCookies {
         }
     }
 
+    /// A cookie from a browser's stored fields; nil when `HTTPCookie` rejects them. `sameSite`
+    /// as Chromium and Firefox store it: 1 lax, 2 strict, else none.
+    static func cookie(
+        domain: String, name: String, value: String, path: String, expires: Date?, isSecure: Bool, isHTTPOnly: Bool, sameSite: Int32 = 0
+    ) -> HTTPCookie? {
+        var properties: [HTTPCookiePropertyKey: Any] = [.domain: domain, .name: name, .value: value, .path: path]
+        if let expires {
+            properties[.expires] = expires
+        }
+        if isSecure {
+            properties[.secure] = "TRUE"
+        }
+        if isHTTPOnly {
+            properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
+        }
+        switch sameSite {
+        case 1: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax
+        case 2: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict
+        default: break
+        }
+        return HTTPCookie(properties: properties)
+    }
+
+    // MARK: - SQLite
+
+    /// Opens a copy of a database, with its journal, and deletes the copy afterwards.
+    static func withCopy<T>(of database: URL, _ read: (OpaquePointer) throws -> T) throws -> T {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-cookies-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let copy = folder.appendingPathComponent(database.lastPathComponent)
+        for suffix in ["", "-wal", "-shm"] {
+            let source = URL(fileURLWithPath: database.path + suffix)
+            if FileManager.default.fileExists(atPath: source.path) {
+                try FileManager.default.copyItem(at: source, to: URL(fileURLWithPath: copy.path + suffix))
+            }
+        }
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(copy.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db = handle else {
+            // SQLite may make a handle also when it fails to open.
+            sqlite3_close(handle)
+            throw Failure.database("open failed")
+        }
+        defer { sqlite3_close(db) }
+        return try read(db)
+    }
+
     private static func scalar(_ db: OpaquePointer, _ query: String) -> String? {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
@@ -274,7 +302,7 @@ public enum BrowserCookies {
         return sqlite3_step(statement) == SQLITE_ROW ? text(statement, 0) : nil
     }
 
-    private static func text(_ statement: OpaquePointer?, _ column: Int32) -> String {
+    static func text(_ statement: OpaquePointer?, _ column: Int32) -> String {
         sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
     }
 

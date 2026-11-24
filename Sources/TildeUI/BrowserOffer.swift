@@ -1,4 +1,5 @@
 import AppKit
+import TildeCore
 
 /// The offer, in the bar under the HUD, to open a page of another browser in Tilde's browser.
 /// A session makes it at most once. Its × hides it for the session and shows a toast whose
@@ -27,9 +28,7 @@ final class BrowserOffer: ObservableObject {
     private var hasOffered = false
     /// Counts sessions, so that a page read for an earlier session is not offered.
     private var session = 0
-    private static let browserBundleIDs: Set<String> = [
-        "com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "com.microsoft.edgemac", "com.brave.Browser",
-    ]
+    private static let browserBundleIDs = Set(ChromiumBrowser.allCases.map(\.bundleID) + ["com.apple.Safari"])
 
     /// A session starts or ends: no offer shows, and the next session can make one.
     func reset() {
