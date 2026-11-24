@@ -188,10 +188,13 @@ struct ImportSheet: View {
     let onDone: (String?) -> Void
     @State private var selected: CookieBrowser?
     @State private var profile: CookieProfile?
-    @State private var isImporting = false
     /// The import under way; Cancel stops it before the cookies go to the browser.
     @State private var importing: Task<Void, Never>?
     @State private var error: String?
+
+    private var isImporting: Bool {
+        importing != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -294,19 +297,15 @@ struct ImportSheet: View {
         guard let profile else {
             return
         }
-        isImporting = true
         error = nil
         importing = Task {
-            let started = Date()
-            defer { isImporting = false }
+            let spinner = SpinnerTime()
+            defer { importing = nil }
             do {
                 let result = try await Task.detached { try BrowserCookies.cookies(of: profile) }.value
                 try Task.checkCancellation()
                 await browser.add(result.cookies)
-                let wait = 1 - Date().timeIntervalSince(started)
-                if wait > 0 {
-                    try? await Task.sleep(for: .seconds(wait))
-                }
+                await spinner.waitForMinimum()
                 let time = Date().formatted(date: .abbreviated, time: .shortened)
                 onDone("✓ \(result.cookies.count) cookies from \(profile.title), \(time)")
             } catch is CancellationError {
