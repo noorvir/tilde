@@ -32,6 +32,33 @@ struct CameraAlignmentTests {
         #expect(abs((segments.first?.timeMapping.target.duration.seconds ?? 0) - 0.5) < 0.01)
     }
 
+    /// The camera file starts before the screen does: what came before the clip's first
+    /// frame is cut off, and the rest starts at the clip's start.
+    @Test func anEarlyCameraFileLosesItsHead() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("camera-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try await Self.writeMovie(to: file, seconds: 1)
+
+        let clipStart = CMTime(seconds: 100, preferredTimescale: 600)
+        let recording = CameraRecording(file: file, start: clipStart - CMTime(seconds: 0.5, preferredTimescale: 600))
+        await CameraAlignment.align(recording, toClipStartingAt: clipStart)
+
+        let asset = AVURLAsset(url: file)
+        let duration = try await asset.load(.duration).seconds
+        #expect(abs(duration - 0.5) < 0.05, "\(duration)")
+        let track = try #require(try await asset.loadTracks(withMediaType: .video).first)
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        reader.add(output)
+        reader.startReading()
+        var times: [Double] = []
+        while let sample = output.copyNextSampleBuffer() {
+            times.append(sample.presentationTimeStamp.seconds)
+        }
+        #expect(abs((times.first ?? 1)) < 0.02, "\(times.first ?? -1)")
+        #expect((14...16).contains(times.count), "\(times.count)")
+    }
+
     /// Play right after the preview opens, before either file has loaded: both players wait,
     /// then run on the same time of the clip.
     @MainActor @Test func playStartsTheClipAndItsCameraInStep() async throws {

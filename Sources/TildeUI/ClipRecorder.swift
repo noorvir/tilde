@@ -49,22 +49,27 @@ final class ClipRecorder {
                 self?.sourceEnded(video)
             }
         }
+        // The camera file takes about a second to start: it starts before the screen does,
+        // and Stop cuts off what came before the clip's first frame.
+        if recordsCamera, let camera {
+            let file = Self.cameraFile(of: video)
+            cameraFile = file
+            camera.startRecording(to: file)
+        }
         Task {
             do {
                 let started = try await ScreenRecorder.start(source, to: video, extras: extras, onSourceEnded: sourceEnded)
                 dispatch(.clipStarted(operation), [
                     .adoptClip: { [self] in
                         recorder = started
-                        if recordsCamera, let camera {
-                            let file = Self.cameraFile(of: video)
-                            cameraFile = file
-                            camera.startRecording(to: file)
-                        }
                         recorded = (name, frame)
                         clock = (Date(), 0)
                         log.notice("recording \(name, privacy: .public)")
                     },
-                    .dropClip: { started.discard() },
+                    .dropClip: { [self] in
+                        started.discard()
+                        dropCameraFile()
+                    },
                 ])
                 // A source that went away meanwhile ends the clip now that it is taken.
                 if endedEarly.remove(video) != nil, recorder?.video == video {
@@ -72,6 +77,7 @@ final class ClipRecorder {
                 }
             } catch {
                 log.error("could not start recording: \(String(describing: error), privacy: .public)")
+                dropCameraFile()
                 dispatch(.clipStartFailed(operation), [:])
             }
         }
@@ -135,12 +141,18 @@ final class ClipRecorder {
     func discard() {
         recorder?.discard()
         recorder = nil
-        if cameraFile != nil {
-            cameraFile = nil
-            Task {
-                if let recording = await camera?.stopRecording() {
-                    try? FileManager.default.removeItem(at: recording.file)
-                }
+        dropCameraFile()
+    }
+
+    /// Ends the camera file in progress, if any, and deletes it.
+    private func dropCameraFile() {
+        guard cameraFile != nil else {
+            return
+        }
+        cameraFile = nil
+        Task {
+            if let recording = await camera?.stopRecording() {
+                try? FileManager.default.removeItem(at: recording.file)
             }
         }
     }
