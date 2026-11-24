@@ -152,7 +152,7 @@ private enum BackgroundSwatch {
         case .gradient(let gradient):
             VideoFramer.gradientImage(gradient, size: CGSize(width: size.width * 2, height: size.height * 2)).map { NSImage(cgImage: $0, size: size) }
         case .image(let url):
-            NSImage(contentsOf: url)
+            BackgroundImages.image(at: url)
         }
         let image = NSImage(size: size, flipped: false) { rect in
             NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).addClip()
@@ -171,13 +171,12 @@ private enum BackgroundSwatch {
     }
 }
 
-/// A background as the saved video shows it: a gradient, or an image that fills.
-private struct BackgroundFill: View {
-    let background: VideoBackground
-    /// Decoded once: the body runs on every tick of a drag.
-    @MainActor private static let images = NSCache<NSURL, NSImage>()
+/// The user's background images, decoded once: the fill's body runs on every tick of a drag.
+@MainActor
+private enum BackgroundImages {
+    private static let images = NSCache<NSURL, NSImage>()
 
-    @MainActor private static func image(at url: URL) -> NSImage? {
+    static func image(at url: URL) -> NSImage? {
         if let image = images.object(forKey: url as NSURL) {
             return image
         }
@@ -187,13 +186,18 @@ private struct BackgroundFill: View {
         }
         return image
     }
+}
+
+/// A background as the saved video shows it: a gradient, or an image that fills.
+private struct BackgroundFill: View {
+    let background: VideoBackground
 
     var body: some View {
         switch background {
         case .gradient(let gradient):
             LinearGradient(colors: gradient.colors.map(Color.init(hex:)), startPoint: .topLeading, endPoint: .bottomTrailing)
         case .image(let url):
-            if let image = Self.image(at: url) {
+            if let image = BackgroundImages.image(at: url) {
                 Color.clear.overlay(Image(nsImage: image).resizable().scaledToFill()).clipped()
             } else {
                 Color.gray
