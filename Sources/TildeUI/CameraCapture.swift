@@ -247,15 +247,16 @@ final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegate, AVCap
 
     // MARK: Frames, on `frameQueue`
 
-    /// Shows the frame; logs a gap of over a second between frames, which a frozen picture
-    /// would show.
+    /// Shows the frame, and reports the first one of an attempt.
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         display.show(sampleBuffer)
         let now = Date()
         let previous = lastFrame
         lastFrame = now
         if let previous {
-            count(gap: now.timeIntervalSince(previous), at: now)
+            if CameraLog.isDebug {
+                count(gap: now.timeIntervalSince(previous), at: now)
+            }
             return
         }
         statsStart = now
@@ -269,7 +270,8 @@ final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegate, AVCap
     }
 
     /// Every two seconds: how many frames came and the longest wait between two, which a
-    /// frozen picture would show. A wait of over a quarter second is logged at once.
+    /// frozen picture would show. A wait of over a quarter second is logged at once. Only with
+    /// `DebugCamera`.
     private func count(gap: TimeInterval, at now: Date) {
         frameCount += 1
         longestGap = max(longestGap, gap)
@@ -331,6 +333,9 @@ final class CameraCapture: NSObject, AVCaptureFileOutputRecordingDelegate, AVCap
     }
 
     private func logLag(_ change: String) {
+        guard CameraLog.isDebug else {
+            return
+        }
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         queue.async { [self] in
             guard let pauseAsked else {

@@ -251,13 +251,13 @@ final class CameraBubble: ObservableObject {
             },
             center.addObserver(forName: NSWindow.didChangeScreenNotification, object: panel, queue: .main) { [weak self, weak panel] _ in
                 MainActor.assumeIsolated {
-                    CameraLog.note("bubble changed screen: \(panel?.screen?.localizedName ?? "none"), frame \(panel.map { NSStringFromRect($0.frame) } ?? "")")
+                    CameraLog.debug("bubble changed screen: \(panel?.screen?.localizedName ?? "none"), frame \(panel.map { NSStringFromRect($0.frame) } ?? "")")
                     self?.barFollows()
                 }
             },
         ]
         panel.onDrag = { [weak panel] ended in
-            CameraLog.note("bubble drag \(ended ? "ended" : "began") at \(panel.map { NSStringFromPoint($0.frame.origin) } ?? "")")
+            CameraLog.debug("bubble drag \(ended ? "ended" : "began") at \(panel.map { NSStringFromPoint($0.frame.origin) } ?? "")")
         }
         panel.onClick = { [weak self] in
             guard let self, cameraState == .failed else {

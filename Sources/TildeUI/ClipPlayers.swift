@@ -113,7 +113,7 @@ final class ClipPlayers: ObservableObject {
 
     /// The camera's lead over the clip a second after Play, in milliseconds.
     private func logOffset(_ count: Int) {
-        guard let camera else {
+        guard CameraLog.isDebug, let camera else {
             return
         }
         Task {
