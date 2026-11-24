@@ -1,6 +1,7 @@
 // What the pointer does in wireframe mode: a drag draws a component, also in another, or with
 // no tool moves one; the chip and the top grip move one too, a corner handle resizes one from
-// that corner, and ⌥ and a drag copies one. A click selects one, a double-click edits its text,
+// that corner, and ⌥ and a drag copies one with its children, or the whole selection that it
+// is in. A click selects one, a double-click edits its text,
 // and a click on its tag edits its label. A drag on the text of the selected component, with
 // any tool, moves the text off it as a free text, which moves as a component does. The Text
 // tool's click types a component's text, or a free text where there is no component. A
@@ -10,10 +11,10 @@
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
 import { api, postPointer, live } from "../scene.js";
-import { typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, toggleSelected, showHandles, hideHandles, toggleMenu } from "./chip.js";
+import { typeMenu, bordersMenu, selection, selectedFrames, isHandle, deleteComponent, selectGroup, toggleSelected, showHandles, hideHandles, toggleMenu } from "./chip.js";
 import { kindNames, newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { commentBox, commented, openComment, closeComment } from "./comment.js";
-import { descendantsOf, newKey, outerOf, setKey } from "./groups.js";
+import { copiesOf, descendantsOf, newKey, outerOf, setKey } from "./groups.js";
 import { record } from "./history.js";
 import { labelField, labelled, editLabel, editText, endLabel, isDoubleClick } from "./labels.js";
 import { tagAt, textAt, textBox, textHeight } from "./look.js";
@@ -107,19 +108,32 @@ function startAdjusting(event, frame, mode, from, corner = null) {
   selection.hovered = frame.groupIds[0];
   const menuBefore = selection.menu;
   selection.menu = null;
-  const rectOf = ({ x, y, width, height }) => ({ x, y, width, height });
   const isCopy = mode === "move" && from !== "text" && event.altKey;
-  // Its children, and theirs, move with it; a copy and a text that leaves move alone.
-  const movesChildren = mode === "move" && from !== "text" && !isCopy;
-  const others = movesChildren ? descendantsOf(frame) : [];
+  // Its children, and theirs, move with it; a text that leaves moves alone.
+  const others = mode === "move" && from !== "text" ? descendantsOf(frame) : [];
   adjusting = {
-    mode, from, corner, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, pressedAt: event.timeStamp, rect: rectOf(frame), data: frame.customData, moved: false, menuBefore,
-    before: api.getSceneElementsIncludingDeleted(), isCopy, adds: addsToSelection(event),
-    others: others.map((member) => ({ group: member.groupIds[0], rect: rectOf(member), data: member.customData })),
+    mode, from, corner, start: { x: event.clientX, y: event.clientY }, pressedAt: event.timeStamp, moved: false, menuBefore,
+    before: api.getSceneElementsIncludingDeleted(), isCopy, adds: addsToSelection(event), ...moving(frame, others),
   };
   event.target.setPointerCapture?.(event.pointerId);
   cursorRing.style.display = "none";
   showHandles();
+}
+
+// What a move or a resize changes: the component that the pointer has, as it was at the
+// press, and the `others` that move with it.
+function moving(frame, others) {
+  const part = ({ groupIds: [group], x, y, width, height, customData }) => ({ group, rect: { x, y, width, height }, data: customData });
+  return { ...part(frame), others: others.map(part) };
+}
+
+// What ⌥ and a drag on `frame` copies: the selection that it is in, or it alone, each with its
+// children and theirs. `frame` is the first.
+function copiedWith(frame) {
+  const selected = selectedFrames();
+  const roots = selected.some((other) => other.id === frame.id) ? selected.filter((other) => other.id !== frame.id) : [];
+  const all = [frame, ...roots].flatMap((root) => [root, ...descendantsOf(root)]);
+  return all.filter((member, index) => all.findIndex((other) => other.id === member.id) === index);
 }
 
 // Opens a component's comment. The component is selected while its comment is typed, and as it
@@ -168,12 +182,11 @@ function adjust(event) {
   if (!adjusting.moved && Math.hypot(dx, dy) >= 3) {
     adjusting.moved = true;
     record(adjusting.before);
-    // The copy goes on top, and moves; the original stays. The copy has no parent or children.
+    // The copies go on top, grouped as the originals, and move; the originals stay.
     if (adjusting.isCopy) {
-      const { rect, data: { key: _, parent: __, ...data } } = adjusting;
-      const copy = wireframeElements(data.tildeWireframe, rect, data);
-      api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...copy], captureUpdate: "NEVER" });
-      Object.assign(adjusting, { group: copy[0].groupIds[0], data });
+      const [copy, ...others] = copiesOf(copiedWith(frameOf(adjusting.group)));
+      api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), copy, ...others], captureUpdate: "NEVER" });
+      Object.assign(adjusting, moving(copy, others));
       selection.hovered = adjusting.group;
     }
     if (adjusting.from === "text") freeText();

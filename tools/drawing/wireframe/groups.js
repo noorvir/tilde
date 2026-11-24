@@ -1,10 +1,12 @@
 // Groups: a parent component and its children, which have the parent's `key` in their data as
 // `parent`. A component drawn fully inside another is its child, and Group in the context menu
 // makes the selected components children of the one under the pointer. A parent moves with
-// its children and theirs, and is deleted with them; a child moves and is deleted alone.
+// its children and theirs, and is deleted and copied with them; a child moves and is deleted
+// alone, and its copy has the same parent.
 // Ungroup takes a component from its parent and its own children from it.
 
 import { live, taken, changeElements } from "../scene.js";
+import { wireframeElements } from "./components.js";
 import { record } from "./history.js";
 
 // Those that can still change: not the ones that Done took, which stay until their note is saved.
@@ -35,6 +37,18 @@ export function setKey(frame, key) {
 function setParent(frames, key) {
   const changed = frames.filter((frame) => frame.customData.parent !== key);
   changeData(changed, ({ parent: _, ...data }) => (key ? { ...data, parent: key } : data));
+}
+
+// Copies of `frames`, each in the place of its original, grouped as they are: a parent's copy
+// is the parent of its children's copies, and the copy of a child whose parent is not copied
+// is a child of that parent too.
+export function copiesOf(frames) {
+  const keys = new Map(frames.filter((frame) => frame.customData.key).map((frame) => [frame.customData.key, newKey()]));
+  return frames.map(({ x, y, width, height, customData: { key, parent, ...data } }) => {
+    if (key) data.key = keys.get(key);
+    if (parent) data.parent = keys.get(parent) ?? parent;
+    return wireframeElements(data.tildeWireframe, { x, y, width, height }, data)[0];
+  });
 }
 
 // The smallest component that `rect` is fully inside, if any. A free text holds nothing.

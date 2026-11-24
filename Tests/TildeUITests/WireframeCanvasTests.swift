@@ -785,8 +785,8 @@ struct WireframeCanvasTests {
 
     /// A component drawn fully inside another is its child, and one that is partly outside it
     /// is not. A drag on the parent moves it with its children and theirs; a drag on a child
-    /// moves the child alone, with its own children. One undo puts all back. A copy has no
-    /// parent.
+    /// moves the child alone, with its own children. One undo puts all back. A copy of a
+    /// child has the same parent, and its own children are copied with it.
     @Test func aParentMovesWithItsChildrenAndAChildMovesAlone() async throws {
         try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
         try await drawComponent("card")
@@ -815,12 +815,44 @@ struct WireframeCanvasTests {
         try await page.draw("undoCanvas()")
         #expect(try await rects() == [[150, 130, 600, 400], [250, 180, 240, 120], [270, 200, 100, 40], [650, 450, 150, 110]])
 
-        // ⌥ and a drag: the copy moves alone, and is no parent or child.
-        try await page.drag(from: CGPoint(x: 450, y: 280), to: CGPoint(x: 950, y: 280), alt: true)
+        // ⌥ and a drag on the card: its copy is a child of the section too, and the parent of
+        // the button's copy. The originals stay.
+        try await page.drag(from: CGPoint(x: 450, y: 280), to: CGPoint(x: 950, y: 280), alt: true, meta: true)
         drawn = try await page.shapes()
-        #expect(drawn.count == 5)
-        #expect(drawn[4].parent == nil && drawn[4].key == nil)
-        #expect(drawn.prefix(3).map(\.rect) == [[150, 130, 600, 400], [250, 180, 240, 120], [270, 200, 100, 40]])
+        #expect(drawn.map(\.type) == ["section", "card", "button", "list", "card", "button"])
+        #expect(drawn.map(\.rect) == [
+            [150, 130, 600, 400], [250, 180, 240, 120], [270, 200, 100, 40], [650, 450, 150, 110], [750, 180, 240, 120], [770, 200, 100, 40],
+        ])
+        #expect(drawn[4].parent == drawn[0].key)
+        #expect(drawn[4].key != nil && drawn[4].key != drawn[1].key)
+        #expect(drawn[5].parent == drawn[4].key)
+        #expect(drawn[1].parent == drawn[0].key && drawn[2].parent == drawn[1].key)
+    }
+
+    /// ⌥ and a drag on a component of a selection of several copies them all, with their
+    /// children: the copies are grouped among them as the originals are. One undo takes the
+    /// copies away.
+    @Test func aCopyOfASelectionKeepsItsGroups() async throws {
+        try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 400, y: 300))
+        try await drawComponent("card", from: CGPoint(x: 150, y: 150), to: CGPoint(x: 350, y: 250))
+        try await drawComponent("list", from: CGPoint(x: 100, y: 400), to: CGPoint(x: 300, y: 600))
+        try await putToolDown()
+        let onSection = CGPoint(x: 120, y: 280)
+        try await page.click(onSection)
+        try await page.click(CGPoint(x: 200, y: 500), meta: true)
+
+        try await page.drag(from: onSection, to: CGPoint(x: 620, y: 280), alt: true, meta: true)
+        let drawn = try await page.shapes()
+        #expect(drawn.map(\.type) == ["section", "card", "list", "section", "card", "list"])
+        #expect(drawn.suffix(3).map(\.rect) == [[600, 100, 300, 200], [650, 150, 200, 100], [600, 400, 200, 200]])
+        #expect(drawn.prefix(3).map(\.rect) == [[100, 100, 300, 200], [150, 150, 200, 100], [100, 400, 200, 200]])
+        #expect(drawn[3].key != nil && drawn[3].key != drawn[0].key)
+        #expect(drawn[4].parent == drawn[3].key)
+        #expect(drawn[5].parent == nil && drawn[3].parent == nil)
+        #expect(drawn[1].parent == drawn[0].key)
+
+        try await page.draw("undoCanvas()")
+        #expect(try await page.shapes().count == 3)
     }
 
     /// Delete on a child removes the child alone. Delete on a parent removes it with its
@@ -865,19 +897,26 @@ struct WireframeCanvasTests {
         try await drawComponent("list", from: CGPoint(x: 500, y: 100), to: CGPoint(x: 700, y: 300))
         try await putToolDown()
         let outlines = "document.querySelectorAll('#tilde-outlines > div').length"
+        // The squares on the corners of each selected component that does not have the handles.
+        let squares = "document.querySelectorAll('#tilde-outlines [data-selected-corner]').length"
 
         // One selected component has nothing to group.
         try await page.click(first)
         #expect(try await page.openContextMenu(at: first).contains("group") == false)
+        // Esc closes the menu, and the card stays selected, with the handles.
         try await page.press("Escape")
-
-        try await page.click(first)
+        #expect(try await page.run(squares) as? Int == 0)
+        #expect(try await page.shows("[data-corner=\"nw\"]"))
         try await page.click(second, control: true)
         #expect(try await page.run(outlines) as? Int == 1)
+        #expect(try await page.run(squares) as? Int == 4)
         try await page.click(second, meta: true)
         #expect(try await page.run(outlines) as? Int == 0)
+        // The pointer is on the list, which has the handles: the card shows as selected.
+        #expect(try await page.run(squares) as? Int == 4)
         try await page.click(second, meta: true)
         #expect(try await page.run(outlines) as? Int == 1)
+        #expect(try await page.run(squares) as? Int == 4)
 
         // The secondary button keeps the selection. The card under it becomes the parent.
         var items = try await page.openContextMenu(at: first)

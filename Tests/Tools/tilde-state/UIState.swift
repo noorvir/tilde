@@ -32,7 +32,7 @@ struct UIState: Decodable {
     /// The first component's handles: with its borders menu open, with the pointer over it,
     /// or selected with the pointer away.
     enum Chip: String, Decodable {
-        case borders, hovered, selected
+        case borders, hovered, selected, several
     }
     enum Enlarged: String, Decodable {
         case closeUp, context

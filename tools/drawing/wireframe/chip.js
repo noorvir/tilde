@@ -29,14 +29,21 @@ chip.dataset.wireframeHandle = "";
 chip.style.cssText = "position:fixed;z-index:9999;display:none;align-items:center;gap:2px;height:22px;padding:0 4px 0 8px;border-radius:11px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif;cursor:move;user-select:none;white-space:nowrap";
 // A square on each corner, with the cursor of its diagonal. Over the grip: where the two meet on
 // a narrow component, the corners win.
-export const corners = ["nw", "ne", "sw", "se"].map((corner) => {
+const cornerNames = ["nw", "ne", "sw", "se"];
+const cornerStyle = "position:fixed;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff";
+export const corners = cornerNames.map((corner) => {
   const handle = document.createElement("div");
   handle.dataset.wireframeHandle = "";
   handle.dataset.corner = corner;
   const cursor = corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize";
-  handle.style.cssText = `position:fixed;z-index:9999;display:none;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff;cursor:${cursor}`;
+  handle.style.cssText = `${cornerStyle};z-index:9999;display:none;cursor:${cursor}`;
   return handle;
 });
+
+// Where a corner of a component is.
+function cornerPoint(frame, corner) {
+  return { x: corner.includes("w") ? frame.x : frame.x + frame.width, y: corner.includes("n") ? frame.y : frame.y + frame.height };
+}
 // The grip that moves a component: a short bar in the component's colour, with square corners
 // as its tag has, on the middle of its top edge.
 export const grip = document.createElement("div");
@@ -56,9 +63,11 @@ bordersMenu.dataset.wireframeHandle = "";
 bordersMenu.setAttribute("role", "menu");
 bordersMenu.style.cssText = menuStyle;
 export const selectionOutline = document.createElement("div");
-selectionOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:2px solid #2F76FF;margin:-1px 0 0 -1px";
-// The outlines of the other selected components, and thin ones of the children that move with
-// a selected one.
+const selectionStyle = "position:fixed;pointer-events:none;z-index:9997;border:2px solid #2F76FF;margin:-1px 0 0 -1px";
+selectionOutline.style.cssText = `${selectionStyle};display:none`;
+// What shows the whole selection: the outline of each other selected component, as the first
+// one's, a square on each corner of every selected one, as the handles', and a thin outline of
+// each child that moves with a selected one.
 export const otherOutlines = document.createElement("div");
 otherOutlines.id = "tilde-outlines";
 // The chip stands a little away from the component, clear of Technical's offset edge; a strip
@@ -183,14 +192,22 @@ export function toggleSelected(group) {
   showHandles();
 }
 
-// An outline for each of the other selected components, and a thin one for each child that
-// moves with a selected one.
+// Every selected component looks selected, also while the handles are on another one: its
+// outline, and the squares on its corners; a free text has none. The squares only show; the
+// component with the handles has those in their place.
 function drawOtherOutlines(isShown) {
   const selected = isShown ? selectedFrames() : [];
   const ids = new Set(selected.map((frame) => frame.id));
   const mates = selected.flatMap(descendantsOf).filter((frame, index, all) => !ids.has(frame.id) && all.indexOf(frame) === index);
-  const outline = ({ x, y, width, height }, border) => `<div style="position:fixed;pointer-events:none;z-index:9997;box-sizing:border-box;left:${x}px;top:${y}px;width:${width}px;height:${height}px;border:${border}px solid #2F76FF"></div>`;
-  const content = [...selected.slice(0, -1).map((frame) => outline(frame, 2)), ...mates.map((frame) => outline(frame, 1))].join("");
+  const place = ({ x, y, width, height }) => `left:${x}px;top:${y}px;width:${width}px;height:${height}px`;
+  const outlines = selected.slice(0, -1).map((frame) => `<div style="${selectionStyle};${place(frame)}"></div>`);
+  const mateOutlines = mates.map((frame) => `<div style="position:fixed;pointer-events:none;z-index:9997;box-sizing:border-box;border:1px solid #2F76FF;${place(frame)}"></div>`);
+  const handled = selection.hovered ?? selection.selected;
+  const squares = selected.filter((frame) => frame.customData.tildeWireframe !== "text" && frame.groupIds[0] !== handled).flatMap((frame) => cornerNames.map((corner) => {
+    const { x, y } = cornerPoint(frame, corner);
+    return `<span data-selected-corner style="${cornerStyle};pointer-events:none;z-index:9998;left:${x}px;top:${y}px"></span>`;
+  }));
+  const content = [...outlines, ...mateOutlines, ...squares].join("");
   if (otherOutlines.innerHTML !== content) otherOutlines.innerHTML = content;
 }
 
@@ -224,9 +241,7 @@ export function showHandles() {
   const kind = frame.customData.tildeWireframe;
   Object.assign(handleOutline.style, { left: `${frame.x}px`, top: `${frame.y}px`, width: `${frame.width}px`, height: `${frame.height}px` });
   for (const handle of corners) {
-    const { corner } = handle.dataset;
-    const x = corner.includes("w") ? frame.x : frame.x + frame.width;
-    const y = corner.includes("n") ? frame.y : frame.y + frame.height;
+    const { x, y } = cornerPoint(frame, handle.dataset.corner);
     Object.assign(handle.style, { left: `${x}px`, top: `${y}px` });
   }
   let name = `<span data-menu="kinds" title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>`;
