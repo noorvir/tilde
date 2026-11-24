@@ -173,8 +173,8 @@ enum VideoFramer {
             let square = camera
                 .cropped(to: CGRect(x: extent.midX - side / 2, y: extent.midY - side / 2, width: side, height: side))
                 .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-            let cameraRadius = layout.cameraShape == .circle ? cameraRect.width / 2 : cameraRect.width * 0.2
-            let rim: CGFloat = max(2, cameraRect.width * 0.012)
+            let cameraRadius = layout.cameraShape.cornerRadius(side: cameraRect.width)
+            let rim = CameraBubble.Shape.rim(side: cameraRect.width)
             let rimRect = cameraRect.insetBy(dx: -rim, dy: -rim)
             result = shadow(of: rimRect, radius: cameraRadius + rim).composited(over: result)
             result = solid(rimRect, radius: cameraRadius + rim, color: .white).composited(over: result)

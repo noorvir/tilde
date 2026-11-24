@@ -10,13 +10,30 @@ import SwiftUI
 final class CameraBubble: ObservableObject {
     enum Shape: String {
         case circle, rounded
+
+        /// The other shape, which the shape button switches to.
+        var toggled: Shape {
+            self == .circle ? .rounded : .circle
+        }
+
+        /// The corner radius of a camera `side` wide, in its units.
+        func cornerRadius(side: CGFloat) -> CGFloat {
+            self == .circle ? side / 2 : side * 0.2
+        }
+
+        /// The white rim around a camera `side` wide, in its units, on a saved video and its
+        /// preview.
+        static func rim(side: CGFloat) -> CGFloat {
+            max(2, side * 0.012)
+        }
     }
 
     enum Menu {
         case camera, microphone, size
     }
 
-    static let sizes: [(name: String, side: CGFloat)] = [("Small", 140), ("Medium", 200), ("Large", 280)]
+    /// The bubble's sizes, and the side of each one's icon in the size menu.
+    static let sizes: [(name: String, side: CGFloat, icon: CGFloat)] = [("Small", 140, 7), ("Medium", 200, 10), ("Large", 280, 13)]
 
     /// The recording bar's camera button: the bubble shows in recording mode while on.
     @Published private(set) var isOn: Bool
@@ -152,7 +169,7 @@ final class CameraBubble: ObservableObject {
     }
 
     func toggleShape() {
-        shape = shape == .circle ? .rounded : .circle
+        shape = shape.toggled
         defaults.set(shape.rawValue, forKey: "CameraShape")
     }
 

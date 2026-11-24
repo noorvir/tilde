@@ -8,7 +8,7 @@ struct CameraBubbleView: View {
     let display: CameraDisplay
 
     var body: some View {
-        let clip = bubble.shape == .circle ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: bubble.side * 0.2))
+        let clip = bubble.shape == .circle ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: bubble.shape.cornerRadius(side: bubble.side)))
         ZStack {
             Color.tildeInk
             if bubble.isDenied {
@@ -198,7 +198,7 @@ private struct SizeIcon: View {
     @Environment(\.pillSize) private var pillSize
 
     var body: some View {
-        let side = pillSize.scaled([7, 10, 13][min(index, 2)])
+        let side = pillSize.scaled(CameraBubble.sizes[index].icon)
         let frame = pillSize.scaled(14)
         Group {
             if shape == .circle {

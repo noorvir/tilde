@@ -67,7 +67,7 @@ struct ComposerCanvas: NSViewRepresentable {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
         /// Ignored while a drag goes on: the drag's own layout shows until it ends.
-        func show(_ layout: ClipLayout, clipSize: CGSize, corner: CGFloat = VideoFramer.defaultCorner) {
+        func show(_ layout: ClipLayout, clipSize: CGSize, corner: CGFloat) {
             guard drag == nil, layout != shown || clipSize != self.clipSize || corner != self.corner else {
                 return
             }
@@ -89,8 +89,7 @@ struct ComposerCanvas: NSViewRepresentable {
             screen.place(in: frames.screen, radius: min(frames.screen.width, frames.screen.height) * corner, rim: 0)
             if let camera {
                 if let frame = frames.camera {
-                    let radius = shown.cameraShape == .circle ? frame.width / 2 : frame.width * 0.2
-                    camera.place(in: frame, radius: radius, rim: max(1.5, frame.width * 0.012))
+                    camera.place(in: frame, radius: shown.cameraShape.cornerRadius(side: frame.width), rim: CameraBubble.Shape.rim(side: frame.width))
                 }
                 camera.isHidden = frames.camera == nil
             }

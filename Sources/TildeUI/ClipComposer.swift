@@ -58,7 +58,7 @@ struct ClipComposer: View {
             if layout.cameraCenter != nil {
                 HUDButton(image: Image(systemName: layout.cameraShape == .circle ? "circle" : "app"), help: "Camera shape") {
                     var changed = controller.layout(of: video)
-                    changed.cameraShape = changed.cameraShape == .circle ? .rounded : .circle
+                    changed.cameraShape = changed.cameraShape.toggled
                     controller.setLayout(changed, of: video)
                 }
             }
