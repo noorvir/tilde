@@ -314,6 +314,7 @@ final class AnnotationController: ObservableObject {
 
         drawing.scope = { [weak self] in self?.scope.window }
         wireframe.scope = { [weak self] in self?.scope.window }
+        wireframe.onShownNote = { [weak self] in self?.tracker.onCanvas = $0 }
         let canvas = drawing.panel
         canvas.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         canvas.isOverTildeWindow = { [weak self] point in self?.picker.windows.isOverTildeWindow(point) == true }

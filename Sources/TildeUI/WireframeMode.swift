@@ -27,7 +27,12 @@ final class WireframeMode: ObservableObject {
     private let follower = ScopeFollower()
     /// The note of the components on the canvas: one shown again, or the draft that their first
     /// change made. Done updates it instead of making a new one.
-    var shownNote: Draft.ID?
+    var shownNote: Draft.ID? {
+        didSet {
+            onShownNote(shownNote)
+        }
+    }
+    var onShownNote: (Draft.ID?) -> Void = { _ in }
     /// The lookup under way of the lines under the pointer.
     private var snaps: Task<Void, Never>?
     /// The newest point that came during the lookup, to look up next.

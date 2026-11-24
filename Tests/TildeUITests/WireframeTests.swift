@@ -172,6 +172,31 @@ struct WireframeTests {
         }
     }
 
+    /// The draft of the wireframe that is drawn has no label while its components are on the
+    /// canvas: a press on its top-right corner, where the label would be, finds none, so it is
+    /// for the corner's handle and opens no preview. The label is back when the mode ends.
+    @Test func theDraftOfTheWireframeOnTheCanvasHasNoLabel() async throws {
+        open(Open(canvas: .wireframe))
+        let card = Fixtures.wireframeShapes[0]
+        let bounds = DrawingShapes.bounds(of: [card])
+        controller.wireframe.newShapes = { done in
+            done(DrawingPanel.Drawing(shapes: [card], ids: ["a"], bounds: bounds))
+        }
+        controller.wireframe.scope = { Fixtures.window }
+        controller.wireframe.pictures = { _ in Captures(image: Fixtures.closeUp(0), contextImage: Fixtures.context(0)) }
+
+        // A change on the canvas saves the draft.
+        controller.drawing.panel.onCanvasChanged()
+        try await until { controller.wireframe.shownNote != nil }
+        let draft = try #require(controller.drafts.first)
+        let corner = CGPoint(x: bounds.maxX, y: bounds.minY)
+        #expect(draft.marker == corner)
+        #expect(controller.tracker.label(at: corner) == nil)
+
+        controller.dispatch(.toggleAnnotating, with: [.showCanvas: {}])
+        try await until { controller.tracker.label(at: corner) == draft.id }
+    }
+
     // MARK: - Esc
 
     /// Esc in wireframe mode puts the tool down: no tool is on, the mode stays and nothing
