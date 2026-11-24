@@ -219,6 +219,12 @@ final class DrawingPanel {
         await active?.takeNewShapes()
     }
 
+    /// The shapes not taken yet stay on the canvas as taken ones do, without their handles,
+    /// until `remove`. The call goes to the page at once, before any later call.
+    func holdNewShapes() {
+        active?.run("takeNewShapes()")
+    }
+
     func remove(_ ids: [String]) {
         active?.run("remove(\(Self.json(ids)))")
     }

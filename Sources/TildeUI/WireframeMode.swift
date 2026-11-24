@@ -34,6 +34,11 @@ final class WireframeMode: ObservableObject {
     private var nextPoint: CGPoint?
     /// The lines that the canvas has, so the same ones are not sent again at pointer rate.
     private var sentSnaps: Snaps?
+    /// The pictures of an area of the screen as it is with the wireframe on it, and as it is
+    /// under it.
+    var pictures: (CGRect) async -> Captures
+    /// Reads the components that no note has taken, as `DrawingPanel.newShapes` does.
+    var newShapes: (@escaping (DrawingPanel.Drawing?) -> Void) -> Void
 
     private struct Snaps: Equatable {
         let lines: WireframeLayout.Lines
@@ -65,6 +70,12 @@ final class WireframeMode: ObservableObject {
         self.picker = picker
         self.browser = browser
         self.defaults = defaults
+        pictures = { [canvas, browser] area in
+            let canvasWindows = Set(canvas.windowNumbers.map { CGWindowID($0) })
+            let page = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
+            return await NoteCaptures.ofWireframe(area: area, canvas: canvasWindows, page: page)
+        }
+        newShapes = { [canvas] done in canvas.newShapes(done) }
         tool = lastTool
         // The blurred screen under the components shows Tilde's browser, as Done's pictures do.
         canvas.underKeeps = { [weak browser] in Set(browser?.windowNumber.map { [CGWindowID($0)] } ?? []) }
@@ -264,26 +275,35 @@ final class WireframeMode: ObservableObject {
         let replaces = shownNote
         let place = place(of: drawn.bounds, chosen: chosen, scope: scope())
 
-        let canvasWindows = Set(canvas.windowNumbers.map { CGWindowID($0) })
-        let page = Set(browser.windowNumber.map { [CGWindowID($0)] } ?? [])
-        let captures = await NoteCaptures.ofWireframe(area: place.area, canvas: canvasWindows, page: page)
+        let captures = await pictures(place.area)
         let note = Self.note(of: drawn, chosen: chosen, place: place, captures: captures, ids: drawn.ids)
         return Taken(note: note, replaces: replaces)
     }
 
-    /// The components as they are, as a note with no pictures, which they stay on the canvas
-    /// for; nil when there are none. The page gets the call at once, so `end()` right after
-    /// loses nothing.
-    func readDraft(_ done: @escaping (NewNote?) -> Void) {
+    /// The components as they are, as a note with the pictures of them; nil when there are
+    /// none. The page gets the calls at once, so `end()` right after loses nothing. `taking`:
+    /// the mode ends, so the components leave the canvas's list of new shapes and lose their
+    /// handles; they stay on the canvas for the pictures, until the note's `drawingIDs` go.
+    func readDraft(taking: Bool = false, _ done: @escaping (NewNote?) -> Void) {
         let chosen = window.flatMap { picker.currentWindow(number: $0.number) }
         let scope = scope()
-        canvas.newShapes { [weak self] drawn in
+        newShapes { [weak self] drawn in
             guard let self, let drawn else {
                 done(nil)
                 return
             }
             let place = place(of: drawn.bounds, chosen: chosen, scope: scope)
-            done(Self.note(of: drawn, chosen: chosen, place: place, captures: nil, ids: []))
+            Task {
+                // The canvas has to paint without the handles first.
+                if taking {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                let captures = await self.pictures(place.area)
+                done(Self.note(of: drawn, chosen: chosen, place: place, captures: captures, ids: taking ? drawn.ids : []))
+            }
+        }
+        if taking {
+            canvas.holdNewShapes()
         }
     }
 

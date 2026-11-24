@@ -142,6 +142,36 @@ struct WireframeTests {
         #expect(!controller.isWireframe)
     }
 
+    // MARK: - The draft
+
+    /// A switch to Annotate or to Draw while a wireframe is drawn keeps it in the list as a
+    /// draft, with the picture of its components: never one with no picture.
+    @Test func aSwitchOfModeKeepsTheWireframeAsADraftWithItsPicture() async throws {
+        for event in [SessionFlow.Event.toggleAnnotating, .startDrawing] {
+            open(Open(canvas: .wireframe))
+            // The canvas has one card that no note has taken, and the screen gives its picture.
+            controller.wireframe.newShapes = { done in
+                let card = Fixtures.wireframeShapes[0]
+                done(DrawingPanel.Drawing(shapes: [card], ids: ["a"], bounds: DrawingShapes.bounds(of: [card])))
+            }
+            controller.wireframe.scope = { Fixtures.window }
+            controller.wireframe.pictures = { _ in Captures(image: Fixtures.closeUp(0), contextImage: Fixtures.context(0)) }
+
+            // The canvas's window is not opened here.
+            controller.dispatch(event, with: [.showCanvas: {}])
+            #expect(!controller.isWireframe)
+            try await until { controller.drafts.first?.annotation.image != nil }
+
+            let draft = try #require(controller.drafts.first)
+            #expect(controller.drafts.count == 1)
+            #expect(draft.isWireframe)
+            #expect(draft.isUnfinished)
+            #expect(draft.annotation.image == Fixtures.closeUp(0))
+            #expect(draft.annotation.contextImage == Fixtures.context(0))
+            #expect(WireframeMode.Saved(draft)?.shapes.count == 1)
+        }
+    }
+
     // MARK: - Esc
 
     /// Esc in wireframe mode puts the tool down: no tool is on, the mode stays and nothing

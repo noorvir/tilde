@@ -174,6 +174,8 @@ final class AnnotationController: ObservableObject {
     private var liveDrawToken = UUID()
     /// Keeps Draw's shapes as a draft after Draw ends; Send waits for it.
     private var keepingDraw: Task<Void, Never>?
+    /// Makes the pictures of the wireframe's draft after the mode ends; the canvas stays for it.
+    private var keepingWireframe: Task<Void, Never>?
     /// The note that the delete question asks about.
     private(set) var deleteAsked: Draft.ID?
     /// The id that the open comment has in the saved record, until it is a note.
@@ -420,14 +422,8 @@ final class AnnotationController: ObservableObject {
         case .showCanvas: showCanvas()
         case .showWireframe: showWireframe()
         case .endWireframe:
-            // The components that Done did not take stay as the wireframe's draft.
             wireframeSaveTime.cancel()
-            let id = wireframe.shownNote
-            wireframe.readDraft { [weak self] note in
-                if let note {
-                    self?.keepWireframeDraft(note, id: id)
-                }
-            }
+            keepWireframeAtEnd()
             wireframe.end()
         case .putToolDown:
             if isWireframe {
@@ -453,10 +449,17 @@ final class AnnotationController: ObservableObject {
             drawing.panel.stopDrawing()
             hover = nil
             if commentBox.pending == nil {
-                if drawing.panel.hasGroup {
-                    // Shapes with no comment yet stay as a draft note; its pictures show them.
+                // Shapes with no comment yet stay as a draft note; its pictures show them, as a
+                // wireframe's draft shows its components.
+                let hasShapes = drawing.panel.hasGroup
+                let wireframeDraft = keepingWireframe
+                keepingWireframe = nil
+                if hasShapes || wireframeDraft != nil {
                     keepingDraw = Task {
-                        await keepDrawingDraft()
+                        await wireframeDraft?.value
+                        if hasShapes {
+                            await keepDrawingDraft()
+                        }
                         if !isDrawing {
                             drawing.panel.hide()
                         }
@@ -1377,24 +1380,25 @@ final class AnnotationController: ObservableObject {
     private func takeWireframe() async {
         wireframeSaveTime.cancel()
         if let taken = await wireframe.take() {
-            keep(taken)
+            keepWireframe(taken.note, replacing: taken.replaces, isUnfinished: false)
         }
         dispatch(.wireframeTaken)
     }
 
-    /// Done finishes the draft or the note that the components replace, or makes a new note.
-    private func keep(_ taken: WireframeMode.Taken) {
-        guard let replaced = taken.replaces, let index = drafts.firstIndex(where: { $0.id == replaced }) else {
-            let pending = Pending(taken.note, browser: browser, withContext: session?.capturesContext ?? false)
-            add(pending, comment: "")
-            return
+    /// The mode ends: the components that Done did not take stay as the wireframe's draft. The
+    /// canvas shows them until their pictures are made.
+    private func keepWireframeAtEnd() {
+        let id = wireframe.shownNote
+        let (kept, keeping) = AsyncStream.makeStream(of: Void.self)
+        wireframe.readDraft(taking: true) { [weak self] note in
+            if let note {
+                self?.keepWireframe(note, replacing: id, isUnfinished: true)
+            }
+            keeping.finish()
         }
-        // The note keeps its id, and so the names of its saved pictures: the old ones go.
-        if let session {
-            archive.forgetImages(of: replaced, in: session.id)
+        keepingWireframe = Task {
+            for await _ in kept {}
         }
-        drafts[index] = drafts[index].redrawn(as: taken.note)
-        drawing.panel.remove(taken.note.drawingIDs)
     }
 
     /// Every change to the components saves the wireframe's draft half a second after changes
@@ -1409,7 +1413,8 @@ final class AnnotationController: ObservableObject {
             }
             let id = wireframe.shownNote
             wireframe.readDraft { [weak self] note in
-                guard let self else {
+                // Done or the mode's end came while the pictures were made: theirs are newer.
+                guard let self, isWireframe, !wireframe.isTaking else {
                     return
                 }
                 // Every component deleted: a draft goes; a sent or finished note waits for Done.
@@ -1423,34 +1428,33 @@ final class AnnotationController: ObservableObject {
                     }
                     return
                 }
-                let kept = keepWireframeDraft(note, id: id)
+                let kept = keepWireframe(note, replacing: id, isUnfinished: true)
                 // The next change updates the same draft, and Done replaces it.
-                if isWireframe, wireframe.shownNote == nil {
+                if wireframe.shownNote == nil {
                     wireframe.shownNote = kept
                 }
             }
         }
     }
 
-    /// Keeps the components as an unfinished note: `id`'s, or a new one. Saved to disk at once.
+    /// Keeps the components as a note with their pictures: `id`'s, drawn again, or a new one.
+    /// `isUnfinished`: a draft, which Done finishes. Saved to disk at once.
     @discardableResult
-    private func keepWireframeDraft(_ note: NewNote, id: Draft.ID?) -> Draft.ID {
-        let kept: Draft.ID
-        if let id, let index = drafts.firstIndex(where: { $0.id == id }) {
-            let old = drafts[index].annotation
-            drafts[index].annotation = Annotation(
-                id: old.id, comment: old.comment, target: note.target, frame: note.frame, image: old.image, contextImage: old.contextImage
-            )
-            drafts[index].marker = note.marker
-            drafts[index].isUnfinished = true
-            kept = id
-        } else {
-            var empty = note
-            empty.captures = Captures(image: nil, contextImage: nil)
-            kept = add(Pending(empty, browser: browser, withContext: false), comment: "", isUnfinished: true)
+    private func keepWireframe(_ note: NewNote, replacing id: Draft.ID?, isUnfinished: Bool) -> Draft.ID {
+        guard let id, let index = drafts.firstIndex(where: { $0.id == id }) else {
+            let kept = add(Pending(note, browser: browser, withContext: false), comment: "", isUnfinished: isUnfinished)
+            saver.save()
+            return kept
         }
+        // The note keeps its id, and so the names of its saved pictures: the old ones go.
+        if let session {
+            archive.forgetImages(of: id, in: session.id)
+        }
+        drafts[index] = drafts[index].redrawn(as: note)
+        drafts[index].isUnfinished = isUnfinished
+        drawing.panel.remove(note.drawingIDs)
         saver.save()
-        return kept
+        return id
     }
 
     /// Shows a wireframe note's components again, to edit them: Done then replaces that note,
