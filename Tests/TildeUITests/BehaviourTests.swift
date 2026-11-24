@@ -358,9 +358,9 @@ struct BehaviourTests {
         defer { try? FileManager.default.removeItem(at: folder) }
 
         #expect(throws: ScreenRecorder.Failure.badSize) {
-            _ = try ScreenRecorder.makeWriter(width: 0, height: 0, to: folder.appendingPathComponent("a.mp4"))
+            _ = try ScreenRecorder.makeWriter(width: 0, height: 0, withAudio: false, to: folder.appendingPathComponent("a.mp4"))
         }
-        let (writer, _) = try ScreenRecorder.makeWriter(width: 1290, height: 2796, to: folder.appendingPathComponent("b.mp4"))
+        let (writer, _, _) = try ScreenRecorder.makeWriter(width: 1290, height: 2796, withAudio: false, to: folder.appendingPathComponent("b.mp4"))
         writer.cancelWriting()
     }
 
@@ -648,6 +648,35 @@ struct BehaviourTests {
         #expect(controller.previewCard.id == drafts[0].id)
         #expect(controller.handleKey(try key(53), in: .preview(isTyping: false)))
         #expect(controller.previewCard.id == nil)
+    }
+
+    /// Delete in the preview, by key or button, always asks first: Esc keeps the note, ↩
+    /// deletes it. Typing in the comment deletes text, not the note.
+    @Test func deleteInThePreviewAsksFirst() async throws {
+        let drafts = Fixtures.drafts(2)
+        controller.setStateForTesting(
+            session: Fixtures.session(), drafts: drafts, mode: .open(SessionFlow.Open(panel: .preview)), previewID: drafts[0].id
+        )
+        #expect(!controller.handleKey(try key(51), in: .preview(isTyping: true)))
+        #expect(controller.confirmation == nil)
+
+        #expect(controller.handleKey(try key(51), in: .preview(isTyping: false)))
+        #expect(controller.confirmation == .deleteNote)
+        #expect(controller.drafts.count == 2)
+        #expect(controller.handleConfirmationKey(53, in: NSPanel()))
+        #expect(controller.confirmation == nil)
+        #expect(controller.drafts.count == 2)
+
+        #expect(controller.handleKey(try key(117), in: .preview(isTyping: false)))
+        #expect(controller.confirmation == .deleteNote)
+        #expect(controller.handleConfirmationKey(36, in: NSPanel()))
+        try await until { self.controller.drafts.map(\.id) == [drafts[1].id] }
+        #expect(controller.confirmation == nil)
+
+        // The card's Delete button asks the same.
+        controller.askToDelete(drafts[1].id)
+        #expect(controller.confirmation == .deleteNote)
+        #expect(controller.drafts.count == 1)
     }
 
     // MARK: - The menu
@@ -1077,6 +1106,21 @@ struct BehaviourTests {
         #expect(HUDView.status(of: controller).title == "Annotating")
     }
 
+    /// ↩ in another app ends Draw's group: the page asks for its comment once the group is
+    /// known. Outside Draw, or with Draw paused, ↩ stays the app's.
+    @Test func returnInAnotherAppEndsDrawsGroupOnlyWhileDrawing() throws {
+        let enter = try keyDown("\r", keyCode: 36)
+        open()
+        #expect(!controller.handleOtherAppKey(enter, focus: .other))
+
+        controller.setStateForTesting(session: Fixtures.session(), drafts: [], mode: .open(SessionFlow.Open(canvas: .draw)), source: nil)
+        #expect(controller.handleOtherAppKey(enter, focus: .other))
+        #expect(!controller.handleOtherAppKey(enter, focus: .text))
+
+        controller.setStateForTesting(session: Fixtures.session(), drafts: [], mode: .open(SessionFlow.Open(pauses: [.user], canvas: .draw)), source: nil)
+        #expect(!controller.handleOtherAppKey(enter, focus: .other))
+    }
+
     @Test func noSessionOrAQuestionLeavesAKeyToTheOtherApp() throws {
         let a = try keyDown("a", keyCode: 0)
         #expect(controller.session == nil)
@@ -1085,6 +1129,19 @@ struct BehaviourTests {
         open(drafts: Fixtures.drafts(2), pauses: [.user], question: .clearAll)
         #expect(!controller.handleOtherAppKey(a, focus: .other))
         #expect(controller.confirmation == .clearAll)
+    }
+
+    /// Drafts are not sent: with only drafts there is nothing to send, and Send is off.
+    @Test func onlyDraftsLeaveNothingToSend() {
+        var drafts = Fixtures.drafts(2)
+        drafts[0].isUnfinished = true
+        drafts[1].isUnfinished = true
+        open(drafts: drafts)
+        #expect(!controller.canSend)
+
+        drafts[1].isUnfinished = false
+        open(drafts: drafts)
+        #expect(controller.canSend)
     }
 
     // MARK: - Esc

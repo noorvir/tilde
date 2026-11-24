@@ -22,9 +22,12 @@ struct SessionRecord: Codable, Equatable, Identifiable {
         let marker: CGPoint
         let chip: String
         let anchor: PageAnchor?
+        /// A draft that Send leaves out; nil in records from before drafts.
+        var isUnfinished: Bool?
 
         static func == (lhs: Note, rhs: Note) -> Bool {
             lhs.id == rhs.id && lhs.comment == rhs.comment && lhs.frame == rhs.frame && lhs.chip == rhs.chip && lhs.anchor == rhs.anchor
+                && lhs.isUnfinished == rhs.isUnfinished
         }
     }
 
@@ -97,7 +100,7 @@ final class SessionArchive: @unchecked Sendable {
     }
 
     /// Saves a session's images not on disk yet, keyed by file name.
-    func saveImages(_ images: [String: Data], of id: String) {
+    func saveImages(_ images: [String: Data], of id: String, notes: [UUID]) {
         queue.async { [self] in
             let folder = folder(id)
             for (name, data) in images {
@@ -107,6 +110,12 @@ final class SessionArchive: @unchecked Sendable {
                 }
                 try? createPrivateFolder(folder)
                 try? writePrivate(data, to: url)
+            }
+            // The pictures of a comment box that closed, or that became a note of its own.
+            let kept = Set(notes.flatMap { [Self.imageName($0), Self.contextImageName($0)] })
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            for file in files where file.pathExtension == "png" && !kept.contains(file.lastPathComponent) {
+                try? FileManager.default.removeItem(at: file)
             }
         }
     }
@@ -165,6 +174,11 @@ final class SessionArchive: @unchecked Sendable {
     func adopt(_ video: URL, into id: String) -> URL {
         let own = newClip(in: id)
         try? linkOrCopy(video, to: own)
+        // Its camera, recorded beside it.
+        let camera = ClipRecorder.cameraFile(of: video)
+        if FileManager.default.fileExists(atPath: camera.path) {
+            try? linkOrCopy(camera, to: ClipRecorder.cameraFile(of: own))
+        }
         return own
     }
 
@@ -197,7 +211,7 @@ final class SessionArchive: @unchecked Sendable {
                 }
                 isChanged = true
                 let target = Target.recording(video: own, seconds: seconds, source: source)
-                return SessionRecord.Note(id: note.id, comment: note.comment, target: target, frame: note.frame, marker: note.marker, chip: note.chip, anchor: note.anchor)
+                return SessionRecord.Note(id: note.id, comment: note.comment, target: target, frame: note.frame, marker: note.marker, chip: note.chip, anchor: note.anchor, isUnfinished: note.isUnfinished)
             }
             if isChanged, !write(record) {
                 isComplete = false

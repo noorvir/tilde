@@ -140,15 +140,15 @@ final class SettingsModel: ObservableObject {
     let version: String
     let onResult: (InstallResult) -> Void
     let onResetHUD: () -> Void
-    /// The Chromium profiles whose logins Tilde's browser can import.
-    let browserProfiles: () -> [ChromiumProfile]
+    /// The installed browsers whose logins Tilde's browser can import.
+    let cookieBrowsers: () -> [CookieBrowser]
     /// Whether macOS allows Tilde to record the screen and to use Accessibility.
     let permissions: () -> (screenRecording: Bool, accessibility: Bool)
 
     init(
         setup: AgentSetup, wireframes: WireframeSwitch, shortcuts: ShortcutStore, browser: BrowserController, history: HistoryModel, server: ServerState, updates: Updates, version: String,
         onResult: @escaping (InstallResult) -> Void = { _ in }, onResetHUD: @escaping () -> Void = {},
-        browserProfiles: @escaping () -> [ChromiumProfile] = { BrowserCookies.profiles() },
+        cookieBrowsers: @escaping () -> [CookieBrowser] = CookieBrowser.installed,
         permissions: @escaping () -> (screenRecording: Bool, accessibility: Bool) = { (ScreenCapture.isAllowed, AXIsProcessTrusted()) },
         wireframePreviews: WireframePreviews? = nil
     ) {
@@ -163,7 +163,7 @@ final class SettingsModel: ObservableObject {
         self.onResult = onResult
         self.onResetHUD = onResetHUD
         self.permissions = permissions
-        self.browserProfiles = browserProfiles
+        self.cookieBrowsers = cookieBrowsers
         self.wireframePreviews = wireframePreviews ?? WireframePreviews()
     }
 

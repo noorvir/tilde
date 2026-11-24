@@ -1,10 +1,10 @@
-// Wireframe mode: components (section, card, table, button, dropdown, list, and plain
-// rectangles and ellipses) over the screen, sent together as one note. Its shapes stay until
+// Wireframe mode: components (section, card, table, button, dropdown, list and ellipse; an
+// older note's rectangle comes back as a card) and text over the screen, sent together as one note. Its shapes stay until
 // Done takes them all. Each component is one element, which wireframe/look.js draws.
 
 import { moveCursor, setSelectMode } from "../cursor.js";
 import { drawColor, useTool } from "../draw-mode.js";
-import { api, taken, live, changeElements, isTextField } from "../scene.js";
+import { api, taken, live, changeElements, isTextField, post } from "../scene.js";
 import { selection, setKindIcons, deleteComponent, hideHandles } from "./chip.js";
 import { kindNames, wireframeElements } from "./components.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./history.js";
@@ -54,13 +54,27 @@ export function setWireframe(state) {
 // The components of a wireframe note, to edit it again: its shapes as the report gives them,
 // and their origin in points from the top left of the canvas.
 export function restoreWireframe({ shapes, origin: [left, top] }) {
-  const elements = shapes.filter((shape) => kindNames[shape.type]).flatMap((shape) => {
+  const elements = shapes.filter((shape) => kindNames[shape.type] || shape.type === "text").flatMap((shape) => {
     const [x, y, width, height] = shape.rect;
-    const data = Object.fromEntries(["label", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
-    return wireframeElements(shape.type, { x: x + left, y: y + top, width, height }, data);
+    const data = Object.fromEntries(["label", "text", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
+    // Card took Rectangle's place.
+    const kind = shape.type === "rectangle" ? "card" : shape.type;
+    return wireframeElements(kind, { x: x + left, y: y + top, width, height }, data);
   });
   api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...elements], captureUpdate: "NEVER" });
   clearHistory();
+}
+
+// The scene's version, to tell Tilde of each change to the shapes or components, which it
+// saves as a draft: each element's id and version, as a move or resize rebuilds a component as
+// new elements at their first version.
+let sentVersion = "";
+
+export function postChange() {
+  const version = api.getSceneElementsIncludingDeleted().map((element) => `${element.id}:${element.version}:${element.isDeleted ? 1 : 0}`).join(",");
+  if (version === sentVersion) return;
+  sentVersion = version;
+  post("canvasChanged");
 }
 
 // Before Done takes the components: the label that is typed is kept, and no handle, guide or

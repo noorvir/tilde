@@ -13,8 +13,9 @@ set -eu
 
 cd "$(dirname "$0")/.."
 configuration="${1:-release}"
-# scripts/release.sh changes this line; a release from a tag sets TILDE_VERSION instead.
-version="${TILDE_VERSION:-0.2.0}"
+# A release sets TILDE_VERSION; any other build is the latest tag on HEAD's history plus " (dev)".
+latest_tag="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"
+version="${TILDE_VERSION:-${latest_tag#v} (dev)}"
 identity="${TILDE_SIGN_IDENTITY:--}"
 # The public half of the EdDSA key that signs updates (Sparkle's generate_keys prints it). An
 # update that this key did not sign is refused. TILDE_UPDATE_PUBLIC_KEY replaces it for tests.
@@ -89,7 +90,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>Copyright © YEAR The Tilde authors.</string>
-  <key>NSCameraUsageDescription</key><string>Tilde records the screen of an iPhone connected by cable.</string>
+  <key>NSCameraUsageDescription</key><string>Tilde shows your camera in screen recordings, and records the screen of an iPhone connected by cable.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Tilde records your voice with screen recordings that show your camera.</string>
   <key>NSLocalNetworkUsageDescription</key><string>Tilde connects to the machines that you link, and opens pages from your local network in its browser.</string>
   <key>SUEnableAutomaticChecks</key><true/>
   <key>SUAutomaticallyUpdate</key><true/>

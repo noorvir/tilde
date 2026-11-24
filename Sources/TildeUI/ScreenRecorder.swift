@@ -5,13 +5,17 @@ import ScreenCaptureKit
 import VideoToolbox
 
 /// Records one display, one window or an iPhone on a cable to an H.264 `.mp4` file, without
-/// Tilde's own windows other than its browser. The video leaves out the time spent paused.
+/// Tilde's own windows other than its browser on a display, and with the microphone
+/// when asked (macOS 15 and later). The video leaves out the time spent paused.
 final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     struct Clip {
         let video: URL
         let seconds: Double
         /// The last frame, as PNG.
         let poster: Data?
+        /// When the first frame was captured, on the host clock: the clip's time zero, which
+        /// its sound is written against too, and the camera is aligned to.
+        let start: CMTime
     }
 
     enum Failure: Error {
@@ -46,6 +50,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     private let clock: CMClock
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
+    /// The microphone's track; nil when the clip has no sound.
+    private let audioInput: AVAssetWriterInput?
     private let queue = DispatchQueue(label: "dev.tilde.recorder")
     private let writerWatch: DispatchSourceTimer
     private let log = Logger(subsystem: "dev.tilde.app", category: "recording")
@@ -65,10 +71,18 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// Set by Stop and Discard: from then on nothing is written.
     private var isStopped = false
 
-    /// Starts recording a source into `video`. `browserWindow`, Tilde's browser, stays in a
-    /// recording of the screen; Tilde's other windows do not.
+    /// What a clip records besides the source: Tilde's windows to keep in a display's clip,
+    /// such as its browser, and the microphone's `AVCaptureDevice.uniqueID`. The camera is a
+    /// file of its own.
+    struct Extras {
+        var keptWindows: [Int] = []
+        var microphone: String?
+    }
+
+    /// Starts recording a source into `video`. Of Tilde's windows, only `extras.keptWindows`
+    /// show in a display's clip; a window's clip shows that window's app alone.
     static func start(
-        _ source: RecordingSource, to video: URL, browserWindow: Int?, onSourceEnded: @escaping @Sendable () -> Void
+        _ source: RecordingSource, to video: URL, extras: Extras, onSourceEnded: @escaping @Sendable () -> Void
     ) async throws -> ScreenRecorder {
         let filter: SCContentFilter
         let size: CGSize
@@ -80,7 +94,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         case .window(let window):
             let content = try await shareableContent()
             guard let shared = content.windows.first(where: { $0.windowID == CGWindowID(window.number) }),
-                  let (showing, display) = ScreenCapture.filter(showingAppOf: shared, at: shared.frame, content: content)
+                  let (showing, display) = ScreenCapture.filter(showingAppOf: shared, at: shared.frame, content: content, keeping: [])
             else {
                 throw Failure.noSource
             }
@@ -94,8 +108,8 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
                 throw Failure.noSource
             }
             let tilde = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
-            let browser = content.windows.filter { Int($0.windowID) == browserWindow }
-            filter = SCContentFilter(display: shared, excludingApplications: tilde, exceptingWindows: browser)
+            let kept = content.windows.filter { extras.keptWindows.contains(Int($0.windowID)) }
+            filter = SCContentFilter(display: shared, excludingApplications: tilde, exceptingWindows: kept)
             size = shared.frame.size
         }
 
@@ -112,8 +126,15 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             configuration.sourceRect = windowArea.rect.offsetBy(dx: -windowArea.display.minX, dy: -windowArea.display.minY)
         }
 
-        let (writer, input) = try makeWriter(width: width, height: height, to: video)
-        let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: onSourceEnded)
+        var microphone: String?
+        if #available(macOS 15.0, *), let device = extras.microphone {
+            configuration.captureMicrophone = true
+            configuration.microphoneCaptureDeviceID = device
+            microphone = device
+        }
+
+        let (writer, input, audioInput) = try makeWriter(width: width, height: height, withAudio: microphone != nil, to: video)
+        let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, audioInput: audioInput, onSourceEnded: onSourceEnded)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: recorder)
         recorder.endCapture = {
             try? await stream.stopCapture()
@@ -128,6 +149,11 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
                 moved.showsCursor = true
                 moved.pixelFormat = configuration.pixelFormat
                 moved.sourceRect = CGRect(origin: origin, size: windowArea.rect.size)
+                // A new configuration has no microphone: the sound would stop.
+                if #available(macOS 15.0, *), let microphone {
+                    moved.captureMicrophone = true
+                    moved.microphoneCaptureDeviceID = microphone
+                }
                 stream.updateConfiguration(moved) { _ in }
             }
         }
@@ -135,6 +161,9 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             try? await SCScreenshotManager.captureSampleBuffer(contentFilter: filter, configuration: configuration)
         }
         try stream.addStreamOutput(recorder, type: .screen, sampleHandlerQueue: recorder.queue)
+        if #available(macOS 15.0, *), microphone != nil {
+            try stream.addStreamOutput(recorder, type: .microphone, sampleHandlerQueue: recorder.queue)
+        }
         do {
             try await stream.startCapture()
         } catch {
@@ -154,14 +183,14 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         do {
             let frame = try await firstFrame.image(timeout: 5)
             let (width, height) = videoSize(of: CGSize(width: frame.width, height: frame.height))
-            (writer, input) = try makeWriter(width: width, height: height, to: video)
+            (writer, input, _) = try makeWriter(width: width, height: height, withAudio: false, to: video)
         } catch {
             session.stopRunning()
             throw error
         }
 
         let recorder = ScreenRecorder(
-            clock: session.synchronizationClock ?? CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: onSourceEnded
+            clock: session.synchronizationClock ?? CMClockGetHostTimeClock(), writer: writer, input: input, audioInput: nil, onSourceEnded: onSourceEnded
         )
         let center = NotificationCenter.default
         let ended: @Sendable (Notification) -> Void = { [weak recorder] _ in
@@ -197,10 +226,13 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         return (Int(pixels.width * scale) / 2 * 2, Int(pixels.height * scale) / 2 * 2)
     }
 
-    /// An H.264 writer for frames of this size into `video`. A frame of another size, such as
-    /// a phone turned sideways, is fitted in with bars. A size it cannot write is an error, not
-    /// the exception that AVAssetWriterInput raises for it.
-    static func makeWriter(width: Int, height: Int, to video: URL) throws -> (AVAssetWriter, AVAssetWriterInput) {
+    /// An H.264 writer for frames of this size into `video`, with an AAC track when
+    /// `withAudio`. A frame of another size, such as a phone turned sideways, is fitted in
+    /// with bars. A size it cannot write is an error, not the exception that
+    /// AVAssetWriterInput raises for it.
+    static func makeWriter(
+        width: Int, height: Int, withAudio: Bool, to video: URL
+    ) throws -> (AVAssetWriter, AVAssetWriterInput, AVAssetWriterInput?) {
         let writer = try AVAssetWriter(outputURL: video, fileType: .mp4)
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -214,16 +246,29 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = true
         writer.add(input)
+        var audioInput: AVAssetWriterInput?
+        if withAudio {
+            let audio = AVAssetWriterInput(
+                mediaType: .audio,
+                outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVNumberOfChannelsKey: 1, AVSampleRateKey: 48000, AVEncoderBitRateKey: 96000]
+            )
+            audio.expectsMediaDataInRealTime = true
+            writer.add(audio)
+            audioInput = audio
+        }
         guard writer.startWriting() else {
             throw writer.error ?? Failure.noSource
         }
-        return (writer, input)
+        return (writer, input, audioInput)
     }
 
-    private init(clock: CMClock, writer: AVAssetWriter, input: AVAssetWriterInput, onSourceEnded: @escaping @Sendable () -> Void) {
+    private init(
+        clock: CMClock, writer: AVAssetWriter, input: AVAssetWriterInput, audioInput: AVAssetWriterInput?, onSourceEnded: @escaping @Sendable () -> Void
+    ) {
         self.clock = clock
         self.writer = writer
         self.input = input
+        self.audioInput = audioInput
         self.onSourceEnded = onSourceEnded
         writerWatch = DispatchSource.makeTimerSource(queue: queue)
         super.init()
@@ -329,6 +374,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         }
 
         input.markAsFinished()
+        audioInput?.markAsFinished()
         writer.endSession(atSourceTime: end)
         await writer.finishWriting()
         if let error = writer.error {
@@ -342,7 +388,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             VTCreateCGImageFromCVPixelBuffer(lastFrame, options: nil, imageOut: &image)
             poster = image.flatMap { ScreenCapture.png(from: $0, outline: nil, scale: 1, maxSide: 1600) }
         }
-        return Clip(video: writer.outputURL, seconds: (end - start).seconds, poster: poster)
+        return Clip(video: writer.outputURL, seconds: (end - start).seconds, poster: poster, start: start)
     }
 
     /// Ends the recording and deletes its file.
@@ -362,10 +408,37 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     // MARK: - Frames (on `queue`)
 
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen, Self.isComplete(buffer) else {
+        if type == .screen, Self.isComplete(buffer) {
+            append(buffer)
             return
         }
-        append(buffer)
+        if #available(macOS 15.0, *), type == .microphone {
+            appendAudio(buffer)
+        }
+    }
+
+    /// Writes sound moved back by the time spent paused, from the clip's first frame on; sound
+    /// during a pause, or that the encoder cannot take now, is dropped.
+    private func appendAudio(_ buffer: CMSampleBuffer) {
+        guard let audioInput, !isStopped, writer.status == .writing, let startTime, buffer.isValid,
+              let time = videoTime(of: buffer.presentationTimeStamp), time >= startTime, audioInput.isReadyForMoreMediaData
+        else {
+            return
+        }
+        let offset = time - buffer.presentationTimeStamp
+        var count: CMItemCount = 0
+        CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: 0, arrayToFill: nil, entriesNeededOut: &count)
+        var timings = [CMSampleTimingInfo](repeating: CMSampleTimingInfo(), count: count)
+        CMSampleBufferGetSampleTimingInfoArray(buffer, entryCount: count, arrayToFill: &timings, entriesNeededOut: &count)
+        for index in timings.indices {
+            timings[index].presentationTimeStamp = timings[index].presentationTimeStamp + offset
+            timings[index].decodeTimeStamp = .invalid
+        }
+        var moved: CMSampleBuffer?
+        CMSampleBufferCreateCopyWithNewTiming(allocator: nil, sampleBuffer: buffer, sampleTimingEntryCount: count, sampleTimingArray: &timings, sampleBufferOut: &moved)
+        if let moved, !audioInput.append(moved) {
+            log.error("could not write sound: \(self.writer.error?.localizedDescription ?? "", privacy: .public)")
+        }
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -476,8 +549,8 @@ extension ScreenRecorder {
     static func forTesting(
         video: URL, width: Int, height: Int, takeStill: @escaping @Sendable () async -> CMSampleBuffer?, endCapture: @escaping () async -> Void = {}
     ) throws -> ScreenRecorder {
-        let (writer, input) = try makeWriter(width: width, height: height, to: video)
-        let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, onSourceEnded: {})
+        let (writer, input, _) = try makeWriter(width: width, height: height, withAudio: false, to: video)
+        let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, audioInput: nil, onSourceEnded: {})
         recorder.takeStill = takeStill
         recorder.endCapture = endCapture
         return recorder

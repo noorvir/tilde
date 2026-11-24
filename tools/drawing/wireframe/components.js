@@ -5,8 +5,9 @@
 import { convertToExcalidrawElements } from "@excalidraw/excalidraw";
 import { api, taken, live } from "../scene.js";
 
+// In the bar's order. Rectangle is only for older notes, which show it as Card.
 export const kindNames = {
-  section: "Section", card: "Card", table: "Table", button: "Button", dropdown: "Dropdown", list: "List", rectangle: "Rectangle", ellipse: "Circle",
+  section: "Section", card: "Card", ellipse: "Circle", button: "Button", table: "Table", list: "List", dropdown: "Dropdown", rectangle: "Rectangle",
 };
 
 export const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -23,17 +24,18 @@ export function rowsOf(kind, { width, height }, data) {
 }
 
 export const allBorders = ["top", "right", "bottom", "left"];
-// A new rectangle or ellipse is filled as the last one set.
+// A new ellipse is filled as the last one set.
 let isFilled = true;
 
 export function newData(kind) {
   const data = { borders: allBorders };
-  if (kind === "rectangle" || kind === "ellipse") data.filled = isFilled;
+  if (kind === "ellipse") data.filled = isFilled;
   return data;
 }
 
 // A component in the scene: one element as large as it, which nothing of Excalidraw draws, with
-// its kind and `data` (label, borders, rows, columns, fill). The look layer draws it.
+// its kind and `data` (label, text, borders, rows, columns, fill). The look layer draws it. A
+// free text is one too, of kind "text", as large as its text.
 export function wireframeElements(kind, { x, y, width, height }, data, groupIds = [`wireframe-${Math.random().toString(36).slice(2)}`]) {
   const [frame] = convertToExcalidrawElements([{
     type: "rectangle", x, y, width, height, roughness: 0, strokeWidth: 1, fillStyle: "solid", strokeStyle: "solid",
@@ -42,10 +44,11 @@ export function wireframeElements(kind, { x, y, width, height }, data, groupIds 
   return [{ ...frame, groupIds, customData: { ...data, tildeWireframe: kind } }];
 }
 
-// A new kind keeps the rect and the label, and the fill or rows where the new kind has them.
+// A new kind keeps the rect, the label and the text, and the fill or rows where the new kind has
+// them.
 export function changedKind(frame, kind) {
   const old = frame.customData;
-  const data = { ...newData(kind), tildeWireframe: kind, label: old.label, comment: old.comment };
+  const data = { ...newData(kind), tildeWireframe: kind, label: old.label, text: old.text, comment: old.comment };
   if (old.borders) data.borders = old.borders;
   if (old.radius) data.radius = old.radius;
   if ("filled" in data && old.filled !== undefined) data.filled = old.filled;

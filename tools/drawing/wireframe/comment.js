@@ -11,7 +11,7 @@ commentBox.dataset.wireframeHandle = "";
 commentBox.style.cssText = "position:fixed;z-index:10000;display:none;flex-direction:column;gap:6px;width:260px;padding:8px;border-radius:10px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif";
 const commentField = document.createElement("textarea");
 commentField.id = "tilde-comment-field";
-commentField.placeholder = "Add a comment…";
+commentField.placeholder = "Add a comment";
 commentField.rows = 3;
 commentField.setAttribute("aria-label", "Comment");
 commentField.style.cssText = "box-sizing:border-box;width:100%;margin:0;padding:6px 8px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:rgba(255,255,255,.08);color:#fff;font:400 12px -apple-system,sans-serif;resize:none;outline:none";

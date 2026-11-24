@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Record's accessory bar under the HUD, while recording mode is on: what the next clip
-/// records, which starts choosing it, then Play or Pause and Stop. The source button has
+/// records, which starts choosing it, then Play or Pause, the camera bubble and Stop. The source button has
 /// a fixed width, so the bar keeps its width in every state of the clip.
 struct HUDRecordingBar: View {
     /// The source button's width, which the source dropdown's rows share.
@@ -35,6 +35,8 @@ struct HUDRecordingBar: View {
                 controller.dispatch(.record)
             }
             .disabled(!controller.accepts(.record))
+
+            CameraButton(camera: controller.camera)
 
             HUDButton(image: Image(systemName: "stop.fill"), help: "Stop recording") {
                 controller.dispatch(.stop)
@@ -71,6 +73,17 @@ struct HUDRecordingBar: View {
         case .screen: return Image(systemName: "display")
         case .window: return Image(systemName: "macwindow")
         case .phone: return Image(systemName: "iphone")
+        }
+    }
+}
+
+/// Shows and hides the camera bubble; on while it shows.
+private struct CameraButton: View {
+    @ObservedObject var camera: CameraBubble
+
+    var body: some View {
+        HUDButton(image: Image(systemName: camera.isOn ? "video.fill" : "video"), isOn: camera.isOn, help: camera.isOn ? "Turn camera off" : "Turn camera on") {
+            camera.toggle()
         }
     }
 }

@@ -14,6 +14,10 @@ final class ClipRecorder {
     var dispatch: (SessionFlow.Event, [SessionFlow.Effect: () -> Void]) -> Void = { _, _ in }
     /// Puts a stopped clip in the list.
     var keep: (Draft) -> Void = { _ in }
+    /// Records the camera beside a clip, while its bubble shows.
+    weak var camera: CameraBubble?
+    /// The camera file of the clip in progress.
+    private var cameraFile: URL?
 
     private var recorder: ScreenRecorder?
     /// What the clip in progress shows: its name, such as "Safari window", and its frame.
@@ -23,8 +27,9 @@ final class ClipRecorder {
     private let log = Logger(subsystem: "dev.tilde.app", category: "recording")
 
     /// Starts recording `source` into `video` for the flow's start `operation`. `windowName`:
-    /// the name of a window's app as the HUD shows it.
-    func start(_ source: RecordingSource, windowName: String?, into video: URL, browserWindow: Int?, operation: Int) {
+    /// the name of a window's app as the HUD shows it. `recordsCamera`: the camera goes into a
+    /// file of its own beside the video.
+    func start(_ source: RecordingSource, windowName: String?, into video: URL, extras: ScreenRecorder.Extras, recordsCamera: Bool, operation: Int) {
         // What the report says the clip shows.
         let name: String
         let frame: CGRect
@@ -44,9 +49,16 @@ final class ClipRecorder {
                 self?.sourceEnded(video)
             }
         }
+        // The camera file takes about a second to start: it starts before the screen does,
+        // and Stop cuts off what came before the clip's first frame.
+        if recordsCamera, let camera {
+            let file = Self.cameraFile(of: video)
+            cameraFile = file
+            camera.startRecording(to: file)
+        }
         Task {
             do {
-                let started = try await ScreenRecorder.start(source, to: video, browserWindow: browserWindow, onSourceEnded: sourceEnded)
+                let started = try await ScreenRecorder.start(source, to: video, extras: extras, onSourceEnded: sourceEnded)
                 dispatch(.clipStarted(operation), [
                     .adoptClip: { [self] in
                         recorder = started
@@ -54,7 +66,10 @@ final class ClipRecorder {
                         clock = (Date(), 0)
                         log.notice("recording \(name, privacy: .public)")
                     },
-                    .dropClip: { started.discard() },
+                    .dropClip: { [self] in
+                        started.discard()
+                        dropCameraFile()
+                    },
                 ])
                 // A source that went away meanwhile ends the clip now that it is taken.
                 if endedEarly.remove(video) != nil, recorder?.video == video {
@@ -62,6 +77,7 @@ final class ClipRecorder {
                 }
             } catch {
                 log.error("could not start recording: \(String(describing: error), privacy: .public)")
+                dropCameraFile()
                 dispatch(.clipStartFailed(operation), [:])
             }
         }
@@ -74,11 +90,17 @@ final class ClipRecorder {
 
     func pause() {
         recorder?.pause()
+        if cameraFile != nil {
+            camera?.pauseRecording()
+        }
         clock = (Date(), clock.before + Date().timeIntervalSince(clock.since))
     }
 
     func resume() {
         recorder?.resume()
+        if cameraFile != nil {
+            camera?.resumeRecording()
+        }
         clock = (Date(), clock.before)
     }
 
@@ -89,9 +111,16 @@ final class ClipRecorder {
         }
         self.recorder = nil
         let recorded = self.recorded
+        let recordsCamera = cameraFile != nil
+        cameraFile = nil
         Task {
             do {
                 let clip = try await recorder.stop()
+                // The camera file is finished, also one cut short by the camera going off, and
+                // put on the clip's time.
+                if recordsCamera, let recording = await camera?.stopRecording() {
+                    await CameraAlignment.align(recording, toClipStartingAt: clip.start)
+                }
                 let target = Target.recording(video: clip.video, seconds: clip.seconds, source: recorded.name)
                 let annotation = Annotation(comment: "", target: target, frame: recorded.frame, image: clip.poster, contextImage: nil)
                 let captures = Captures(image: clip.poster, contextImage: nil)
@@ -112,6 +141,20 @@ final class ClipRecorder {
     func discard() {
         recorder?.discard()
         recorder = nil
+        dropCameraFile()
+    }
+
+    /// Ends the camera file in progress, if any, and deletes it.
+    private func dropCameraFile() {
+        guard cameraFile != nil else {
+            return
+        }
+        cameraFile = nil
+        Task {
+            if let recording = await camera?.stopRecording() {
+                try? FileManager.default.removeItem(at: recording.file)
+            }
+        }
     }
 
     /// The recorded window, display or phone went away: the clip ends at its last frame. Before
@@ -124,10 +167,17 @@ final class ClipRecorder {
         dispatch(.captureStopped, [:])
     }
 
-    /// Deletes the video of a recording's draft; other drafts have no file.
+    /// Deletes the video of a recording's draft, and its camera file; other drafts have no file.
     nonisolated static func deleteVideo(of draft: Draft) {
         if case .recording(let video, _, _) = draft.annotation.target {
             try? FileManager.default.removeItem(at: video)
+            try? FileManager.default.removeItem(at: cameraFile(of: video))
         }
+    }
+
+    /// Where a clip's camera is recorded, beside its video. It stays on disk with the clip, so a
+    /// restored or carried clip has it too.
+    nonisolated static func cameraFile(of video: URL) -> URL {
+        video.deletingPathExtension().appendingPathExtension("camera.mov")
     }
 }

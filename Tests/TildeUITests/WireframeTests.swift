@@ -104,7 +104,7 @@ struct WireframeTests {
             #expect(controller.handleKey(try key(letter), in: .canvas))
             #expect(controller.wireframe.tool == tool)
         }
-        #expect(controller.handleKey(try key("T", modifiers: .shift), in: .overlay(hoveredNote: nil)))
+        #expect(controller.handleKey(try key("G", modifiers: .shift), in: .overlay(hoveredNote: nil)))
         #expect(controller.wireframe.tool == "table")
         controller.setWireframeTool("button")
         #expect(controller.wireframe.tool == "button")
@@ -119,7 +119,7 @@ struct WireframeTests {
         let drawTool = controller.drawing.tool
         let color = controller.drawing.color
 
-        for letter in ["a", "p", "w", "x", "1", "6"] {
+        for letter in ["a", "p", "w", "q", "1", "6"] {
             #expect(controller.handleKey(try key(letter), in: .canvas), "\(letter) was not taken")
         }
         #expect(controller.wireframe.tool == "list")
@@ -128,8 +128,8 @@ struct WireframeTests {
         #expect(controller.isWireframe)
         #expect(controller.pauses.isEmpty)
 
-        // ⌘Z is the canvas's own key: undo of its changes.
-        #expect(!controller.handleKey(try key("z", code: kVK_ANSI_Z, modifiers: .command), in: .canvas))
+        // ⌘Z undoes the canvas's last change.
+        #expect(controller.handleKey(try key("z", code: kVK_ANSI_Z, modifiers: .command), in: .canvas))
         #expect(controller.isWireframe)
     }
 

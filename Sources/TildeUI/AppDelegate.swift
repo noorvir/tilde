@@ -42,6 +42,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         super.init()
     }
 
+    /// Draft saves that wait for changes to stop run first, so the shapes of the last half
+    /// second are kept.
+    public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard controller.hasWaitingDraftSave else {
+            return .terminateNow
+        }
+        controller.saveWaitingDrafts {
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
         nodes?.stopLinks()
         controller.saver.saveBeforeQuitting()

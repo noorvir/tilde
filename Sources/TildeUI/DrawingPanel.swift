@@ -19,9 +19,14 @@ final class DrawingPanel {
     private var releaseTask: Task<Void, Never>?
     private var isOverLabel = false
     var onEscape: () -> Void = {}
-    var onShape: () -> Void = {}
     var onEdited: () -> Void = {}
+    /// The shapes or the wireframe's components changed.
+    var onCanvasChanged: () -> Void = {}
+    /// A text field of the canvas got the keyboard, or lost it.
+    var onTyping: (Bool) -> Void = { _ in }
     var onClickAway: () -> Void = {}
+    /// Add comment in the canvas's context menu.
+    var onAddComment: () -> Void = {}
     /// A press, in Quartz screen coordinates. True: it was for something else, such as a label.
     var onPress: (CGPoint) -> Bool = { _ in false }
     /// The pointer moved, in Quartz screen coordinates.
@@ -54,6 +59,11 @@ final class DrawingPanel {
         }
         self.look = look
         canvases.forEach { $0.look = look }
+    }
+
+    /// Draw has shapes that no comment has taken yet: Esc ends the group and opens its comment.
+    var hasGroup: Bool {
+        active?.hasGroup ?? false
     }
 
     /// Windows Tilde must keep in a screenshot of what was drawn.
@@ -109,6 +119,12 @@ final class DrawingPanel {
         active?.run("endEditing()")
     }
 
+    /// Asks the page for the group's comment once its last shape has settled: it posts
+    /// `addComment` when there is a group.
+    func endGroup() {
+        active?.run("endGroup()")
+    }
+
     /// The hand cursor over a note's label, which a press opens.
     func setOverLabel(_ isOverLabel: Bool) {
         guard isOverLabel != self.isOverLabel else {
@@ -127,23 +143,19 @@ final class DrawingPanel {
         active?.focus()
     }
 
-    /// The element to snap to, in Quartz screen coordinates.
-    func setSnapFrame(_ frame: CGRect?) {
-        active?.setSnapFrame(frame)
-    }
-
     /// Wireframe mode's tool and icons as JSON, or `null` to leave the mode.
     func setWireframe(_ json: String) {
         active?.wireframe = json
     }
 
-    /// Undo and redo of wireframe mode's changes, which the canvas keeps.
-    func undoWireframe() {
-        active?.run("undoWireframe()")
+    /// Undo and redo of the canvas's changes, in Draw and Wireframe. Saved notes are not in its
+    /// history.
+    func undoCanvas() {
+        active?.run("undoCanvas()")
     }
 
-    func redoWireframe() {
-        active?.run("redoWireframe()")
+    func redoCanvas() {
+        active?.run("redoCanvas()")
     }
 
     /// Lines for wireframe shapes to snap to, in Quartz screen coordinates.
@@ -193,6 +205,14 @@ final class DrawingPanel {
             }
         }
         return []
+    }
+
+    func newShapes(_ done: @escaping (Drawing?) -> Void) {
+        guard let active else {
+            done(nil)
+            return
+        }
+        active.newShapes(done)
     }
 
     func takeNewShapes() async -> Drawing? {

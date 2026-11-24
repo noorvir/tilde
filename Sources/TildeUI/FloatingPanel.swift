@@ -1,6 +1,10 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// A window that annotates the screen: the overlay or the drawing canvas. A press there that
+/// only closes the notes list starts no note or drawing.
+protocol AnnotationSurface: NSWindow {}
+
 /// Borderless panel that can take keyboard focus without activating other windows.
 ///
 /// While one of its text views has the keyboard, Tilde is the app in front, as with any text

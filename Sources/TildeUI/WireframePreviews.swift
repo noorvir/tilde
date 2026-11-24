@@ -147,7 +147,8 @@ final class WireframePicturePage {
     /// and the fade show it under the components: the top left `size` of the page, at two
     /// pixels per point.
     func picture(of shapes: [[String: Any]], look: WireframeLook, state: String, over app: CGImage, size: CGSize) async throws -> CGImage {
-        let under = shapes.filter { $0["filled"] as? Bool != false }.compactMap { shape -> UnderBlurView.Shape? in
+        // A free text has nothing under it blurred.
+        let under = shapes.filter { $0["filled"] as? Bool != false && $0["type"] as? String != "text" }.compactMap { shape -> UnderBlurView.Shape? in
             guard let rect = (shape["rect"] as? [NSNumber])?.map(\.doubleValue), rect.count == 4 else {
                 return nil
             }

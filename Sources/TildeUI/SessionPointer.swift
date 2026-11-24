@@ -21,8 +21,12 @@ extension AnnotationController {
     }
 
     func mouseMoved(to point: CGPoint) {
-        // In wireframe mode nothing behind the components is highlighted.
-        guard commentBox.pending == nil, previewCard.id == nil, !isWireframe else {
+        // In Draw and Wireframe nothing behind the shapes is highlighted.
+        if isDrawing {
+            hover = nil
+            return
+        }
+        guard commentBox.pending == nil, previewCard.id == nil else {
             return
         }
         hoverPicker.pointerMoved(isOverPanel: isOverPanel(point))
@@ -128,7 +132,7 @@ extension AnnotationController {
     // MARK: - The drawing canvas
 
     /// The pointer moved on the canvas, at a Quartz point: over a note's label nothing snaps;
-    /// else Draw snaps to the element under it, and Wireframe to the lines of the layout.
+    /// else Wireframe snaps to the lines of the layout.
     func canvasPointerMoved(to point: CGPoint) {
         let isOverLabel = tracker.label(at: point) != nil
         if isOverLabel {
@@ -139,7 +143,7 @@ extension AnnotationController {
             wireframe.pointerMoved(to: point)
             return
         }
-        drawing.pointerMoved(to: point, isOverLabel: isOverLabel)
+        drawing.pointerMoved(isOverLabel: isOverLabel)
     }
 
     /// A press on the canvas, at a Quartz point. True: it opened the preview of the note

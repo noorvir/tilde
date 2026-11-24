@@ -2,7 +2,7 @@
 // must know of.
 
 import { isSelectMode, setOverLabel } from "./cursor.js";
-import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, setSnapFrame, pointerLeft } from "./draw-mode.js";
+import { clickArrow, cancelClickArrow, setTool, editShapes, endEditing, resetEditing, setColor, setNoTool, deselect, endGroup, pointerLeft, groupChanged, shapeAt, drawSelection } from "./draw-mode.js";
 import { api, taken, post, live, changeElements, describe, withGroups, isTextField } from "./scene.js";
 import { selection, selectGroup, showHandles } from "./wireframe/chip.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.js";
@@ -23,6 +23,7 @@ function clear() {
   taken.clear();
   api.updateScene({ elements: [], captureUpdate: "NEVER" });
   api.history.clear();
+  groupChanged();
 }
 
 // The shapes drawn and not taken yet, as `takeNewShapes` gives them; they stay as they are.
@@ -36,11 +37,27 @@ function takeNewShapes() {
   const elements = live().filter((element) => !taken.has(element.id));
   if (!elements.length) return "";
   elements.forEach((element) => taken.add(element.id));
+  // No outline in the note's pictures.
+  api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+  drawSelection();
   api.history.clear();
   clearHistory();
   // Their empty tags go before the pictures are taken.
   drawLook();
+  groupChanged();
   return JSON.stringify(elements.map(describe));
+}
+
+// Undo and redo of the canvas's last change. Wireframe mode keeps its own history; Draw keeps
+// Excalidraw's, which taking the shapes for a note clears, so a saved note never comes back.
+function undoCanvas() {
+  if (wireframe) undoWireframe();
+  else document.querySelector('.excalidraw [data-testid="button-undo"]')?.click();
+}
+
+function redoCanvas() {
+  if (wireframe) redoWireframe();
+  else document.querySelector('.excalidraw [data-testid="button-redo"]')?.click();
 }
 
 // With the other elements of each shape's group.
@@ -55,24 +72,27 @@ function setSnapTargetsHere(targets) {
 }
 
 // Whether a press at this point, in points from the top left of the canvas, is for the page.
-// With a tool, every press is; with none, Draw takes no press, and wireframe mode only those on
-// its components.
+// With a tool, every press is; with none, wireframe mode takes only those on its components,
+// and Draw those on a shape, to select it.
 function takesPointer(x, y) {
   if (!isSelectMode) return true;
-  return Boolean(wireframe) && wireframeTakesPointer(x, y);
+  if (wireframe) return wireframeTakesPointer(x, y);
+  return Boolean(shapeAt(x, y));
 }
 
 // The pointer went through the canvas to a window behind, such as one of Tilde's own: the page
 // gets no more moves, so the tool's ring does not stay where the pointer left.
 function pointerWentThrough(isPress) {
   pointerLeft();
+  // A click beside the shapes clears Draw's selection.
+  if (isPress && !wireframe) deselect();
   wireframePointerWentThrough(isPress);
 }
 
 window.tildeDraw = {
-  setTool, editShapes, endEditing, setOverLabel, setColor, setNoTool, deselect, setSnapFrame,
+  setTool, editShapes, endEditing, endGroup, setOverLabel, setColor, setNoTool, deselect,
   shapesOf, clear, newShapes, takeNewShapes, remove, takesPointer, pointerWentThrough,
-  setWireframe, setWireframeLook, showPreview, undoWireframe, redoWireframe, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
+  setWireframe, setWireframeLook, showPreview, undoCanvas, redoCanvas, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 
 // Tilde takes its own keys before the page; it must know when a text field here has the
@@ -95,7 +115,7 @@ export function swallowToolKey(event) {
 export function escapePressed(event) {
   if (event.key !== "Escape") return;
   // Excalidraw ends the text being typed.
-  if (wireframe && isTextField(event.target)) return;
+  if (isTextField(event.target)) return;
   event.preventDefault();
   // In wireframe mode Esc steps back one level: the chip's menu, then the selection; with
   // nothing selected it reaches Tilde, which puts the tool down.

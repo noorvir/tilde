@@ -178,6 +178,8 @@ struct UIState: Decodable {
     var commentText: String?
     var preview: Int?
     var enlarged: Enlarged?
+    /// The clip's menu of backgrounds is open in the preview.
+    var backgrounds: Bool?
     var text: String?
     /// The key hints after a tooltip's text, such as ["⌃⌃", "Space"].
     var keys: [String]?
@@ -192,6 +194,8 @@ struct UIState: Decodable {
     var chip: Chip?
     /// The canvas has its components inside a section, and a button inside a card.
     var nested: Bool?
+    /// The canvas's components have texts, and a free text is beside them.
+    var texts: Bool?
 
     init(file: URL) throws {
         let data = try Data(contentsOf: file)

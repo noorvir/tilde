@@ -11,8 +11,6 @@ struct GeneralSettings: View {
         "http://127.0.0.1:\(model.server.port)/mcp"
     }
 
-    @AppStorage("drawingSnaps") private var snapsDrawings = true
-
     var body: some View {
         let permissions = model.permissions()
 
@@ -27,14 +25,6 @@ struct GeneralSettings: View {
                         .onChange(of: launchesAtLogin) { _, isOn in
                             setLaunchAtLogin(isOn)
                         }
-                }
-                SettingsDivider()
-                SettingsRow(title: "Snap drawings to elements", subtitle: "Hold ⌘ while drawing to draw freely") {
-                    Toggle("Snap drawings to elements", isOn: $snapsDrawings)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(Color.tildeBlue)
-                        .labelsHidden()
                 }
                 SettingsDivider()
                 PermissionRow(title: "Screen Recording", subtitle: "Screenshots of any app", isAllowed: permissions.screenRecording) {
@@ -63,7 +53,7 @@ struct GeneralSettings: View {
                 }
             }
 
-            BrowserSettings(browser: model.browser, profiles: model.browserProfiles())
+            BrowserSettings(browser: model.browser, browsers: model.cookieBrowsers)
 
             SettingsSection("HUD") {
                 SettingsRow(title: "Position", subtitle: "Back to the top centre of each screen") {
@@ -144,40 +134,41 @@ private struct PermissionRow: View {
     }
 }
 
-/// Logins for Tilde's browser: import a Chromium profile's cookies, or clear the browser.
+/// Tilde's browser: import a browser profile's cookies, offer the browser for pages of other
+/// browsers, or clear its data.
 private struct BrowserSettings: View {
-    let browser: BrowserController
-    let profiles: [ChromiumProfile]
-    @State private var profile: ChromiumProfile?
-    @State private var isImporting = false
-    @State private var error: String?
+    @ObservedObject var browser: BrowserController
+    let browsers: () -> [CookieBrowser]
+    @State private var choice: [CookieBrowser]?
     @State private var asksToClear = false
     @AppStorage("BrowserImport.summary") private var lastImport = ""
+    @AppStorage(BrowserOffer.enabledKey) private var offersBrowser = true
+    @AppStorage(LoginImportBar.enabledKey) private var offersImport = true
 
     var body: some View {
         SettingsSection("Browser") {
-            SettingsRow(title: "Import logins", subtitle: subtitle, subtitleIsError: error != nil) {
-                HStack(spacing: 10) {
-                    if profiles.count > 1 {
-                        Picker("Profile", selection: $profile) {
-                            ForEach(profiles, id: \.self) { profile in
-                                Text(profile.title).tag(Optional(profile))
-                            }
-                        }
+            SettingsRow(title: "Import logins", subtitle: lastImport.isEmpty ? "Cookies from a browser on this Mac, so pages open signed in" : lastImport) {
+                Button("Import") {
+                    choice = browsers()
+                }
+            }
+            SettingsDivider()
+            SettingsRow(title: "Offer to import logins", subtitle: "A bar in Tilde's browser until logins are imported") {
+                Toggle("Offer to import logins", isOn: $offersImport)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .tint(Color.tildeBlue)
+                    .labelsHidden()
+            }
+            // Not while the page is in Tilde's browser already.
+            if browser.pageURL == nil {
+                SettingsDivider()
+                SettingsRow(title: "Offer Tilde's browser", subtitle: "For a note on a page in another browser") {
+                    Toggle("Offer Tilde's browser", isOn: $offersBrowser)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .tint(Color.tildeBlue)
                         .labelsHidden()
-                        .fixedSize()
-                    }
-                    Button(action: importLogins) {
-                        // While importing, a spinner takes the label's place at the same width.
-                        ZStack {
-                            Text("Import").opacity(isImporting ? 0 : 1)
-                            if isImporting {
-                                ProgressView().controlSize(.small)
-                            }
-                        }
-                    }
-                    .disabled(profiles.isEmpty || isImporting)
-                    .accessibilityLabel("Import")
                 }
             }
             SettingsDivider()
@@ -187,8 +178,13 @@ private struct BrowserSettings: View {
                 }
             }
         }
-        .onAppear {
-            profile = profile ?? profiles.first
+        .sheet(item: Binding(get: { choice.map(BrowserChoice.init) }, set: { choice = $0?.browsers })) { item in
+            ImportSheet(browsers: item.browsers, browser: browser) { summary in
+                if let summary {
+                    lastImport = summary
+                }
+                choice = nil
+            }
         }
         .confirmationDialog("Clear Tilde's browser data?", isPresented: $asksToClear) {
             Button("Clear", role: .destructive) {
@@ -201,35 +197,145 @@ private struct BrowserSettings: View {
             Text("You will be logged out of every site in Tilde's browser.")
         }
     }
+}
 
-    private var subtitle: String {
-        if let error {
-            return error
+struct BrowserChoice: Identifiable {
+    let browsers: [CookieBrowser]
+    var id: [String] { browsers.map(\.id) }
+}
+
+/// The import: a browser on this Mac, then one of its profiles. Safari asks for Full Disk
+/// Access first.
+struct ImportSheet: View {
+    let browsers: [CookieBrowser]
+    let browser: BrowserController
+    /// The result line, or nil when cancelled.
+    let onDone: (String?) -> Void
+    @State private var selected: CookieBrowser?
+    @State private var profile: CookieProfile?
+    @State private var isImporting = false
+    /// The import under way; Cancel stops it before the cookies go to the browser.
+    @State private var importing: Task<Void, Never>?
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Import logins").font(.headline)
+            Text("Tilde's browser gets this profile's cookies. Your browser stays as it is.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            if browsers.isEmpty {
+                Text("No browser with logins found on this Mac.").foregroundStyle(.secondary).padding(.vertical, 12)
+            }
+            ForEach(browsers) { item in
+                row(item)
+            }
+            if let error {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    importing?.cancel()
+                    onDone(nil)
+                }
+                    .keyboardShortcut(.cancelAction)
+                Button(action: importLogins) {
+                    // While importing, a spinner takes the label's place at the same width.
+                    ZStack {
+                        Text("Import").opacity(isImporting ? 0 : 1)
+                        if isImporting {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(profile == nil || selected?.needsFullDiskAccess != false || isImporting)
+                .accessibilityLabel("Import")
+            }
+            .padding(.top, 10)
         }
-        if profiles.isEmpty {
-            return "No Chrome, Arc, Brave or Edge profile found"
+        .padding(20)
+        .frame(width: 460)
+        .onAppear {
+            choose(browsers.first { !$0.needsFullDiskAccess } ?? browsers.first)
         }
-        if !lastImport.isEmpty {
-            return lastImport
+    }
+
+    private func row(_ item: CookieBrowser) -> some View {
+        let isSelected = selected == item
+        return HStack(spacing: 12) {
+            Image(nsImage: icon(item)).resizable().frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                Text(detail(item)).font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if item.needsFullDiskAccess {
+                Button("Grant") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!)
+                }
+            } else if isSelected, item.profiles.count > 1 {
+                Picker("Profile", selection: $profile) {
+                    ForEach(item.profiles, id: \.self) { profile in
+                        Text(profile.name).tag(Optional(profile))
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
         }
-        return "From \(profile?.browser.name ?? "Chrome") into Tilde's browser. Stays on this Mac."
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(isSelected ? Color.accentColor.opacity(0.08) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.25)))
+        .contentShape(Rectangle())
+        .onTapGesture { choose(item) }
+    }
+
+    private func detail(_ item: CookieBrowser) -> String {
+        if item.needsFullDiskAccess {
+            return "Needs Full Disk Access for Tilde"
+        }
+        return item.profiles.count == 1 ? item.profiles[0].name : "\(item.profiles.count) profiles"
+    }
+
+    private func icon(_ item: CookieBrowser) -> NSImage {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: item.bundleID) else {
+            return NSImage(systemSymbolName: "globe", accessibilityDescription: nil) ?? NSImage()
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    private func choose(_ item: CookieBrowser?) {
+        selected = item
+        profile = item?.profiles.first
+        error = nil
     }
 
     /// Reads the profile's cookies off the main thread (macOS may ask for the Keychain
-    /// password), then adds them to the browser. Only counts are kept.
+    /// password), then adds them to the browser. Only counts are kept. The spinner shows for
+    /// at least a second.
     private func importLogins() {
         guard let profile else {
             return
         }
         isImporting = true
         error = nil
-        Task {
+        importing = Task {
+            let started = Date()
             defer { isImporting = false }
             do {
                 let result = try await Task.detached { try BrowserCookies.cookies(of: profile) }.value
+                try Task.checkCancellation()
                 await browser.add(result.cookies)
+                let wait = 1 - Date().timeIntervalSince(started)
+                if wait > 0 {
+                    try? await Task.sleep(for: .seconds(wait))
+                }
                 let time = Date().formatted(date: .abbreviated, time: .shortened)
-                lastImport = "\(result.cookies.count) cookies from \(profile.title), \(time)"
+                onDone("✓ \(result.cookies.count) cookies from \(profile.title), \(time)")
+            } catch is CancellationError {
+                return
             } catch {
                 self.error = "Could not import: \(error)"
             }

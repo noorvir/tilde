@@ -18,6 +18,14 @@ final class AnnotationController: ObservableObject {
         didSet {
             updateOverlayInput()
             tracker.isPaused = !pauses.isEmpty
+            camera.update(isRecordMode: isRecordMode, showsBar: !isClipBusy)
+        }
+    }
+    /// A clip starts, records or is being saved: the camera bubble's bar is not on screen.
+    private var isClipBusy: Bool {
+        switch recording {
+        case .starting, .recording, .finishing: true
+        default: false
         }
     }
     var mode: SessionFlow.Mode { flow.mode }
@@ -123,6 +131,17 @@ final class AnnotationController: ObservableObject {
     /// Wireframe mode, on Draw's canvas: its tool, its window and the note of its components.
     let wireframe: WireframeMode
     let wireframes: WireframeSwitch
+    /// The camera bubble of recording mode.
+    let camera: CameraBubble
+    /// The backgrounds that saved videos can sit on.
+    let backgrounds: VideoBackgrounds
+    /// Each clip's layout on its saved video, by the clip's video, once the preview changed it.
+    @Published private var layouts: [URL: ClipLayout] = [:]
+    /// The clip whose video is being saved.
+    @Published private(set) var savingVideo: URL?
+    /// The video file that Save video wrote last, while its toast shows.
+    @Published private(set) var savedVideo: URL?
+    private let savedVideoTime = Countdown()
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -130,8 +149,9 @@ final class AnnotationController: ObservableObject {
             self?.dispatch(event, with: data)
         }
         clips.keep = { [weak self] draft in
-            self?.drafts.append(draft)
+            self?.keepClip(draft)
         }
+        clips.camera = self.camera
         return clips
     }()
     /// The source picker under the HUD while choosing.
@@ -146,6 +166,23 @@ final class AnnotationController: ObservableObject {
     var sender = ReportSender()
     /// Comments typed into the preview or the browser's notes panel, until typing pauses.
     private let typedComments = TypedComments()
+    /// A change to the wireframe saves its draft once changes pause.
+    private let wireframeSaveTime = Countdown()
+    /// A change to Draw's shapes saves them once changes pause.
+    private let drawSaveTime = Countdown()
+    /// Draw's shapes with no comment yet, as the saved record has them.
+    private var liveDrawGroup: SessionRecord.Note?
+    /// Changes when the live group is taken, so a read of the shapes that was under way then
+    /// does not bring it back.
+    private var liveDrawToken = UUID()
+    /// Keeps Draw's shapes as a draft after Draw ends; Send waits for it.
+    private var keepingDraw: Task<Void, Never>?
+    /// The note that the delete question asks about.
+    private(set) var deleteAsked: Draft.ID?
+    /// The id that the open comment has in the saved record, until it is a note.
+    private var composerNoteID = UUID()
+    /// The sent session whose unfinished drafts the next session takes.
+    private static let carriedDraftsKey = "CarriedDraftsSession"
     /// The double tap, the hold key and the answers to a question.
     private let keyMonitors: KeyMonitors
     /// The session's single keys typed in other apps, while a session is on screen.
@@ -207,6 +244,8 @@ final class AnnotationController: ObservableObject {
         drawing = DrawingNotes(picker: picker)
         wireframe = WireframeMode(canvas: drawing.panel, picker: picker, browser: browser, defaults: defaults)
         wireframes = WireframeSwitch(defaults: defaults)
+        camera = CameraBubble(defaults: defaults)
+        backgrounds = VideoBackgrounds(defaults: defaults)
         tracker = NoteTracker(windows: picker.windows, browser: browser)
         flow.choosesInPicker = defaults.bool(forKey: "ChoosesInPicker")
 
@@ -224,6 +263,7 @@ final class AnnotationController: ObservableObject {
 
     /// Gives each part what it asks of the session, and takes what it reports.
     private func joinParts() {
+        camera.screen = { [weak self] in self?.hud.screen }
         saver.snapshot = { [weak self] in self?.snapshot }
         notices.onSentShown = { [weak self] operation in self?.dispatch(.sentShown(operation)) }
         typedComments.onPause = { [weak self] in self?.saveTypedComments() }
@@ -231,7 +271,13 @@ final class AnnotationController: ObservableObject {
         commentBox.onChange = { [weak self] isOpen in
             self?.tracker.isHeld = isOpen
             self?.saver.isHeld = isOpen
+            if isOpen {
+                self?.composerNoteID = UUID()
+            }
+            self?.saver.saveSoon()
         }
+        // The comment being written is saved as it is typed.
+        commentBox.draft.onChange = { [weak self] in self?.saver.saveSoon() }
 
         scope.onChange = { [weak self] in self?.sourceChanged() }
         scope.onCheck = { [weak self] delta in self?.scopeChecked(movedBy: delta) }
@@ -273,8 +319,16 @@ final class AnnotationController: ObservableObject {
         canvas.isOnLabel = { [weak self] point in self?.tracker.label(at: point) != nil }
         canvas.isOverTildeWindow = { [weak self] point in self?.picker.windows.isOverTildeWindow(point) == true }
         canvas.onEscape = { [weak self] in self?.escapePressed() }
-        canvas.onShape = { [weak self] in self?.dispatch(.shapeFinished) }
         canvas.onEdited = { [weak self] in self?.updateEditedDrawing() }
+        canvas.onCanvasChanged = { [weak self] in
+            if self?.isWireframe == true {
+                self?.wireframeChanged()
+            } else {
+                self?.drawChanged()
+            }
+        }
+        canvas.onTyping = { [weak self] in self?.sessionKeyTap?.isTildeTyping = $0 }
+        canvas.onAddComment = { [weak self] in _ = self?.endDrawingGroup() }
         canvas.onClickAway = { [weak self] in
             self?.dispatch(.clickAway)
             // The click gave the canvas the keyboard; a question in the comment box needs it.
@@ -292,9 +346,11 @@ final class AnnotationController: ObservableObject {
     /// What the flow's rules read of the notes and the comment being written, as they are now.
     var facts: SessionFlow.Facts {
         var facts = SessionFlow.Facts(notes: drafts.count)
+        facts.unfinished = drafts.filter(\.isUnfinished).count
         facts.commentHasText = commentBox.hasText
         facts.commentIsOnDrawing = commentBox.pending?.drawingIDs.isEmpty == false
         facts.wireframesOn = wireframes.isOn
+        facts.toolIsDown = isToolDown
         return facts
     }
 
@@ -366,7 +422,16 @@ final class AnnotationController: ObservableObject {
         case .toggleList: toggleList()
         case .showCanvas: showCanvas()
         case .showWireframe: showWireframe()
-        case .endWireframe: wireframe.end()
+        case .endWireframe:
+            // The components that Done did not take stay as the wireframe's draft.
+            wireframeSaveTime.cancel()
+            let id = wireframe.shownNote
+            wireframe.readDraft { [weak self] note in
+                if let note {
+                    self?.keepWireframeDraft(note, id: id)
+                }
+            }
+            wireframe.end()
         case .putToolDown:
             if isWireframe {
                 wireframe.putToolDown()
@@ -374,19 +439,11 @@ final class AnnotationController: ObservableObject {
                 drawing.putToolDown()
             }
             updateOverlayInput()
-        // A wireframe keeps its own undo history, of every change; Draw undoes a shape's note.
+        // The canvas's last change, in Draw and Wireframe; never a saved note.
         case .undoShape:
-            if isWireframe {
-                wireframe.undo()
-            } else {
-                undoLastDrawing()
-            }
+            drawing.panel.undoCanvas()
         case .redoShape:
-            if isWireframe {
-                wireframe.redo()
-            } else {
-                redoLastDrawing()
-            }
+            drawing.panel.redoCanvas()
         case .openShapeComment:
             Task { await addDrawingNote() }
         case .takeWireframe:
@@ -397,10 +454,19 @@ final class AnnotationController: ObservableObject {
         case .keepDrawing:
             drawing.panel.endEditing()
             drawing.panel.stopDrawing()
-            drawing.panel.setSnapFrame(nil)
             hover = nil
             if commentBox.pending == nil {
-                drawing.panel.hide()
+                if drawing.panel.hasGroup {
+                    // Shapes with no comment yet stay as a draft note; its pictures show them.
+                    keepingDraw = Task {
+                        await keepDrawingDraft()
+                        if !isDrawing {
+                            drawing.panel.hide()
+                        }
+                    }
+                } else {
+                    drawing.panel.hide()
+                }
             }
             // The drawing tools showed in the floating panel.
             if hud.isInBrowser {
@@ -428,6 +494,12 @@ final class AnnotationController: ObservableObject {
         case .clearDrafts:
             drafts.forEach(ClipRecorder.deleteVideo)
             drafts = []
+        case .deleteAskedNote:
+            if let id = deleteAsked {
+                deleteAsked = nil
+                // After this event: deleting is an event of its own.
+                Task { deleteDraft(id) }
+            }
         case .restoreDrafts:
             if let record = restoreRecord {
                 replaceDrafts(with: record)
@@ -484,7 +556,50 @@ final class AnnotationController: ObservableObject {
             sourcePicker.openApp = nil
             return
         }
+        // In Draw, Esc first puts the tool down and keeps the group; at the root it opens the
+        // group's comment, as ↩ does.
+        if !isWireframe, drawing.isToolDown, endDrawingGroup() {
+            return
+        }
         dispatch(.escape)
+    }
+
+    /// A draft save waits for changes to stop.
+    var hasWaitingDraftSave: Bool {
+        drawSaveTime.isPending || wireframeSaveTime.isPending
+    }
+
+    /// Before Tilde quits: the draft saves that wait for changes to stop run now. `done` comes
+    /// once their shapes are read.
+    func saveWaitingDrafts(_ done: @escaping @MainActor () -> Void) {
+        drawSaveTime.runNow()
+        wireframeSaveTime.runNow()
+        // The page answers within a few frames.
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            done()
+        }
+    }
+
+    /// ↩ in Draw: ends the group, or, when Tilde has not heard of it yet, as right after a
+    /// release, asks the page for its comment once the release has settled. False outside Draw.
+    func returnInDraw() -> Bool {
+        guard isDrawing, !isWireframe, !isDrawingPaused, commentBox.pending == nil else {
+            return false
+        }
+        if !endDrawingGroup() {
+            drawing.panel.endGroup()
+        }
+        return true
+    }
+
+    /// Ends Draw's group of shapes and opens its one comment. False when there is none to end.
+    func endDrawingGroup() -> Bool {
+        guard drawing.panel.hasGroup, accepts(.shapeFinished) else {
+            return false
+        }
+        dispatch(.shapeFinished)
+        return true
     }
 
     // MARK: - Session lifecycle
@@ -524,6 +639,15 @@ final class AnnotationController: ObservableObject {
                 created = record.created
             }
             drafts = SessionSaver.drafts(from: record, archive: archive, into: session.id)
+        }
+        liveDrawGroup = nil
+        // The drafts that the last Send left come into this session.
+        if let carried = defaults.string(forKey: Self.carriedDraftsKey), carried != session.id {
+            defaults.removeObject(forKey: Self.carriedDraftsKey)
+            if var record = archive.record(carried) {
+                record.notes = record.notes.filter { $0.isUnfinished == true }
+                drafts += SessionSaver.drafts(from: record, archive: archive, into: session.id)
+            }
         }
         saver.start(created: created)
         keyMonitors.startHold()
@@ -608,6 +732,7 @@ final class AnnotationController: ObservableObject {
         gaveKeyboardBack = false
         holdsKeyboard = false
         drafts = []
+        layouts = [:]
         scope.reset()
         browserOffer.reset()
 
@@ -695,11 +820,19 @@ final class AnnotationController: ObservableObject {
         guard let session, case .sending(let operation, _) = mode else {
             return
         }
-        let drafts = self.drafts
         Task {
+            // Draw's shapes become a draft first, so the next session takes them.
+            await keepingDraw?.value
+            // A draft is not sent until Done or its comment finishes it.
+            let notes = drafts.filter { !$0.isUnfinished }
+            guard !notes.isEmpty else {
+                log.error("nothing to send: every note is a draft")
+                dispatch(.sendFailed(operation))
+                return
+            }
             let report: ReportSender.Report
             do {
-                report = try await sender.save(drafts, of: session)
+                report = try await sender.save(notes, of: session)
             } catch {
                 log.error("could not save feedback to inbox: \(error.localizedDescription, privacy: .public)")
                 dispatch(.sendFailed(operation))
@@ -720,6 +853,10 @@ final class AnnotationController: ObservableObject {
             notices.showSent("Sent to \(session.client)", status: .done)
         }
         saver.save(state: .sent, reportFolder: report.folder)
+        // Drafts were not sent: the next session takes them.
+        if drafts.contains(where: \.isUnfinished) {
+            defaults.set(session.id, forKey: Self.carriedDraftsKey)
+        }
         store.finish(session.id, with: .sent(report.feedback, folder: report.folder))
         end()
 
@@ -750,7 +887,20 @@ final class AnnotationController: ObservableObject {
         guard let session else {
             return nil
         }
-        return SessionSaver.Snapshot(session: session, drafts: drafts, pageURL: scope.isBrowser ? browser.pageURL : nil, scopeApp: scope.name)
+        var unfinished: [SessionSaver.Unfinished] = []
+        if let pending = commentBox.pending {
+            let note = SessionRecord.Note(
+                id: composerNoteID, comment: commentBox.text, target: pending.target, frame: pending.frame, marker: pending.marker, chip: pending.chip,
+                anchor: pending.anchor, isUnfinished: true
+            )
+            unfinished.append(SessionSaver.Unfinished(note: note, capture: pending.capture))
+        }
+        if let liveDrawGroup {
+            unfinished.append(SessionSaver.Unfinished(note: liveDrawGroup, capture: nil))
+        }
+        return SessionSaver.Snapshot(
+            session: session, drafts: drafts, pageURL: scope.isBrowser ? browser.pageURL : nil, scopeApp: scope.name, unfinished: unfinished
+        )
     }
 
     /// Brings back a saved session's notes, also a sent one, to edit and send again: into the
@@ -887,6 +1037,12 @@ final class AnnotationController: ObservableObject {
         }
         // Before Tilde comes forward: macOS shows a Space with a window of the app it activates.
         overlays.moveToShownSpace()
+        // In recording mode the overlay takes the keys (Space records) without Tilde coming
+        // forward: an app that is not active shows no hover effects in the clip.
+        if recording != nil {
+            overlays.makeKey()
+            return
+        }
         NSApp.activate(ignoringOtherApps: true)
         if !focusCanvas() {
             overlays.makeKey()
@@ -894,9 +1050,10 @@ final class AnnotationController: ObservableObject {
     }
 
     /// Gives keyboard focus (Esc, ⌘↩) to the overlay under the pointer, unless the comment box
-    /// or the preview has it or annotating is paused.
+    /// or the preview has it or annotating is paused. In recording mode too, after a source is
+    /// chosen, so Space records: the overlay takes keys there but not the pointer.
     func makeOverlayKey() {
-        guard overlayTakesInput, commentBox.pending == nil, previewCard.id == nil else {
+        guard overlayTakesInput || recording != nil, commentBox.pending == nil, previewCard.id == nil else {
             return
         }
         if !focusCanvas() {
@@ -1061,10 +1218,86 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
+        let extras = ScreenRecorder.Extras(keptWindows: [browser.windowNumber].compactMap { $0 }, microphone: camera.microphone)
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
-            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, operation: operation
+            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), extras: extras, recordsCamera: camera.isShowing, operation: operation
         )
+    }
+
+    /// A stopped clip goes to the list, and the preview opens on it once the flow is done with
+    /// the stop.
+    private func keepClip(_ draft: Draft) {
+        drafts.append(draft)
+        Task { @MainActor in
+            self.preview(draft.id)
+        }
+    }
+
+    // MARK: - Saved videos
+
+    /// The camera file recorded beside a clip's video, if any.
+    func cameraTrack(of video: URL) -> URL? {
+        let file = ClipRecorder.cameraFile(of: video)
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
+    }
+
+    /// Where a clip's parts go on its saved video; a clip starts with the last background
+    /// chosen, and its camera in the bottom-left corner.
+    func layout(of video: URL) -> ClipLayout {
+        if let layout = layouts[video] {
+            return layout
+        }
+        var layout = ClipLayout(background: backgrounds.last)
+        if cameraTrack(of: video) != nil {
+            layout.cameraCenter = CGPoint(x: 0.16, y: 0.74)
+            layout.cameraShape = camera.shape
+        }
+        return layout
+    }
+
+    func setLayout(_ layout: ClipLayout, of video: URL) {
+        layouts[video] = layout
+        backgrounds.remember(layout.background)
+    }
+
+    /// Writes a clip with its camera on its layout to Downloads, then shows the toast.
+    func saveVideo(_ video: URL) {
+        guard savingVideo == nil else {
+            return
+        }
+        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
+        let formatter = DateFormatter()
+        // Digits in every locale: the name is for files.
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
+        let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date())).mp4")
+        let layout = layout(of: video)
+        let cameraTrack = cameraTrack(of: video)
+        savingVideo = video
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+            let started = Date()
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try await VideoFramer.export(video, camera: cameraTrack, layout: layout, to: file)
+                savedVideo = file
+                savedVideoTime.start(10) { [weak self] in
+                    self?.savedVideo = nil
+                }
+            } catch {
+                log.error("could not save video: \(String(describing: error), privacy: .public)")
+                notices.show(.recordingNotSaved)
+            }
+            // The button's spinner shows for at least a second.
+            let left = 1 - Date().timeIntervalSince(started)
+            if left > 0 {
+                try? await Task.sleep(for: .seconds(left))
+            }
+            savingVideo = nil
+        }
     }
 
     // MARK: - Drawing
@@ -1096,6 +1329,9 @@ final class AnnotationController: ObservableObject {
 
     /// Makes a note of what was just drawn. Nothing drawn: nothing happens.
     private func addDrawingNote() async {
+        drawSaveTime.cancel()
+        liveDrawGroup = nil
+        liveDrawToken = UUID()
         guard let note = await drawing.takeNote() else {
             drawing.panel.endEditing()
             if isDrawing {
@@ -1105,6 +1341,48 @@ final class AnnotationController: ObservableObject {
         }
         openComposer(note)
         drawing.panel.editShapes(note.drawingIDs)
+    }
+
+    /// Each change to Draw's shapes saves those with no comment yet, half a second after
+    /// changes stop, so that a crash keeps them: the next start has them as a draft note.
+    private func drawChanged() {
+        guard isDrawing, !isWireframe else {
+            return
+        }
+        let token = liveDrawToken
+        drawSaveTime.start(0.5) { [weak self] in
+            self?.drawing.panel.newShapes { [weak self] drawn in
+                guard let self, isDrawing, !isWireframe, liveDrawToken == token else {
+                    return
+                }
+                let id = liveDrawGroup?.id ?? UUID()
+                liveDrawGroup = drawn.map { drawn in
+                    let center = CGPoint(x: drawn.bounds.midX, y: drawn.bounds.midY)
+                    let screen = NSScreen.screens.first { $0.frame.flipped.contains(center) }?.frame.flipped ?? drawn.bounds
+                    return SessionRecord.Note(
+                        id: id, comment: "", target: .drawing(shapes: DrawingShapes.encode(drawn.shapes, origin: screen.origin, element: nil)),
+                        frame: drawn.bounds, marker: CGPoint(x: drawn.bounds.maxX, y: drawn.bounds.minY), chip: "Drawing", anchor: nil, isUnfinished: true
+                    )
+                }
+                saver.save()
+            }
+        }
+    }
+
+    /// Draw ended with shapes that have no comment yet: they become an unfinished note, which
+    /// its comment in the preview finishes. Saved to disk at once.
+    private func keepDrawingDraft() async {
+        let sessionID = session?.id
+        // The session may have ended meanwhile.
+        drawSaveTime.cancel()
+        liveDrawGroup = nil
+        liveDrawToken = UUID()
+        guard sessionID != nil, let note = await drawing.takeNote(), session?.id == sessionID else {
+            return
+        }
+        add(Pending(note, browser: browser, withContext: false), comment: "")
+        drafts[drafts.count - 1].isUnfinished = true
+        saver.save()
     }
 
     /// The shape of the open comment changed: its link and the comment box go with it.
@@ -1118,25 +1396,6 @@ final class AnnotationController: ObservableObject {
                 return
             }
             commentBox.follow(pending)
-        }
-    }
-
-    /// A note of a drawing can be undone in draw mode, and come back.
-    private func undoLastDrawing() {
-        let isDrawingNote: (Draft) -> Bool = { draft in
-            if case .drawing = draft.annotation.target {
-                return true
-            }
-            return false
-        }
-        if let index = drafts.lastIndex(where: isDrawingNote) {
-            drawing.keepUndone(drafts.remove(at: index))
-        }
-    }
-
-    private func redoLastDrawing() {
-        if let draft = drawing.takeUndone() {
-            drafts.append(draft)
         }
     }
 
@@ -1159,26 +1418,81 @@ final class AnnotationController: ObservableObject {
     /// own comment; or they replace the note that they were shown from. Then the mode ends.
     /// Nothing drawn: the mode only ends.
     private func takeWireframe() async {
+        wireframeSaveTime.cancel()
         if let taken = await wireframe.take() {
             keep(taken)
         }
         dispatch(.wireframeTaken)
     }
 
+    /// Done finishes the draft or the note that the components replace, or makes a new note.
     private func keep(_ taken: WireframeMode.Taken) {
-        guard let replaced = taken.replaces else {
+        guard let replaced = taken.replaces, let index = drafts.firstIndex(where: { $0.id == replaced }) else {
             let pending = Pending(taken.note, browser: browser, withContext: session?.capturesContext ?? false)
             add(pending, comment: "")
             return
         }
-        if let index = drafts.firstIndex(where: { $0.id == replaced }) {
-            // The note keeps its id, and so the names of its saved pictures: the old ones go.
-            if let session {
-                archive.forgetImages(of: replaced, in: session.id)
-            }
-            drafts[index] = drafts[index].redrawn(as: taken.note)
+        // The note keeps its id, and so the names of its saved pictures: the old ones go.
+        if let session {
+            archive.forgetImages(of: replaced, in: session.id)
         }
+        drafts[index] = drafts[index].redrawn(as: taken.note)
         drawing.panel.remove(taken.note.drawingIDs)
+    }
+
+    /// Every change to the components saves the wireframe's draft half a second after changes
+    /// stop, so that a quit or a crash loses nothing.
+    private func wireframeChanged() {
+        guard isWireframe, !wireframe.isTaking else {
+            return
+        }
+        wireframeSaveTime.start(0.5) { [weak self] in
+            guard let self, isWireframe, !wireframe.isTaking else {
+                return
+            }
+            let id = wireframe.shownNote
+            wireframe.readDraft { [weak self] note in
+                guard let self else {
+                    return
+                }
+                // Every component deleted: a draft goes; a sent or finished note waits for Done.
+                guard let note else {
+                    if let id, let index = drafts.firstIndex(where: { $0.id == id }), drafts[index].isUnfinished {
+                        drafts.remove(at: index)
+                        if wireframe.shownNote == id {
+                            wireframe.shownNote = nil
+                        }
+                        saver.save()
+                    }
+                    return
+                }
+                let kept = keepWireframeDraft(note, id: id)
+                // The next change updates the same draft, and Done replaces it.
+                if isWireframe, wireframe.shownNote == nil {
+                    wireframe.shownNote = kept
+                }
+            }
+        }
+    }
+
+    /// Keeps the components as an unfinished note: `id`'s, or a new one. Saved to disk at once.
+    @discardableResult
+    private func keepWireframeDraft(_ note: NewNote, id: Draft.ID?) -> Draft.ID {
+        if let id, let index = drafts.firstIndex(where: { $0.id == id }) {
+            let old = drafts[index].annotation
+            drafts[index].annotation = Annotation(
+                id: old.id, comment: old.comment, target: note.target, frame: note.frame, image: old.image, contextImage: old.contextImage
+            )
+            drafts[index].marker = note.marker
+            drafts[index].isUnfinished = true
+        } else {
+            var empty = note
+            empty.captures = Captures(image: nil, contextImage: nil)
+            add(Pending(empty, browser: browser, withContext: false), comment: "")
+            drafts[drafts.count - 1].isUnfinished = true
+        }
+        saver.save()
+        return id.flatMap { id in drafts.contains { $0.id == id } ? id : nil } ?? drafts[drafts.count - 1].id
     }
 
     /// Shows a wireframe note's components again, to edit them: Done then replaces that note,
@@ -1252,6 +1566,13 @@ final class AnnotationController: ObservableObject {
         }
     }
 
+    /// The preview's Delete button, Delete and Backspace ask first, for a note and for a clip
+    /// alike.
+    func askToDelete(_ id: Draft.ID) {
+        deleteAsked = id
+        dispatch(.requestDeleteNote)
+    }
+
     func deleteDraft(_ id: Draft.ID) {
         dispatch(.deleteNote, with: [.deleteNote: { [self] in
             if previewCard.id == id {
@@ -1304,6 +1625,10 @@ final class AnnotationController: ObservableObject {
         dispatch(.editNote, with: [.editNote: { [self] in
             if let index = drafts.firstIndex(where: { $0.id == id }) {
                 drafts[index].annotation.comment = comment
+                // A drawing's draft is finished by its comment; a wireframe's only by Done.
+                if !drafts[index].isWireframe, !comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    drafts[index].isUnfinished = false
+                }
             }
         }])
     }

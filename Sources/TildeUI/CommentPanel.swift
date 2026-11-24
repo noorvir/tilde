@@ -90,7 +90,15 @@ final class CommentPanel {
 /// The text of the comment being written. Not published: typing changes nothing else on screen.
 @MainActor
 final class CommentDraft {
-    var text = ""
+    var text = "" {
+        didSet {
+            if text != oldValue {
+                onChange()
+            }
+        }
+    }
+    /// The text changed, such as on a key.
+    var onChange: () -> Void = {}
 }
 
 /// The comment's text, in a plain text view: a key changes the text and nothing else, and the

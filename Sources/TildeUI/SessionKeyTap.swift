@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import os
 
 /// Where the keyboard is when a key is typed during a session.
 enum KeyFocus: Equatable {
@@ -92,6 +93,13 @@ enum KeyFocus: Equatable {
 final class SessionKeyTap: @unchecked Sendable {
     private let onKey: (CGEvent) -> Bool
     private var port: CFMachPort?
+    private let typing = OSAllocatedUnfairLock(initialState: false)
+
+    /// A text field of Tilde's canvas has the keyboard: every key goes to it, none to `onKey`.
+    var isTildeTyping: Bool {
+        get { typing.withLock { $0 } }
+        set { typing.withLock { $0 = newValue } }
+    }
     private var loop: CFRunLoop?
 
     init(onKey: @escaping (CGEvent) -> Bool) {
@@ -110,6 +118,9 @@ final class SessionKeyTap: @unchecked Sendable {
                 if let port = tap.port {
                     CGEvent.tapEnable(tap: port, enable: true)
                 }
+                return Unmanaged.passUnretained(event)
+            }
+            if tap.isTildeTyping {
                 return Unmanaged.passUnretained(event)
             }
             return tap.onKey(event) ? nil : Unmanaged.passUnretained(event)

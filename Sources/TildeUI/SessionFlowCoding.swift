@@ -163,7 +163,7 @@ extension SessionFlow: Codable {
 /// out), `commentHasText` and `commentIsOnDrawing` (false when left out).
 extension SessionFlow.Facts: Codable {
     enum Key: String, CodingKey, CaseIterable {
-        case notes, commentHasText, commentIsOnDrawing, wireframesOn
+        case notes, commentHasText, commentIsOnDrawing, wireframesOn, toolIsDown
     }
 
     init(from decoder: Decoder) throws {
@@ -172,6 +172,7 @@ extension SessionFlow.Facts: Codable {
         commentHasText = try values.decodeIfPresent(Bool.self, forKey: .commentHasText) ?? false
         commentIsOnDrawing = try values.decodeIfPresent(Bool.self, forKey: .commentIsOnDrawing) ?? false
         wireframesOn = try values.decodeIfPresent(Bool.self, forKey: .wireframesOn) ?? true
+        toolIsDown = try values.decodeIfPresent(Bool.self, forKey: .toolIsDown) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -180,6 +181,7 @@ extension SessionFlow.Facts: Codable {
         try values.encode(commentHasText, forKey: .commentHasText)
         try values.encode(commentIsOnDrawing, forKey: .commentIsOnDrawing)
         try values.encode(wireframesOn, forKey: .wireframesOn)
+        try values.encode(toolIsDown, forKey: .toolIsDown)
     }
 }
 
@@ -193,7 +195,7 @@ extension SessionFlow.Event: Codable {
         let operation = Int(value) ?? 0
         let events: [String: SessionFlow.Event] = [
             "begin": .begin, "ended": .ended, "escape": .escape, "togglePause": .togglePause, "toggleAnnotating": .toggleAnnotating, "resume": .resume,
-            "startShortcut": .startShortcut, "requestClearAll": .requestClearAll, "requestCancel": .requestCancel, "restore": .restore, "openBrowser": .openBrowser, "deleteNote": .deleteNote, "editNote": .editNote,
+            "startShortcut": .startShortcut, "requestClearAll": .requestClearAll, "requestCancel": .requestCancel, "requestDeleteNote": .requestDeleteNote, "restore": .restore, "openBrowser": .openBrowser, "deleteNote": .deleteNote, "editNote": .editNote,
             "confirm": .confirm, "dismissConfirmation": .dismissConfirmation, "holdBegan": .holdBegan, "holdEnded": .holdEnded,
             "otherAppInFront": .otherAppInFront, "scopeAppInFront": .scopeAppInFront, "openComment": .openComment, "clickAway": .clickAway,
             "submitComment": .submitComment, "openPreview": .openPreview, "closePreview": .closePreview,

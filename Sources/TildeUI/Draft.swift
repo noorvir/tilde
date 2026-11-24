@@ -7,6 +7,9 @@ struct Draft: Identifiable {
     var annotation: Annotation
     /// From a saved session, with no window or page to confirm where it belongs.
     var isRestored = false
+    /// Kept and saved but not sent: a wireframe until Done, Draw's shapes or a comment box
+    /// until a comment. Send leaves it for the next session.
+    var isUnfinished = false
     /// Quartz point where the numbered marker sits.
     var marker: CGPoint
     let chip: String
@@ -75,6 +78,8 @@ struct NewNote {
     /// Its screenshots when they are taken already, as for a drawing.
     var captures: Captures?
     var drawingIDs: [String] = []
+    /// Where a drawing's shapes are, in Quartz screen coordinates.
+    var drawingBounds: CGRect?
 }
 
 extension NewNote {
@@ -129,7 +134,7 @@ extension Pending {
         self.init(
             target: note.target, frame: note.frame, marker: note.marker, chip: note.chip, capture: capture, anchor: note.anchor,
             tracked: note.tracked, sourceWindow: note.window?.number, fingerprint: fingerprint, page: page, sourcePID: note.window?.pid,
-            pictureArea: note.pictureArea, drawingIDs: note.drawingIDs
+            pictureArea: note.pictureArea, drawingIDs: note.drawingIDs, drawingBounds: note.drawingBounds
         )
     }
 }

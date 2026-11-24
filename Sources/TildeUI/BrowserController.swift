@@ -22,6 +22,8 @@ final class BrowserController: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var addressFocusRequest = 0
     /// Whether the notes panel is open beside the page.
     @Published var showsNotes = true
+    /// The bar that offers to import logins was closed; until Tilde quits.
+    @Published var hidesLoginImport = false
     #if DEBUG
     private var pageFrameForTesting: CGRect?
     #endif

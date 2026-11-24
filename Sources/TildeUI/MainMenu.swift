@@ -11,7 +11,7 @@ enum MainMenu {
         let app = submenu("Tilde", in: menu)
         app.addItem(withTitle: "About Tilde", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         app.addItem(.separator())
-        let settingsItem = app.addItem(withTitle: "Settings…", action: #selector(SettingsWindow.showGeneral(_:)), keyEquivalent: ",")
+        let settingsItem = app.addItem(withTitle: "Settings", action: #selector(SettingsWindow.showGeneral(_:)), keyEquivalent: ",")
         settingsItem.target = settings
         app.addItem(.separator())
         app.addItem(withTitle: "Hide Tilde", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")

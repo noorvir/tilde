@@ -1,9 +1,9 @@
 // Editing a component after it is drawn. Over one, it shows as selected: with no tool a drag
 // anywhere on it moves it (with a tool a drag draws in it, and its chip or grip moves it), ⌥ and
-// a drag moves a copy, and a double-click edits its label. A chip just below it moves it too:
+// a drag moves a copy, and a double-click edits its text. A chip above its top right moves it too:
 // a click on its name changes the kind, its Borders button opens the borders, its Comment
 // button its comment, its other controls set the rows and columns of a table or list or the
-// fill of a rectangle or ellipse, and × deletes it. A handle at each corner resizes it, and
+// fill of an ellipse, and × deletes it. A handle at each corner resizes it, and
 // its opposite corner stays; a grip at the middle of its top edge moves it. Moves and resizes
 // snap. Only components not sent yet can change; each change can be undone.
 
@@ -61,9 +61,9 @@ export const chipStyle = document.createElement("style");
 chipStyle.textContent = `
 #tilde-chip::before { content: ""; position: absolute; left: 0; right: 0; }
 #tilde-chip[data-side="below"]::before { top: -6px; height: 6px; }
-#tilde-chip[data-side="above"]::before { bottom: -2px; height: 2px; }
+#tilde-chip[data-side="above"]::before { bottom: -6px; height: 6px; }
 `;
-const gap = { below: 6, above: 2 };
+const gap = { below: 6, above: 6 };
 
 // The component under the pointer, the component that a click selected (its handles show
 // while the pointer is not over another one), and the chip's menu that is open: "kinds",
@@ -119,12 +119,13 @@ function fillToggle(isOn) {
 function chipControls(frame) {
   const data = frame.customData;
   const kind = data.tildeWireframe;
+  if (kind === "text") return commentButton(Boolean(data.comment));
   let controls = bordersButton(data.borders ?? []) + commentButton(Boolean(data.comment));
   if (kind === "table" || kind === "list") {
     const counts = rowsOf(kind, frame, data);
     controls += stepper("rows", counts.rows) + (kind === "table" ? stepper("columns", counts.columns) : "");
   }
-  if (kind === "rectangle" || kind === "ellipse") controls += fillToggle(data.filled);
+  if (kind === "ellipse") controls += fillToggle(data.filled);
   return controls;
 }
 
@@ -173,11 +174,13 @@ export function showHandles() {
   const group = selection.hovered ?? selection.selected;
   const frame = group ? frameOf(group) : null;
   const isShown = Boolean(frame && wireframe && !labelled && !editing);
+  // A free text has no size of its own to change, and moves by a drag on it.
+  const isFreeText = frame?.customData.tildeWireframe === "text";
   setActiveTag(isShown && selection.hovered ? selection.hovered : null);
   handleOutline.style.display = isShown ? "block" : "none";
   chip.style.display = isShown ? "flex" : "none";
-  for (const handle of corners) handle.style.display = isShown ? "block" : "none";
-  grip.style.display = isShown ? "flex" : "none";
+  for (const handle of corners) handle.style.display = isShown && !isFreeText ? "block" : "none";
+  grip.style.display = isShown && !isFreeText ? "flex" : "none";
   typeMenu.style.display = isShown && selection.menu === "kinds" ? "flex" : "none";
   bordersMenu.style.display = isShown && selection.menu === "borders" ? "flex" : "none";
   if (!isShown) return;
@@ -189,13 +192,16 @@ export function showHandles() {
     const y = corner.includes("n") ? frame.y : frame.y + frame.height;
     Object.assign(handle.style, { left: `${x}px`, top: `${y}px` });
   }
-  const content = `<span data-menu="kinds" title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>${chipControls(frame)}${deleteButton}`;
+  let name = `<span data-menu="kinds" title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>`;
+  if (isFreeText) name = `<span style="margin-right:4px">⠿ Text</span>`;
+  const content = `${name}${chipControls(frame)}${deleteButton}`;
   if (chip.innerHTML !== content) chip.innerHTML = content;
   placeChip(frame);
   placeGrip(frame);
 
   if (selection.menu === "kinds") {
-    const items = Object.entries(kindNames).map(([value, name]) => {
+    // The bar's kinds; an older note's kind stays in the list while it has it.
+    const items = Object.entries(kindNames).filter(([value]) => kindIcons[value] || value === kind).map(([value, name]) => {
       const background = value === kind ? "background:rgba(255,255,255,.2);" : "";
       const icon = kindIcons[value] ? `<img src="${kindIcons[value]}" style="max-width:16px;max-height:14px;pointer-events:none">` : "";
       const iconSlot = `<span style="display:flex;justify-content:center;width:18px">${icon}</span>`;
@@ -212,17 +218,17 @@ export function showHandles() {
   if (selection.menu === "comment") placeMenu(commentBox, chip.querySelector("[data-menu=comment]"));
 }
 
-// The chip goes just below the component, at its left edge; where it would leave the screen
-// at the bottom, just above it, after the label's tag. It stays on the screen.
+// The chip goes just above the component, right-aligned with its right edge, and never over
+// the label's tag; where it would leave the screen at the top, just below it. It stays on the
+// screen.
 function placeChip(frame) {
   const { width, height } = chip.getBoundingClientRect();
-  let side = "below";
-  let left = frame.x;
-  let top = frame.y + frame.height + gap.below;
-  if (top + height > window.innerHeight) {
-    side = "above";
-    left = frame.x + shownTagWidth(frame) + 4;
-    top = frame.y - gap.above - height;
+  let side = "above";
+  const left = Math.max(frame.x + frame.width - width, frame.x + shownTagWidth(frame) + 4);
+  let top = frame.y - gap.above - height;
+  if (top < 0) {
+    side = "below";
+    top = frame.y + frame.height + gap.below;
   }
   chip.dataset.side = side;
   Object.assign(chip.style, {

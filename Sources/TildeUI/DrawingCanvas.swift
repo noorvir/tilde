@@ -57,6 +57,9 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         }
     }
 
+    /// Draw has shapes that no comment has taken yet.
+    private(set) var hasGroup = false
+
     var windowNumber: Int? {
         panel?.windowNumber
     }
@@ -118,15 +121,6 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         captureUnder()
     }
 
-    func setSnapFrame(_ frame: CGRect?) {
-        guard let frame else {
-            run("setSnapFrame(null)")
-            return
-        }
-        let origin = self.frame.flipped.origin
-        run("setSnapFrame([\(frame.minX - origin.x), \(frame.minY - origin.y), \(frame.width), \(frame.height)])")
-    }
-
     func shapes(_ ids: [String]) async -> [[String: Any]] {
         guard let webView, !ids.isEmpty,
               let text = try? await webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.shapesOf(\(DrawingPanel.json(ids))) : \"\"") as? String,
@@ -155,6 +149,7 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         underBlur = nil
         isReady = false
         isLoaded = false
+        hasGroup = false
     }
 
     func setTool(_ tool: String) {
@@ -171,6 +166,24 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 
     func run(_ call: String) {
         webView?.evaluateJavaScript("window.tildeDraw && window.tildeDraw.\(call); 0")
+    }
+
+    /// The shapes not taken yet, which stay on the canvas. The call goes to the page at once,
+    /// before any later call.
+    func newShapes(_ done: @escaping (DrawingPanel.Drawing?) -> Void) {
+        guard let webView else {
+            done(nil)
+            return
+        }
+        let origin = frame.flipped.origin
+        webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.newShapes() : \"\"") { result, _ in
+            guard let text = result as? String, let shapes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]], !shapes.isEmpty else {
+                done(nil)
+                return
+            }
+            let moved = shapes.map { DrawingShapes.moved($0, by: CGVector(dx: origin.x, dy: origin.y)) }
+            done(DrawingPanel.Drawing(shapes: moved, ids: shapes.compactMap { $0["id"] as? String }, bounds: DrawingShapes.bounds(of: moved)))
+        }
     }
 
     func takeNewShapes() async -> DrawingPanel.Drawing? {
@@ -208,14 +221,19 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
             }
         case "escape":
             owner?.onEscape()
-        case "shape":
-            owner?.onShape()
+        case "group", "noGroup":
+            hasGroup = text == "group"
         case "edited":
             owner?.onEdited()
+        case "canvasChanged":
+            owner?.onCanvasChanged()
+        case "addComment":
+            owner?.onAddComment()
         case "clickAway":
             owner?.onClickAway()
         case "typing", "notTyping":
             (panel as? CanvasPanel)?.isTyping = text == "typing"
+            owner?.onTyping(text == "typing")
         case "noTool", "tool":
             hasNoTool = text == "noTool"
         case _ where text.hasPrefix("pointer:"):
@@ -365,13 +383,21 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
 /// Excalidraw ignores a press on a page without focus, so a press first gives the canvas the
 /// keyboard, and reaches the page once the page has focus. The comment box gets the keyboard
 /// back when the press ends.
-private final class CanvasPanel: FloatingPanel {
+private final class CanvasPanel: FloatingPanel, AnnotationSurface {
     var onPress: (CGPoint) -> Bool = { _ in false }
     /// Tilde's keys come before the page's, unless a text field on the page has the keyboard.
     var onKey: (NSEvent) -> Bool = { _ in false }
     var isTyping = false
     private var heldEvents: [NSEvent]?
     private var isPressTaken = false
+
+    /// ⌘ keys come here before the main menu, whose Undo would go to the page.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command), !isTyping, onKey(event) {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, !isTyping, onKey(event) {

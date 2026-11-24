@@ -15,15 +15,9 @@ struct DrawCanvasTests {
         try await page.load()
     }
 
-    private func shapeMessages() -> Int {
-        page.messages.filter { $0 == "shape" }.count
-    }
-
-    /// Takes the new shapes and removes them, as Tilde does when a shape's comment is saved.
-    private func removeNewShapes() async throws {
-        let ids = try await page.takeShapes().map(\.id)
-        try await page.draw("remove(\(DrawingPanel.json(ids)))")
-        try await page.draw("endEditing()")
+    /// Each new group of shapes that Tilde hears of; the tests end each group before the next.
+    private func groupMessages() -> Int {
+        page.messages.filter { $0 == "group" }.count
     }
 
     private func rect(of shape: [String: Any]?) -> [Double]? {
@@ -46,7 +40,7 @@ struct DrawCanvasTests {
     @Test func aDragDrawsAnArrow() async throws {
         try await page.draw("setTool('arrow')")
         try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
-        try await page.wait { self.shapeMessages() == 1 }
+        try await page.wait { self.groupMessages() == 1 }
         let shapes = try await page.rawShapes()
         #expect(shapes.count == 1)
         #expect(shapes.first?["type"] as? String == "arrow")
@@ -55,13 +49,38 @@ struct DrawCanvasTests {
         #expect(shapes.first?["color"] as? String == "#2F76FF")
     }
 
+    /// ↩ right after a release, before Tilde hears of the group, still ends the group: the page
+    /// asks for its comment once the group is known, and Excalidraw edits no text.
+    @Test func returnRightAfterAReleaseAddsTheComment() async throws {
+        try await page.draw("setTool('rectangle')")
+        try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
+        #expect(try await page.press("Enter"))
+        try await page.wait { self.page.messages.contains("addComment") }
+        #expect(groupMessages() == 1)
+        #expect(page.messages.firstIndex(of: "group")! < page.messages.firstIndex(of: "addComment")!)
+        #expect(try await !page.shows(".excalidraw-wysiwyg"))
+    }
+
+    /// ↩ that comes before the release, as it can from the keyboard, waits for it: the comment
+    /// opens for the shape just drawn.
+    @Test func returnBeforeTheReleaseAddsTheCommentAfterIt() async throws {
+        try await page.draw("setTool('rectangle')")
+        try await page.run("fire('pointermove', 200, 150); window.pressed = fire('pointerdown', 200, 150); fire('pointermove', 320, 210, {isPressed: true, target: window.pressed}); fire('pointermove', 440, 270, {isPressed: true, target: window.pressed}); 0")
+        #expect(try await page.press("Enter"))
+        #expect(!page.messages.contains("addComment"))
+        try await page.run("fire('pointerup', 440, 270, {target: window.pressed}); 0")
+        try await page.wait { self.page.messages.contains("addComment") }
+        #expect(page.messages.firstIndex(of: "group")! < page.messages.firstIndex(of: "addComment")!)
+        #expect(try await page.rawShapes().count == 1)
+    }
+
     /// A click starts an arrow, which is no shape for Tilde yet. Esc throws that arrow away and
     /// does not reach Tilde; with no arrow under way, Esc is Tilde's.
     @Test func escThrowsAwayTheArrowThatAClickStarted() async throws {
         try await page.draw("setTool('arrow')")
         try await page.click(CGPoint(x: 200, y: 150))
         #expect(try await page.rawShapes().first?["type"] as? String == "arrow")
-        #expect(shapeMessages() == 0)
+        #expect(groupMessages() == 0, "\(page.messages)")
 
         #expect(try await page.press("Escape"))
         #expect(!page.messages.contains("escape"))
@@ -75,29 +94,7 @@ struct DrawCanvasTests {
         try await page.draw("setTool('rectangle')")
         try await page.click(CGPoint(x: 200, y: 150))
         #expect(try await page.rawShapes().isEmpty)
-        #expect(shapeMessages() == 0)
-    }
-
-    /// A new shape's corners go to the corners, edge midpoints and centre of the element under
-    /// the pointer, within 16 points; ⌘ turns that off.
-    @Test func aShapeSnapsToTheElementUnderThePointer() async throws {
-        try await page.draw("setTool('rectangle')")
-        try await page.draw("setSnapFrame([400, 300, 200, 100])")
-        try await page.drag(from: CGPoint(x: 392, y: 306), to: CGPoint(x: 607, y: 391))
-        try await page.wait { self.shapeMessages() == 1 }
-        #expect(rect(of: try await page.rawShapes().first) == [400, 300, 200, 100])
-        try await removeNewShapes()
-
-        try await page.drag(from: CGPoint(x: 392, y: 306), to: CGPoint(x: 607, y: 391), meta: true)
-        try await page.wait { self.shapeMessages() == 2 }
-        #expect(rect(of: try await page.rawShapes().first) == [392, 306, 215, 85])
-        try await removeNewShapes()
-
-        // No element under the pointer: nothing to snap to.
-        try await page.draw("setSnapFrame(null)")
-        try await page.drag(from: CGPoint(x: 392, y: 306), to: CGPoint(x: 607, y: 391))
-        try await page.wait { self.shapeMessages() == 3 }
-        #expect(rect(of: try await page.rawShapes().first) == [392, 306, 215, 85])
+        #expect(groupMessages() == 0, "\(page.messages)")
     }
 
     /// While a shape's comment is open, only that shape changes: a press beside it is a click
@@ -106,7 +103,7 @@ struct DrawCanvasTests {
     @Test func aShapeIsEditedWhileItsCommentIsOpen() async throws {
         try await page.draw("setTool('rectangle')")
         try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
-        try await page.wait { self.shapeMessages() == 1 }
+        try await page.wait { self.groupMessages() == 1 }
         let taken = try await page.takeShapes()
         let id = try #require(taken.first?.id)
         try await page.draw("editShapes(['\(id)'])")
@@ -114,7 +111,7 @@ struct DrawCanvasTests {
         try await page.drag(from: CGPoint(x: 700, y: 500), to: CGPoint(x: 900, y: 650))
         #expect(page.messages.contains("clickAway"))
         #expect(try await page.rawShapes().isEmpty)
-        #expect(shapeMessages() == 1)
+        #expect(groupMessages() == 1)
 
         // The edge of the rectangle, which the selection tool takes hold of.
         try await page.drag(from: CGPoint(x: 320, y: 150), to: CGPoint(x: 380, y: 190))
@@ -124,7 +121,7 @@ struct DrawCanvasTests {
 
         try await page.draw("endEditing()")
         try await page.drag(from: CGPoint(x: 700, y: 500), to: CGPoint(x: 900, y: 650))
-        try await page.wait { self.shapeMessages() == 2 }
+        try await page.wait { self.groupMessages() == 2 }
         #expect(rect(of: try await page.rawShapes().first) == [700, 500, 200, 150])
     }
 
@@ -132,7 +129,7 @@ struct DrawCanvasTests {
     @Test func clearRemovesEveryShape() async throws {
         try await page.draw("setTool('ellipse')")
         try await page.drag(from: CGPoint(x: 200, y: 150), to: CGPoint(x: 440, y: 270))
-        try await page.wait { self.shapeMessages() == 1 }
+        try await page.wait { self.groupMessages() == 1 }
         let taken = try await page.takeShapes()
         let id = try #require(taken.first?.id)
         try await page.draw("clear()")

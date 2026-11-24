@@ -59,7 +59,7 @@ enum Surfaces {
             return try await hosted(SettingsView(model: model), size: size)
 
         case .canvas:
-            return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip, isNested: state.nested == true)
+            return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip, isNested: state.nested == true, hasTexts: state.texts == true)
 
         case .restorePrompt:
             let restore = RestoreToastState()
@@ -158,6 +158,7 @@ enum Surfaces {
         case .context: controller.previewCard.expandedImage = .context
         case nil: controller.previewCard.expandedImage = nil
         }
+        controller.previewCard.showsBackgrounds = state.backgrounds == true
         return controller
     }
 

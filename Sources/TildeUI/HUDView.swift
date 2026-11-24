@@ -62,6 +62,10 @@ struct HUDView: View {
                 pill
                     .fixedSize()
             }
+            if hud.isShown, let video = controller.savedVideo {
+                SavedVideoToast(video: video)
+                    .transition(Self.zoom)
+            }
             if controller.isDrawing {
                 // Its own width: the HUD's, scaled, or wider for its content.
                 drawingAccessoryBar
@@ -85,12 +89,19 @@ struct HUDView: View {
                 HUDAccessoryBrowserBar(onOpen: controller.openBrowserFromAccessory, onDismiss: browserOffer.dismiss)
                     .transition(Self.zoom)
             }
+            if hud.isShown, browserOffer.showsToast, !hud.isInBrowser {
+                HUDBrowserOfferToast(onNever: browserOffer.neverOffer)
+                    .onHover { browserOffer.holdToast($0) }
+                    .transition(Self.zoom)
+            }
             if hud.isShown, let notice = notices.pause {
                 PauseCard(notice: notice, notices: notices)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if hud.isShown, controller.isOpen, hud.showsList, !controller.drafts.isEmpty {
                 AnnotationList(controller: controller)
+                    .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { hud.listFrame = $0 }
+                    .onDisappear { hud.listFrame = .zero }
                     .transition(Self.zoom)
             }
             if hud.isShown, controller.isSourcePickerOpen {
@@ -115,6 +126,8 @@ struct HUDView: View {
         .animation(.easeInOut(duration: 0.18), value: controller.confirmation)
         .animation(.easeOut(duration: 0.15), value: notices.pause)
         .animation(.spring(duration: 0.28), value: browserOffer.url)
+        .animation(.spring(duration: 0.28), value: browserOffer.showsToast)
+        .animation(HUDPanel.motion, value: controller.savedVideo)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -194,7 +207,7 @@ struct HUDView: View {
         Group {
             tools()
             HUDBarDivider()
-            undoRedo()
+            undoRedo
         }
         .disabled(controller.isDrawingPaused)
         Spacer(minLength: 0)
@@ -212,7 +225,7 @@ struct HUDView: View {
             HStack(spacing: HUDAccessory.size.scaled(4)) {
                 wireframeTools
                 HUDBarDivider()
-                undoRedo(undoKeys: ["⌘Z"], redoKeys: ["⇧⌘Z"])
+                undoRedo
             }
             .opacity(isStyling ? 0 : 1)
             .allowsHitTesting(!isStyling)
@@ -241,11 +254,11 @@ struct HUDView: View {
     }
 
     @ViewBuilder
-    private func undoRedo(undoKeys: [String] = [], redoKeys: [String] = []) -> some View {
-        HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: undoKeys, help: "Undo") {
+    private var undoRedo: some View {
+        HUDButton(image: Image(systemName: "arrow.uturn.backward"), keys: ["⌘Z"], help: "Undo") {
             controller.dispatch(.undoDrawing)
         }
-        HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: redoKeys, help: "Redo") {
+        HUDButton(image: Image(systemName: "arrow.uturn.forward"), keys: ["⇧⌘Z"], help: "Redo") {
             controller.dispatch(.redoDrawing)
         }
     }
@@ -288,7 +301,8 @@ struct HUDView: View {
     /// Wireframe's tools, each with its own letter.
     private var wireframeTools: some View {
         ForEach(WireframeMode.tools, id: \.tool) { entry in
-            HUDButton(image: Image(systemName: entry.symbol), isOn: wireframe.tool == entry.tool, keys: [entry.key.uppercased()], help: entry.help) {
+            let otherKeys = WireframeMode.otherKeys.filter { $0.value == entry.tool }.keys.sorted()
+            HUDButton(image: Image(systemName: entry.symbol), isOn: wireframe.tool == entry.tool, keys: ([entry.key] + otherKeys).map { $0.uppercased() }, help: entry.help) {
                 controller.setWireframeTool(entry.tool)
             }
         }
@@ -308,6 +322,7 @@ struct HUDView: View {
         (tool: "rectangle", symbol: "rectangle", help: "Rectangle"),
         (tool: "ellipse", symbol: "circle", help: "Circle"),
         (tool: "freedraw", symbol: "scribble", help: "Freehand"),
+        (tool: "text", symbol: "textformat", help: "Text"),
     ]
 
     nonisolated static let drawingColors = [
@@ -445,6 +460,7 @@ struct HUDView: View {
             HUDButton(image: Image(systemName: "list.bullet"), badge: count, isOn: hud.showsList, help: hud.showsList ? "Hide notes" : "Show notes") {
                 controller.dispatch(.toggleList)
             }
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { hud.listButtonFrame = $0 }
             .disabled(count == 0)
 
             HUDButton(image: Image(systemName: "trash"), isDestructive: true, help: "Clear all notes") {
@@ -515,6 +531,8 @@ struct HUDView: View {
                 Text("Discard the recording?")
             case .restore:
                 Text("Replace \(count == 1 ? "the note" : "\(count) notes") with \(controller.restoreRecord?.notes.count ?? 0) saved?")
+            case .deleteNote:
+                Text(isAskedNoteAClip ? "Delete the clip?" : "Delete the note?")
             }
         }
         .font(.system(size: 13, weight: .semibold))
@@ -525,7 +543,7 @@ struct HUDView: View {
         PillTextButton(title: "Cancel", key: "esc", isDestructive: false) {
             controller.dispatch(.dismissConfirmation)
         }
-        .tildeTooltip(confirmation == .discardRecording ? "Keep recording" : "Keep everything")
+        .tildeTooltip(cancelHelp(confirmation))
 
         switch confirmation {
         case .clearAll:
@@ -550,7 +568,28 @@ struct HUDView: View {
                 controller.dispatch(.confirm)
             }
             .tildeTooltip("Replace the notes")
+        case .deleteNote:
+            PillTextButton(title: "Delete", key: "↩", isDestructive: true) {
+                controller.dispatch(.confirm)
+            }
+            .tildeTooltip(isAskedNoteAClip ? "Delete the clip" : "Delete the note")
         }
+    }
+
+    private func cancelHelp(_ confirmation: SessionFlow.Question) -> String {
+        switch confirmation {
+        case .discardRecording: "Keep recording"
+        case .deleteNote: isAskedNoteAClip ? "Keep the clip" : "Keep the note"
+        default: "Keep everything"
+        }
+    }
+
+    /// The delete question asks about a recording.
+    private var isAskedNoteAClip: Bool {
+        guard case .recording = controller.drafts.first(where: { $0.id == controller.deleteAsked })?.annotation.target else {
+            return false
+        }
+        return true
     }
 
     private var sendHelp: String {
@@ -620,6 +659,41 @@ struct HUDView: View {
     }
 }
 
+/// After Save video: where the file went, with Show in Finder and Copy.
+private struct SavedVideoToast: View {
+    let video: URL
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: PillMetrics.iconGap) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Video saved")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Text("Downloads")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            HStack(spacing: 4) {
+                PillTextButton(title: "Show in Finder", isDestructive: false) {
+                    NSWorkspace.shared.activateFileViewerSelecting([video])
+                }
+                PillTextButton(title: "Copy", isDestructive: false) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([video as NSURL])
+                }
+            }
+        }
+        .pillInsets(.regular, leading: .text)
+        .pill()
+        .environment(\.colorScheme, .dark)
+    }
+}
+
 /// The subtitle on one line, cut to the space there is.
 private struct SubtitleLine: View {
     let part: HUDView.SubtitlePart
@@ -664,6 +738,18 @@ struct HUDAccessoryBrowserBar: View {
         .pillInsets(HUDAccessory.size)
         .pill()
         .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The toast after the browser offer's ×: it only offers to turn the offer off.
+struct HUDBrowserOfferToast: View {
+    let onNever: () -> Void
+
+    var body: some View {
+        HUDButton(image: nil, title: "Don't show again", help: "Never offer Tilde's browser; Settings turns it back on", action: onNever)
+            .pillInsets(HUDAccessory.size)
+            .pill()
+            .environment(\.colorScheme, .dark)
     }
 }
 
