@@ -272,3 +272,57 @@ private struct HUDShape: Shape {
         RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : height / 2).path(in: rect)
     }
 }
+
+/// A HUD card of rows, as the source dropdown.
+struct MenuCard<Content: View>: View {
+    var width: CGFloat = 260
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        let size = HUDAccessory.size
+        VStack(spacing: size.scaled(2)) {
+            content()
+        }
+        .frame(width: width)
+        .padding(size.scaled(4))
+        .hudCard(cornerRadius: size.scaled(12))
+        .environment(\.pillSize, size)
+    }
+}
+
+/// A row of a HUD card: grey with a check mark while it is the current choice.
+struct MenuRow: View {
+    let image: Image
+    let title: String
+    var isOn = false
+    var width: CGFloat = 260
+    let action: () -> Void
+
+    init(symbol: String, title: String, isOn: Bool = false, width: CGFloat = 260, action: @escaping () -> Void) {
+        self.init(image: Image(systemName: symbol), title: title, isOn: isOn, width: width, action: action)
+    }
+
+    /// A row with a picture of its own, such as a background's swatch.
+    init(image: Image, title: String, isOn: Bool = false, width: CGFloat = 260, action: @escaping () -> Void) {
+        self.image = image
+        self.title = title
+        self.isOn = isOn
+        self.width = width
+        self.action = action
+    }
+
+    var body: some View {
+        let size = HUDAccessory.size
+        Button(action: action) {
+            HStack(spacing: size.scaled(4)) {
+                HUDButtonLabel(image: image, title: title, fillsWidth: true)
+                Image(systemName: "checkmark")
+                    .font(.system(size: size.font(10.5), weight: .semibold))
+                    .opacity(isOn ? 1 : 0)
+            }
+            .modifier(HUDButtonChrome(width: width, isOn: isOn, padding: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
