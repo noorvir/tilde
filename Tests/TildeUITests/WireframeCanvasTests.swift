@@ -685,6 +685,23 @@ struct WireframeCanvasTests {
         #expect(try await rects() == [[210, 160, 240, 120]])
     }
 
+    /// The pointer went through to the app behind and comes back on a component: the page shows
+    /// the component's handles at once, before any move comes. A press on a corner right after
+    /// resizes the component; it does not move it.
+    @Test func aPressRightAfterThePointerCameBackResizesByTheCorner() async throws {
+        try await drawComponent("card")
+        try await start(tool: "")
+        try await page.hover(CGPoint(x: 900, y: 600))
+        try await page.draw("pointerWentThrough(false)")
+        #expect(try await page.run("getComputedStyle(document.querySelector('[data-corner=se]')).display") as? String == "none")
+
+        try await page.draw("pointerCameBack(400, 230)")
+        #expect(try await page.run("document.elementFromPoint(440, 270).dataset.corner") as? String == "se")
+        try await page.run("window.pressed = fire('pointerdown', 440, 270); fire('pointermove', 460, 290, {isPressed: true, target: window.pressed}); fire('pointerup', 460, 290, {target: window.pressed}); 0")
+        try await page.settle()
+        #expect(try await rects() == [[200, 150, 260, 140]])
+    }
+
     /// A component being drawn grows from its press, also when new lines come before its first
     /// move: the page last saw the pointer far away, over Tilde's bar, before the press.
     @Test func linesThatComeAtThePressDoNotDrawTowardsAnOldPlace() async throws {

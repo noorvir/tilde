@@ -41,6 +41,17 @@ export function controlClick(event) {
   event.preventDefault();
 }
 
+// The pointer is over the page again, after it went through: the move that brought it went to
+// the app behind, so the page gets one here. A press that comes next, with no move of its own,
+// then finds the handles of the component under the pointer.
+export function pointerCameBack(x, y) {
+  if (!wireframe || adjusting) return;
+  const target = document.elementFromPoint(x, y) ?? document.body;
+  target.dispatchEvent(new PointerEvent("pointermove", {
+    bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse", isPrimary: true,
+  }));
+}
+
 // The mode ended: no move is under way.
 export function stopAdjusting() {
   adjusting = null;
