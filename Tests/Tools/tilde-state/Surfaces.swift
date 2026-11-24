@@ -59,7 +59,7 @@ enum Surfaces {
             return try await hosted(SettingsView(model: model), size: size)
 
         case .canvas:
-            return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip, isNested: state.nested == true, hasTexts: state.texts == true)
+            return try await CanvasSurface.image(look: state.look?.value ?? WireframeLook(), chip: state.chip, isNested: state.nested == true, isGrouped: state.grouped == true, hasTexts: state.texts == true)
 
         case .restorePrompt:
             let restore = RestoreToastState()

@@ -7,8 +7,8 @@
 import { live, taken, changeElements } from "../scene.js";
 import { record } from "./history.js";
 
-const isComponent = (element) => Boolean(element.customData?.tildeWireframe) && !taken.has(element.id);
-const components = () => live().filter(isComponent);
+// Those that can still change: not the ones that Done took, which stay until their note is saved.
+const components = () => live().filter((element) => element.customData?.tildeWireframe && !taken.has(element.id));
 
 export const newKey = () => `component-${Math.random().toString(36).slice(2)}`;
 
@@ -59,6 +59,12 @@ export function groupUnder(parent, frames) {
   setKey(parent, key);
   if (children.some((child) => descendantsOf(child).some((inner) => inner.id === parent.id))) setParent([parent]);
   setParent(children, key);
+}
+
+// In a group, for its label's mark: a child, or a parent with a child. Also one that Done took.
+export function isInGroup(frame) {
+  const { key, parent } = frame.customData;
+  return Boolean(parent) || Boolean(key && live().some((element) => element.customData?.parent === key));
 }
 
 export const canUngroup = (frame) => Boolean(frame.customData.parent) || childrenOf(frame).length > 0;

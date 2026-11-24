@@ -194,6 +194,9 @@ struct UIState: Decodable {
     var chip: Chip?
     /// The canvas has its components inside a section, and a button inside a card.
     var nested: Bool?
+    /// The nested components are in groups: the section's first card is its child, and the
+    /// button that card's.
+    var grouped: Bool?
     /// The canvas's components have texts, and a free text is beside them.
     var texts: Bool?
 

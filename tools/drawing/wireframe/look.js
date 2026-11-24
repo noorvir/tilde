@@ -1,13 +1,15 @@
 // The look of the components: an SVG over the canvas that draws each one from its element, in
 // the style, fill, fade and colours of Tilde's settings. Each has square corners, a plain inner
 // block in place of its content, which is not known, the lines that make its kind, and a label
-// tag at its top left, empty until it has a label, and its text, if it has one, in its middle.
+// tag at its top left, empty until it has a label, with a group mark at its right end while the
+// component is in a group, and its text, if it has one, in its middle.
 // A free text, of kind "text", is only its text. A component inside another has a white gap
 // around its border. Under a component with a fill, the screen is faded here, and blurred by
 // Tilde, which gets the shapes to blur from the `under:` message.
 
 import { api, live, post, taken } from "../scene.js";
 import { clamp, newData, rowsOf } from "./components.js";
+import { isInGroup } from "./groups.js";
 import { wireframe } from "./mode.js";
 
 // Each group of kinds has a colour, and a dark one for its edges, its inner block and its
@@ -64,6 +66,9 @@ export function tagWidth(text) {
   return text.length * 7 + 10;
 }
 
+// The group mark, two squares one on the other, and the room it takes at the tag's right end.
+const groupMark = { size: 9, room: 12 };
+
 const placeholder = "Add label";
 
 // The tag of the component under the pointer is active: darker. Its size stays.
@@ -76,17 +81,20 @@ export function setActiveTag(group) {
 }
 
 // A component's tag as it shows now: its text, whether that is the placeholder, whether it is
-// active, and whether it shows. Once Done took the component, its empty tag no longer shows:
+// active, whether it has the group mark, and whether it shows. Once Done took the component, its empty tag no longer shows:
 // the pictures that the agent gets would only have it as noise.
 function tagText(frame) {
   const label = frame.customData.label;
   const isActive = frame.groupIds[0] === activeGroup;
-  if (label) return { text: label, isPlaceholder: false, isActive, isShown: true };
-  return { text: placeholder, isPlaceholder: true, isActive, isShown: !taken.has(frame.id) };
+  const isGrouped = isInGroup(frame);
+  if (label) return { text: label, isPlaceholder: false, isActive, isGrouped, isShown: true };
+  return { text: placeholder, isPlaceholder: true, isActive, isGrouped, isShown: !taken.has(frame.id) };
 }
 
+const widthOf = (tag) => tagWidth(tag.text) + (tag.isGrouped ? groupMark.room : 0);
+
 export function shownTagWidth(frame) {
-  return tagWidth(tagText(frame).text);
+  return widthOf(tagText(frame));
 }
 
 // The component whose tag is at a point; not one that Done took.
@@ -156,13 +164,13 @@ export function drawLook() {
   // The rectangle being drawn, which Excalidraw draws in no colour, shows as the component.
   const drawing = api.getAppState().newElement;
   if (wireframe?.tool && drawing?.type === "rectangle" && !drawing.customData) {
-    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool), tag: { text: placeholder, isPlaceholder: true, isActive: false, isShown: true } });
+    components.push({ id: drawing.id, version: drawing.version, kind: wireframe.tool, rect: drawing, data: newData(wireframe.tool), tag: { text: placeholder, isPlaceholder: true, isActive: false, isGrouped: false, isShown: true } });
   }
 
   const next = components.map((component) => {
     const old = shown.find((entry) => entry.id === component.id);
     const isNested = components.some((other) => other.kind !== "text" && contains(other.rect, component.rect));
-    const tagKey = `${component.tag.text} ${component.tag.isActive} ${component.tag.isShown}`;
+    const tagKey = `${component.tag.text} ${component.tag.isActive} ${component.tag.isGrouped} ${component.tag.isShown}`;
     if (old?.version === component.version && old.lookKey === lookKey && old.tagKey === tagKey && old.isNested === isNested) return old;
     return { id: component.id, version: component.version, lookKey, tagKey, isNested, ...componentNodes(component, isNested) };
   });
@@ -276,11 +284,15 @@ function componentNodes({ kind, rect: { x, y, width, height }, data, tag }, isNe
   // While the label is typed, the field stands in for the tag.
   if (data.typing !== "label" && tag.isShown) {
     const labelTop = tagTop({ y });
-    add("rect", { x, y: labelTop, width: tagWidth(tag.text), height: 15, fill: tag.isActive ? dark : main });
+    const color = tag.isPlaceholder ? "rgba(255,255,255,.7)" : "#FFFFFF";
+    add("rect", { x, y: labelTop, width: widthOf(tag), height: 15, fill: tag.isActive ? dark : main });
     if (tag.text) {
-      const color = tag.isPlaceholder ? "rgba(255,255,255,.7)" : "#FFFFFF";
       const text = add("text", { x: x + 5, y: labelTop + 11, "font-size": 11, fill: color, "font-family": "ui-monospace,Menlo,monospace" });
       text.textContent = tag.text;
+    }
+    if (tag.isGrouped) {
+      const left = x + tagWidth(tag.text) - 2;
+      add("path", { "data-group-mark": "", d: `M${left + 0.5} ${labelTop + 3.5}h6v6h-6zM${left + 3.5} ${labelTop + 6.5}h6v6h-6z`, fill: "none", stroke: color, "stroke-width": 1 });
     }
   }
   return { under, top };

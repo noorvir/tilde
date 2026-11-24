@@ -775,6 +775,9 @@ struct WireframeCanvasTests {
 
     // MARK: - Groups
 
+    /// How many labels show the group mark.
+    private static let groupMarks = "document.querySelectorAll('#tilde-look [data-group-mark]').length"
+
     /// With no tool, as after Esc: a press on a component moves or selects it.
     private func putToolDown() async throws {
         try await start(tool: "")
@@ -795,6 +798,8 @@ struct WireframeCanvasTests {
         #expect(drawn[1].parent == drawn[0].key)
         #expect(drawn[2].parent == drawn[1].key)
         #expect(drawn[3].parent == nil)
+        // The label of each component in a group has the group mark; the list's has none.
+        #expect(try await page.run(Self.groupMarks) as? Int == 3)
 
         // A drag on the section, beside the card.
         try await putToolDown()
@@ -882,6 +887,7 @@ struct WireframeCanvasTests {
         var drawn = try await page.shapes()
         #expect(drawn[0].key != nil && drawn[0].parent == nil)
         #expect(drawn[1].parent == drawn[0].key)
+        #expect(try await page.run(Self.groupMarks) as? Int == 2)
 
         try await page.drag(from: first, to: CGPoint(x: 240, y: 170), meta: true)
         #expect(try await rects() == [[140, 120, 200, 100], [540, 120, 200, 200]])
@@ -906,6 +912,7 @@ struct WireframeCanvasTests {
         #expect(!items.contains("group"))
         try await page.click(on: "#tilde-context-menu [data-item=\"ungroup\"]")
         #expect(try await page.shapes().map(\.parent) == [nil, nil])
+        #expect(try await page.run(Self.groupMarks) as? Int == 0)
         #expect(try await page.openContextMenu(at: child).contains("ungroup") == false)
         try await page.press("Escape")
 

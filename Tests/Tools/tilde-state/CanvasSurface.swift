@@ -37,12 +37,23 @@ enum CanvasSurface {
         ["type": "text", "rect": [480, 170, 108, 18], "text": "Prices per hour"],
     ]
 
-    static func image(look: WireframeLook, chip: UIState.Chip?, isNested: Bool, hasTexts: Bool) async throws -> CGImage {
+    /// The nested components in groups: the section is the parent of the first card, and that
+    /// card of its button. The other components are in no group.
+    private static let groupedShapes: [[String: Any]] = nestedShapes.enumerated().map { index, shape in
+        var shape = shape
+        let links: [Int: [String: String]] = [0: ["key": "pricing"], 1: ["key": "plan", "parent": "pricing"], nestedShapes.count - 1: ["parent": "plan"]]
+        shape.merge(links[index] ?? [:]) { _, new in new }
+        return shape
+    }
+
+    static func image(look: WireframeLook, chip: UIState.Chip?, isNested: Bool, isGrouped: Bool, hasTexts: Bool) async throws -> CGImage {
         let app = try await Renderer.render(NSHostingView(rootView: MockApp()), size: size, appearance: .aqua)
         let page = try await WireframePicturePage.load(html: html())
         let state = chip?.rawValue ?? "normal"
         var drawn = shapes
-        if isNested {
+        if isGrouped {
+            drawn = groupedShapes
+        } else if isNested {
             drawn = nestedShapes
         } else if hasTexts {
             drawn = textShapes
