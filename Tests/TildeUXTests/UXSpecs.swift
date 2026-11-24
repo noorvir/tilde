@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import CryptoKit
+import os
 import Foundation
 import Testing
 
@@ -1429,12 +1430,14 @@ struct UXSpecs {
     }
 }
 
-/// Runs a command on a node through ssh, as Tilde does, and gives its output.
+/// Runs a command on a node through ssh, as Tilde does, and gives its output. The commands
+/// share one connection: a new one for each is a full ssh handshake.
 @discardableResult
 private func onNode(_ host: String, _ command: String) throws -> String {
+    startNodeConnection(host)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-    process.arguments = ["-o", "BatchMode=yes", host, command]
+    process.arguments = ["-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=\(nodeControlPath)", host, command]
     let output = Pipe()
     process.standardOutput = output
     process.standardError = FileHandle.nullDevice
@@ -1445,6 +1448,28 @@ private func onNode(_ host: String, _ command: String) throws -> String {
         throw POSIXError(.EIO)
     }
     return String(decoding: data, as: UTF8.self)
+}
+
+/// The specs' own connection to nodes; Tilde's connections are its own. A command with no
+/// connection to share makes its own.
+private let nodeControlPath = "/tmp/tilde-ux-ssh-%C"
+private let nodeConnections = OSAllocatedUnfairLock(initialState: Set<String>())
+
+/// Starts the shared connection to `host`, once; it ends a minute after its last use. Started
+/// apart, with no output of its own: a master that ssh starts for a command keeps that
+/// command's output open, and reading it never ends.
+private func startNodeConnection(_ host: String) {
+    guard nodeConnections.withLock({ $0.insert(host).inserted }) else {
+        return
+    }
+    let master = Process()
+    master.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+    master.arguments = ["-o", "BatchMode=yes", "-o", "ControlMaster=yes", "-o", "ControlPersist=60", "-o", "ControlPath=\(nodeControlPath)", "-f", "-N", host]
+    master.standardInput = FileHandle.nullDevice
+    master.standardOutput = FileHandle.nullDevice
+    master.standardError = FileHandle.nullDevice
+    try? master.run()
+    waitForExit(master)
 }
 
 /// An agent on a node: its stdio MCP server is `command` (tproxy), started through ssh.
