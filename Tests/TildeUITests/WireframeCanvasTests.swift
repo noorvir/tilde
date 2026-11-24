@@ -75,6 +75,27 @@ struct WireframeCanvasTests {
         #expect(try await page.shows("#tilde-label"))
     }
 
+    /// A tool key right after a release can reach the page before it finishes the drag, as
+    /// Tilde's keys come through its main thread: the drag still draws the tool it was pressed
+    /// with, and the next one draws the new tool.
+    @Test func aToolChosenRightAfterTheReleaseLeavesTheDragsComponent() async throws {
+        try await start(tool: "card")
+        let kinds = WireframeMode.tools.map { "\($0.tool): 'data:,'" }.joined(separator: ", ")
+        try await page.run("fire('pointermove', 200, 150); window.pressed = fire('pointerdown', 200, 150); 0")
+        // Excalidraw applies the moves once a frame: a wait after each.
+        for point in ["320, 210", "440, 270"] {
+            try await page.run("fire('pointermove', \(point), {isPressed: true, target: window.pressed}); 0")
+            try await page.settle()
+        }
+        // No timer of the page runs between the release and the new tool.
+        try await page.run("fire('pointerup', 440, 270, {target: window.pressed}); window.tildeDraw.setWireframe({tool: 'table', icons: {\(kinds)}}); 0")
+        try await page.settle()
+        #expect(try await page.shapes().map(\.type) == ["card"])
+
+        try await page.drag(from: CGPoint(x: 600, y: 400), to: CGPoint(x: 800, y: 500))
+        #expect(try await page.shapes().map(\.type) == ["card", "table"])
+    }
+
     /// Excalidraw applies a drag's moves once a frame. A component ends where the drag is
     /// released, also when its last move came while the page waited for a frame, and that frame
     /// came before the release.
