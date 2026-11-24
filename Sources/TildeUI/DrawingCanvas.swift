@@ -177,27 +177,30 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         }
         let origin = frame.flipped.origin
         webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.newShapes() : \"\"") { result, _ in
-            guard let text = result as? String, let shapes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]], !shapes.isEmpty else {
+            guard let drawing = Self.drawing(from: result, origin: origin), !drawing.shapes.isEmpty else {
                 done(nil)
                 return
             }
-            let moved = shapes.map { DrawingShapes.moved($0, by: CGVector(dx: origin.x, dy: origin.y)) }
-            done(DrawingPanel.Drawing(shapes: moved, ids: shapes.compactMap { $0["id"] as? String }, bounds: DrawingShapes.bounds(of: moved)))
+            done(drawing)
         }
     }
 
     func takeNewShapes() async -> DrawingPanel.Drawing? {
-        guard let webView,
-              let text = try? await webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.takeNewShapes() : \"\"") as? String,
-              let shapes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]]
-        else {
+        guard let webView else {
             return nil
         }
-        let origin = frame.flipped.origin
+        let result = try? await webView.evaluateJavaScript("window.tildeDraw ? window.tildeDraw.takeNewShapes() : \"\"")
+        return Self.drawing(from: result, origin: frame.flipped.origin)
+    }
+
+    /// The page's shapes, as the JSON text of `result`, moved from the canvas at `origin` onto
+    /// the screen. Nil when `result` is not that text.
+    private static func drawing(from result: Any?, origin: CGPoint) -> DrawingPanel.Drawing? {
+        guard let text = result as? String, let shapes = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [[String: Any]] else {
+            return nil
+        }
         let moved = shapes.map { DrawingShapes.moved($0, by: CGVector(dx: origin.x, dy: origin.y)) }
-        return DrawingPanel.Drawing(
-            shapes: moved, ids: shapes.compactMap { $0["id"] as? String }, bounds: DrawingShapes.bounds(of: moved)
-        )
+        return DrawingPanel.Drawing(shapes: moved, ids: shapes.compactMap { $0["id"] as? String }, bounds: DrawingShapes.bounds(of: moved))
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
