@@ -67,8 +67,7 @@ extension AnnotationController {
             if undoCanvasKey(event) {
                 return true
             }
-            // ↩ ends Draw's group of shapes.
-            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, returnInDraw() {
+            if returnKeyInDraw(event) {
                 return true
             }
             let isCommand = event.modifierFlags.contains(.command)
@@ -164,8 +163,7 @@ extension AnnotationController {
             if undoCanvasKey(event) {
                 return true
             }
-            // ↩ ends Draw's group of shapes and opens its comment.
-            if key == kVK_Return, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty, returnInDraw() {
+            if returnKeyInDraw(event) {
                 return true
             }
             // ⌘↩ is Done in Draw and Wireframe.
@@ -224,11 +222,16 @@ extension AnnotationController {
         guard focus == .other, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
             return false
         }
-        // ↩ ends Draw's group, also right after a release, before Tilde heard of the group.
-        if Int(event.keyCode) == kVK_Return, !event.modifierFlags.contains(.shift), returnInDraw() {
+        if returnKeyInDraw(event) {
             return true
         }
         return performShortcut(event)
+    }
+
+    /// ↩ alone ends Draw's group of shapes and opens its comment, also right after a release,
+    /// before Tilde heard of the group. True when it did.
+    private func returnKeyInDraw(_ event: NSEvent) -> Bool {
+        Int(event.keyCode) == kVK_Return && event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty && returnInDraw()
     }
 
     /// What a key does in the session: a key of wireframe mode first, then a key of the HUD's
