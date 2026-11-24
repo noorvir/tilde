@@ -17,7 +17,8 @@ import { tagAt, textAt, textBox, textHeight } from "./look.js";
 import { wireframe } from "./mode.js";
 import { snapLines, nearest, nearestOf, hideGuides, showGuides } from "./snap.js";
 
-// The press that may draw a component: the elements before it, its place and its time.
+// The press that may draw a component: the elements before it, its place, its time and the tool
+// it draws with. A tool key right after the release can change the tool before the shape is done.
 let wireframePress = null;
 // The move or resize under way.
 export let adjusting = null;
@@ -73,7 +74,7 @@ function finishWireframeShape(press) {
     if (component && isDoubleClick(component.groupIds[0], press.time)) editText(component);
     return;
   }
-  const elements = wireframeElements(wireframe.tool, box, newData(wireframe.tool));
+  const elements = wireframeElements(press.tool, box, newData(press.tool));
   record(rest);
   api.updateScene({ elements: [...rest, ...elements], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
 }
@@ -406,7 +407,7 @@ export function snapPointer(event) {
     return;
   }
   if (event.type === "pointerdown") {
-    wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY, time: event.timeStamp };
+    wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY, time: event.timeStamp, tool: wireframe.tool };
   }
   const tool = api?.getAppState().activeTool.type;
   const pointer = { x: event.clientX, y: event.clientY };

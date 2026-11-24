@@ -15,11 +15,7 @@ struct UpdateSettings: View {
             if updates.status != .off {
                 SettingsDivider()
                 SettingsRow(title: "Update automatically", subtitle: "Installs updates and reopens Tilde when you are not using it") {
-                    Toggle("Update automatically", isOn: $updates.isAutomatic)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(Color.tildeBlue)
-                        .labelsHidden()
+                    SettingsToggle("Update automatically", isOn: $updates.isAutomatic)
                 }
             }
         }

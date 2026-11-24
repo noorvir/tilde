@@ -27,9 +27,12 @@ final class ClipRecorder {
     private let log = Logger(subsystem: "dev.tilde.app", category: "recording")
 
     /// Starts recording `source` into `video` for the flow's start `operation`. `windowName`:
-    /// the name of a window's app as the HUD shows it. `recordsCamera`: the camera goes into a
-    /// file of its own beside the video.
-    func start(_ source: RecordingSource, windowName: String?, into video: URL, extras: ScreenRecorder.Extras, recordsCamera: Bool, operation: Int) {
+    /// the name of a window's app as the HUD shows it. `browserWindow` and `microphone`: as
+    /// `ScreenRecorder.start` takes them. `recordsCamera`: the camera goes into a file of its own
+    /// beside the video.
+    func start(
+        _ source: RecordingSource, windowName: String?, into video: URL, browserWindow: Int?, microphone: String?, recordsCamera: Bool, operation: Int
+    ) {
         // What the report says the clip shows.
         let name: String
         let frame: CGRect
@@ -58,7 +61,9 @@ final class ClipRecorder {
         }
         Task {
             do {
-                let started = try await ScreenRecorder.start(source, to: video, extras: extras, onSourceEnded: sourceEnded)
+                let started = try await ScreenRecorder.start(
+                    source, to: video, browserWindow: browserWindow, microphone: microphone, onSourceEnded: sourceEnded
+                )
                 dispatch(.clipStarted(operation), [
                     .adoptClip: { [self] in
                         recorder = started

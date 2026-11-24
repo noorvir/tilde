@@ -71,18 +71,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
     /// Set by Stop and Discard: from then on nothing is written.
     private var isStopped = false
 
-    /// What a clip records besides the source: Tilde's windows to keep in a display's clip,
-    /// such as its browser, and the microphone's `AVCaptureDevice.uniqueID`. The camera is a
-    /// file of its own.
-    struct Extras {
-        var keptWindows: [Int] = []
-        var microphone: String?
-    }
-
-    /// Starts recording a source into `video`. Of Tilde's windows, only `extras.keptWindows`
-    /// show in a display's clip; a window's clip shows that window's app alone.
+    /// Starts recording a source into `video`. Of Tilde's windows, only `browserWindow`, the
+    /// number of Tilde's browser window, shows in a display's clip; a window's clip shows that
+    /// window's app alone. `microphone`: the `AVCaptureDevice.uniqueID` whose sound the clip
+    /// records, or nil for none. The camera is a file of its own.
     static func start(
-        _ source: RecordingSource, to video: URL, extras: Extras, onSourceEnded: @escaping @Sendable () -> Void
+        _ source: RecordingSource, to video: URL, browserWindow: Int?, microphone: String?, onSourceEnded: @escaping @Sendable () -> Void
     ) async throws -> ScreenRecorder {
         let filter: SCContentFilter
         let size: CGSize
@@ -94,7 +88,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
         case .window(let window):
             let content = try await shareableContent()
             guard let shared = content.windows.first(where: { $0.windowID == CGWindowID(window.number) }),
-                  let (showing, display) = ScreenCapture.filter(showingAppOf: shared, at: shared.frame, content: content, keeping: [])
+                  let (showing, display) = ScreenCapture.filter(showingAppOf: shared, at: shared.frame, content: content)
             else {
                 throw Failure.noSource
             }
@@ -108,7 +102,7 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
                 throw Failure.noSource
             }
             let tilde = content.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
-            let kept = content.windows.filter { extras.keptWindows.contains(Int($0.windowID)) }
+            let kept = content.windows.filter { Int($0.windowID) == browserWindow }
             filter = SCContentFilter(display: shared, excludingApplications: tilde, exceptingWindows: kept)
             size = shared.frame.size
         }
@@ -126,14 +120,14 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptur
             configuration.sourceRect = windowArea.rect.offsetBy(dx: -windowArea.display.minX, dy: -windowArea.display.minY)
         }
 
-        var microphone: String?
-        if #available(macOS 15.0, *), let device = extras.microphone {
+        var recordsMicrophone = false
+        if #available(macOS 15.0, *), let microphone {
             configuration.captureMicrophone = true
-            configuration.microphoneCaptureDeviceID = device
-            microphone = device
+            configuration.microphoneCaptureDeviceID = microphone
+            recordsMicrophone = true
         }
 
-        let (writer, input, audioInput) = try makeWriter(width: width, height: height, withAudio: microphone != nil, to: video)
+        let (writer, input, audioInput) = try makeWriter(width: width, height: height, withAudio: recordsMicrophone, to: video)
         let recorder = ScreenRecorder(clock: CMClockGetHostTimeClock(), writer: writer, input: input, audioInput: audioInput, onSourceEnded: onSourceEnded)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: recorder)
         recorder.endCapture = {

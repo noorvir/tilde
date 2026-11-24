@@ -37,15 +37,12 @@ extension BrowserCookies {
     /// Safari is listed while Tilde cannot read its cookies, to ask for Full Disk Access.
     public static func browsers(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [CookieBrowser] {
         let chromium = profiles(home: home)
-        let chromiumBundleIDs: [ChromiumBrowser: String] = [
-            .chrome: "com.google.Chrome", .arc: "company.thebrowser.Browser", .brave: "com.brave.Browser", .edge: "com.microsoft.edgemac",
-        ]
         var browsers: [CookieBrowser] = ChromiumBrowser.allCases.compactMap { browser in
             let profiles = chromium.filter { $0.browser == browser }.map { CookieProfile(source: .chromium($0), browser: browser.name, name: $0.name) }
-            guard !profiles.isEmpty, let bundleID = chromiumBundleIDs[browser] else {
+            guard !profiles.isEmpty else {
                 return nil
             }
-            return CookieBrowser(name: browser.name, bundleID: bundleID, profiles: profiles, needsFullDiskAccess: false)
+            return CookieBrowser(name: browser.name, bundleID: browser.bundleID, profiles: profiles, needsFullDiskAccess: false)
         }
 
         let safari = [
@@ -125,26 +122,15 @@ extension BrowserCookies {
             var cookies: [HTTPCookie] = []
             var skipped = 0
             while sqlite3_step(statement) == SQLITE_ROW {
-                var properties: [HTTPCookiePropertyKey: Any] = [
-                    .domain: column(statement, 0), .name: column(statement, 1), .value: column(statement, 2), .path: column(statement, 3),
-                ]
                 let expiry = Double(sqlite3_column_int64(statement, 4))
-                if expiry > 0 {
-                    // Newer versions count milliseconds.
-                    properties[.expires] = Date(timeIntervalSince1970: expiry > 1e11 ? expiry / 1000 : expiry)
-                }
-                if sqlite3_column_int(statement, 5) == 1 {
-                    properties[.secure] = "TRUE"
-                }
-                if sqlite3_column_int(statement, 6) == 1 {
-                    properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
-                }
-                switch sqlite3_column_int(statement, 7) {
-                case 1: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteLax
-                case 2: properties[.sameSitePolicy] = HTTPCookieStringPolicy.sameSiteStrict
-                default: break
-                }
-                if let cookie = HTTPCookie(properties: properties) {
+                // Newer versions count milliseconds.
+                let expires = expiry > 0 ? Date(timeIntervalSince1970: expiry > 1e11 ? expiry / 1000 : expiry) : nil
+                let cookie = Self.cookie(
+                    domain: text(statement, 0), name: text(statement, 1), value: text(statement, 2), path: text(statement, 3), expires: expires,
+                    isSecure: sqlite3_column_int(statement, 5) == 1, isHTTPOnly: sqlite3_column_int(statement, 6) == 1,
+                    sameSite: sqlite3_column_int(statement, 7)
+                )
+                if let cookie {
                     cookies.append(cookie)
                 } else {
                     skipped += 1
@@ -205,16 +191,12 @@ extension BrowserCookies {
                     skipped += 1
                     continue
                 }
-                var properties: [HTTPCookiePropertyKey: Any] = [.domain: domain, .name: name, .value: value, .path: path]
                 // Seconds since 2001.
-                properties[.expires] = Date(timeIntervalSinceReferenceDate: expiry)
-                if flags & 1 != 0 {
-                    properties[.secure] = "TRUE"
-                }
-                if flags & 4 != 0 {
-                    properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
-                }
-                if let cookie = HTTPCookie(properties: properties) {
+                let cookie = Self.cookie(
+                    domain: domain, name: name, value: value, path: path, expires: Date(timeIntervalSinceReferenceDate: expiry),
+                    isSecure: flags & 1 != 0, isHTTPOnly: flags & 4 != 0
+                )
+                if let cookie {
                     cookies.append(cookie)
                 } else {
                     skipped += 1
@@ -223,33 +205,5 @@ extension BrowserCookies {
             pageStart += pageSize
         }
         return (cookies, skipped)
-    }
-
-    // MARK: - SQLite
-
-    /// Opens a copy of a database, with its journal, and deletes the copy afterwards.
-    private static func withCopy<T>(of database: URL, _ read: (OpaquePointer) throws -> T) throws -> T {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("tilde-cookies-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: folder) }
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let copy = folder.appendingPathComponent(database.lastPathComponent)
-        for suffix in ["", "-wal", "-shm"] {
-            let source = URL(fileURLWithPath: database.path + suffix)
-            if FileManager.default.fileExists(atPath: source.path) {
-                try FileManager.default.copyItem(at: source, to: URL(fileURLWithPath: copy.path + suffix))
-            }
-        }
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(copy.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let db = handle else {
-            // SQLite may make a handle also when it fails to open.
-            sqlite3_close(handle)
-            throw Failure.database("open failed")
-        }
-        defer { sqlite3_close(db) }
-        return try read(db)
-    }
-
-    private static func column(_ statement: OpaquePointer?, _ index: Int32) -> String {
-        sqlite3_column_text(statement, index).map { String(cString: $0) } ?? ""
     }
 }

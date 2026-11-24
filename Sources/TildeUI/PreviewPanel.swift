@@ -178,6 +178,7 @@ struct PreviewView: View {
     @ObservedObject var controller: AnnotationController
     @ObservedObject private var previewCard: PreviewCard
     @ObservedObject private var wireframes: WireframeSwitch
+    @ObservedObject private var savedVideos: SavedVideos
     /// Called when a drag of the header moves.
     let onDrag: () -> Void
     /// The corner grip's drag, by its distance since it began, and its end.
@@ -191,6 +192,7 @@ struct PreviewView: View {
         self.controller = controller
         previewCard = controller.previewCard
         wireframes = controller.wireframes
+        savedVideos = controller.savedVideos
         self.onDrag = onDrag
         self.onResize = onResize
         self.onResizeEnded = onResizeEnded
@@ -279,10 +281,10 @@ struct PreviewView: View {
             }
             if case .recording(let video, _, _) = controller.drafts.first(where: { $0.id == id })?.annotation.target {
                 CardButton(
-                    symbol: "square.and.arrow.down", title: "Save video", isLoading: controller.savingVideo == video,
+                    symbol: "square.and.arrow.down", title: "Save video", isLoading: savedVideos.saving == video,
                     help: "Save the video with its background to Downloads"
                 ) {
-                    controller.saveVideo(video)
+                    savedVideos.save(video, camera: controller.cameraTrack(of: video), layout: controller.layout(of: video))
                 }
             }
             CardButton(symbol: "trash", title: "Delete", isDestructive: true, help: "Delete this note") {

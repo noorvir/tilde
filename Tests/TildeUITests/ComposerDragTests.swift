@@ -14,7 +14,7 @@ struct ComposerDragTests {
         var layout = ClipLayout(background: .gradient(.dusk))
         layout.cameraCenter = CGPoint(x: 0.16, y: 0.74)
         let clip = CGSize(width: 1280, height: 800)
-        view.show(layout, clipSize: clip)
+        view.show(layout, clipSize: clip, corner: VideoFramer.defaultCorner)
         var handed: [ClipLayout] = []
         view.onChange = { handed.append($0) }
 
@@ -36,7 +36,7 @@ struct ComposerDragTests {
         for tick in 1...60 {
             try send(.leftMouseDragged, dx: CGFloat(tick))
             // The controller's layout does not stop the drag.
-            view.show(layout, clipSize: clip)
+            view.show(layout, clipSize: clip, corner: VideoFramer.defaultCorner)
         }
         #expect(handed.isEmpty)
         try send(.leftMouseUp, dx: 60)

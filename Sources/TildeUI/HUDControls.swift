@@ -189,6 +189,30 @@ struct SendButton: View {
     }
 }
 
+/// A toast's icon, title and subtitle, before its buttons.
+struct ToastLabel: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: PillMetrics.iconGap) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+    }
+}
+
 /// A text button for the pill's confirm state; destructive ones are red like Delete.
 struct PillTextButton: View {
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded
@@ -270,5 +294,76 @@ private struct HUDShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         RoundedRectangle(cornerRadius: isHUDEmbedded ? 8 : height / 2).path(in: rect)
+    }
+}
+
+/// A HUD card of rows, as the source dropdown.
+struct MenuCard<Content: View>: View {
+    /// Around the rows, inside the card's edge.
+    static var padding: CGFloat { HUDAccessory.size.scaled(4) }
+
+    var width: CGFloat = 260
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: HUDAccessory.size.scaled(2)) {
+            content()
+        }
+        .frame(width: width)
+        .menuCard()
+    }
+}
+
+extension View {
+    /// The look of a HUD menu card around its content, such as the camera's sizes in a row.
+    func menuCard() -> some View {
+        let size = HUDAccessory.size
+        return padding(MenuCard<EmptyView>.padding)
+            .hudCard(cornerRadius: size.scaled(12))
+            .environment(\.pillSize, size)
+    }
+}
+
+/// Between groups of rows in a HUD card.
+struct MenuDivider: View {
+    var body: some View {
+        Rectangle().fill(.white.opacity(0.1)).frame(height: 1).padding(.vertical, 3).padding(.horizontal, 6)
+    }
+}
+
+/// A row of a HUD card: grey with a check mark while it is the current choice.
+struct MenuRow: View {
+    let image: Image
+    let title: String
+    var isOn = false
+    var width: CGFloat = 260
+    let action: () -> Void
+
+    init(symbol: String, title: String, isOn: Bool = false, width: CGFloat = 260, action: @escaping () -> Void) {
+        self.init(image: Image(systemName: symbol), title: title, isOn: isOn, width: width, action: action)
+    }
+
+    /// A row with a picture of its own, such as a background's swatch.
+    init(image: Image, title: String, isOn: Bool = false, width: CGFloat = 260, action: @escaping () -> Void) {
+        self.image = image
+        self.title = title
+        self.isOn = isOn
+        self.width = width
+        self.action = action
+    }
+
+    var body: some View {
+        let size = HUDAccessory.size
+        Button(action: action) {
+            HStack(spacing: size.scaled(4)) {
+                HUDButtonLabel(image: image, title: title, fillsWidth: true)
+                Image(systemName: "checkmark")
+                    .font(.system(size: size.font(10.5), weight: .semibold))
+                    .opacity(isOn ? 1 : 0)
+            }
+            .modifier(HUDButtonChrome(width: width, isOn: isOn, padding: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }

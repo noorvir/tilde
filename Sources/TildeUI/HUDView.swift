@@ -17,6 +17,7 @@ struct HUDView: View {
     @ObservedObject private var wireframe: WireframeMode
     @ObservedObject private var wireframes: WireframeSwitch
     @ObservedObject private var browserOffer: BrowserOffer
+    @ObservedObject private var savedVideos: SavedVideos
     /// What Record records, which the controller reads for the source's name.
     @ObservedObject private var scope: SessionScope
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -40,6 +41,7 @@ struct HUDView: View {
         wireframe = controller.wireframe
         wireframes = controller.wireframes
         browserOffer = controller.browserOffer
+        savedVideos = controller.savedVideos
         scope = controller.scope
         self.isEmbedded = isEmbedded
         self.onDrag = onDrag
@@ -62,7 +64,7 @@ struct HUDView: View {
                 pill
                     .fixedSize()
             }
-            if hud.isShown, let video = controller.savedVideo {
+            if hud.isShown, let video = savedVideos.saved {
                 SavedVideoToast(video: video)
                     .transition(Self.zoom)
             }
@@ -127,7 +129,7 @@ struct HUDView: View {
         .animation(.easeOut(duration: 0.15), value: notices.pause)
         .animation(.spring(duration: 0.28), value: browserOffer.url)
         .animation(.spring(duration: 0.28), value: browserOffer.showsToast)
-        .animation(HUDPanel.motion, value: controller.savedVideo)
+        .animation(HUDPanel.motion, value: savedVideos.saved)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
@@ -659,41 +661,6 @@ struct HUDView: View {
     }
 }
 
-/// After Save video: where the file went, with Show in Finder and Copy.
-private struct SavedVideoToast: View {
-    let video: URL
-
-    var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: PillMetrics.iconGap) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.green)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Video saved")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text("Downloads")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-            }
-            HStack(spacing: 4) {
-                PillTextButton(title: "Show in Finder", isDestructive: false) {
-                    NSWorkspace.shared.activateFileViewerSelecting([video])
-                }
-                PillTextButton(title: "Copy", isDestructive: false) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.writeObjects([video as NSURL])
-                }
-            }
-        }
-        .pillInsets(.regular, leading: .text)
-        .pill()
-        .environment(\.colorScheme, .dark)
-    }
-}
-
 /// The subtitle on one line, cut to the space there is.
 private struct SubtitleLine: View {
     let part: HUDView.SubtitlePart
@@ -784,13 +751,5 @@ struct PauseCard: View {
         case .otherApp:
             return "Paused while another app is in front"
         }
-    }
-}
-
-private extension Color {
-    /// From "#RRGGBB".
-    init(hex: String) {
-        let value = Int(hex.dropFirst(), radix: 16) ?? 0
-        self.init(red: Double(value >> 16 & 255) / 255, green: Double(value >> 8 & 255) / 255, blue: Double(value & 255) / 255)
     }
 }

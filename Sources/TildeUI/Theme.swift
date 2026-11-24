@@ -94,6 +94,19 @@ enum HUDAccessory {
 extension Color {
     static let tildeBlue = Color(nsColor: .tildeBlue)
     static let tildeInk = Color(nsColor: .tildeInk)
+
+    /// From "#RRGGBB", in sRGB.
+    init(hex: String) {
+        self.init(cgColor: .hex(hex))
+    }
+}
+
+extension CGColor {
+    /// From "#RRGGBB", in sRGB.
+    static func hex(_ hex: String) -> CGColor {
+        let value = Int(hex.dropFirst(), radix: 16) ?? 0
+        return CGColor(srgbRed: CGFloat(value >> 16 & 255) / 255, green: CGFloat(value >> 8 & 255) / 255, blue: CGFloat(value & 255) / 255, alpha: 1)
+    }
 }
 
 extension View {

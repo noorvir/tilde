@@ -17,11 +17,7 @@ struct GeneralSettings: View {
         VStack(alignment: .leading, spacing: 28) {
             SettingsSection("Application") {
                 SettingsRow(title: "Launch at login", subtitle: launchError, subtitleIsError: launchError != nil) {
-                    Toggle("Launch at login", isOn: $launchesAtLogin)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(Color.tildeBlue)
-                        .labelsHidden()
+                    SettingsToggle("Launch at login", isOn: $launchesAtLogin)
                         .onChange(of: launchesAtLogin) { _, isOn in
                             setLaunchAtLogin(isOn)
                         }
@@ -97,26 +93,13 @@ private struct BetaSettings: View {
     var body: some View {
         SettingsSection("Beta features") {
             SettingsRow(title: "Remote machines", subtitle: "Agents on a linked machine can open Tilde on this screen") {
-                BetaSwitch(title: "Remote machines", isOn: Binding { nodes.isEnabled } set: { nodes.setEnabled($0) })
+                SettingsToggle("Remote machines", isOn: Binding { nodes.isEnabled } set: { nodes.setEnabled($0) })
             }
             SettingsDivider()
             SettingsRow(title: "Wireframes", subtitle: "Sketch components over the screen and send them as one note") {
-                BetaSwitch(title: "Wireframes", isOn: Binding { wireframes.isOn } set: { wireframes.set($0) })
+                SettingsToggle("Wireframes", isOn: Binding { wireframes.isOn } set: { wireframes.set($0) })
             }
         }
-    }
-}
-
-private struct BetaSwitch: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(title, isOn: $isOn)
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .tint(Color.tildeBlue)
-            .labelsHidden()
     }
 }
 
@@ -154,21 +137,13 @@ private struct BrowserSettings: View {
             }
             SettingsDivider()
             SettingsRow(title: "Offer to import logins", subtitle: "A bar in Tilde's browser until logins are imported") {
-                Toggle("Offer to import logins", isOn: $offersImport)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .tint(Color.tildeBlue)
-                    .labelsHidden()
+                SettingsToggle("Offer to import logins", isOn: $offersImport)
             }
             // Not while the page is in Tilde's browser already.
             if browser.pageURL == nil {
                 SettingsDivider()
                 SettingsRow(title: "Offer Tilde's browser", subtitle: "For a note on a page in another browser") {
-                    Toggle("Offer Tilde's browser", isOn: $offersBrowser)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(Color.tildeBlue)
-                        .labelsHidden()
+                    SettingsToggle("Offer Tilde's browser", isOn: $offersBrowser)
                 }
             }
             SettingsDivider()
@@ -178,14 +153,7 @@ private struct BrowserSettings: View {
                 }
             }
         }
-        .sheet(item: Binding(get: { choice.map(BrowserChoice.init) }, set: { choice = $0?.browsers })) { item in
-            ImportSheet(browsers: item.browsers, browser: browser) { summary in
-                if let summary {
-                    lastImport = summary
-                }
-                choice = nil
-            }
-        }
+        .loginImportSheet(choice: $choice, browser: browser)
         .confirmationDialog("Clear Tilde's browser data?", isPresented: $asksToClear) {
             Button("Clear", role: .destructive) {
                 Task {
@@ -199,24 +167,54 @@ private struct BrowserSettings: View {
     }
 }
 
-struct BrowserChoice: Identifiable {
-    let browsers: [CookieBrowser]
-    var id: [String] { browsers.map(\.id) }
+extension View {
+    /// The login import while `choice` holds the browsers to choose from, as Settings and the
+    /// login bar show it. A finished import keeps its result line as the last import.
+    func loginImportSheet(choice: Binding<[CookieBrowser]?>, browser: BrowserController) -> some View {
+        modifier(LoginImportSheet(choice: choice, browser: browser))
+    }
+}
+
+private struct LoginImportSheet: ViewModifier {
+    @Binding var choice: [CookieBrowser]?
+    let browser: BrowserController
+    @AppStorage("BrowserImport.summary") private var lastImport = ""
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: Binding { choice != nil } set: { if !$0 { choice = nil } }) {
+            ImportSheet(browsers: choice ?? [], browser: browser) { summary in
+                if let summary {
+                    lastImport = summary
+                }
+                choice = nil
+            }
+        }
+    }
 }
 
 /// The import: a browser on this Mac, then one of its profiles. Safari asks for Full Disk
 /// Access first.
-struct ImportSheet: View {
-    let browsers: [CookieBrowser]
+private struct ImportSheet: View {
+    /// Kept from the sheet's start: the choice is gone while the sheet closes.
+    @State private var browsers: [CookieBrowser]
     let browser: BrowserController
     /// The result line, or nil when cancelled.
     let onDone: (String?) -> Void
     @State private var selected: CookieBrowser?
     @State private var profile: CookieProfile?
-    @State private var isImporting = false
     /// The import under way; Cancel stops it before the cookies go to the browser.
     @State private var importing: Task<Void, Never>?
     @State private var error: String?
+
+    init(browsers: [CookieBrowser], browser: BrowserController, onDone: @escaping (String?) -> Void) {
+        _browsers = State(initialValue: browsers)
+        self.browser = browser
+        self.onDone = onDone
+    }
+
+    private var isImporting: Bool {
+        importing != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -319,19 +317,15 @@ struct ImportSheet: View {
         guard let profile else {
             return
         }
-        isImporting = true
         error = nil
         importing = Task {
-            let started = Date()
-            defer { isImporting = false }
+            let spinner = SpinnerTime()
+            defer { importing = nil }
             do {
                 let result = try await Task.detached { try BrowserCookies.cookies(of: profile) }.value
                 try Task.checkCancellation()
                 await browser.add(result.cookies)
-                let wait = 1 - Date().timeIntervalSince(started)
-                if wait > 0 {
-                    try? await Task.sleep(for: .seconds(wait))
-                }
+                await spinner.waitForMinimum()
                 let time = Date().formatted(date: .abbreviated, time: .shortened)
                 onDone("✓ \(result.cookies.count) cookies from \(profile.title), \(time)")
             } catch is CancellationError {

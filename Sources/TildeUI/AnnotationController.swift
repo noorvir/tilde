@@ -137,11 +137,6 @@ final class AnnotationController: ObservableObject {
     let backgrounds: VideoBackgrounds
     /// Each clip's layout on its saved video, by the clip's video, once the preview changed it.
     @Published private var layouts: [URL: ClipLayout] = [:]
-    /// The clip whose video is being saved.
-    @Published private(set) var savingVideo: URL?
-    /// The video file that Save video wrote last, while its toast shows.
-    @Published private(set) var savedVideo: URL?
-    private let savedVideoTime = Countdown()
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -160,6 +155,8 @@ final class AnnotationController: ObservableObject {
     let notices = Notices()
     /// The bar under the HUD that offers Tilde's browser for a page in another browser.
     let browserOffer = BrowserOffer()
+    /// The preview's Save video and its toast.
+    private(set) lazy var savedVideos = SavedVideos(notices: notices)
     /// Where sessions are saved while in progress and kept afterwards.
     let archive: SessionArchive
     let saver: SessionSaver
@@ -1218,10 +1215,10 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
-        let extras = ScreenRecorder.Extras(keptWindows: [browser.windowNumber].compactMap { $0 }, microphone: camera.microphone)
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
-            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), extras: extras, recordsCamera: camera.isShowing, operation: operation
+            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, microphone: camera.microphone,
+            recordsCamera: camera.isShowing, operation: operation
         )
     }
 
@@ -1259,45 +1256,6 @@ final class AnnotationController: ObservableObject {
     func setLayout(_ layout: ClipLayout, of video: URL) {
         layouts[video] = layout
         backgrounds.remember(layout.background)
-    }
-
-    /// Writes a clip with its camera on its layout to Downloads, then shows the toast.
-    func saveVideo(_ video: URL) {
-        guard savingVideo == nil else {
-            return
-        }
-        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
-        let formatter = DateFormatter()
-        // Digits in every locale: the name is for files.
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date())).mp4")
-        let layout = layout(of: video)
-        let cameraTrack = cameraTrack(of: video)
-        savingVideo = video
-        Task { [weak self] in
-            guard let self else {
-                return
-            }
-            let started = Date()
-            do {
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                try await VideoFramer.export(video, camera: cameraTrack, layout: layout, to: file)
-                savedVideo = file
-                savedVideoTime.start(10) { [weak self] in
-                    self?.savedVideo = nil
-                }
-            } catch {
-                log.error("could not save video: \(String(describing: error), privacy: .public)")
-                notices.show(.recordingNotSaved)
-            }
-            // The button's spinner shows for at least a second.
-            let left = 1 - Date().timeIntervalSince(started)
-            if left > 0 {
-                try? await Task.sleep(for: .seconds(left))
-            }
-            savingVideo = nil
-        }
     }
 
     // MARK: - Drawing
@@ -1380,8 +1338,7 @@ final class AnnotationController: ObservableObject {
         guard sessionID != nil, let note = await drawing.takeNote(), session?.id == sessionID else {
             return
         }
-        add(Pending(note, browser: browser, withContext: false), comment: "")
-        drafts[drafts.count - 1].isUnfinished = true
+        add(Pending(note, browser: browser, withContext: false), comment: "", isUnfinished: true)
         saver.save()
     }
 
@@ -1478,6 +1435,7 @@ final class AnnotationController: ObservableObject {
     /// Keeps the components as an unfinished note: `id`'s, or a new one. Saved to disk at once.
     @discardableResult
     private func keepWireframeDraft(_ note: NewNote, id: Draft.ID?) -> Draft.ID {
+        let kept: Draft.ID
         if let id, let index = drafts.firstIndex(where: { $0.id == id }) {
             let old = drafts[index].annotation
             drafts[index].annotation = Annotation(
@@ -1485,14 +1443,14 @@ final class AnnotationController: ObservableObject {
             )
             drafts[index].marker = note.marker
             drafts[index].isUnfinished = true
+            kept = id
         } else {
             var empty = note
             empty.captures = Captures(image: nil, contextImage: nil)
-            add(Pending(empty, browser: browser, withContext: false), comment: "")
-            drafts[drafts.count - 1].isUnfinished = true
+            kept = add(Pending(empty, browser: browser, withContext: false), comment: "", isUnfinished: true)
         }
         saver.save()
-        return id.flatMap { id in drafts.contains { $0.id == id } ? id : nil } ?? drafts[drafts.count - 1].id
+        return kept
     }
 
     /// Shows a wireframe note's components again, to edit them: Done then replaces that note,
@@ -1544,18 +1502,21 @@ final class AnnotationController: ObservableObject {
         hideComposer()
     }
 
-    /// A new note in the list; its pictures join it once they are made.
-    private func add(_ pending: Pending, comment: String) {
+    /// A new note in the list; its pictures join it once they are made. `isUnfinished`: a
+    /// draft without its comment, which the preview finishes.
+    @discardableResult
+    private func add(_ pending: Pending, comment: String, isUnfinished: Bool = false) -> Draft.ID {
         let capture = drawing.finish(pending, windowFrame: pending.sourceWindow.flatMap { tracker.windowFrames[$0] })
-        let draft = Draft(pending, comment: comment, capture: capture)
+        var draft = Draft(pending, comment: comment, capture: capture)
+        draft.isUnfinished = isUnfinished
         drafts.append(draft)
         tracker.notesAdded()
         if let tracked = pending.tracked {
             tracker.follow(draft.id, element: tracked)
         }
-        Task {
+        Task { [id = draft.id] in
             let captures = await capture.value
-            guard let index = drafts.firstIndex(where: { $0.id == draft.id }) else {
+            guard let index = drafts.firstIndex(where: { $0.id == id }) else {
                 return
             }
             let current = drafts[index].annotation
@@ -1564,6 +1525,7 @@ final class AnnotationController: ObservableObject {
                 image: captures.image, contextImage: captures.contextImage
             )
         }
+        return draft.id
     }
 
     /// The preview's Delete button, Delete and Backspace ask first, for a note and for a clip
