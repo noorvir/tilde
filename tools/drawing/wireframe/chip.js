@@ -5,12 +5,15 @@
 // button its comment, its other controls set the rows and columns of a table or list or the
 // fill of an ellipse, and its trash can deletes it. A handle at each corner resizes it, and
 // its opposite corner stays; a grip at the middle of its top edge moves it. Moves and resizes
-// snap. Only components not sent yet can change; each change can be undone.
+// snap. ⌘ or ⌃ and a click adds a component to the selection, or takes it out: each selected
+// one has an outline, as have the components that move with one. Only components not sent yet
+// can change; each change can be undone.
 
 import { editing } from "../draw-mode.js";
 import { commentBox } from "./comment.js";
 import { live, changeElements } from "../scene.js";
 import { rowsOf, allBorders, kindNames, frameOf, clamp } from "./components.js";
+import { membersOf } from "./groups.js";
 import { record } from "./history.js";
 import { labelled } from "./labels.js";
 import { paletteOf, setActiveTag, shownTagWidth, tagTop } from "./look.js";
@@ -54,6 +57,10 @@ bordersMenu.setAttribute("role", "menu");
 bordersMenu.style.cssText = menuStyle;
 export const selectionOutline = document.createElement("div");
 selectionOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:2px solid #2F76FF;margin:-1px 0 0 -1px";
+// The outlines of the other selected components, and thin ones of the components that move
+// with a selected one.
+export const otherOutlines = document.createElement("div");
+otherOutlines.id = "tilde-outlines";
 // The chip stands a little away from the component, clear of Technical's offset edge; a strip
 // as wide as the chip fills the gap, so the pointer reaches the chip without leaving the
 // component, and its handles stay.
@@ -66,9 +73,11 @@ chipStyle.textContent = `
 const gap = { below: 6, above: 6 };
 
 // The component under the pointer, the component that a click selected (its handles show
-// while the pointer is not over another one), and the chip's menu that is open: "kinds",
-// "borders", "comment" or null.
-export const selection = { hovered: null, selected: null, menu: null };
+// while the pointer is not over another one), the other selected ones, and the chip's menu
+// that is open: "kinds", "borders", "comment" or null.
+export const selection = { hovered: null, selected: null, more: [], menu: null };
+
+export const selectedFrames = () => [...selection.more, selection.selected].map((group) => group && frameOf(group)).filter(Boolean);
 
 export const isHandle = (target) => Boolean(target?.closest?.("[data-wireframe-handle]"));
 // The bar's symbol for each kind, as image URLs from Tilde.
@@ -157,7 +166,29 @@ export function deleteComponent(group) {
 
 export function selectGroup(group) {
   selection.selected = group;
+  selection.more = [];
   showHandles();
+}
+
+// The component joins the selection, with the handles, or leaves it.
+export function toggleSelected(group) {
+  const selected = selectedFrames().map((frame) => frame.groupIds[0]);
+  const others = selected.filter((other) => other !== group);
+  const next = selected.includes(group) ? others : [...others, group];
+  selection.selected = next.pop() ?? null;
+  selection.more = next;
+  showHandles();
+}
+
+// An outline for each of the other selected components, and a thin one for each component
+// that moves with a selected one.
+function drawOtherOutlines(isShown) {
+  const selected = isShown ? selectedFrames() : [];
+  const ids = new Set(selected.map((frame) => frame.id));
+  const mates = selected.flatMap(membersOf).filter((frame, index, all) => !ids.has(frame.id) && all.indexOf(frame) === index);
+  const outline = ({ x, y, width, height }, border) => `<div style="position:fixed;pointer-events:none;z-index:9997;box-sizing:border-box;left:${x}px;top:${y}px;width:${width}px;height:${height}px;border:${border}px solid #2F76FF"></div>`;
+  const content = [...selected.slice(0, -1).map((frame) => outline(frame, 2)), ...mates.map((frame) => outline(frame, 1))].join("");
+  if (otherOutlines.innerHTML !== content) otherOutlines.innerHTML = content;
 }
 
 // A press on a chip's button that opens a menu: it opens that menu, or closes it when it is open.
@@ -173,6 +204,7 @@ export function showHandles() {
   if (isSelectionShown) {
     Object.assign(selectionOutline.style, { left: `${selected.x}px`, top: `${selected.y}px`, width: `${selected.width}px`, height: `${selected.height}px` });
   }
+  drawOtherOutlines(isSelectionShown);
   const group = selection.hovered ?? selection.selected;
   const frame = group ? frameOf(group) : null;
   const isShown = Boolean(frame && wireframe && !labelled && !editing);

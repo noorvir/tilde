@@ -5,7 +5,7 @@
 import { moveCursor, setSelectMode } from "../cursor.js";
 import { drawColor, useTool } from "../draw-mode.js";
 import { api, taken, live, changeElements, isTextField, post } from "../scene.js";
-import { selection, setKindIcons, deleteComponent, hideHandles } from "./chip.js";
+import { selection, setKindIcons, deleteComponent, selectGroup, hideHandles } from "./chip.js";
 import { kindNames, wireframeElements } from "./components.js";
 import { clearHistory, undoWireframe, redoWireframe } from "./history.js";
 import { commented, closeComment } from "./comment.js";
@@ -27,7 +27,7 @@ export function setWireframe(state) {
     if (!wasOn) return;
     stopAdjusting();
     if (commented) closeComment(true);
-    selection.selected = null;
+    selectGroup(null);
     if (labelled) endLabel(false);
     hideHandles();
     setWireframeWindow(null);
@@ -56,7 +56,7 @@ export function setWireframe(state) {
 export function restoreWireframe({ shapes, origin: [left, top] }) {
   const elements = shapes.filter((shape) => kindNames[shape.type] || shape.type === "text").flatMap((shape) => {
     const [x, y, width, height] = shape.rect;
-    const data = Object.fromEntries(["label", "text", "comment", "borders", "rows", "columns", "filled", "radius"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
+    const data = Object.fromEntries(["label", "text", "comment", "borders", "rows", "columns", "filled", "radius", "group"].filter((key) => shape[key] !== undefined).map((key) => [key, shape[key]]));
     // Card took Rectangle's place.
     const kind = shape.type === "rectangle" ? "card" : shape.type;
     return wireframeElements(kind, { x: x + left, y: y + top, width, height }, data);
@@ -82,7 +82,7 @@ export function postChange() {
 export function finishEdits() {
   if (labelled) endLabel(true);
   if (commented) closeComment(true);
-  selection.selected = null;
+  selectGroup(null);
   hideHandles();
   hideGuides();
   windowOutline.style.display = "none";
