@@ -72,20 +72,8 @@ struct RestoreToastView: View {
 
     private func pill(_ record: SessionRecord) -> some View {
         HStack(spacing: 12) {
-            HStack(spacing: PillMetrics.iconGap) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.tildeBlue)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Restore unfinished session?")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text(Self.subtitle(record, now: Date()))
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-            }
-            .padding(.trailing, 8)
+            ToastLabel(symbol: "clock.arrow.circlepath", tint: .tildeBlue, title: "Restore unfinished session?", subtitle: Self.subtitle(record, now: Date()))
+                .padding(.trailing, 8)
 
             PillTextButton(title: "Discard", isDestructive: false) {
                 onDiscard(record)

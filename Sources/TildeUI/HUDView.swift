@@ -659,41 +659,6 @@ struct HUDView: View {
     }
 }
 
-/// After Save video: where the file went, with Show in Finder and Copy.
-private struct SavedVideoToast: View {
-    let video: URL
-
-    var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: PillMetrics.iconGap) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.green)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Video saved")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text("Downloads")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-            }
-            HStack(spacing: 4) {
-                PillTextButton(title: "Show in Finder", isDestructive: false) {
-                    NSWorkspace.shared.activateFileViewerSelecting([video])
-                }
-                PillTextButton(title: "Copy", isDestructive: false) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.writeObjects([video as NSURL])
-                }
-            }
-        }
-        .pillInsets(.regular, leading: .text)
-        .pill()
-        .environment(\.colorScheme, .dark)
-    }
-}
-
 /// The subtitle on one line, cut to the space there is.
 private struct SubtitleLine: View {
     let part: HUDView.SubtitlePart

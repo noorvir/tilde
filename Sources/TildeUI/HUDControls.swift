@@ -189,6 +189,30 @@ struct SendButton: View {
     }
 }
 
+/// A toast's icon, title and subtitle, before its buttons.
+struct ToastLabel: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: PillMetrics.iconGap) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+        }
+    }
+}
+
 /// A text button for the pill's confirm state; destructive ones are red like Delete.
 struct PillTextButton: View {
     @Environment(\.isHUDEmbedded) private var isHUDEmbedded

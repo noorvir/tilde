@@ -127,19 +127,7 @@ struct InstallToastView: View {
 
     private func pill(_ result: InstallResult) -> some View {
         HStack(spacing: 12) {
-            HStack(spacing: PillMetrics.iconGap) {
-                Image(systemName: Self.symbol(result))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Self.color(result))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(Self.title(result))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text(Self.subtitle(result))
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-            }
+            ToastLabel(symbol: Self.symbol(result), tint: Self.color(result), title: Self.title(result), subtitle: Self.subtitle(result))
 
             HStack(spacing: 2) {
                 ForEach(Array(result.apps.prefix(7).enumerated()), id: \.offset) { _, app in
