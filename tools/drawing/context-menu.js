@@ -6,7 +6,7 @@ import { deleteSelected, hasGroup } from "./draw-mode.js";
 import { api, post } from "./scene.js";
 import { deleteComponent, selectedFrames, showHandles, trashIcon } from "./wireframe/chip.js";
 import { componentAt } from "./wireframe/components.js";
-import { canGroup, groupTogether, ungroup } from "./wireframe/groups.js";
+import { canGroup, canUngroup, groupUnder, ungroup } from "./wireframe/groups.js";
 import { wireframe } from "./wireframe/mode.js";
 import { openComponentComment } from "./wireframe/pointer.js";
 
@@ -75,18 +75,20 @@ function canComment() {
   return hasGroup;
 }
 
-// The selected components, when the menu opened on one of them and Group has something to do.
+// The selected components, when the menu opened on one of them and Group has something to do:
+// that one becomes the parent of the others.
 function groupable() {
   const here = wireframe && componentHere();
   const frames = selectedFrames();
-  return here && frames.some((frame) => frame.id === here.id) && canGroup(frames) ? frames : null;
+  return here && frames.some((frame) => frame.id === here.id) && canGroup(here, frames) ? frames : null;
 }
 
-// Group for a selection of several components, and Ungroup for a component in a group.
+// Group for a selection of several components, and Ungroup for a parent or a child.
 function groupItems() {
+  const here = wireframe && componentHere();
   const items = [];
   if (groupable()) items.push(item("group", "Group", "group"));
-  if (wireframe && componentHere()?.customData.group) items.push(item("ungroup", "Ungroup", "ungroup"));
+  if (here && canUngroup(here)) items.push(item("ungroup", "Ungroup", "ungroup"));
   return items;
 }
 
@@ -146,7 +148,7 @@ function run(name) {
   if (name === "group" || name === "ungroup") {
     const frames = groupable();
     const component = wireframe && componentHere();
-    if (name === "group" && frames) groupTogether(frames);
+    if (name === "group" && frames) groupUnder(component, frames);
     if (name === "ungroup" && component) ungroup(component);
     showHandles();
     return;

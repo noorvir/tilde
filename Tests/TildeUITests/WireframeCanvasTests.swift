@@ -402,8 +402,8 @@ struct WireframeCanvasTests {
     // MARK: - Move, resize and copy
 
     /// With no tool a drag on a component moves it. With a tool a drag draws, also on a
-    /// component: a section in a section, a card in it; the chip still moves one. Each one
-    /// drawn in another is in its group, so the three move as one.
+    /// component: a section in a section, a card in it; the chip still moves one. The card
+    /// has no children, so it moves alone.
     @Test func aToolDrawsInAComponentAndNoToolMovesIt() async throws {
         try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
         try await drawComponent("section", from: CGPoint(x: 150, y: 150), to: CGPoint(x: 450, y: 400))
@@ -420,7 +420,7 @@ struct WireframeCanvasTests {
         try await start(tool: "")
         try await page.drag(from: CGPoint(x: 300, y: 250), to: CGPoint(x: 360, y: 290))
         let moved = try await page.shapes()
-        #expect(moved.map(\.rect) == [[180, 150, 600, 400], [230, 200, 300, 250], [280, 250, 200, 100]])
+        #expect(moved.map(\.rect) == [[100, 100, 600, 400], [150, 150, 300, 250], [280, 250, 200, 100]])
     }
 
     /// A move rebuilds the component as new elements; Tilde still hears of the change, so the
@@ -436,7 +436,7 @@ struct WireframeCanvasTests {
     }
 
     /// A drag on a section draws in it while a tool is chosen: the section stays. Its chip
-    /// moves it, with the card drawn in it.
+    /// moves it, with the card drawn in it, which is its child.
     @Test func aDragOnASectionDrawsInIt() async throws {
         try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
         try await drawComponent("card", from: CGPoint(x: 150, y: 150), to: CGPoint(x: 350, y: 250))
@@ -780,41 +780,79 @@ struct WireframeCanvasTests {
         try await start(tool: "")
     }
 
-    /// A component drawn fully inside another joins its group, and one that is partly outside
-    /// it joins none. A drag on either of the two moves both, and one undo puts both back. A
-    /// copy is in no group.
-    @Test func aComponentDrawnInsideAnotherMovesWithIt() async throws {
+    /// A component drawn fully inside another is its child, and one that is partly outside it
+    /// is not. A drag on the parent moves it with its children and theirs; a drag on a child
+    /// moves the child alone, with its own children. One undo puts all back. A copy has no
+    /// parent.
+    @Test func aParentMovesWithItsChildrenAndAChildMovesAlone() async throws {
         try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
         try await drawComponent("card")
-        try await drawComponent("button", from: CGPoint(x: 650, y: 450), to: CGPoint(x: 800, y: 560))
+        try await drawComponent("button", from: CGPoint(x: 220, y: 170), to: CGPoint(x: 320, y: 210))
+        try await drawComponent("list", from: CGPoint(x: 650, y: 450), to: CGPoint(x: 800, y: 560))
         var drawn = try await page.shapes()
-        #expect(drawn.map(\.type) == ["section", "card", "button"])
-        #expect(drawn[0].group != nil)
-        #expect(drawn[1].group == drawn[0].group)
-        #expect(drawn[2].group == nil)
+        #expect(drawn.map(\.type) == ["section", "card", "button", "list"])
+        #expect(drawn[0].key != nil && drawn[0].parent == nil)
+        #expect(drawn[1].parent == drawn[0].key)
+        #expect(drawn[2].parent == drawn[1].key)
+        #expect(drawn[3].parent == nil)
 
         // A drag on the section, beside the card.
         try await putToolDown()
         try await page.drag(from: CGPoint(x: 150, y: 450), to: CGPoint(x: 200, y: 480), meta: true)
-        #expect(try await rects() == [[150, 130, 600, 400], [250, 180, 240, 120], [650, 450, 150, 110]])
-        // A drag on the card.
-        try await page.drag(from: CGPoint(x: 300, y: 200), to: CGPoint(x: 280, y: 190), meta: true)
-        #expect(try await rects() == [[130, 120, 600, 400], [230, 170, 240, 120], [650, 450, 150, 110]])
+        #expect(try await rects() == [[150, 130, 600, 400], [250, 180, 240, 120], [270, 200, 100, 40], [650, 450, 150, 110]])
+        // A drag on the card, beside the button: the section stays.
+        try await page.drag(from: CGPoint(x: 450, y: 280), to: CGPoint(x: 430, y: 270), meta: true)
+        #expect(try await rects() == [[150, 130, 600, 400], [230, 170, 240, 120], [250, 190, 100, 40], [650, 450, 150, 110]])
+        // A drag on the button: the card stays.
+        try await page.drag(from: CGPoint(x: 300, y: 210), to: CGPoint(x: 400, y: 230), meta: true)
+        #expect(try await rects() == [[150, 130, 600, 400], [230, 170, 240, 120], [350, 210, 100, 40], [650, 450, 150, 110]])
         try await page.draw("undoCanvas()")
-        #expect(try await rects() == [[150, 130, 600, 400], [250, 180, 240, 120], [650, 450, 150, 110]])
+        try await page.draw("undoCanvas()")
+        #expect(try await rects() == [[150, 130, 600, 400], [250, 180, 240, 120], [270, 200, 100, 40], [650, 450, 150, 110]])
 
-        // ⌥ and a drag: the copy moves alone.
-        try await page.drag(from: CGPoint(x: 300, y: 200), to: CGPoint(x: 900, y: 200), alt: true)
+        // ⌥ and a drag: the copy moves alone, and is no parent or child.
+        try await page.drag(from: CGPoint(x: 450, y: 280), to: CGPoint(x: 950, y: 280), alt: true)
         drawn = try await page.shapes()
-        #expect(drawn.count == 4)
-        #expect(drawn[3].group == nil)
-        #expect(drawn[0].rect == [150, 130, 600, 400])
-        #expect(drawn[1].rect == [250, 180, 240, 120])
+        #expect(drawn.count == 5)
+        #expect(drawn[4].parent == nil && drawn[4].key == nil)
+        #expect(drawn.prefix(3).map(\.rect) == [[150, 130, 600, 400], [250, 180, 240, 120], [270, 200, 100, 40]])
+    }
+
+    /// Delete on a child removes the child alone. Delete on a parent removes it with its
+    /// children and theirs, by the key, the chip's trash can or the context menu; one undo
+    /// brings all back.
+    @Test func aParentIsDeletedWithItsChildren() async throws {
+        let onSection = CGPoint(x: 150, y: 450)
+        try await drawComponent("section", from: CGPoint(x: 100, y: 100), to: CGPoint(x: 700, y: 500))
+        try await drawComponent("card")
+        try await drawComponent("button", from: CGPoint(x: 220, y: 170), to: CGPoint(x: 320, y: 210))
+        try await drawComponent("card", from: CGPoint(x: 460, y: 150), to: CGPoint(x: 680, y: 270))
+        try await drawComponent("list", from: CGPoint(x: 650, y: 450), to: CGPoint(x: 800, y: 560))
+
+        try await page.hover(CGPoint(x: 570, y: 210))
+        try await page.press("Delete")
+        #expect(try await page.shapes().map(\.type) == ["section", "card", "button", "list"])
+
+        try await page.hover(onSection)
+        try await page.press("Delete")
+        #expect(try await page.shapes().map(\.type) == ["list"])
+        try await page.draw("undoCanvas()")
+        #expect(try await page.shapes().map(\.type) == ["section", "card", "button", "list"])
+
+        try await page.hover(onSection)
+        try await page.click(on: "[data-action=\"delete\"]")
+        #expect(try await page.shapes().map(\.type) == ["list"])
+        try await page.draw("undoCanvas()")
+
+        #expect(try await page.openContextMenu(at: onSection).contains("deleteSelectedElements"))
+        try await page.click(on: "#tilde-context-menu [data-item=\"deleteSelectedElements\"]")
+        #expect(try await page.shapes().map(\.type) == ["list"])
     }
 
     /// ⌘ or ⌃ and a click adds a component to the selection, and takes it out again. The
-    /// context menu on a selection of several has Group, which makes them move as one; on a
-    /// component in a group it has Ungroup, after which each moves alone.
+    /// context menu on a selection of several has Group: the component under the pointer
+    /// becomes the parent of the others. On a parent or a child the menu has Ungroup, after
+    /// which each moves alone.
     @Test func groupAndUngroupAreInTheContextMenu() async throws {
         let first = CGPoint(x: 200, y: 150)
         let second = CGPoint(x: 600, y: 150)
@@ -836,19 +874,21 @@ struct WireframeCanvasTests {
         try await page.click(second, meta: true)
         #expect(try await page.run(outlines) as? Int == 1)
 
-        // The secondary button keeps the selection.
+        // The secondary button keeps the selection. The card under it becomes the parent.
         var items = try await page.openContextMenu(at: first)
         #expect(items.contains("group"))
         #expect(!items.contains("ungroup"))
         try await page.click(on: "#tilde-context-menu [data-item=\"group\"]")
         var drawn = try await page.shapes()
-        #expect(drawn[0].group != nil)
-        #expect(drawn[0].group == drawn[1].group)
+        #expect(drawn[0].key != nil && drawn[0].parent == nil)
+        #expect(drawn[1].parent == drawn[0].key)
 
         try await page.drag(from: first, to: CGPoint(x: 240, y: 170), meta: true)
         #expect(try await rects() == [[140, 120, 200, 100], [540, 120, 200, 200]])
+        try await page.drag(from: CGPoint(x: 640, y: 170), to: CGPoint(x: 640, y: 250), meta: true)
+        #expect(try await rects() == [[140, 120, 200, 100], [540, 200, 200, 200]])
 
-        // Edit Wireframe gives the components back as the report has them, in their group.
+        // Edit Wireframe gives the components back as the report has them, parent and child.
         let report = DrawingPanel.json(try await page.rawShapes())
         try await page.draw("clear()")
         try await start(tool: "")
@@ -856,20 +896,21 @@ struct WireframeCanvasTests {
         try await page.settle()
         drawn = try await page.shapes()
         #expect(drawn.count == 2)
-        #expect(drawn[0].group != nil)
-        #expect(drawn[0].group == drawn[1].group)
+        #expect(drawn[0].key != nil)
+        #expect(drawn[1].parent == drawn[0].key)
 
-        let moved = CGPoint(x: 240, y: 170)
-        try await page.click(moved)
-        items = try await page.openContextMenu(at: moved)
+        // Ungroup on the child: the parent then moves alone.
+        let child = CGPoint(x: 640, y: 250)
+        items = try await page.openContextMenu(at: child)
         #expect(items.contains("ungroup"))
         #expect(!items.contains("group"))
         try await page.click(on: "#tilde-context-menu [data-item=\"ungroup\"]")
-        drawn = try await page.shapes()
-        #expect(drawn.map(\.group) == [nil, nil])
+        #expect(try await page.shapes().map(\.parent) == [nil, nil])
+        #expect(try await page.openContextMenu(at: child).contains("ungroup") == false)
+        try await page.press("Escape")
 
-        try await page.drag(from: moved, to: first, meta: true)
-        #expect(try await rects() == [[100, 100, 200, 100], [540, 120, 200, 200]])
+        try await page.drag(from: CGPoint(x: 240, y: 170), to: first, meta: true)
+        #expect(try await rects() == [[100, 100, 200, 100], [540, 200, 200, 200]])
     }
 
     // MARK: - The chip

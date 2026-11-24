@@ -6,14 +6,14 @@
 // fill of an ellipse, and its trash can deletes it. A handle at each corner resizes it, and
 // its opposite corner stays; a grip at the middle of its top edge moves it. Moves and resizes
 // snap. ⌘ or ⌃ and a click adds a component to the selection, or takes it out: each selected
-// one has an outline, as have the components that move with one. Only components not sent yet
+// one has an outline, as have the children that move with one. A parent is deleted with them. Only components not sent yet
 // can change; each change can be undone.
 
 import { editing } from "../draw-mode.js";
 import { commentBox } from "./comment.js";
 import { live, changeElements } from "../scene.js";
 import { rowsOf, allBorders, kindNames, frameOf, clamp } from "./components.js";
-import { membersOf } from "./groups.js";
+import { descendantsOf } from "./groups.js";
 import { record } from "./history.js";
 import { labelled } from "./labels.js";
 import { paletteOf, setActiveTag, shownTagWidth, tagTop } from "./look.js";
@@ -57,8 +57,8 @@ bordersMenu.setAttribute("role", "menu");
 bordersMenu.style.cssText = menuStyle;
 export const selectionOutline = document.createElement("div");
 selectionOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:2px solid #2F76FF;margin:-1px 0 0 -1px";
-// The outlines of the other selected components, and thin ones of the components that move
-// with a selected one.
+// The outlines of the other selected components, and thin ones of the children that move with
+// a selected one.
 export const otherOutlines = document.createElement("div");
 otherOutlines.id = "tilde-outlines";
 // The chip stands a little away from the component, clear of Technical's offset edge; a strip
@@ -158,9 +158,12 @@ function borderItems(borders) {
 export const trashIcon = '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>';
 const deleteButton = `<span data-action="delete" role="button" aria-label="Delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${trashIcon}</svg></span>`;
 
+// With its children, and theirs.
 export function deleteComponent(group) {
+  const frame = frameOf(group);
+  if (!frame) return;
   record();
-  changeElements(live().filter((element) => element.groupIds.includes(group)).map((element) => element.id), () => ({ isDeleted: true }));
+  changeElements([frame, ...descendantsOf(frame)].map((element) => element.id), () => ({ isDeleted: true }));
   hideHandles();
 }
 
@@ -180,12 +183,12 @@ export function toggleSelected(group) {
   showHandles();
 }
 
-// An outline for each of the other selected components, and a thin one for each component
-// that moves with a selected one.
+// An outline for each of the other selected components, and a thin one for each child that
+// moves with a selected one.
 function drawOtherOutlines(isShown) {
   const selected = isShown ? selectedFrames() : [];
   const ids = new Set(selected.map((frame) => frame.id));
-  const mates = selected.flatMap(membersOf).filter((frame, index, all) => !ids.has(frame.id) && all.indexOf(frame) === index);
+  const mates = selected.flatMap(descendantsOf).filter((frame, index, all) => !ids.has(frame.id) && all.indexOf(frame) === index);
   const outline = ({ x, y, width, height }, border) => `<div style="position:fixed;pointer-events:none;z-index:9997;box-sizing:border-box;left:${x}px;top:${y}px;width:${width}px;height:${height}px;border:${border}px solid #2F76FF"></div>`;
   const content = [...selected.slice(0, -1).map((frame) => outline(frame, 2)), ...mates.map((frame) => outline(frame, 1))].join("");
   if (otherOutlines.innerHTML !== content) otherOutlines.innerHTML = content;

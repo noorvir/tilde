@@ -4,7 +4,7 @@
 // and a click on its tag edits its label. A drag on the text of the selected component, with
 // any tool, moves the text off it as a free text, which moves as a component does. The Text
 // tool's click types a component's text, or a free text where there is no component. A
-// component drawn fully inside another joins its group, and a group moves as one. ⌘ or ⌃ and
+// component drawn fully inside another is its child: it moves with it, and alone. ⌘ or ⌃ and
 // a click adds a component to the selection, or takes it out.
 
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
@@ -13,7 +13,7 @@ import { api, postPointer, live } from "../scene.js";
 import { typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, toggleSelected, showHandles, hideHandles, toggleMenu } from "./chip.js";
 import { kindNames, newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { commentBox, commented, openComment, closeComment } from "./comment.js";
-import { membersOf, newGroup, outerOf, setGroup } from "./groups.js";
+import { descendantsOf, newKey, outerOf, setKey } from "./groups.js";
 import { record } from "./history.js";
 import { labelField, labelled, editLabel, editText, endLabel, isDoubleClick } from "./labels.js";
 import { tagAt, textAt, textBox, textHeight } from "./look.js";
@@ -93,13 +93,13 @@ function finishWireframeShape(press) {
     if (component && isDoubleClick(component.groupIds[0], press.time)) editText(component);
     return;
   }
-  // Fully inside another component, it joins that one's group.
+  // Fully inside another component, it is that one's child.
   const outer = outerOf(box);
-  const group = outer && (outer.customData.group ?? newGroup());
-  const data = group ? { ...newData(press.tool), group } : newData(press.tool);
+  const parent = outer && (outer.customData.key ?? newKey());
+  const data = parent ? { ...newData(press.tool), parent } : newData(press.tool);
   record(rest);
   api.updateScene({ elements: [...rest, ...wireframeElements(press.tool, box, data)], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
-  if (outer) setGroup([outer], group);
+  if (outer) setKey(outer, parent);
 }
 
 // `corner` of a resize: "nw", "ne", "sw" or "se", the one that the pointer moves.
@@ -109,9 +109,9 @@ function startAdjusting(event, frame, mode, from, corner = null) {
   selection.menu = null;
   const rectOf = ({ x, y, width, height }) => ({ x, y, width, height });
   const isCopy = mode === "move" && from !== "text" && event.altKey;
-  // The other components of its group move with it; a copy and a text that leaves move alone.
-  const movesGroup = mode === "move" && from !== "text" && !isCopy;
-  const others = movesGroup ? membersOf(frame).filter((member) => member.id !== frame.id) : [];
+  // Its children, and theirs, move with it; a copy and a text that leaves move alone.
+  const movesChildren = mode === "move" && from !== "text" && !isCopy;
+  const others = movesChildren ? descendantsOf(frame) : [];
   adjusting = {
     mode, from, corner, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, pressedAt: event.timeStamp, rect: rectOf(frame), data: frame.customData, moved: false, menuBefore,
     before: api.getSceneElementsIncludingDeleted(), isCopy, adds: addsToSelection(event),
@@ -168,9 +168,9 @@ function adjust(event) {
   if (!adjusting.moved && Math.hypot(dx, dy) >= 3) {
     adjusting.moved = true;
     record(adjusting.before);
-    // The copy goes on top, and moves; the original stays. The copy is in no group.
+    // The copy goes on top, and moves; the original stays. The copy has no parent or children.
     if (adjusting.isCopy) {
-      const { rect, data: { group: _, ...data } } = adjusting;
+      const { rect, data: { key: _, parent: __, ...data } } = adjusting;
       const copy = wireframeElements(data.tildeWireframe, rect, data);
       api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...copy], captureUpdate: "NEVER" });
       Object.assign(adjusting, { group: copy[0].groupIds[0], data });

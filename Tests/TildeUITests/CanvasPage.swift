@@ -31,8 +31,9 @@ final class CanvasPage {
         var rows: Int?
         var columns: Int?
         var filled: Bool?
-        /// The group of components that it moves with.
-        var group: String?
+        /// A parent's key, which its children have as `parent`: they move and go with it.
+        var key: String?
+        var parent: String?
     }
 
     static let size = CGSize(width: 1200, height: 800)
@@ -422,7 +423,7 @@ final class CanvasPage {
             Shape(
                 id: item["id"] as? String ?? "", type: item["type"] as? String ?? "", rect: (item["rect"] as? [NSNumber] ?? []).map(\.doubleValue),
                 label: item["label"] as? String, text: item["text"] as? String, borders: item["borders"] as? [String], rows: item["rows"] as? Int, columns: item["columns"] as? Int,
-                filled: item["filled"] as? Bool, group: item["group"] as? String
+                filled: item["filled"] as? Bool, key: item["key"] as? String, parent: item["parent"] as? String
             )
         }
     }

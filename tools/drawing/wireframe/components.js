@@ -51,7 +51,8 @@ export function changedKind(frame, kind) {
   const data = { ...newData(kind), tildeWireframe: kind, label: old.label, text: old.text, comment: old.comment };
   if (old.borders) data.borders = old.borders;
   if (old.radius) data.radius = old.radius;
-  if (old.group) data.group = old.group;
+  if (old.key) data.key = old.key;
+  if (old.parent) data.parent = old.parent;
   if ("filled" in data && old.filled !== undefined) data.filled = old.filled;
   if ((kind === "table" || kind === "list") && old.rows !== undefined) data.rows = old.rows;
   return data;
