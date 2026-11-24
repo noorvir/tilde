@@ -59,6 +59,50 @@ struct CameraAlignmentTests {
         #expect((14...16).contains(times.count), "\(times.count)")
     }
 
+    /// The saved video shows the camera from its first frame on, also before a late camera's
+    /// own start: there its first frame stands in.
+    @Test func theSavedVideoShowsALateCameraFromTheStart() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("save-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let video = folder.appendingPathComponent("clip.mov")
+        let camera = ClipRecorder.cameraFile(of: video)
+        try await Self.writeMovie(to: video, seconds: 1)
+        try await Self.writeMovie(to: camera, seconds: 1)
+        let clipStart = CMTime(seconds: 100, preferredTimescale: 600)
+        await CameraAlignment.align(CameraRecording(file: camera, start: clipStart + CMTime(seconds: 0.5, preferredTimescale: 600)), toClipStartingAt: clipStart)
+
+        // The camera in a corner, on the background alone.
+        var layout = ClipLayout(background: .gradient(.peach))
+        layout.screenScale = 0.3
+        layout.cameraCenter = CGPoint(x: 0.15, y: 0.8)
+        let saved = folder.appendingPathComponent("saved.mp4")
+        try await VideoFramer.export(video, camera: camera, layout: layout, to: saved)
+
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: saved))
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let frame = try await generator.image(at: CMTime(seconds: 0.1, preferredTimescale: 600)).image
+        let centre = try Self.brightness(of: frame, at: CGPoint(x: 0.15, y: 0.8))
+        let background = try Self.brightness(of: frame, at: CGPoint(x: 0.9, y: 0.1))
+        // The test movie's frames are black; the background is not.
+        #expect(centre < 0.1, "\(centre)")
+        #expect(background > 0.4, "\(background)")
+    }
+
+    /// 0 to 1 at a point given in fractions of the image, from its top-left corner.
+    private static func brightness(of image: CGImage, at point: CGPoint) throws -> Double {
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try #require(CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let x = point.x * CGFloat(image.width)
+        let y = (1 - point.y) * CGFloat(image.height)
+        context.draw(image, in: CGRect(x: -x, y: -y, width: CGFloat(image.width), height: CGFloat(image.height)))
+        return (Double(pixel[0]) + Double(pixel[1]) + Double(pixel[2])) / (3 * 255)
+    }
+
     /// Play right after the preview opens, before either file has loaded: both players wait,
     /// then run on the same time of the clip.
     @MainActor @Test func playStartsTheClipAndItsCameraInStep() async throws {

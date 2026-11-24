@@ -246,24 +246,9 @@ final class ClipPlayers: ObservableObject {
         }
         if let cameraFile {
             Task {
-                cameraPoster = await Self.firstFrame(of: cameraFile)
+                cameraPoster = await VideoFramer.firstFrame(of: cameraFile)
             }
         }
-    }
-
-    private static func firstFrame(of file: URL) async -> CGImage? {
-        let asset = AVURLAsset(url: file)
-        guard let track = try? await asset.loadTracks(withMediaType: .video).first, let segments = try? await track.load(.segments) else {
-            return nil
-        }
-        // A camera that started after the clip has nothing before its first frame.
-        let start = segments.first { !$0.isEmpty }?.timeMapping.target.start ?? .zero
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.maximumSize = CGSize(width: 1280, height: 1280)
-        let image = try? await generator.image(at: start)
-        return image?.image
     }
 
     private func load(_ video: URL) async {

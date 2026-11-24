@@ -195,6 +195,7 @@ enum VideoFramer {
         }
 
         var cameraPart: AVMutableCompositionTrack?
+        var cameraStill: CIImage?
         if let camera, layout.cameraCenter != nil {
             let cameraAsset = AVURLAsset(url: camera)
             if let cameraTrack = try await cameraAsset.loadTracks(withMediaType: .video).first {
@@ -202,12 +203,15 @@ enum VideoFramer {
                 let part = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
                 try part?.insertTimeRange(CMTimeRange(start: .zero, duration: CMTimeMinimum(duration, cameraDuration)), of: cameraTrack, at: .zero)
                 cameraPart = part
+                let still = await firstFrame(of: camera)
+                cameraStill = still.map { CIImage(cgImage: $0) }
             }
         }
 
         let clipSize = try await screenTrack.load(.naturalSize)
         let instruction = FrameInstruction(
-            timeRange: range, screenID: screenPart.trackID, cameraID: cameraPart?.trackID, layout: layout, clipSize: clipSize, backdrop: backdrop
+            timeRange: range, screenID: screenPart.trackID, cameraID: cameraPart?.trackID, cameraStill: cameraStill, layout: layout, clipSize: clipSize,
+            backdrop: backdrop
         )
         let videoComposition = AVMutableVideoComposition()
         videoComposition.customVideoCompositorClass = FrameCompositor.self
@@ -225,6 +229,21 @@ enum VideoFramer {
         guard session.status == .completed else {
             throw session.error ?? Failure.exportFailed
         }
+    }
+
+    /// A camera file's first frame. A camera that started after the clip has nothing before
+    /// it: the preview and the saved video show this frame there.
+    static func firstFrame(of file: URL) async -> CGImage? {
+        let asset = AVURLAsset(url: file)
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first, let segments = try? await track.load(.segments) else {
+            return nil
+        }
+        let start = segments.first { !$0.isEmpty }?.timeMapping.target.start ?? .zero
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        let image = try? await generator.image(at: start)
+        return image?.image
     }
 
     /// One frame: the background, the screen clip rounded with a shadow, and the camera in
@@ -336,14 +355,20 @@ private final class FrameInstruction: NSObject, AVVideoCompositionInstructionPro
     let passthroughTrackID = kCMPersistentTrackID_Invalid
     let screenID: CMPersistentTrackID
     let cameraID: CMPersistentTrackID?
+    /// The camera's first frame, for the times its track has none.
+    let cameraStill: CIImage?
     let layout: ClipLayout
     let clipSize: CGSize
     let backdrop: CIImage
 
-    init(timeRange: CMTimeRange, screenID: CMPersistentTrackID, cameraID: CMPersistentTrackID?, layout: ClipLayout, clipSize: CGSize, backdrop: CIImage) {
+    init(
+        timeRange: CMTimeRange, screenID: CMPersistentTrackID, cameraID: CMPersistentTrackID?, cameraStill: CIImage?, layout: ClipLayout, clipSize: CGSize,
+        backdrop: CIImage
+    ) {
         self.timeRange = timeRange
         self.screenID = screenID
         self.cameraID = cameraID
+        self.cameraStill = cameraStill
         self.layout = layout
         self.clipSize = clipSize
         self.backdrop = backdrop
@@ -368,7 +393,8 @@ private final class FrameCompositor: NSObject, AVVideoCompositing, @unchecked Se
             request.finish(with: VideoFramer.Failure.exportFailed)
             return
         }
-        let camera = instruction.cameraID.flatMap(request.sourceFrame(byTrackID:)).map { CIImage(cvPixelBuffer: $0) }
+        let cameraFrame = instruction.cameraID.flatMap(request.sourceFrame(byTrackID:)).map { CIImage(cvPixelBuffer: $0) }
+        let camera = cameraFrame ?? instruction.cameraStill
         let image = VideoFramer.frame(instruction, screen: CIImage(cvPixelBuffer: screen), camera: camera)
         Self.context.render(image, to: output)
         request.finish(withComposedVideoFrame: output)
