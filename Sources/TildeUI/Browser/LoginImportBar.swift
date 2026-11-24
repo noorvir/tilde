@@ -49,14 +49,7 @@ struct LoginImportBar: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06)))
             .environment(\.colorScheme, .dark)
             .padding([.horizontal, .bottom], BrowserMetrics.frame)
-            .sheet(item: Binding(get: { choice.map(BrowserChoice.init) }, set: { choice = $0?.browsers })) { item in
-                ImportSheet(browsers: item.browsers, browser: browser) { summary in
-                    if let summary {
-                        lastImport = summary
-                    }
-                    choice = nil
-                }
-            }
+            .loginImportSheet(choice: $choice, browser: browser)
         }
     }
 }

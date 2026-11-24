@@ -153,14 +153,7 @@ private struct BrowserSettings: View {
                 }
             }
         }
-        .sheet(item: Binding(get: { choice.map(BrowserChoice.init) }, set: { choice = $0?.browsers })) { item in
-            ImportSheet(browsers: item.browsers, browser: browser) { summary in
-                if let summary {
-                    lastImport = summary
-                }
-                choice = nil
-            }
-        }
+        .loginImportSheet(choice: $choice, browser: browser)
         .confirmationDialog("Clear Tilde's browser data?", isPresented: $asksToClear) {
             Button("Clear", role: .destructive) {
                 Task {
@@ -174,15 +167,36 @@ private struct BrowserSettings: View {
     }
 }
 
-struct BrowserChoice: Identifiable {
-    let browsers: [CookieBrowser]
-    var id: [String] { browsers.map(\.id) }
+extension View {
+    /// The login import while `choice` holds the browsers to choose from, as Settings and the
+    /// login bar show it. A finished import keeps its result line as the last import.
+    func loginImportSheet(choice: Binding<[CookieBrowser]?>, browser: BrowserController) -> some View {
+        modifier(LoginImportSheet(choice: choice, browser: browser))
+    }
+}
+
+private struct LoginImportSheet: ViewModifier {
+    @Binding var choice: [CookieBrowser]?
+    let browser: BrowserController
+    @AppStorage("BrowserImport.summary") private var lastImport = ""
+
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: Binding { choice != nil } set: { if !$0 { choice = nil } }) {
+            ImportSheet(browsers: choice ?? [], browser: browser) { summary in
+                if let summary {
+                    lastImport = summary
+                }
+                choice = nil
+            }
+        }
+    }
 }
 
 /// The import: a browser on this Mac, then one of its profiles. Safari asks for Full Disk
 /// Access first.
-struct ImportSheet: View {
-    let browsers: [CookieBrowser]
+private struct ImportSheet: View {
+    /// Kept from the sheet's start: the choice is gone while the sheet closes.
+    @State private var browsers: [CookieBrowser]
     let browser: BrowserController
     /// The result line, or nil when cancelled.
     let onDone: (String?) -> Void
@@ -191,6 +205,12 @@ struct ImportSheet: View {
     /// The import under way; Cancel stops it before the cookies go to the browser.
     @State private var importing: Task<Void, Never>?
     @State private var error: String?
+
+    init(browsers: [CookieBrowser], browser: BrowserController, onDone: @escaping (String?) -> Void) {
+        _browsers = State(initialValue: browsers)
+        self.browser = browser
+        self.onDone = onDone
+    }
 
     private var isImporting: Bool {
         importing != nil
