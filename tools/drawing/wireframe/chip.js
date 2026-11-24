@@ -3,7 +3,7 @@
 // a drag moves a copy, and a double-click edits its text. A chip above its top right moves it too:
 // a click on its name changes the kind, its Borders button opens the borders, its Comment
 // button its comment, its other controls set the rows and columns of a table or list or the
-// fill of an ellipse, and × deletes it. A handle at each corner resizes it, and
+// fill of an ellipse, and its trash can deletes it. A handle at each corner resizes it, and
 // its opposite corner stays; a grip at the middle of its top edge moves it. Moves and resizes
 // snap. Only components not sent yet can change; each change can be undone.
 
@@ -145,7 +145,9 @@ function borderItems(borders) {
   return [items[0], separator, ...items.slice(1)].join("");
 }
 
-const deleteButton = `<span data-action="delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="12" height="12"><path d="M3 3L9 9M9 3L3 9" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
+// The trash can of Delete, here and in the context menu, in a 16 × 16 box.
+export const trashIcon = '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>';
+const deleteButton = `<span data-action="delete" role="button" aria-label="Delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${trashIcon}</svg></span>`;
 
 export function deleteComponent(group) {
   record();

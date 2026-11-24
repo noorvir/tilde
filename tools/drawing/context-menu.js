@@ -4,7 +4,7 @@
 
 import { deleteSelected, hasGroup } from "./draw-mode.js";
 import { api, post } from "./scene.js";
-import { deleteComponent } from "./wireframe/chip.js";
+import { deleteComponent, trashIcon } from "./wireframe/chip.js";
 import { componentAt } from "./wireframe/components.js";
 import { wireframe } from "./wireframe/mode.js";
 import { openComponentComment } from "./wireframe/pointer.js";
@@ -23,7 +23,7 @@ const icons = {
   flipH: '<path d="M8 2v12M6 4.5 2.5 12H6zM10 4.5l3.5 7.5H10z"/>',
   flipV: '<path d="M2 8h12M4.5 6 12 2.5V6zM4.5 10l7.5 3.5V10z"/>',
   duplicate: '<rect x="2.5" y="2.5" width="8" height="8" rx="1.5"/><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>',
-  trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>',
+  trash: trashIcon,
 };
 
 // Excalidraw's actions that Tilde keeps, by its name for each, in groups.
