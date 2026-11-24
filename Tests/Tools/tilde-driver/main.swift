@@ -312,24 +312,33 @@ func node(_ element: AXUIElement, depth: Int) -> [String: Any]? {
     for (index, attribute) in nodeAttributes.enumerated() where !isAnswered(values[index]) {
         values[index] = axValue(element, attribute) as AnyObject?
     }
-    let role = values[0] as? String ?? ""
+    let roleValue = values[0]
+    let title = values[1]
+    let description = values[2]
+    let value = values[3]
+    let enabled = values[4]
+    let positionValue = values[5]
+    let sizeValue = values[6]
+    let childrenValue = values[7]
+
+    let role = roleValue as? String ?? ""
     if role == kAXApplicationRole {
         return nil
     }
     var result: [String: Any] = ["role": role]
-    result["name"] = [values[1], values[2], values[3]].lazy.compactMap { $0 as? String }.first { !$0.isEmpty }
-    result["enabled"] = values[4] as? Bool ?? true
+    result["name"] = [title, description, value].lazy.compactMap { $0 as? String }.first { !$0.isEmpty }
+    result["enabled"] = enabled as? Bool ?? true
     var position = CGPoint.zero
     var size = CGSize.zero
-    if let value = values[5], CFGetTypeID(value) == AXValueGetTypeID() {
-        AXValueGetValue(value as! AXValue, .cgPoint, &position)
+    if let positionValue, CFGetTypeID(positionValue) == AXValueGetTypeID() {
+        AXValueGetValue(positionValue as! AXValue, .cgPoint, &position)
     }
-    if let value = values[6], CFGetTypeID(value) == AXValueGetTypeID() {
-        AXValueGetValue(value as! AXValue, .cgSize, &size)
+    if let sizeValue, CFGetTypeID(sizeValue) == AXValueGetTypeID() {
+        AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
     }
     result["frame"] = [position.x, position.y, size.width, size.height]
     if depth < maxDepth {
-        let children = values[7] as? [AXUIElement] ?? []
+        let children = childrenValue as? [AXUIElement] ?? []
         var nodes: [[String: Any]] = []
         for child in children where nodes.count < 500 {
             if let child = node(child, depth: depth + 1) {

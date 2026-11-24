@@ -3,8 +3,9 @@
 Black-box specs of the built app, with real input, real windows and real apps. They prove only
 what the real app can prove; `swift test` and the UI contract (`scripts/ui-check.sh`) pin the
 rest without a screen. `scripts/ux-vms.sh` runs them in two VMs at the same time, each half
-under the 180 s limit of `scripts/ux.sh`. The checks are in points, so they pass on a 1x and a
-2x screen.
+under the 180 s limit of `scripts/ux.sh`, then the wireframe spec alone in the first VM: its lag
+check fails while the other VM takes the host's CPU. The checks are in points, so they pass on
+a 1x and a 2x screen.
 
 ## Flows
 
@@ -34,6 +35,11 @@ Second VM (`tilde-ux-2`):
 | `aCopiedReportGoesToTheRemoteMachineWithItsImages` | A copied report's images go to the machine over ssh. |
 | `aPasteInACommentBoxLandsInTheSystemsFocusedTextAndFocusGoesBackAfter` | A dictation app's paste lands in the focused text; focus goes back after. |
 | `theHUDShowsOverAFullScreenAppOnASecondDisplayWhoseWindowRecordsWhileTheUserTypesInIt` | On a second display (`tilde-ux-display`, a virtual one) above right of the main one, over a full-screen app, the HUD is drawn where the pointer is and takes the keys; the app's window records until Stop while the user types in it; the app gets no window sharing window, on which AppKit asserts in some apps, and they crash. |
+
+Alone in the first VM, after both halves:
+
+| Spec | What only the real app proves |
+| --- | --- |
 | `aWireframeOnAWindowReachesTheAgentWithItsTwoPictures` | Snapping, the window behind, components that keep to a moving window, the report. |
 
 ## Dropped
