@@ -15,7 +15,6 @@ final class BrowserOffer: ObservableObject {
     nonisolated static let enabledKey = "OfferTildeBrowser"
     private let defaults: UserDefaults
     private let toastTime = Countdown()
-    private var isToastHeld = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -72,28 +71,22 @@ final class BrowserOffer: ObservableObject {
         hideToast()
     }
 
-    /// The pointer on the toast keeps it.
+    /// The pointer on the toast keeps it; leaving it gives it 6 seconds again.
     func holdToast(_ isHeld: Bool) {
-        isToastHeld = isHeld
-        if isHeld {
-            toastTime.cancel()
-        } else if showsToast {
+        toastTime.cancel()
+        if !isHeld, showsToast {
             startToastTime()
         }
     }
 
     private func startToastTime() {
         toastTime.start(6) { [weak self] in
-            guard let self, !isToastHeld else {
-                return
-            }
-            hideToast()
+            self?.hideToast()
         }
     }
 
     private func hideToast() {
         toastTime.cancel()
-        isToastHeld = false
         showsToast = false
     }
 
