@@ -890,9 +890,13 @@ struct UXSpecs {
                 try await Task.sleep(for: .milliseconds(100))
             }
             let before = try #require(resting, "No red mark and button on the window")
-            // Every frame that the screen shows while the window glides 180 pt in 1.5 s.
+            // Every frame that the screen shows while the window glides 180 pt in 1.5 s. The
+            // glide starts once the recording has its first frame, so that the capture's start
+            // is not part of what is measured.
+            async let recorded = app.recordRow(at: middle, from: strip.minX, width: strip.width, seconds: 2.4)
+            try await app.waitForRowRecording()
             try window.show("glide")
-            let frames = try await app.recordRow(at: middle, from: strip.minX, width: strip.width, seconds: 2.4)
+            let frames = try await recorded
             var places = frames.compactMap(place)
             if let place = try await place(on: app.screen(in: strip)) {
                 places.append(place)
