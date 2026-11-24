@@ -35,26 +35,14 @@ struct LoginImportBar: View {
                     choice = CookieBrowser.installed()
                 }
                 .controlSize(.small)
-                Button("Don't show again") {
+                HUDButton(image: nil, title: "Don't show again", help: "Settings › Browser turns it back on") {
                     isEnabled = false
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.6))
-                .help("Settings › Browser turns it back on")
-                Button {
+                HUDButton(image: Image(systemName: "xmark"), help: "Hide until Tilde quits") {
                     browser.hidesLoginImport = true
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .frame(width: 20, height: 20)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.6))
-                .help("Hide until Tilde quits")
-                .accessibilityLabel("Hide")
             }
+            .environment(\.pillSize, HUDAccessory.size)
             .padding(.leading, 12)
             .padding(.trailing, 6)
             .frame(height: 32)
