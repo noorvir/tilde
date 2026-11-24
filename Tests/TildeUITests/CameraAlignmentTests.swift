@@ -103,6 +103,29 @@ struct CameraAlignmentTests {
         return (Double(pixel[0]) + Double(pixel[1]) + Double(pixel[2])) / (3 * 255)
     }
 
+    /// A window's clip is black outside the window's round corners: the mask takes the
+    /// window's own radius. A frame with no black corner has none to take.
+    @Test func theCornerIsMeasuredFromTheWindowsOwn() throws {
+        func frame(radius: CGFloat) throws -> CGImage {
+            let context = try #require(CGContext(
+                data: nil, width: 1600, height: 1000, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            let all = CGRect(x: 0, y: 0, width: 1600, height: 1000)
+            context.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+            context.fill(all)
+            // A dark window: well above black.
+            context.setFillColor(CGColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1))
+            context.addPath(CGPath(roundedRect: all, cornerWidth: radius, cornerHeight: radius, transform: nil))
+            context.fillPath()
+            return try #require(context.makeImage())
+        }
+
+        let measured = try #require(VideoFramer.corner(of: try frame(radius: 32)))
+        #expect(abs(measured * 1000 - 32) < 6, "\(measured * 1000)")
+        #expect(VideoFramer.corner(of: try frame(radius: 0)) == nil)
+    }
+
     /// Play right after the preview opens, before either file has loaded: both players wait,
     /// then run on the same time of the clip.
     @MainActor @Test func playStartsTheClipAndItsCameraInStep() async throws {

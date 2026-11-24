@@ -32,7 +32,7 @@ struct ClipComposer: View {
         VStack(alignment: .leading, spacing: 10) {
             ZStack {
                 BackgroundFill(background: layout.background)
-                ComposerCanvas(players: players, layout: layout, clipSize: players.clipSize, cameraPoster: players.cameraPoster) { changed in
+                ComposerCanvas(players: players, layout: layout, clipSize: players.clipSize, corner: players.corner, cameraPoster: players.cameraPoster) { changed in
                     controller.setLayout(changed, of: video)
                 }
                 // A click on the picture closes the open menu, and moves nothing.
@@ -212,6 +212,8 @@ final class ClipPlayers: ObservableObject {
     let clock = ClipClock()
     /// The clip's size in pixels, once known.
     @Published private(set) var clipSize = CGSize(width: 16, height: 10)
+    /// The clip's corner radius, in fractions of its shorter side.
+    @Published private(set) var corner = VideoFramer.defaultCorner
     /// The camera's first frame: it shows until the camera's player has a frame of its own,
     /// at once and where the camera started after the clip.
     @Published private(set) var cameraPoster: CGImage?
@@ -261,6 +263,7 @@ final class ClipPlayers: ObservableObject {
             return
         }
         clipSize = size
+        corner = await VideoFramer.corner(of: video)
     }
 
     func toggle() {
@@ -444,6 +447,7 @@ struct ComposerCanvas: NSViewRepresentable {
     let players: ClipPlayers
     let layout: ClipLayout
     let clipSize: CGSize
+    let corner: CGFloat
     let cameraPoster: CGImage?
     /// Called once at the end of a drag that moved or resized something.
     let onChange: (ClipLayout) -> Void
@@ -455,7 +459,7 @@ struct ComposerCanvas: NSViewRepresentable {
     func updateNSView(_ view: CanvasView, context: Context) {
         view.onChange = onChange
         view.cameraPoster = cameraPoster
-        view.show(layout, clipSize: clipSize)
+        view.show(layout, clipSize: clipSize, corner: corner)
     }
 
     final class CanvasView: NSView {
@@ -478,6 +482,7 @@ struct ComposerCanvas: NSViewRepresentable {
         }
         private(set) var shown = ClipLayout(background: .gradient(.dusk))
         private var clipSize = CGSize(width: 16, height: 10)
+        private var corner = VideoFramer.defaultCorner
         private var drag: Drag?
         private let screen: PartLayers
         private let camera: PartLayers?
@@ -501,12 +506,13 @@ struct ComposerCanvas: NSViewRepresentable {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
         /// Ignored while a drag goes on: the drag's own layout shows until it ends.
-        func show(_ layout: ClipLayout, clipSize: CGSize) {
-            guard drag == nil, layout != shown || clipSize != self.clipSize else {
+        func show(_ layout: ClipLayout, clipSize: CGSize, corner: CGFloat = VideoFramer.defaultCorner) {
+            guard drag == nil, layout != shown || clipSize != self.clipSize || corner != self.corner else {
                 return
             }
             shown = layout
             self.clipSize = clipSize
+            self.corner = corner
             place()
         }
 
@@ -519,7 +525,7 @@ struct ComposerCanvas: NSViewRepresentable {
             let frames = shown.frames(in: bounds.size, clip: clipSize)
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            screen.place(in: frames.screen, radius: min(frames.screen.width, frames.screen.height) * 0.025, rim: 0)
+            screen.place(in: frames.screen, radius: min(frames.screen.width, frames.screen.height) * corner, rim: 0)
             if let camera {
                 if let frame = frames.camera {
                     let radius = shown.cameraShape == .circle ? frame.width / 2 : frame.width * 0.2

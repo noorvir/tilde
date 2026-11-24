@@ -209,9 +209,10 @@ enum VideoFramer {
         }
 
         let clipSize = try await screenTrack.load(.naturalSize)
+        let corner = await corner(of: video)
         let instruction = FrameInstruction(
             timeRange: range, screenID: screenPart.trackID, cameraID: cameraPart?.trackID, cameraStill: cameraStill, layout: layout, clipSize: clipSize,
-            backdrop: backdrop
+            corner: corner, backdrop: backdrop
         )
         let videoComposition = AVMutableVideoComposition()
         videoComposition.customVideoCompositorClass = FrameCompositor.self
@@ -229,6 +230,74 @@ enum VideoFramer {
         guard session.status == .completed else {
             throw session.error ?? Failure.exportFailed
         }
+    }
+
+    /// The corner radius for a clip with no measured one, in fractions of its shorter side.
+    static let defaultCorner: CGFloat = 0.025
+
+    /// The corner radius of what a clip shows, in fractions of the clip's shorter side. A
+    /// window's clip is black outside the window's round corners: the radius is measured there
+    /// on the first frame, so the mask cuts off the black and nothing of the window. A clip
+    /// with no black corner, such as a screen's, gets `defaultCorner`.
+    static func corner(of video: URL) async -> CGFloat {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: video))
+        generator.appliesPreferredTrackTransform = true
+        guard let first = try? await generator.image(at: .zero) else {
+            return defaultCorner
+        }
+        return corner(of: first.image) ?? defaultCorner
+    }
+
+    /// Nil when neither top corner is black, or the black goes too far to be a corner.
+    static func corner(of frame: CGImage) -> CGFloat? {
+        let shorter = CGFloat(min(frame.width, frame.height))
+        // Far enough along the diagonal for a radius of a tenth of the shorter side.
+        let side = Int(shorter * 0.04) + 2
+        guard side < frame.width / 2, side < frame.height / 2,
+              let left = blackSteps(in: frame, fromLeft: true, side: side),
+              let right = blackSteps(in: frame, fromLeft: false, side: side)
+        else {
+            return nil
+        }
+        let steps = min(left, right)
+        guard steps > 0, steps < side else {
+            return nil
+        }
+        // A circle's edge crosses the diagonal at r × (1 − 1/√2) from the corner; one pixel
+        // more covers the blended edge.
+        let radius = CGFloat(steps + 1) / (1 - 1 / 2.0.squareRoot())
+        return radius / shorter
+    }
+
+    /// How many pixels are black along the diagonal from a top corner of `frame`, in a square
+    /// of `side` pixels.
+    private static func blackSteps(in frame: CGImage, fromLeft: Bool, side: Int) -> Int? {
+        let x = fromLeft ? 0 : frame.width - side
+        guard let corner = frame.cropping(to: CGRect(x: x, y: 0, width: side, height: side)),
+              let context = CGContext(
+                  data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              )
+        else {
+            return nil
+        }
+        context.draw(corner, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let data = context.data else {
+            return nil
+        }
+        let pixels = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
+        var steps = 0
+        // The bitmap's first row is the image's top row.
+        while steps < side {
+            let column = fromLeft ? steps : side - 1 - steps
+            let offset = (steps * side + column) * 4
+            // An encoded black is not exactly zero; a dark window is well above this.
+            guard max(pixels[offset], pixels[offset + 1], pixels[offset + 2]) < 12 else {
+                break
+            }
+            steps += 1
+        }
+        return steps
     }
 
     /// A camera file's first frame. A camera that started after the clip has nothing before
@@ -255,7 +324,7 @@ enum VideoFramer {
 
         let screenRect = flipped(frames.screen)
         let placed = fit(screen, in: screenRect)
-        let radius = min(screenRect.width, screenRect.height) * 0.025
+        let radius = min(screenRect.width, screenRect.height) * instruction.corner
         result = shadow(of: screenRect, radius: radius).composited(over: result)
         result = masked(placed, to: screenRect, radius: radius).composited(over: result)
 
@@ -359,11 +428,13 @@ private final class FrameInstruction: NSObject, AVVideoCompositionInstructionPro
     let cameraStill: CIImage?
     let layout: ClipLayout
     let clipSize: CGSize
+    /// The screen clip's corner radius, in fractions of its shorter side.
+    let corner: CGFloat
     let backdrop: CIImage
 
     init(
         timeRange: CMTimeRange, screenID: CMPersistentTrackID, cameraID: CMPersistentTrackID?, cameraStill: CIImage?, layout: ClipLayout, clipSize: CGSize,
-        backdrop: CIImage
+        corner: CGFloat, backdrop: CIImage
     ) {
         self.timeRange = timeRange
         self.screenID = screenID
@@ -371,6 +442,7 @@ private final class FrameInstruction: NSObject, AVVideoCompositionInstructionPro
         self.cameraStill = cameraStill
         self.layout = layout
         self.clipSize = clipSize
+        self.corner = corner
         self.backdrop = backdrop
         requiredSourceTrackIDs = [screenID, cameraID].compactMap { $0 }.map { NSNumber(value: $0) }
     }
