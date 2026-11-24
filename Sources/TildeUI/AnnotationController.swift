@@ -137,11 +137,6 @@ final class AnnotationController: ObservableObject {
     let backgrounds: VideoBackgrounds
     /// Each clip's layout on its saved video, by the clip's video, once the preview changed it.
     @Published private var layouts: [URL: ClipLayout] = [:]
-    /// The clip whose video is being saved.
-    @Published private(set) var savingVideo: URL?
-    /// The video file that Save video wrote last, while its toast shows.
-    @Published private(set) var savedVideo: URL?
-    private let savedVideoTime = Countdown()
     /// The clip of recording mode.
     private(set) lazy var clips: ClipRecorder = {
         let clips = ClipRecorder()
@@ -160,6 +155,8 @@ final class AnnotationController: ObservableObject {
     let notices = Notices()
     /// The bar under the HUD that offers Tilde's browser for a page in another browser.
     let browserOffer = BrowserOffer()
+    /// The preview's Save video and its toast.
+    private(set) lazy var savedVideos = SavedVideos(notices: notices)
     /// Where sessions are saved while in progress and kept afterwards.
     let archive: SessionArchive
     let saver: SessionSaver
@@ -1259,45 +1256,6 @@ final class AnnotationController: ObservableObject {
     func setLayout(_ layout: ClipLayout, of video: URL) {
         layouts[video] = layout
         backgrounds.remember(layout.background)
-    }
-
-    /// Writes a clip with its camera on its layout to Downloads, then shows the toast.
-    func saveVideo(_ video: URL) {
-        guard savingVideo == nil else {
-            return
-        }
-        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads", isDirectory: true)
-        let formatter = DateFormatter()
-        // Digits in every locale: the name is for files.
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        let file = folder.appendingPathComponent("Tilde \(formatter.string(from: Date())).mp4")
-        let layout = layout(of: video)
-        let cameraTrack = cameraTrack(of: video)
-        savingVideo = video
-        Task { [weak self] in
-            guard let self else {
-                return
-            }
-            let started = Date()
-            do {
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                try await VideoFramer.export(video, camera: cameraTrack, layout: layout, to: file)
-                savedVideo = file
-                savedVideoTime.start(10) { [weak self] in
-                    self?.savedVideo = nil
-                }
-            } catch {
-                log.error("could not save video: \(String(describing: error), privacy: .public)")
-                notices.show(.recordingNotSaved)
-            }
-            // The button's spinner shows for at least a second.
-            let left = 1 - Date().timeIntervalSince(started)
-            if left > 0 {
-                try? await Task.sleep(for: .seconds(left))
-            }
-            savingVideo = nil
-        }
     }
 
     // MARK: - Drawing

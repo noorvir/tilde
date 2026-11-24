@@ -17,6 +17,7 @@ struct HUDView: View {
     @ObservedObject private var wireframe: WireframeMode
     @ObservedObject private var wireframes: WireframeSwitch
     @ObservedObject private var browserOffer: BrowserOffer
+    @ObservedObject private var savedVideos: SavedVideos
     /// What Record records, which the controller reads for the source's name.
     @ObservedObject private var scope: SessionScope
     /// In the toolbar of Tilde's browser instead of the floating panel: the pill alone, which
@@ -40,6 +41,7 @@ struct HUDView: View {
         wireframe = controller.wireframe
         wireframes = controller.wireframes
         browserOffer = controller.browserOffer
+        savedVideos = controller.savedVideos
         scope = controller.scope
         self.isEmbedded = isEmbedded
         self.onDrag = onDrag
@@ -62,7 +64,7 @@ struct HUDView: View {
                 pill
                     .fixedSize()
             }
-            if hud.isShown, let video = controller.savedVideo {
+            if hud.isShown, let video = savedVideos.saved {
                 SavedVideoToast(video: video)
                     .transition(Self.zoom)
             }
@@ -127,7 +129,7 @@ struct HUDView: View {
         .animation(.easeOut(duration: 0.15), value: notices.pause)
         .animation(.spring(duration: 0.28), value: browserOffer.url)
         .animation(.spring(duration: 0.28), value: browserOffer.showsToast)
-        .animation(HUDPanel.motion, value: controller.savedVideo)
+        .animation(HUDPanel.motion, value: savedVideos.saved)
     }
 
     /// How the list appears and goes with the HUD: the same zoom as the pill.
