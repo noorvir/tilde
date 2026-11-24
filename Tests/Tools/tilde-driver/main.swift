@@ -102,7 +102,7 @@ func handle(_ request: HTTPRequest) async -> HTTPResponse {
     case ("POST", "/ax"):
         let pid = pid_t(body["pid"] as? Int ?? 0)
         maxDepth = body["depth"] as? Int ?? 40
-        return json(["tree": roots(of: pid).map { node($0, depth: 0) }])
+        return json(["tree": roots(of: pid).compactMap { node($0, depth: 0) }])
 
     case ("POST", "/window"):
         return json(["png": windowPicture(pid: body["pid"] as? Int ?? 0, title: body["title"] as? String ?? "") as Any])
@@ -293,26 +293,75 @@ func isNotApplication(_ element: AXUIElement) -> Bool {
     (axValue(element, kAXRoleAttribute) as String?) != kAXApplicationRole
 }
 
-func node(_ element: AXUIElement, depth: Int) -> [String: Any] {
-    var result: [String: Any] = ["role": axValue(element, kAXRoleAttribute) as String? ?? ""]
-    result["name"] = axName(element)
-    result["enabled"] = axValue(element, kAXEnabledAttribute) as Bool? ?? true
+/// The element and what is in it; nil for an application element, which is never part of a tree.
+func node(_ element: AXUIElement, depth: Int) -> [String: Any]? {
+    // In one request to the app: each attribute alone is a round trip, and a tree has hundreds
+    // of elements. Not a global: top-level code sets those only when it reaches them.
+    let nodeAttributes = [
+        kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute, kAXEnabledAttribute,
+        kAXPositionAttribute, kAXSizeAttribute, kAXChildrenAttribute,
+    ]
+    var answer: CFArray?
+    let status = AXUIElementCopyMultipleAttributeValues(element, nodeAttributes as CFArray, AXCopyMultipleAttributeOptions(), &answer)
+    var values: [AnyObject?] = (status == .success ? answer as? [AnyObject] : nil) ?? []
+    if values.count != nodeAttributes.count {
+        values = Array(repeating: nil, count: nodeAttributes.count)
+    }
+    // An attribute that the element has not, or that has no value, comes as an AXValue holding
+    // that error, which no cast below accepts. Any other failure is read again on its own.
+    for (index, attribute) in nodeAttributes.enumerated() where !isAnswered(values[index]) {
+        values[index] = axValue(element, attribute) as AnyObject?
+    }
+    let roleValue = values[0]
+    let title = values[1]
+    let description = values[2]
+    let value = values[3]
+    let enabled = values[4]
+    let positionValue = values[5]
+    let sizeValue = values[6]
+    let childrenValue = values[7]
+
+    let role = roleValue as? String ?? ""
+    if role == kAXApplicationRole {
+        return nil
+    }
+    var result: [String: Any] = ["role": role]
+    result["name"] = [title, description, value].lazy.compactMap { $0 as? String }.first { !$0.isEmpty }
+    result["enabled"] = enabled as? Bool ?? true
     var position = CGPoint.zero
     var size = CGSize.zero
-    var value: CFTypeRef?
-    if AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &value) == .success, let value {
-        AXValueGetValue(value as! AXValue, .cgPoint, &position)
+    if let positionValue, CFGetTypeID(positionValue) == AXValueGetTypeID() {
+        AXValueGetValue(positionValue as! AXValue, .cgPoint, &position)
     }
-    value = nil
-    if AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &value) == .success, let value {
-        AXValueGetValue(value as! AXValue, .cgSize, &size)
+    if let sizeValue, CFGetTypeID(sizeValue) == AXValueGetTypeID() {
+        AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
     }
     result["frame"] = [position.x, position.y, size.width, size.height]
     if depth < maxDepth {
-        let children: [AXUIElement] = axValue(element, kAXChildrenAttribute) ?? []
-        result["children"] = children.filter(isNotApplication).prefix(500).map { node($0, depth: depth + 1) }
+        let children = childrenValue as? [AXUIElement] ?? []
+        var nodes: [[String: Any]] = []
+        for child in children where nodes.count < 500 {
+            if let child = node(child, depth: depth + 1) {
+                nodes.append(child)
+            }
+        }
+        result["children"] = nodes
     }
     return result
+}
+
+/// Whether a value from a request for several attributes is final: a value, or the error that
+/// the element has no such attribute or value.
+private func isAnswered(_ value: AnyObject?) -> Bool {
+    guard let value else {
+        return false
+    }
+    guard CFGetTypeID(value) == AXValueGetTypeID(), AXValueGetType(value as! AXValue) == .axError else {
+        return true
+    }
+    var error = AXError.success
+    AXValueGetValue(value as! AXValue, .axError, &error)
+    return error == .attributeUnsupported || error == .noValue
 }
 
 func find(_ name: String, role: String?, in element: AXUIElement, depth: Int) -> AXUIElement? {
