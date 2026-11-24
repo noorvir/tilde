@@ -753,11 +753,3 @@ struct PauseCard: View {
         }
     }
 }
-
-private extension Color {
-    /// From "#RRGGBB".
-    init(hex: String) {
-        let value = Int(hex.dropFirst(), radix: 16) ?? 0
-        self.init(red: Double(value >> 16 & 255) / 255, green: Double(value >> 8 & 255) / 255, blue: Double(value & 255) / 255)
-    }
-}

@@ -191,7 +191,7 @@ private struct BackgroundFill: View {
     var body: some View {
         switch background {
         case .gradient(let gradient):
-            LinearGradient(colors: gradient.cgColors.map { Color(cgColor: $0) }, startPoint: .topLeading, endPoint: .bottomTrailing)
+            LinearGradient(colors: gradient.colors.map(Color.init(hex:)), startPoint: .topLeading, endPoint: .bottomTrailing)
         case .image(let url):
             if let image = Self.image(at: url) {
                 Color.clear.overlay(Image(nsImage: image).resizable().scaledToFill()).clipped()
