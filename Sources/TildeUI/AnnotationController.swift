@@ -1215,10 +1215,10 @@ final class AnnotationController: ObservableObject {
         guard case .starting(let operation) = recording, let session else {
             return
         }
-        let extras = ScreenRecorder.Extras(keptWindows: [browser.windowNumber].compactMap { $0 }, microphone: camera.microphone)
         // The clip belongs to the session: it is in its folder, and goes with it.
         clips.start(
-            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), extras: extras, recordsCamera: camera.isShowing, operation: operation
+            clipSource, windowName: scope.name, into: archive.newClip(in: session.id), browserWindow: browser.windowNumber, microphone: camera.microphone,
+            recordsCamera: camera.isShowing, operation: operation
         )
     }
 
