@@ -17,11 +17,7 @@ struct GeneralSettings: View {
         VStack(alignment: .leading, spacing: 28) {
             SettingsSection("Application") {
                 SettingsRow(title: "Launch at login", subtitle: launchError, subtitleIsError: launchError != nil) {
-                    Toggle("Launch at login", isOn: $launchesAtLogin)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(Color.tildeBlue)
-                        .labelsHidden()
+                    SettingsToggle("Launch at login", isOn: $launchesAtLogin)
                         .onChange(of: launchesAtLogin) { _, isOn in
                             setLaunchAtLogin(isOn)
                         }
@@ -97,26 +93,13 @@ private struct BetaSettings: View {
     var body: some View {
         SettingsSection("Beta features") {
             SettingsRow(title: "Remote machines", subtitle: "Agents on a linked machine can open Tilde on this screen") {
-                BetaSwitch(title: "Remote machines", isOn: Binding { nodes.isEnabled } set: { nodes.setEnabled($0) })
+                SettingsToggle("Remote machines", isOn: Binding { nodes.isEnabled } set: { nodes.setEnabled($0) })
             }
             SettingsDivider()
             SettingsRow(title: "Wireframes", subtitle: "Sketch components over the screen and send them as one note") {
-                BetaSwitch(title: "Wireframes", isOn: Binding { wireframes.isOn } set: { wireframes.set($0) })
+                SettingsToggle("Wireframes", isOn: Binding { wireframes.isOn } set: { wireframes.set($0) })
             }
         }
-    }
-}
-
-private struct BetaSwitch: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        Toggle(title, isOn: $isOn)
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .tint(Color.tildeBlue)
-            .labelsHidden()
     }
 }
 
@@ -154,21 +137,13 @@ private struct BrowserSettings: View {
             }
             SettingsDivider()
             SettingsRow(title: "Offer to import logins", subtitle: "A bar in Tilde's browser until logins are imported") {
-                Toggle("Offer to import logins", isOn: $offersImport)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .tint(Color.tildeBlue)
-                    .labelsHidden()
+                SettingsToggle("Offer to import logins", isOn: $offersImport)
             }
             // Not while the page is in Tilde's browser already.
             if browser.pageURL == nil {
                 SettingsDivider()
                 SettingsRow(title: "Offer Tilde's browser", subtitle: "For a note on a page in another browser") {
-                    Toggle("Offer Tilde's browser", isOn: $offersBrowser)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(Color.tildeBlue)
-                        .labelsHidden()
+                    SettingsToggle("Offer Tilde's browser", isOn: $offersBrowser)
                 }
             }
             SettingsDivider()

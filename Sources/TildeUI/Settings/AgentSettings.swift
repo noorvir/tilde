@@ -135,11 +135,7 @@ struct AgentRow: View {
                     .font(.system(size: 14))
                 StatusDot(status: status)
                 Spacer(minLength: 16)
-                Toggle(row.name, isOn: installed(status))
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .tint(Color.tildeBlue)
-                    .labelsHidden()
+                SettingsToggle(row.name, isOn: installed(status))
             }
             .padding(.horizontal, 16)
             .frame(height: 50)

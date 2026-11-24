@@ -57,6 +57,25 @@ struct SettingsSection<Content: View, Accessory: View>: View {
     }
 }
 
+/// A row's on and off switch: mini, in Tilde blue, with its title for accessibility only.
+struct SettingsToggle: View {
+    let title: String
+    @Binding var isOn: Bool
+
+    init(_ title: String, isOn: Binding<Bool>) {
+        self.title = title
+        _isOn = isOn
+    }
+
+    var body: some View {
+        Toggle(title, isOn: $isOn)
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(Color.tildeBlue)
+            .labelsHidden()
+    }
+}
+
 /// A hairline between rows, inset 16 pt on both sides.
 struct SettingsDivider: View {
     var body: some View {
