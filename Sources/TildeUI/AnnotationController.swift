@@ -1338,8 +1338,7 @@ final class AnnotationController: ObservableObject {
         guard sessionID != nil, let note = await drawing.takeNote(), session?.id == sessionID else {
             return
         }
-        add(Pending(note, browser: browser, withContext: false), comment: "")
-        drafts[drafts.count - 1].isUnfinished = true
+        add(Pending(note, browser: browser, withContext: false), comment: "", isUnfinished: true)
         saver.save()
     }
 
@@ -1436,6 +1435,7 @@ final class AnnotationController: ObservableObject {
     /// Keeps the components as an unfinished note: `id`'s, or a new one. Saved to disk at once.
     @discardableResult
     private func keepWireframeDraft(_ note: NewNote, id: Draft.ID?) -> Draft.ID {
+        let kept: Draft.ID
         if let id, let index = drafts.firstIndex(where: { $0.id == id }) {
             let old = drafts[index].annotation
             drafts[index].annotation = Annotation(
@@ -1443,14 +1443,14 @@ final class AnnotationController: ObservableObject {
             )
             drafts[index].marker = note.marker
             drafts[index].isUnfinished = true
+            kept = id
         } else {
             var empty = note
             empty.captures = Captures(image: nil, contextImage: nil)
-            add(Pending(empty, browser: browser, withContext: false), comment: "")
-            drafts[drafts.count - 1].isUnfinished = true
+            kept = add(Pending(empty, browser: browser, withContext: false), comment: "", isUnfinished: true)
         }
         saver.save()
-        return id.flatMap { id in drafts.contains { $0.id == id } ? id : nil } ?? drafts[drafts.count - 1].id
+        return kept
     }
 
     /// Shows a wireframe note's components again, to edit them: Done then replaces that note,
@@ -1502,18 +1502,21 @@ final class AnnotationController: ObservableObject {
         hideComposer()
     }
 
-    /// A new note in the list; its pictures join it once they are made.
-    private func add(_ pending: Pending, comment: String) {
+    /// A new note in the list; its pictures join it once they are made. `isUnfinished`: a
+    /// draft without its comment, which the preview finishes.
+    @discardableResult
+    private func add(_ pending: Pending, comment: String, isUnfinished: Bool = false) -> Draft.ID {
         let capture = drawing.finish(pending, windowFrame: pending.sourceWindow.flatMap { tracker.windowFrames[$0] })
-        let draft = Draft(pending, comment: comment, capture: capture)
+        var draft = Draft(pending, comment: comment, capture: capture)
+        draft.isUnfinished = isUnfinished
         drafts.append(draft)
         tracker.notesAdded()
         if let tracked = pending.tracked {
             tracker.follow(draft.id, element: tracked)
         }
-        Task {
+        Task { [id = draft.id] in
             let captures = await capture.value
-            guard let index = drafts.firstIndex(where: { $0.id == draft.id }) else {
+            guard let index = drafts.firstIndex(where: { $0.id == id }) else {
                 return
             }
             let current = drafts[index].annotation
@@ -1522,6 +1525,7 @@ final class AnnotationController: ObservableObject {
                 image: captures.image, contextImage: captures.contextImage
             )
         }
+        return draft.id
     }
 
     /// The preview's Delete button, Delete and Backspace ask first, for a note and for a clip
