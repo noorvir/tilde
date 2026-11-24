@@ -8,12 +8,14 @@ import SwiftUI
 struct ClipComposer: View {
     @ObservedObject var controller: AnnotationController
     @ObservedObject private var backgrounds: VideoBackgrounds
+    @ObservedObject private var card: PreviewCard
     let video: URL
     @StateObject private var players: ClipPlayers
 
     init(controller: AnnotationController, video: URL) {
         self.controller = controller
         backgrounds = controller.backgrounds
+        card = controller.previewCard
         self.video = video
         // The note's length until the file says its own.
         let seconds = controller.drafts.lazy.compactMap { draft -> Double? in
@@ -33,7 +35,11 @@ struct ClipComposer: View {
                 ComposerCanvas(players: players, layout: layout, clipSize: players.clipSize, cameraPoster: players.cameraPoster) { changed in
                     controller.setLayout(changed, of: video)
                 }
+                // A click on the picture closes the open menu, and moves nothing.
+                .allowsHitTesting(!card.showsBackgrounds)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { card.showsBackgrounds = false }
             .aspectRatio(ClipLayout.aspect, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.1)).allowsHitTesting(false))
@@ -44,72 +50,74 @@ struct ClipComposer: View {
         .onDisappear { players.stop() }
     }
 
-    /// One line: the recent backgrounds and the menu of the others on the left, Play and the
-    /// scrubber in the middle under the video, the camera's shape on the right.
+    /// One line from the left: the background and its menu, the camera's shape, then Play
+    /// and the scrubber over the rest.
     private func controls(_ layout: ClipLayout) -> some View {
-        CenteredRow(spacing: 12) {
-            HStack(spacing: 6) {
-                ForEach(backgrounds.recents, id: \.key) { background in
-                    swatch(background, title: title(of: background), selected: layout.background)
-                        .contextMenu {
-                            if case .image(let url) = background {
-                                Button("Remove") { backgrounds.remove(url) }
-                            }
-                        }
+        HStack(spacing: 6) {
+            backgroundButton(layout.background)
+            if layout.cameraCenter != nil {
+                HUDButton(image: Image(systemName: layout.cameraShape == .circle ? "circle" : "app"), help: "Camera shape") {
+                    var changed = controller.layout(of: video)
+                    changed.cameraShape = changed.cameraShape == .circle ? .rounded : .circle
+                    controller.setLayout(changed, of: video)
                 }
-                moreBackgrounds
             }
-            HStack(spacing: 6) {
-                CardButton(symbol: players.isPlaying ? "pause.fill" : "play.fill", help: players.isPlaying ? "Pause" : "Play") {
-                    players.toggle()
-                }
-                ClipScrubber(players: players, clock: players.clock)
+            HUDBarDivider()
+            HUDButton(image: Image(systemName: players.isPlaying ? "pause.fill" : "play.fill"), help: players.isPlaying ? "Pause" : "Play") {
+                players.toggle()
             }
-            HStack(spacing: 6) {
-                if layout.cameraCenter != nil {
-                    CardButton(symbol: layout.cameraShape == .circle ? "circle" : "app", help: "Camera shape") {
-                        var changed = controller.layout(of: video)
-                        changed.cameraShape = changed.cameraShape == .circle ? .rounded : .circle
-                        controller.setLayout(changed, of: video)
+            ClipScrubber(players: players, clock: players.clock)
+        }
+        .environment(\.colorScheme, .dark)
+    }
+
+    /// The current background; its menu opens upward, over the picture.
+    private func backgroundButton(_ current: VideoBackground) -> some View {
+        Button {
+            card.showsBackgrounds.toggle()
+        } label: {
+            HUDButtonLabel(image: Image(nsImage: BackgroundSwatch.image(of: current)), opensBelow: true)
+                .modifier(HUDButtonChrome(isActive: card.showsBackgrounds, padding: 6))
+        }
+        .buttonStyle(.plain)
+        .tildeTooltip(card.showsBackgrounds ? nil : "Background")
+        .accessibilityLabel("Background")
+        .accessibilityValue(title(of: current))
+        // A line at the button's top edge, which the menu stands on: it opens upward.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(height: 0)
+                .overlay(alignment: .bottomLeading) {
+                    if card.showsBackgrounds {
+                        backgroundMenu(current)
+                            .fixedSize()
+                            .padding(.bottom, 8)
                     }
                 }
-            }
         }
     }
 
-    /// The backgrounds that are not among the swatches, and adding an image.
-    private var moreBackgrounds: some View {
-        Menu {
-            ForEach(backgrounds.others, id: \.key) { background in
-                Button(title(of: background)) { choose(background) }
+    private func backgroundMenu(_ current: VideoBackground) -> some View {
+        let all = VideoGradient.allCases.map(VideoBackground.gradient) + backgrounds.images.map(VideoBackground.image)
+        return MenuCard {
+            ForEach(all, id: \.key) { background in
+                MenuRow(image: Image(nsImage: BackgroundSwatch.image(of: background)), title: title(of: background), isOn: background == current) {
+                    choose(background)
+                }
+                .contextMenu {
+                    if case .image(let url) = background {
+                        Button("Remove") { backgrounds.remove(url) }
+                    }
+                }
             }
-            Divider()
-            Button("Add image") {
+            Rectangle().fill(.white.opacity(0.1)).frame(height: 1).padding(.vertical, 3).padding(.horizontal, 6)
+            MenuRow(symbol: "plus", title: "Add image") {
+                card.showsBackgrounds = false
                 if let added = backgrounds.add() {
                     choose(.image(added))
                 }
             }
-            if !backgrounds.images.isEmpty {
-                Menu("Remove image") {
-                    ForEach(backgrounds.images, id: \.self) { url in
-                        Button(title(of: .image(url))) { backgrounds.remove(url) }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
-                .frame(width: 30, height: 20)
-                .background(RoundedRectangle(cornerRadius: 5).fill(.white.opacity(0.07)))
-                .contentShape(Rectangle())
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .tildeTooltip("More backgrounds")
-        .accessibilityLabel("More backgrounds")
     }
 
     private func title(of background: VideoBackground) -> String {
@@ -122,26 +130,44 @@ struct ClipComposer: View {
         }
     }
 
-    private func swatch(_ background: VideoBackground, title: String, selected: VideoBackground) -> some View {
-        let isOn = background == selected
-        return Button {
-            choose(background)
-        } label: {
-            BackgroundFill(background: background)
-                .frame(width: 30, height: 20)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(isOn ? Color.white : Color.white.opacity(0.2), lineWidth: isOn ? 2 : 1))
-        }
-        .buttonStyle(.plain)
-        .tildeTooltip(title)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isOn ? .isSelected : [])
-    }
-
     private func choose(_ background: VideoBackground) {
+        card.showsBackgrounds = false
         var layout = controller.layout(of: video)
         layout.background = background
         controller.setLayout(layout, of: video)
+    }
+}
+
+/// A background drawn small, for its button and its row in the menu.
+@MainActor
+private enum BackgroundSwatch {
+    private static let size = CGSize(width: 24, height: 16)
+    private static let images = NSCache<NSString, NSImage>()
+
+    static func image(of background: VideoBackground) -> NSImage {
+        if let image = images.object(forKey: background.key as NSString) {
+            return image
+        }
+        let source: NSImage? = switch background {
+        case .gradient(let gradient):
+            VideoFramer.gradientImage(gradient, size: CGSize(width: size.width * 2, height: size.height * 2)).map { NSImage(cgImage: $0, size: size) }
+        case .image(let url):
+            NSImage(contentsOf: url)
+        }
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).addClip()
+            NSColor.gray.setFill()
+            rect.fill()
+            if let source {
+                // Fills the swatch from the centre.
+                let scale = max(rect.width / source.size.width, rect.height / source.size.height)
+                let drawn = CGSize(width: source.size.width * scale, height: source.size.height * scale)
+                source.draw(in: CGRect(x: rect.midX - drawn.width / 2, y: rect.midY - drawn.height / 2, width: drawn.width, height: drawn.height))
+            }
+            return true
+        }
+        images.setObject(image, forKey: background.key as NSString)
+        return image
     }
 }
 
@@ -393,33 +419,6 @@ final class ClipClock: ObservableObject {
     static func time(_ seconds: Double) -> String {
         let whole = Int(max(seconds, 0).rounded(.down))
         return "\(whole / 60):" + String(format: "%02d", whole % 60)
-    }
-}
-
-/// A row of three parts: the middle one is centred and takes the width the sides leave, at
-/// least half of the row; the sides sit at the row's ends.
-private struct CenteredRow: Layout {
-    let spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
-        let height = sizes.map(\.height).max() ?? 0
-        let ideal = sizes.map(\.width).reduce(0, +) + spacing * 2
-        return CGSize(width: proposal.width ?? ideal, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count == 3 else {
-            return
-        }
-        let leading = subviews[0].sizeThatFits(.unspecified)
-        let trailing = subviews[2].sizeThatFits(.unspecified)
-        let side = max(leading.width, trailing.width) + spacing
-        let middle = max(bounds.width / 2, bounds.width - 2 * side)
-        let height = ProposedViewSize(width: nil, height: bounds.height)
-        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading, proposal: height)
-        subviews[1].place(at: CGPoint(x: bounds.midX, y: bounds.midY), anchor: .center, proposal: ProposedViewSize(width: middle, height: bounds.height))
-        subviews[2].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing, proposal: height)
     }
 }
 

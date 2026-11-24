@@ -1018,17 +1018,30 @@ struct MenuCard<Content: View>: View {
 
 /// A row of a HUD card: grey with a check mark while it is the current choice.
 struct MenuRow: View {
-    let symbol: String
+    let image: Image
     let title: String
     var isOn = false
     var width: CGFloat = 260
     let action: () -> Void
 
+    init(symbol: String, title: String, isOn: Bool = false, width: CGFloat = 260, action: @escaping () -> Void) {
+        self.init(image: Image(systemName: symbol), title: title, isOn: isOn, width: width, action: action)
+    }
+
+    /// A row with a picture of its own, such as a background's swatch.
+    init(image: Image, title: String, isOn: Bool = false, width: CGFloat = 260, action: @escaping () -> Void) {
+        self.image = image
+        self.title = title
+        self.isOn = isOn
+        self.width = width
+        self.action = action
+    }
+
     var body: some View {
         let size = HUDAccessory.size
         Button(action: action) {
             HStack(spacing: size.scaled(4)) {
-                HUDButtonLabel(image: Image(systemName: symbol), title: title, fillsWidth: true)
+                HUDButtonLabel(image: image, title: title, fillsWidth: true)
                 Image(systemName: "checkmark")
                     .font(.system(size: size.font(10.5), weight: .semibold))
                     .opacity(isOn ? 1 : 0)

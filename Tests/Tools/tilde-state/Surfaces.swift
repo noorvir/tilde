@@ -158,6 +158,7 @@ enum Surfaces {
         case .context: controller.previewCard.expandedImage = .context
         case nil: controller.previewCard.expandedImage = nil
         }
+        controller.previewCard.showsBackgrounds = state.backgrounds == true
         return controller
     }
 

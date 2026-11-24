@@ -8,6 +8,8 @@ final class PreviewCard: ObservableObject {
     @Published private(set) var id: Draft.ID?
     /// The screenshot that fills the card's image area, if any.
     @Published var expandedImage: PreviewImage?
+    /// A clip's menu of backgrounds shows.
+    @Published var showsBackgrounds = false
 
     private let makePanel: () -> PreviewPanel
     private lazy var panel = makePanel()
@@ -19,6 +21,7 @@ final class PreviewCard: ObservableObject {
     func open(_ id: Draft.ID) {
         self.id = id
         expandedImage = nil
+        showsBackgrounds = false
         panel.show()
     }
 
@@ -30,10 +33,12 @@ final class PreviewCard: ObservableObject {
         }
         let next = (index + step + drafts.count) % drafts.count
         self.id = drafts[next].id
+        showsBackgrounds = false
     }
 
     func close() {
         expandedImage = nil
+        showsBackgrounds = false
         guard id != nil else {
             return
         }

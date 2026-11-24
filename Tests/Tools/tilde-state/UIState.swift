@@ -178,6 +178,8 @@ struct UIState: Decodable {
     var commentText: String?
     var preview: Int?
     var enlarged: Enlarged?
+    /// The clip's menu of backgrounds is open in the preview.
+    var backgrounds: Bool?
     var text: String?
     /// The key hints after a tooltip's text, such as ["⌃⌃", "Space"].
     var keys: [String]?
