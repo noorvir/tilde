@@ -1414,7 +1414,7 @@ final class AnnotationController: ObservableObject {
             }
             let id = wireframe.shownNote
             wireframe.readDraft { [weak self] note in
-                // Done or the mode's end came while the pictures were made: theirs are newer.
+                // Done or the mode's end came before the page's answer: theirs are newer.
                 guard let self, isWireframe, !wireframe.isTaking else {
                     return
                 }
@@ -1438,17 +1438,21 @@ final class AnnotationController: ObservableObject {
         }
     }
 
-    /// Keeps the components as a note with their pictures: `id`'s, drawn again, or a new one.
+    /// Keeps the components as a note: `id`'s, drawn again, or a new one. A note that comes
+    /// with no pictures keeps the ones it has, or has none until the mode's end makes them.
     /// `isUnfinished`: a draft, which Done finishes. Saved to disk at once.
     @discardableResult
     private func keepWireframe(_ note: NewNote, replacing id: Draft.ID?, isUnfinished: Bool) -> Draft.ID {
         guard let id, let index = drafts.firstIndex(where: { $0.id == id }) else {
-            let kept = add(Pending(note, browser: browser, withContext: false), comment: "", isUnfinished: isUnfinished)
+            var new = note
+            // Without this, the note takes pictures of its own, as a note of an element does.
+            new.captures = note.captures ?? Captures(image: nil, contextImage: nil)
+            let kept = add(Pending(new, browser: browser, withContext: false), comment: "", isUnfinished: isUnfinished)
             saver.save()
             return kept
         }
         // The note keeps its id, and so the names of its saved pictures: the old ones go.
-        if let session {
+        if let session, note.captures != nil {
             archive.forgetImages(of: id, in: session.id)
         }
         drafts[index] = drafts[index].redrawn(as: note)

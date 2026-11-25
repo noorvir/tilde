@@ -285,10 +285,12 @@ final class WireframeMode: ObservableObject {
         return Taken(note: note, replaces: replaces)
     }
 
-    /// The components as they are, as a note with the pictures of them; nil when there are
-    /// none. The page gets the calls at once, so `end()` right after loses nothing. `taking`:
-    /// the mode ends, so the components leave the canvas's list of new shapes and lose their
-    /// handles; they stay on the canvas for the pictures, until the note's `drawingIDs` go.
+    /// The components as they are, as a note; nil when there are none. The page gets the calls
+    /// at once, so `end()` right after loses nothing. `taking`: the mode ends, so the note has
+    /// the pictures of the components, which leave the canvas's list of new shapes and lose
+    /// their handles; they stay on the canvas for the pictures, until the note's `drawingIDs`
+    /// go. Else the note has no pictures: to make them takes the processor from the canvas,
+    /// while the user moves the components or their window.
     func readDraft(taking: Bool = false, _ done: @escaping (NewNote?) -> Void) {
         let chosen = window.flatMap { picker.currentWindow(number: $0.number) }
         let scope = scope()
@@ -298,13 +300,15 @@ final class WireframeMode: ObservableObject {
                 return
             }
             let place = place(of: drawn.bounds, chosen: chosen, scope: scope)
+            guard taking else {
+                done(Self.note(of: drawn, chosen: chosen, place: place, captures: nil, ids: []))
+                return
+            }
             Task {
                 // The canvas has to paint without the handles first.
-                if taking {
-                    try? await Task.sleep(for: .milliseconds(100))
-                }
+                try? await Task.sleep(for: .milliseconds(100))
                 let captures = await self.pictures(place.area)
-                done(Self.note(of: drawn, chosen: chosen, place: place, captures: captures, ids: taking ? drawn.ids : []))
+                done(Self.note(of: drawn, chosen: chosen, place: place, captures: captures, ids: drawn.ids))
             }
         }
         if taking {

@@ -197,6 +197,33 @@ struct WireframeTests {
         try await until { controller.tracker.label(at: corner) == draft.id }
     }
 
+    /// The draft that a change saves takes no pictures: to make them takes the processor from
+    /// the canvas while the user moves the components or their window. The mode's end makes
+    /// them, and until then a note that is drawn again keeps the pictures it has.
+    @Test func theDraftSavedWhileTheWireframeChangesTakesNoPictures() async throws {
+        open(Open(canvas: .wireframe))
+        let card = Fixtures.wireframeShapes[0]
+        controller.wireframe.newShapes = { done in
+            done(DrawingPanel.Drawing(shapes: [card], ids: ["a"], bounds: DrawingShapes.bounds(of: [card])))
+        }
+        controller.wireframe.scope = { Fixtures.window }
+        var taken = 0
+        controller.wireframe.pictures = { _ in
+            taken += 1
+            return Captures(image: Fixtures.closeUp(0), contextImage: Fixtures.context(0))
+        }
+
+        controller.drawing.panel.onCanvasChanged()
+        try await until { controller.wireframe.shownNote != nil }
+        #expect(taken == 0)
+        #expect(controller.drafts.first?.annotation.image == nil)
+
+        controller.dispatch(.toggleAnnotating, with: [.showCanvas: {}])
+        try await until { controller.drafts.first?.annotation.image != nil }
+        #expect(taken == 1)
+        #expect(controller.drafts.count == 1)
+    }
+
     // MARK: - Esc
 
     /// Esc in wireframe mode puts the tool down: no tool is on, the mode stays and nothing
