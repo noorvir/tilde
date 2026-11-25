@@ -55,6 +55,14 @@ final class DrawingCanvas: NSObject, WKScriptMessageHandler {
         passThrough.onWentThrough = { [weak self] isPress in
             self?.run("pointerWentThrough(\(isPress))")
         }
+        // The page shows what is under the pointer before the next move or press comes.
+        passThrough.onCameBack = { [weak self] point in
+            guard let self else {
+                return
+            }
+            let origin = frame.flipped.origin
+            run("pointerCameBack(\(point.x - origin.x), \(point.y - origin.y))")
+        }
     }
 
     /// Draw has shapes that no comment has taken yet.

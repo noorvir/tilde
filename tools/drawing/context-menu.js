@@ -1,11 +1,12 @@
-// Tilde's context menu on the canvas, in place of Excalidraw's: Add comment, then the
-// Excalidraw actions that Tilde keeps. Excalidraw's own menu opens hidden; an item here clicks
+// Tilde's context menu on the canvas, in place of Excalidraw's: Add comment, in wireframe mode
+// Group and Ungroup, then the Excalidraw actions that Tilde keeps. Excalidraw's own menu opens hidden; an item here clicks
 // its item there, so each action runs as Excalidraw runs it.
 
 import { deleteSelected, hasGroup } from "./draw-mode.js";
 import { api, post } from "./scene.js";
-import { deleteComponent } from "./wireframe/chip.js";
+import { deleteComponent, selectedFrames, showHandles, trashIcon } from "./wireframe/chip.js";
 import { componentAt } from "./wireframe/components.js";
+import { canGroup, canUngroup, groupUnder, ungroup } from "./wireframe/groups.js";
 import { wireframe } from "./wireframe/mode.js";
 import { openComponentComment } from "./wireframe/pointer.js";
 
@@ -23,7 +24,9 @@ const icons = {
   flipH: '<path d="M8 2v12M6 4.5 2.5 12H6zM10 4.5l3.5 7.5H10z"/>',
   flipV: '<path d="M2 8h12M4.5 6 12 2.5V6zM4.5 10l7.5 3.5V10z"/>',
   duplicate: '<rect x="2.5" y="2.5" width="8" height="8" rx="1.5"/><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>',
-  trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>',
+  trash: trashIcon,
+  group: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><rect x="5" y="5" width="3" height="3"/><rect x="8" y="8" width="3" height="3"/>',
+  ungroup: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5" stroke-dasharray="2 2"/><rect x="5" y="5" width="3" height="3"/><rect x="8" y="8" width="3" height="3"/>',
 };
 
 // Excalidraw's actions that Tilde keeps, by its name for each, in groups.
@@ -72,6 +75,23 @@ function canComment() {
   return hasGroup;
 }
 
+// The selected components, when the menu opened on one of them and Group has something to do:
+// that one becomes the parent of the others.
+function groupable() {
+  const here = wireframe && componentHere();
+  const frames = selectedFrames();
+  return here && frames.some((frame) => frame.id === here.id) && canGroup(here, frames) ? frames : null;
+}
+
+// Group for a selection of several components, and Ungroup for a parent or a child.
+function groupItems() {
+  const here = wireframe && componentHere();
+  const items = [];
+  if (groupable()) items.push(item("group", "Group", "group"));
+  if (here && canUngroup(here)) items.push(item("ungroup", "Ungroup", "ungroup"));
+  return items;
+}
+
 // After Excalidraw has opened its menu, Tilde's shows the same actions that it keeps.
 export function contextMenuRequested(event) {
   openedAt = { x: event.clientX, y: event.clientY };
@@ -87,6 +107,8 @@ export function contextMenuRequested(event) {
     const groups = kept
       .map((group) => group.filter(([name]) => shown.has(name)).map(([name, label, icon]) => item(name, label, icon, macShortcut(shown.get(name)))))
       .filter((group) => group.length);
+    const grouping = groupItems();
+    if (grouping.length) groups.unshift(grouping);
     if (canComment()) groups.unshift([item("addComment", "Add comment", "comment", "↩")]);
     if (!groups.length) return;
     contextMenu.innerHTML = groups.map((group) => group.join("")).join("<hr>");
@@ -112,14 +134,25 @@ function close() {
   post("notTyping");
 }
 
+// The items that Tilde runs itself.
+const ownItems = new Set(["deleteSelectedElements", "addComment", "group", "ungroup"]);
+
 function run(name) {
   // Excalidraw's item runs while its menu is still there; closing Tilde's then closes that one.
-  if (name !== "deleteSelectedElements" && name !== "addComment") {
+  if (!ownItems.has(name)) {
     document.querySelector(`.excalidraw .context-menu li[data-testid="${name}"]`)?.click();
     close();
     return;
   }
   close();
+  if (name === "group" || name === "ungroup") {
+    const frames = groupable();
+    const component = wireframe && componentHere();
+    if (name === "group" && frames) groupUnder(component, frames);
+    if (name === "ungroup" && component) ungroup(component);
+    showHandles();
+    return;
+  }
   if (name === "deleteSelectedElements") {
     const component = wireframe && componentHere();
     if (component) deleteComponent(component.groupIds[0]);

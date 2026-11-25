@@ -31,6 +31,9 @@ final class CanvasPage {
         var rows: Int?
         var columns: Int?
         var filled: Bool?
+        /// A parent's key, which its children have as `parent`: they move and go with it.
+        var key: String?
+        var parent: String?
     }
 
     static let size = CGSize(width: 1200, height: 800)
@@ -194,7 +197,8 @@ final class CanvasPage {
       const target = options.target ?? document.elementFromPoint(x, y) ?? document.querySelector("canvas.interactive");
       target.dispatchEvent(new PointerEvent(type, {
         bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse",
-        isPrimary: true, button: 0, buttons: type === "pointerdown" || options.isPressed ? 1 : 0, altKey: Boolean(options.alt), metaKey: Boolean(options.meta),
+        isPrimary: true, button: options.button ?? 0, buttons: type === "pointerdown" || options.isPressed ? 1 : 0,
+        altKey: Boolean(options.alt), metaKey: Boolean(options.meta), ctrlKey: Boolean(options.control),
       }));
       return target;
     };
@@ -272,10 +276,27 @@ final class CanvasPage {
         try await settle()
     }
 
-    /// A press and release at one point.
-    func click(_ point: CGPoint) async throws {
-        try await run("window.pressed = fire('pointerdown', \(point.x), \(point.y)); fire('pointerup', \(point.x), \(point.y), {target: window.pressed}); 0")
+    /// A press and release at one point, with ⌘ or ⌃ held.
+    func click(_ point: CGPoint, meta: Bool = false, control: Bool = false) async throws {
+        let options = "meta: \(meta), control: \(control)"
+        try await run("window.pressed = fire('pointerdown', \(point.x), \(point.y), {\(options)}); fire('pointerup', \(point.x), \(point.y), {\(options), target: window.pressed}); 0")
         try await settle()
+    }
+
+    /// A click of the secondary button at a point, which asks for the context menu. Returns the
+    /// items that Tilde's menu shows, by name.
+    func openContextMenu(at point: CGPoint) async throws -> [String] {
+        let script = """
+        window.pressed = fire('pointerdown', \(point.x), \(point.y), {button: 2});
+        window.pressed.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, composed: true, view: window, clientX: \(point.x), clientY: \(point.y), button: 2,
+        }));
+        fire('pointerup', \(point.x), \(point.y), {button: 2, target: window.pressed}); 0
+        """
+        try await run(script)
+        try await settle()
+        let items = "[...document.querySelectorAll('#tilde-context-menu [data-item]')].filter((item) => item.offsetParent).map((item) => item.dataset.item)"
+        return try await run(items) as? [String] ?? []
     }
 
     /// Two clicks at one point, at once: a double-click however slow the page is. Two calls,
@@ -402,7 +423,7 @@ final class CanvasPage {
             Shape(
                 id: item["id"] as? String ?? "", type: item["type"] as? String ?? "", rect: (item["rect"] as? [NSNumber] ?? []).map(\.doubleValue),
                 label: item["label"] as? String, text: item["text"] as? String, borders: item["borders"] as? [String], rows: item["rows"] as? Int, columns: item["columns"] as? Int,
-                filled: item["filled"] as? Bool
+                filled: item["filled"] as? Bool, key: item["key"] as? String, parent: item["parent"] as? String
             )
         }
     }

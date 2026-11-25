@@ -428,6 +428,10 @@ private struct CommentEditor: View {
     @ObservedObject var controller: AnnotationController
     let id: Draft.ID
     @State private var text: String
+    private static let fontSize: CGFloat = 14
+    /// The box's three lines. SwiftUI at times keeps them 1 pt lower each, by another rounding
+    /// of the font's line height, and the box would not always be as tall.
+    private static let minHeight = 3 * NSLayoutManager().defaultLineHeight(for: .systemFont(ofSize: fontSize))
 
     init(controller: AnnotationController, id: Draft.ID, initial: String) {
         self.controller = controller
@@ -438,10 +442,11 @@ private struct CommentEditor: View {
     var body: some View {
         TextField("Add a comment", text: $text, axis: .vertical)
             .textFieldStyle(.plain)
-            .font(.system(size: 14))
+            .font(.system(size: Self.fontSize))
             .foregroundStyle(.white)
             // Grows with the text up to about 400 pt, then scrolls.
             .lineLimit(3...23)
+            .frame(minHeight: Self.minHeight, alignment: .top)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))

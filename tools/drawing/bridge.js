@@ -9,7 +9,7 @@ import { clearHistory, undoWireframe, redoWireframe } from "./wireframe/history.
 import { drawLook, setWireframeLook } from "./wireframe/look.js";
 import { showPreview } from "./wireframe/preview.js";
 import { wireframe, setWireframe, restoreWireframe, finishEdits } from "./wireframe/mode.js";
-import { snapAgain, takesPointer as wireframeTakesPointer, pointerWentThrough as wireframePointerWentThrough } from "./wireframe/pointer.js";
+import { snapAgain, takesPointer as wireframeTakesPointer, pointerCameBack, pointerWentThrough as wireframePointerWentThrough } from "./wireframe/pointer.js";
 import { setSnapTargets } from "./wireframe/snap.js";
 import { setWireframeWindow } from "./wireframe/window.js";
 
@@ -91,7 +91,7 @@ function pointerWentThrough(isPress) {
 
 window.tildeDraw = {
   setTool, editShapes, endEditing, endGroup, setOverLabel, setColor, setNoTool, deselect,
-  shapesOf, clear, newShapes, takeNewShapes, remove, takesPointer, pointerWentThrough,
+  shapesOf, clear, newShapes, takeNewShapes, remove, takesPointer, pointerWentThrough, pointerCameBack,
   setWireframe, setWireframeLook, showPreview, undoCanvas, redoCanvas, restoreWireframe, setWireframeWindow, setSnapTargets: setSnapTargetsHere,
 };
 

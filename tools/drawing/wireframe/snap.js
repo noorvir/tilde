@@ -11,8 +11,8 @@ export const snapRects = new Map();
 let snapAreas = [];
 const fractions = [[0, ""], [1 / 3, "⅓"], [1 / 2, "½"], [2 / 3, "⅔"], [1, ""]];
 
-// `except`: the group of a component being moved or resized, which has no lines of its own.
-export function snapLines(pointer, except) {
+// `except`: the components being moved or resized, which have no lines of their own.
+export function snapLines(pointer, except = []) {
   const lines = { x: [], y: [] };
   for (const [left, top, width, height] of snapRects.values()) {
     const away = Math.hypot(Math.max(left - pointer.x, 0, pointer.x - left - width), Math.max(top - pointer.y, 0, pointer.y - top - height));
@@ -29,7 +29,7 @@ export function snapLines(pointer, except) {
   }
   const drawing = api.getAppState().newElement?.id;
   for (const element of live()) {
-    if (element.id === drawing || !element.customData?.tildeWireframe || element.groupIds.includes(except)) continue;
+    if (element.id === drawing || !element.customData?.tildeWireframe || except.includes(element.groupIds[0])) continue;
     lines.x.push({ value: element.x, own: true }, { value: element.x + element.width / 2, own: true }, { value: element.x + element.width, own: true });
     lines.y.push({ value: element.y, own: true }, { value: element.y + element.height / 2, own: true }, { value: element.y + element.height, own: true });
   }

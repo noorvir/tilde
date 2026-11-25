@@ -1,16 +1,20 @@
 // What the pointer does in wireframe mode: a drag draws a component, also in another, or with
 // no tool moves one; the chip and the top grip move one too, a corner handle resizes one from
-// that corner, and ⌥ and a drag copies one. A click selects one, a double-click edits its text,
+// that corner, and ⌥ and a drag copies one with its children, or the whole selection that it
+// is in. A click selects one, a double-click edits its text,
 // and a click on its tag edits its label. A drag on the text of the selected component, with
 // any tool, moves the text off it as a free text, which moves as a component does. The Text
-// tool's click types a component's text, or a free text where there is no component.
+// tool's click types a component's text, or a free text where there is no component. A
+// component drawn fully inside another is its child: it moves with it, and alone. ⌘ or ⌃ and
+// a click adds a component to the selection, or takes it out.
 
 import { moveCursor, cursorRing, isSelectMode } from "../cursor.js";
 import { editing, isPressed } from "../draw-mode.js";
 import { api, postPointer, live } from "../scene.js";
-import { typeMenu, bordersMenu, selection, isHandle, deleteComponent, selectGroup, showHandles, hideHandles, toggleMenu } from "./chip.js";
+import { typeMenu, bordersMenu, selection, selectedFrames, isHandle, deleteComponent, selectGroup, toggleSelected, showHandles, hideHandles, toggleMenu } from "./chip.js";
 import { kindNames, newData, changedKind, changedData, wireframeElements, frameOf, componentAt, rebuild } from "./components.js";
 import { commentBox, commented, openComment, closeComment } from "./comment.js";
+import { copiesOf, descendantsOf, newKey, outerOf, setKey } from "./groups.js";
 import { record } from "./history.js";
 import { labelField, labelled, editLabel, editText, endLabel, isDoubleClick } from "./labels.js";
 import { tagAt, textAt, textBox, textHeight } from "./look.js";
@@ -24,6 +28,29 @@ let wireframePress = null;
 export let adjusting = null;
 // The pointer is over a component that moves, or over a tag: a press there draws nothing.
 export let isOverComponent = false;
+
+// ⌘ or ⌃ with a click: the click adds to the selection.
+const addsToSelection = (event) => event.metaKey || event.ctrlKey;
+// The secondary button opens the context menu. ⌃ and a click is no secondary press here.
+const isSecondary = (event) => event.button === 2 && !event.ctrlKey;
+
+// ⌃ and a click on a component adds it to the selection, as ⌘ does: no context menu opens.
+export function controlClick(event) {
+  if (!wireframe || !event.ctrlKey || !componentAt(event.clientX, event.clientY)) return;
+  event.stopImmediatePropagation();
+  event.preventDefault();
+}
+
+// The pointer is over the page again, after it went through: the move that brought it went to
+// the app behind, so the page gets one here. A press that comes next, with no move of its own,
+// then finds the handles of the component under the pointer.
+export function pointerCameBack(x, y) {
+  if (!wireframe || adjusting) return;
+  const target = document.elementFromPoint(x, y) ?? document.body;
+  target.dispatchEvent(new PointerEvent("pointermove", {
+    bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, pointerId: 1, pointerType: "mouse", isPrimary: true,
+  }));
+}
 
 // The mode ended: no move is under way.
 export function stopAdjusting() {
@@ -44,7 +71,7 @@ export function pointerWentThrough(isPress) {
   isOverComponent = false;
   // Where the pointer is now, the page does not know.
   lastPointer = null;
-  if (isPress) selection.selected = null;
+  if (isPress) selectGroup(null);
   hideHandles();
 }
 
@@ -70,13 +97,21 @@ function finishWireframeShape(press) {
       const { x, y } = press;
       return element.customData?.tildeWireframe && x >= element.x && x <= element.x + element.width && y >= element.y && y <= element.y + element.height;
     }).pop();
+    if (press.adds) {
+      if (component) toggleSelected(component.groupIds[0]);
+      return;
+    }
     selectGroup(component?.groupIds[0] ?? null);
     if (component && isDoubleClick(component.groupIds[0], press.time)) editText(component);
     return;
   }
-  const elements = wireframeElements(press.tool, box, newData(press.tool));
+  // Fully inside another component, it is that one's child.
+  const outer = outerOf(box);
+  const parent = outer && (outer.customData.key ?? newKey());
+  const data = parent ? { ...newData(press.tool), parent } : newData(press.tool);
   record(rest);
-  api.updateScene({ elements: [...rest, ...elements], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+  api.updateScene({ elements: [...rest, ...wireframeElements(press.tool, box, data)], appState: { selectedElementIds: {} }, captureUpdate: "NEVER" });
+  if (outer) setKey(outer, parent);
 }
 
 // `corner` of a resize: "nw", "ne", "sw" or "se", the one that the pointer moves.
@@ -84,14 +119,32 @@ function startAdjusting(event, frame, mode, from, corner = null) {
   selection.hovered = frame.groupIds[0];
   const menuBefore = selection.menu;
   selection.menu = null;
-  const rect = { x: frame.x, y: frame.y, width: frame.width, height: frame.height };
+  const isCopy = mode === "move" && from !== "text" && event.altKey;
+  // Its children, and theirs, move with it; a text that leaves moves alone.
+  const others = mode === "move" && from !== "text" ? descendantsOf(frame) : [];
   adjusting = {
-    mode, from, corner, group: selection.hovered, start: { x: event.clientX, y: event.clientY }, pressedAt: event.timeStamp, rect, data: frame.customData, moved: false, menuBefore,
-    before: api.getSceneElementsIncludingDeleted(), isCopy: mode === "move" && from !== "text" && event.altKey,
+    mode, from, corner, start: { x: event.clientX, y: event.clientY }, pressedAt: event.timeStamp, moved: false, menuBefore,
+    before: api.getSceneElementsIncludingDeleted(), isCopy, adds: addsToSelection(event), ...moving(frame, others),
   };
   event.target.setPointerCapture?.(event.pointerId);
   cursorRing.style.display = "none";
   showHandles();
+}
+
+// What a move or a resize changes: the component that the pointer has, as it was at the
+// press, and the `others` that move with it.
+function moving(frame, others) {
+  const part = ({ groupIds: [group], x, y, width, height, customData }) => ({ group, rect: { x, y, width, height }, data: customData });
+  return { ...part(frame), others: others.map(part) };
+}
+
+// What ⌥ and a drag on `frame` copies: the selection that it is in, or it alone, each with its
+// children and theirs. `frame` is the first.
+function copiedWith(frame) {
+  const selected = selectedFrames();
+  const roots = selected.some((other) => other.id === frame.id) ? selected.filter((other) => other.id !== frame.id) : [];
+  const all = [frame, ...roots].flatMap((root) => [root, ...descendantsOf(root)]);
+  return all.filter((member, index) => all.findIndex((other) => other.id === member.id) === index);
 }
 
 // Opens a component's comment. The component is selected while its comment is typed, and as it
@@ -140,20 +193,19 @@ function adjust(event) {
   if (!adjusting.moved && Math.hypot(dx, dy) >= 3) {
     adjusting.moved = true;
     record(adjusting.before);
-    // The copy goes on top, and moves; the original stays.
+    // The copies go on top, grouped as the originals, and move; the originals stay.
     if (adjusting.isCopy) {
-      const { rect, data } = adjusting;
-      const copy = wireframeElements(data.tildeWireframe, rect, data);
-      api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...copy], captureUpdate: "NEVER" });
-      adjusting.group = copy[0].groupIds[0];
+      const [copy, ...others] = copiesOf(copiedWith(frameOf(adjusting.group)));
+      api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), copy, ...others], captureUpdate: "NEVER" });
+      Object.assign(adjusting, moving(copy, others));
       selection.hovered = adjusting.group;
     }
     if (adjusting.from === "text") freeText();
   }
   if (!adjusting.moved) return;
-  const { mode, rect, data, group } = adjusting;
+  const { mode, rect, data, group, others } = adjusting;
   postPointer(pointer.x, pointer.y);
-  const lines = event.metaKey ? { x: [], y: [] } : snapLines(pointer, group);
+  const lines = event.metaKey ? { x: [], y: [] } : snapLines(pointer, [group, ...others.map((other) => other.group)]);
   let next;
   let snapX;
   let snapY;
@@ -181,6 +233,7 @@ function adjust(event) {
   }
   showGuides(snapX, snapY, point);
   rebuild(group, next, data);
+  for (const other of others) rebuild(other.group, { ...other.rect, x: other.rect.x + next.x - rect.x, y: other.rect.y + next.y - rect.y }, other.data);
   showHandles();
 }
 
@@ -192,13 +245,15 @@ function editWireframe(event) {
     event.preventDefault();
     if (event.type === "pointermove") adjust(event);
     if (event.type === "pointerup") {
-      const { from, moved, menuBefore, pressedAt } = adjusting;
+      const { from, moved, menuBefore, pressedAt, adds } = adjusting;
       const frame = frameOf(adjusting.group);
       adjusting = null;
       hideGuides();
       // A click on a component or its text selects it; a double-click, or the Text tool's
       // click, types its text.
-      if (!moved && frame && (from === "body" || from === "text")) {
+      if (!moved && frame && adds && (from === "body" || from === "text")) {
+        toggleSelected(frame.groupIds[0]);
+      } else if (!moved && frame && (from === "body" || from === "text")) {
         selectGroup(frame.groupIds[0]);
         if (isDoubleClick(frame.groupIds[0], pressedAt) || wireframe.tool === "text") editText(frame);
       }
@@ -382,6 +437,15 @@ export function snapPointer(event) {
       shiftKey: event.shiftKey, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey,
     },
   };
+  // The selection stays as it is, for Group in the context menu. With no tool the press is
+  // still for the page alone.
+  if (isSecondary(event)) {
+    if (isSelectMode) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+    }
+    return;
+  }
   if (editWireframe(event)) return;
   // The Text tool draws nothing: its click types a text, unless the press ended one. A drag
   // with it does nothing.
@@ -407,7 +471,7 @@ export function snapPointer(event) {
     return;
   }
   if (event.type === "pointerdown") {
-    wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY, time: event.timeStamp, tool: wireframe.tool };
+    wireframePress = { ids: new Set(api.getSceneElementsIncludingDeleted().map((element) => element.id)), x: event.clientX, y: event.clientY, time: event.timeStamp, tool: wireframe.tool, adds: addsToSelection(event) };
   }
   const tool = api?.getAppState().activeTool.type;
   const pointer = { x: event.clientX, y: event.clientY };

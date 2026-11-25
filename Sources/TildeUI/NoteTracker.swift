@@ -30,6 +30,9 @@ final class NoteTracker: ObservableObject {
             elements = elements.filter { ids.contains($0.key) }
         }
     }
+    /// The wireframe note whose components are on the canvas to change: it shows no frame and
+    /// no label there, where a press on its top-right corner is for the component's handle.
+    @Published var onCanvas: Draft.ID?
     /// While the comment box is open nothing moves: the user types, and typing must stay instant.
     var isHeld = false {
         didSet {
@@ -124,7 +127,7 @@ final class NoteTracker: ObservableObject {
 
     /// Where a note's element or region is on screen now, or nil while it does not show.
     func frame(of draft: Draft) -> CGRect? {
-        if hidden.contains(draft.id) || contentGone.contains(draft.id) {
+        if hidden.contains(draft.id) || contentGone.contains(draft.id) || draft.id == onCanvas {
             return nil
         }
         // A recording is only in the list.

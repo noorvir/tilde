@@ -3,14 +3,17 @@
 // a drag moves a copy, and a double-click edits its text. A chip above its top right moves it too:
 // a click on its name changes the kind, its Borders button opens the borders, its Comment
 // button its comment, its other controls set the rows and columns of a table or list or the
-// fill of an ellipse, and × deletes it. A handle at each corner resizes it, and
+// fill of an ellipse, and its trash can deletes it. A handle at each corner resizes it, and
 // its opposite corner stays; a grip at the middle of its top edge moves it. Moves and resizes
-// snap. Only components not sent yet can change; each change can be undone.
+// snap. ⌘ or ⌃ and a click adds a component to the selection, or takes it out: each selected
+// one has an outline, as have the children that move with one. A parent is deleted with them. Only components not sent yet
+// can change; each change can be undone.
 
 import { editing } from "../draw-mode.js";
 import { commentBox } from "./comment.js";
 import { live, changeElements } from "../scene.js";
 import { rowsOf, allBorders, kindNames, frameOf, clamp } from "./components.js";
+import { descendantsOf } from "./groups.js";
 import { record } from "./history.js";
 import { labelled } from "./labels.js";
 import { paletteOf, setActiveTag, shownTagWidth, tagTop } from "./look.js";
@@ -26,14 +29,21 @@ chip.dataset.wireframeHandle = "";
 chip.style.cssText = "position:fixed;z-index:9999;display:none;align-items:center;gap:2px;height:22px;padding:0 4px 0 8px;border-radius:11px;background:rgba(26,26,26,.96);color:#fff;font:600 11px -apple-system,sans-serif;cursor:move;user-select:none;white-space:nowrap";
 // A square on each corner, with the cursor of its diagonal. Over the grip: where the two meet on
 // a narrow component, the corners win.
-export const corners = ["nw", "ne", "sw", "se"].map((corner) => {
+const cornerNames = ["nw", "ne", "sw", "se"];
+const cornerStyle = "position:fixed;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff";
+export const corners = cornerNames.map((corner) => {
   const handle = document.createElement("div");
   handle.dataset.wireframeHandle = "";
   handle.dataset.corner = corner;
   const cursor = corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize";
-  handle.style.cssText = `position:fixed;z-index:9999;display:none;width:10px;height:10px;margin:-6px 0 0 -6px;border:1.5px solid #2F76FF;border-radius:2px;background:#fff;cursor:${cursor}`;
+  handle.style.cssText = `${cornerStyle};z-index:9999;display:none;cursor:${cursor}`;
   return handle;
 });
+
+// Where a corner of a component is.
+function cornerPoint(frame, corner) {
+  return { x: corner.includes("w") ? frame.x : frame.x + frame.width, y: corner.includes("n") ? frame.y : frame.y + frame.height };
+}
 // The grip that moves a component: a short bar in the component's colour, with square corners
 // as its tag has, on the middle of its top edge.
 export const grip = document.createElement("div");
@@ -53,7 +63,13 @@ bordersMenu.dataset.wireframeHandle = "";
 bordersMenu.setAttribute("role", "menu");
 bordersMenu.style.cssText = menuStyle;
 export const selectionOutline = document.createElement("div");
-selectionOutline.style.cssText = "position:fixed;pointer-events:none;z-index:9997;display:none;border:2px solid #2F76FF;margin:-1px 0 0 -1px";
+const selectionStyle = "position:fixed;pointer-events:none;z-index:9997;border:2px solid #2F76FF;margin:-1px 0 0 -1px";
+selectionOutline.style.cssText = `${selectionStyle};display:none`;
+// What shows the whole selection: the outline of each other selected component, as the first
+// one's, a square on each corner of every selected one, as the handles', and a thin outline of
+// each child that moves with a selected one.
+export const otherOutlines = document.createElement("div");
+otherOutlines.id = "tilde-outlines";
 // The chip stands a little away from the component, clear of Technical's offset edge; a strip
 // as wide as the chip fills the gap, so the pointer reaches the chip without leaving the
 // component, and its handles stay.
@@ -66,9 +82,11 @@ chipStyle.textContent = `
 const gap = { below: 6, above: 6 };
 
 // The component under the pointer, the component that a click selected (its handles show
-// while the pointer is not over another one), and the chip's menu that is open: "kinds",
-// "borders", "comment" or null.
-export const selection = { hovered: null, selected: null, menu: null };
+// while the pointer is not over another one), the other selected ones, and the chip's menu
+// that is open: "kinds", "borders", "comment" or null.
+export const selection = { hovered: null, selected: null, more: [], menu: null };
+
+export const selectedFrames = () => [...selection.more, selection.selected].map((group) => group && frameOf(group)).filter(Boolean);
 
 export const isHandle = (target) => Boolean(target?.closest?.("[data-wireframe-handle]"));
 // The bar's symbol for each kind, as image URLs from Tilde.
@@ -145,17 +163,52 @@ function borderItems(borders) {
   return [items[0], separator, ...items.slice(1)].join("");
 }
 
-const deleteButton = `<span data-action="delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="12" height="12"><path d="M3 3L9 9M9 3L3 9" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
+// The trash can of Delete, here and in the context menu, in a 16 × 16 box.
+export const trashIcon = '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.7 9h5.6l.7-9"/>';
+const deleteButton = `<span data-action="delete" role="button" aria-label="Delete" title="Delete" style="${chipButton};margin-left:6px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${trashIcon}</svg></span>`;
 
+// With its children, and theirs.
 export function deleteComponent(group) {
+  const frame = frameOf(group);
+  if (!frame) return;
   record();
-  changeElements(live().filter((element) => element.groupIds.includes(group)).map((element) => element.id), () => ({ isDeleted: true }));
+  changeElements([frame, ...descendantsOf(frame)].map((element) => element.id), () => ({ isDeleted: true }));
   hideHandles();
 }
 
 export function selectGroup(group) {
   selection.selected = group;
+  selection.more = [];
   showHandles();
+}
+
+// The component joins the selection, with the handles, or leaves it.
+export function toggleSelected(group) {
+  const selected = selectedFrames().map((frame) => frame.groupIds[0]);
+  const others = selected.filter((other) => other !== group);
+  const next = selected.includes(group) ? others : [...others, group];
+  selection.selected = next.pop() ?? null;
+  selection.more = next;
+  showHandles();
+}
+
+// Every selected component looks selected, also while the handles are on another one: its
+// outline, and the squares on its corners; a free text has none. The squares only show; the
+// component with the handles has those in their place.
+function drawOtherOutlines(isShown) {
+  const selected = isShown ? selectedFrames() : [];
+  const ids = new Set(selected.map((frame) => frame.id));
+  const mates = selected.flatMap(descendantsOf).filter((frame, index, all) => !ids.has(frame.id) && all.indexOf(frame) === index);
+  const place = ({ x, y, width, height }) => `left:${x}px;top:${y}px;width:${width}px;height:${height}px`;
+  const outlines = selected.slice(0, -1).map((frame) => `<div style="${selectionStyle};${place(frame)}"></div>`);
+  const mateOutlines = mates.map((frame) => `<div style="position:fixed;pointer-events:none;z-index:9997;box-sizing:border-box;border:1px solid #2F76FF;${place(frame)}"></div>`);
+  const handled = selection.hovered ?? selection.selected;
+  const squares = selected.filter((frame) => frame.customData.tildeWireframe !== "text" && frame.groupIds[0] !== handled).flatMap((frame) => cornerNames.map((corner) => {
+    const { x, y } = cornerPoint(frame, corner);
+    return `<span data-selected-corner style="${cornerStyle};pointer-events:none;z-index:9998;left:${x}px;top:${y}px"></span>`;
+  }));
+  const content = [...outlines, ...mateOutlines, ...squares].join("");
+  if (otherOutlines.innerHTML !== content) otherOutlines.innerHTML = content;
 }
 
 // A press on a chip's button that opens a menu: it opens that menu, or closes it when it is open.
@@ -171,6 +224,7 @@ export function showHandles() {
   if (isSelectionShown) {
     Object.assign(selectionOutline.style, { left: `${selected.x}px`, top: `${selected.y}px`, width: `${selected.width}px`, height: `${selected.height}px` });
   }
+  drawOtherOutlines(isSelectionShown);
   const group = selection.hovered ?? selection.selected;
   const frame = group ? frameOf(group) : null;
   const isShown = Boolean(frame && wireframe && !labelled && !editing);
@@ -187,9 +241,7 @@ export function showHandles() {
   const kind = frame.customData.tildeWireframe;
   Object.assign(handleOutline.style, { left: `${frame.x}px`, top: `${frame.y}px`, width: `${frame.width}px`, height: `${frame.height}px` });
   for (const handle of corners) {
-    const { corner } = handle.dataset;
-    const x = corner.includes("w") ? frame.x : frame.x + frame.width;
-    const y = corner.includes("n") ? frame.y : frame.y + frame.height;
+    const { x, y } = cornerPoint(frame, handle.dataset.corner);
     Object.assign(handle.style, { left: `${x}px`, top: `${y}px` });
   }
   let name = `<span data-menu="kinds" title="Change the kind" style="margin-right:4px">⠿ ${kindNames[kind]} ▾</span>`;

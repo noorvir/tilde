@@ -19,6 +19,9 @@ final class PointerPassThrough {
     var takesPointer: (CGPoint) async -> Bool = { _ in true }
     /// The pointer went through the window to the one behind. `isPress`: it pressed there.
     var onWentThrough: (_ isPress: Bool) -> Void = { _ in }
+    /// The window takes the pointer again, at a Quartz point. The move that brought the pointer
+    /// there went to the window behind.
+    var onCameBack: (CGPoint) -> Void = { _ in }
 
     private var monitors: [Any] = []
     /// The answer under way for the pointer's place.
@@ -91,6 +94,9 @@ final class PointerPassThrough {
             window?.ignoresMouseEvents = !takes
             if wasTaking, !takes {
                 onWentThrough(false)
+            }
+            if !wasTaking, takes {
+                onCameBack(NSEvent.mouseLocation.flipped)
             }
             if let next = nextPoint {
                 nextPoint = nil
